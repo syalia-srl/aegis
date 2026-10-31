@@ -3542,6 +3542,10 @@ installKeys(
     },
     escape() {
       if (cancelAsk() || closeInstallDialog() || closePushPanel()) return;
+      if (root.dataset.menu === "open") {
+        setHdrMenu(false);
+        return $("hdr-burger").focus();
+      }
       if (root.dataset.side === "open") return closeSide();
       if (!keymap.hidden) help(false);
       else if (cmenu.close() || cmenu.unbar() || viewer.close() || find.close() || closeMonitorCard() || closeCard()) return;
@@ -4431,11 +4435,6 @@ $("hdr-burger").addEventListener("click", () => {
 $("hdr-scrim").addEventListener("click", () => setHdrMenu(false));
 $("hdr-menu").addEventListener("click", (ev) => {
   if (ev.target.closest("button")) setHdrMenu(false);
-});
-document.addEventListener("keydown", (ev) => {
-  if (ev.key !== "Escape" || root.dataset.menu !== "open") return;
-  setHdrMenu(false);
-  $("hdr-burger").focus();
 });
 window.addEventListener("hashchange", () => setHdrMenu(false));
 phoneHeader.addEventListener("change", () => setHdrMenu(false));
