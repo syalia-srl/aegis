@@ -276,6 +276,8 @@ $("nav-last").append(icon("start"));
 $("nav-up").append(icon("up"));
 $("nav-down").append(icon("down"));
 $("jump").append(icon("latest"));
+$("hdr-burger").append(icon("menu"));
+$("menu-fleet").append(icon("fleet"));
 $("bell").append(icon("bell"));
 $("settings-btn").prepend(icon("gear"));
 $("journal-btn").append(icon("book"));
@@ -299,7 +301,8 @@ $("closing-g").append(glyph("done"));
 $("sp-mark").prepend(gorgoneion());
 $("boot-mark").append(gorgoneion());
 $("band-mark").append(gorgoneion());
-installBell($("bell"), pushSupported() ? openPushPanel : null);
+// On a phone the bell closes its menu, so the panel hangs from the menu button.
+installBell($("bell"), pushSupported() ? (bell) => openPushPanel(phoneHeader.matches ? $("hdr-burger") : bell) : null);
 $("nav-up").addEventListener("click", () => transcript.message(-1));
 $("nav-down").addEventListener("click", () => transcript.message(1));
 $("nav-pos").addEventListener("click", () => transcript.firstUnread());
@@ -600,6 +603,7 @@ const conn = new Connection(`${location.protocol === "https:" ? "wss" : "ws"}://
     $("conn-dot").className = `dot ${state === "open" ? "ready" : state === "connecting" ? "ghost" : "err"}`;
     $("conn-text").textContent =
       state === "open" ? server : state === "connecting" ? "connecting" : state === "closed" ? "disconnected, retrying" : state;
+    markHdrMenu();
     // For the band offline, where the welcome that names the server is out of reach.
     if (state === "open" && server) localStorage.setItem("aegis.server", server);
     // What arrived before a close is still the server's latest: kept at once.
@@ -735,6 +739,7 @@ const schedules = new Schedules(conn, $("schedules"), {
   onCount: (n, red) => {
     $("schedules-n").textContent = n ? String(n) : "";
     $("schedules-n").classList.toggle("err", red);
+    markHdrMenu();
   },
 });
 setSecrets((op, params) => callFor(shown, op, params));
@@ -1315,6 +1320,7 @@ function render() {
   renderTabs($("tablist"), tabbed(), tabFocus(r), tabActions);
   $("tablist").querySelector(".tab.on")?.scrollIntoView({ block: "nearest", inline: "nearest" });
   $("tab-fleet").classList.toggle("on", r.view === "fleet");
+  $("menu-fleet").classList.toggle("on", r.view === "fleet");
   $("tab-add").classList.toggle("on", r.view === "spawn");
   $("settings-btn").classList.toggle("on", r.view === "settings");
   $("journal-btn").classList.toggle("on", r.view === "journal");
@@ -3398,6 +3404,7 @@ for (const [kind, id] of [
 
 // -- tab bar and keys -----------------------------------------------------------
 $("tab-fleet").addEventListener("click", () => go("#fleet"));
+$("menu-fleet").addEventListener("click", () => go("#fleet"));
 $("tab-add").addEventListener("click", () => {
   spawnFrom = null;
   if (!offline()) go("#new");
@@ -4394,7 +4401,7 @@ $("side-btn").addEventListener("click", toggleSide);
 // switcher. Its count is every open session, quiet ones included, as the
 // switcher lists them. A tap opens it without the field's focus, so no
 // on-screen keyboard covers the list.
-const phoneHeader = matchMedia("(max-width:760px)"); // the two-row header (base.css)
+const phoneHeader = matchMedia("(max-width:760px)"); // the one-row header (base.css)
 function sizeTabMore() {
   const list = $("tablist");
   $("tab-more").hidden = !phoneHeader.matches && list.scrollWidth <= list.clientWidth + 1;
@@ -4404,6 +4411,34 @@ new ResizeObserver(sizeTabMore).observe($("tablist"));
 new MutationObserver(sizeTabMore).observe($("tablist"), { childList: true });
 phoneHeader.addEventListener("change", sizeTabMore);
 $("tab-more").addEventListener("click", () => switcher.open({ focus: !matchMedia("(pointer:coarse)").matches }));
+
+// The phone header's menu (#896): the controls a one-row header has no room
+// for. A pick, a tap beside it, Escape or another view closes it.
+function setHdrMenu(open) {
+  if (open) root.dataset.menu = "open";
+  else delete root.dataset.menu;
+  $("hdr-burger").setAttribute("aria-expanded", String(open));
+}
+// The closed menu still says when something in it needs attention.
+function markHdrMenu() {
+  const err = (id) => $(id).classList.contains("err");
+  $("hdr-burger").classList.toggle("alert", err("conn-dot") || err("schedules-n"));
+}
+$("hdr-burger").addEventListener("click", () => {
+  setHdrMenu(true);
+  $("menu-fleet").focus({ preventScroll: true });
+});
+$("hdr-scrim").addEventListener("click", () => setHdrMenu(false));
+$("hdr-menu").addEventListener("click", (ev) => {
+  if (ev.target.closest("button")) setHdrMenu(false);
+});
+document.addEventListener("keydown", (ev) => {
+  if (ev.key !== "Escape" || root.dataset.menu !== "open") return;
+  setHdrMenu(false);
+  $("hdr-burger").focus();
+});
+window.addEventListener("hashchange", () => setHdrMenu(false));
+phoneHeader.addEventListener("change", () => setHdrMenu(false));
 $("nav-side").addEventListener("click", toggleSide);
 // The dimmed transcript is the session view's own ::after, so a tap on it
 // lands on the view itself and goes no further.

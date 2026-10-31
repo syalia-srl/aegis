@@ -35,7 +35,12 @@ body{background:#000}
 #a2 .tabs .gap{flex:1}
 #a2 .tabs{min-width:0}
 /* Only the tab list gives way when the tabs outgrow the row: it scrolls. */
-#a2 .tabs>:not(.tablist,.gap){flex-shrink:0}
+#a2 .tabs>:not(.tablist,.gap),#a2 .hdr-menu>*{flex-shrink:0}
+/* The phone's menu (#896) holds these controls; a wider header lays them out as
+   its own children. */
+#a2 .hdr-menu{display:contents}
+#a2 .hdr-burger,#a2 .hdr-scrim,#a2 .menu-fleet{display:none}
+@keyframes hdr-menu-in{from{transform:translateX(-100%)}}
 #a2 .tablist{display:flex;gap:2px;flex:0 1 auto;min-width:0;overflow-x:auto;scrollbar-width:none}
 #a2 .tablist::-webkit-scrollbar{display:none}
 #a2 .tab-more{flex:none;align-self:center;margin:0 4px 6px;padding:2px 8px;font:12px var(--font-chrome);color:var(--muted);background:none;border:1px solid transparent;border-radius:var(--r);cursor:pointer}
@@ -1952,35 +1957,29 @@ body{background:#000}
 /* A phone: the desktop markup, wrapped. Tabs take their own scrolling row, the
    side panel slides in as a drawer (data-side=open), the band stacks. */
 @media (max-width:760px){
-  #a2 .tabs{flex-wrap:wrap;padding:4px 6px 0;padding-top:max(4px,env(safe-area-inset-top))}
-  /* Two rows (#631, #752): Fleet, the server and the buttons, then the
-     session tabs, the overflow menu and + alone on theirs, so the sessions get
-     the whole width. The spacer is the line between. */
-  #a2 .tabs>*{order:2}
-  #a2 .tabs .tab.home{order:1;margin-bottom:4px}
-  #a2 .tabs .gap{order:7;flex:1 0 100%;height:0;margin:2px -2px 0;border-top:1px solid var(--rule)}
-  #a2 .tablist{order:9;flex:1 1 0;padding:0 2px}
-  #a2 .tabs .tab-more{order:10}
-  #a2 .tabs .tab.add{order:11}
-  /* the name takes the row's free width with a zero basis, and shrinks first,
-     down to its connection dot */
-  #a2 .tabs .servers{flex:1 1 0;justify-content:flex-start;padding:0 6px;margin-bottom:4px;min-width:12px;overflow:hidden}
-  /* the server's name gives way first, so the header's buttons keep their row */
+  /* One row (#896): the menu button, the session tabs, the switcher and +.
+     The rest waits in a drawer from the left, so the sessions get the width
+     and the transcript the height a second row took (#631, #752). */
+  #a2 .tabs{gap:1px;padding:max(4px,env(safe-area-inset-top)) 2px 0}
+  #a2 .tabs .tab.home,#a2 .tabs .gap{display:none}
+  #a2 .tablist{padding:0 2px}
+  #a2 .tabs .tab.add{padding-left:8px;padding-right:8px}
+  #a2 .keys-btn:not(.bell):not(.set-btn):not(.help-btn){display:none}
+  #a2 .hdr-burger{position:relative;display:grid;place-items:center;min-width:44px;min-height:40px;padding:0;background:none;border:0;color:var(--muted);cursor:pointer}
+  #a2 .hdr-burger .ic{width:18px;height:18px}
+  /* what needs attention in the closed menu: the connection, a paused schedule */
+  #a2 .hdr-burger.alert::after{content:"";position:absolute;top:7px;right:8px;width:8px;height:8px;border-radius:50%;background:var(--err)}
+  #a2[data-menu=open] .hdr-scrim{display:block;position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.5)}
+  #a2 .hdr-menu{flex-direction:column;position:fixed;top:0;bottom:0;left:0;width:min(280px,84vw);z-index:41;overflow-y:auto;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom);background:var(--chrome);border-right:1px solid var(--rule);display:none}
+  #a2[data-menu=open] .hdr-menu{display:flex;animation:hdr-menu-in .15s}
+  #a2 .hdr-menu .servers{min-height:48px;margin:0;padding:0 16px;border-bottom:1px solid var(--rule)}
   #a2 #conn-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   #a2 .tabs .ver-top{display:none}
-  #a2 .keys-btn:not(.bell):not(.set-btn):not(.help-btn){display:none}
-  /* the header's buttons: bare icons, the tap target kept by (pointer:coarse) */
-  #a2 .tabs .keys-btn.bell,#a2 .tabs .set-btn,#a2 .tabs .jr-btn,#a2 .tabs .help-btn{display:grid;place-items:center;background:none;border-color:transparent;margin:0 0 4px;padding:0}
-  /* Files joins this row (#586): the 40 px targets stay, and the row gives up
-     a pixel of each gap and most of its side padding instead. */
-  #a2 .tabs .keys-btn.bell,#a2 .tabs .set-btn,#a2 .tabs .jr-btn,#a2 .tabs .help-btn{min-width:40px}
-  #a2 .tabs{gap:1px;padding-left:2px;padding-right:2px}
-  #a2 .tabs .tab.home,#a2 .tabs .tab.add{padding-left:8px;padding-right:8px}
-  #a2 .tabs .servers{padding:0 2px}
-  #a2 .tabs .help-btn{font-size:16px}
-  #a2 .tabs .keys-btn.bell .ic,#a2 .tabs .set-btn .ic,#a2 .tabs .jr-btn svg{width:18px;height:18px}
-  #a2 .set-btn .lbl{display:none}
-  #a2 .set-btn .ic{display:inline-block}
+  #a2 .tabs .hdr-menu button:not(.side-btn){display:flex;justify-content:flex-start;align-items:center;gap:14px;flex:none;width:100%;max-width:none;min-height:44px;height:auto;margin:0;padding:0 16px;background:none;border:0;border-radius:0;color:var(--ink);font:inherit;font-size:14px;cursor:pointer}
+  #a2 .hdr-menu button:not(.side-btn)::after{content:attr(aria-label)}
+  #a2 .hdr-menu button.on{color:var(--strong);background:color-mix(in srgb,var(--ink) 7%,transparent)}
+  #a2 .hdr-menu .ic,#a2 .hdr-menu .jr-btn svg,#a2 .hdr-menu .q{display:block;flex:none;width:18px;height:18px;line-height:18px;text-align:center}
+  #a2 .hdr-menu .sch-btn .n{position:static;order:1;margin-left:auto;font-size:12px}
   #a2 .journal{padding:12px 12px 24px}
   #a2 .jfiles{display:inline-flex;align-items:center;gap:8px;min-height:44px;margin:0 0 8px;padding:0 14px;font-family:var(--font-mono);font-size:12px;color:var(--muted);border:1px solid var(--rule);border-radius:999px;text-decoration:none}
   #a2 .jfiles .ic{width:15px;height:15px}
@@ -2073,10 +2072,6 @@ body{background:#000}
   #a2 .btn{min-height:44px}
   #a2 .tbl td.acts .btn{width:44px;height:44px}
 }
-/* With Fleet on their row (#752), a 360 px phone has 36 px for each header
-   button. Any pointer: a narrow window wrapped ? onto a row of its own (#807).
-   After the touch block, so it wins over the 40 px there. */
-@media (max-width:760px){#a2 .tabs :is(.keys-btn.bell,.set-btn,.jr-btn,.help-btn){flex:1 0 34px;min-width:34px;max-width:40px}}
 /* Toasts (toast.js): cards in the bottom-right; in a session toast.js lifts
    them above the message box. Full width on a phone. */
 #a2 .toasts{position:fixed;right:16px;bottom:16px;z-index:40;display:flex;flex-direction:column;gap:6px;width:min(320px,calc(100vw - 32px));pointer-events:none}

@@ -97,6 +97,8 @@ The buttons of the session panel and the menus of a tab or a card.
 | `g-right` | Next file or page | a file card, the viewer, a browser pane |
 | `g-arrow` | Go there | menus, toasts from another session |
 | `g-close` | Close; an error in the transcript; a failed step | buttons, the transcript, workflows, toasts |
+| `g-menu` | The menu that holds the top bar's controls on a phone | the top bar on a phone |
+| `g-fleet` | Fleet | the menu on a phone |
 | `g-bell` | Notifications | the top bar |
 | `g-gear` | Settings | the top bar |
 | `g-clock` | Schedules; a step's deadline | the top bar, workflows |

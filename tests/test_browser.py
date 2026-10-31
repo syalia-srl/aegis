@@ -6633,13 +6633,11 @@ HEADER_ROWS = """() => {
 
 
 @pytest.mark.parametrize("width", [360, 390])
-def test_a_phone_header_keeps_fleet_with_the_buttons_and_the_tabs_alone(
+def test_a_phone_header_is_one_row_with_the_tabs_beside_the_menu(
     server, browser, width
 ):
-    """#752: on a phone Fleet sat on the tab row (#631), beside two-line tabs,
-    the overflow menu and +, so about one and a half sessions showed. Fleet,
-    the server and the buttons share the first row, the buttons giving up a
-    few pixels each at 360 px, and the sessions have the second to themselves."""
+    """#896: Fleet, the server and the buttons took a row above the tabs (#631,
+    #752). They wait behind the menu button, and the row holds the sessions."""
     errors: list = []
     page = phone(browser, errors)
     page.set_viewport_size({"width": width, "height": 844})
@@ -6648,18 +6646,11 @@ def test_a_phone_header_keeps_fleet_with_the_buttons_and_the_tabs_alone(
     for n in range(3):
         spawn(page, f"session {n}")
     rows = page.evaluate(HEADER_ROWS)
-    assert len(rows) == 2, rows
-    assert rows[0][0] == "tab-fleet" and rows[0][-1] == "help-btn", rows
-    assert "tablist" in rows[1] and "tab-fleet" not in rows[1], rows
-    assert page.locator("#conn-dot").bounding_box()["width"] >= 6, "the dot stays"
+    assert rows == [["hdr-burger", "tablist", "tab-more", "tab-add"]], rows
+    header = page.locator("#a2 > .tabs").bounding_box()
+    assert header["height"] <= 52, header
     tabs = page.locator("#tablist").bounding_box()
-    assert tabs["width"] > width - 90, tabs
-    # Each button keeps a tap target 34 px wide and 40 px tall or more.
-    sizes = page.eval_on_selector_all(
-        ".tabs :is(.keys-btn.bell,.set-btn,.jr-btn,.help-btn)",
-        "bs => bs.filter(b => b.offsetWidth).map(b => [b.offsetWidth, b.offsetHeight])",
-    )
-    assert len(sizes) == 8 and all(w >= 34 and h >= 40 for w, h in sizes), sizes
+    assert tabs["width"] > width - 140, tabs
     assert page.evaluate(WIDER) == []
     assert errors == []
 
@@ -6898,12 +6889,14 @@ def test_a_phone_sees_the_monitor_card_every_reply_and_a_one_line_composer(
     assert on_top, "the card is under the drawer"
     page.mouse.click(5, 300)
     page.wait_for_selector("#mcard:not(.show)", state="attached")
-    # The header's icons are icons: the bell's svg shares its button's class.
+    # The menu's icons are icons: the bell's svg shares its button's class.
+    page.tap("#hdr-burger")
     assert rect("#bell svg")["width"] <= 20 and rect("#settings-btn svg")["width"] <= 20
     # Settings has a button on a phone.
     page.tap("#settings-btn")
     page.wait_for_selector("#a2[data-view=settings]")
-    page.tap("#tab-fleet")
+    page.tap("#hdr-burger")
+    page.tap("#menu-fleet")
     page.wait_for_selector(".card .mons >> text=1 monitor")
     assert page.evaluate(WIDER) == []
     # A card's footer wraps whole items, never inside one.
@@ -8579,10 +8572,11 @@ def test_the_header_opens_the_journal_from_a_book_icon(server, browser, page):
     pg = phone(browser, errors)
     pg.goto(server.url)
     pg.wait_for_selector("#a2[data-view=fleet]")
+    pg.tap("#hdr-burger")
+    pg.wait_for_timeout(250)  # the slide
     box = pg.locator("#journal-btn").bounding_box()
-    # 34 to 40 px wide on a phone, so Fleet fits on their row (#752).
-    assert box and box["x"] + box["width"] <= 390 and box["width"] >= 34
-    assert box["height"] >= 40
+    # A whole row of the phone's menu (#896).
+    assert box and box["x"] == 0 and box["width"] >= 200 and box["height"] >= 44
     assert pg.evaluate(WIDER) == []
     pg.tap("#journal-btn")
     pg.wait_for_selector("#a2[data-view=journal]")
@@ -9333,6 +9327,7 @@ def test_the_policy_editor_fits_a_phone(quota_server, browser):
     pg = ctx.new_page()
     pg.goto(quota_server.url)
     pg.wait_for_selector("#a2[data-view=fleet]")
+    pg.click("#hdr-burger")
     pg.click("#settings-btn")
     pg.wait_for_selector("#set-tok-default")
     pick(pg, "#set-tok-default .poolrow.pool-claude pick-chip", "lines")

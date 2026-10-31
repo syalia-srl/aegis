@@ -140,6 +140,8 @@ def server(tmp_path: Path, fake_claude: str, fake_opencode: str):
 def open_view(page, server) -> None:  # noqa: F811
     page.goto(server.url)
     page.wait_for_selector("#a2[data-view=fleet]")
+    if page.is_visible("#hdr-burger"):  # a phone: the button is in the menu
+        page.click("#hdr-burger")
     page.click("#schedules-btn")
     page.wait_for_selector("#a2[data-view=schedules] .sch-row")
 

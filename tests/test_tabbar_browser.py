@@ -73,11 +73,14 @@ def test_the_usage_button_opens_the_usage_page(server, page):  # noqa: F811
     assert page.errors == []
 
 
-def test_files_stays_in_the_header_on_a_phone(server, browser):  # noqa: F811
+def test_files_is_in_the_menu_on_a_phone(server, browser):  # noqa: F811
     pg = browser.new_page(viewport={"width": 390, "height": 844})
     pg.goto(server.url)
     pg.wait_for_selector("#a2[data-view=fleet]")
-    assert pg.is_visible("#files-btn")
+    assert not pg.is_visible("#files-btn")
+    pg.click("#hdr-burger")
+    pg.click("#files-btn")
+    pg.wait_for_selector("#a2[data-view=files]")
     pg.close()
 
 
@@ -96,53 +99,74 @@ def test_the_panel_toggle_lives_in_the_nav_pill(server, page):  # noqa: F811
     assert page.errors == []
 
 
-def test_a_phone_header_is_one_row_with_fleet_above_the_tabs(server, browser):  # noqa: F811
-    # #631: the header wrapped, leaving ? alone on a second row, and Fleet and
-    # the panel toggle took width the tabs needed. #752: Fleet joins the
-    # buttons, so the tabs get their row to themselves.
-    pg = browser.new_page(viewport={"width": 390, "height": 844}, has_touch=True)
+@pytest.mark.parametrize("touch", [True, False])
+def test_a_phone_menu_holds_the_header_controls_with_tap_targets(
+    server,  # noqa: F811
+    browser,  # noqa: F811
+    touch,
+):  # noqa: F811
+    # #896: the controls took a row of their own above the tabs. In the menu each
+    # is a labelled row, on a touch screen and in a narrow window alike.
+    pg = browser.new_page(viewport={"width": 390, "height": 844}, has_touch=touch)
+    errors: list = []
+    pg.on("pageerror", lambda e: errors.append(str(e)))
     pg.goto(server.url)
     pg.wait_for_selector("#a2[data-view=fleet]")
-    for p in ("one", "two", "three"):
-        spawn(pg, p)
-    box = lambda sel: pg.locator(sel).bounding_box()  # noqa: E731
-    # Each button's drawn icon (the ? is a glyph), and the server's name.
-    row = pg.evaluate(
-        """ids => Object.fromEntries(ids.map(id => {
-          const b = document.getElementById(id), r = document.createRange();
-          r.selectNodeContents(b);
-          const q = (b.querySelector('svg, .ic') ?? r).getBoundingClientRect();
-          const o = b.getBoundingClientRect();
-          return [id, [q.y + q.height / 2, o.width, o.height]];
-        }))""",
-        [*HEADER_ICONS, "bell", "help-btn", "conn-text"],
+    spawn(pg, "one")
+    ids = ["menu-fleet", *HEADER_ICONS, "bell", "help-btn"]
+    assert not pg.is_visible("#hdr-menu"), "the menu starts closed"
+    assert pg.get_attribute("#hdr-burger", "aria-expanded") == "false"
+    pg.click("#hdr-burger")
+    assert pg.get_attribute("#hdr-burger", "aria-expanded") == "true"
+    pg.wait_for_timeout(250)  # the slide
+    assert pg.is_visible("#conn-dot")
+    rows = pg.evaluate(
+        """ids => ids.map(id => {
+          const b = document.getElementById(id), r = b.getBoundingClientRect();
+          return [id, r.left, r.height, getComputedStyle(b, '::after').content];
+        })""",
+        ids,
     )
-    mids = [m for m, _, _ in row.values()]
-    assert max(mids) - min(mids) <= 1, row
-    sizes = {(w, h) for k, (_, w, h) in row.items() if k != "conn-text"}
-    assert len(sizes) == 1, row
-    tops = {k: box(f"#{k}")["y"] for k in [*HEADER_ICONS, "bell", "help-btn"]}
-    fleet, tabs = box("#tab-fleet"), box("#tablist")
-    assert abs(fleet["y"] - min(tops.values())) < 8
-    assert tabs["y"] >= fleet["y"] + fleet["height"]
+    assert all(
+        left == 0 and height >= 44 and label != "none"
+        for _, left, height, label in rows
+    ), rows
     assert not pg.is_visible("#side-btn")
-    pg.tap("#nav-side")
-    pg.wait_for_function("document.getElementById('a2').dataset.side === 'open'")
+    # Each way out closes it: a tap beside it, Escape, a pick.
+    pg.mouse.click(370, 500)
+    pg.wait_for_selector("#hdr-menu", state="hidden")
+    pg.click("#hdr-burger")
+    pg.keyboard.press("Escape")
+    pg.wait_for_selector("#hdr-menu", state="hidden")
+    pg.click("#hdr-burger")
+    pg.click("#menu-fleet")
+    pg.wait_for_selector("#hdr-menu", state="hidden")
+    pg.wait_for_selector("#a2[data-view=fleet]")
+    assert errors == []
     pg.close()
 
 
-def test_a_narrow_window_keeps_the_header_buttons_on_one_row(server, browser):  # noqa: F811
-    # #807: #752 narrowed the buttons for touch only, so a 390 px window with a
-    # mouse wrapped ? onto a row of its own.
+def test_the_menu_button_marks_a_dropped_connection(server, browser):  # noqa: F811
+    # #896: the connection's state is in the closed menu, so its button says so.
+    pg = browser.new_page(viewport={"width": 390, "height": 844})
+    pg.goto(server.url)
+    pg.wait_for_selector("#a2[data-view=fleet]")
+    assert "alert" not in pg.get_attribute("#hdr-burger", "class")
+    server.stop()
+    pg.wait_for_selector("#hdr-burger.alert")
+    pg.close()
+
+
+def test_a_narrow_window_keeps_the_header_on_one_row(server, browser):  # noqa: F811
+    # #807: the layout must not depend on a touch screen. A 390 px window with a
+    # mouse gets the phone's one row.
     pg = browser.new_page(viewport={"width": 390, "height": 600})
     pg.goto(server.url)
     pg.wait_for_selector("#a2[data-view=fleet]")
     box = lambda sel: pg.locator(sel).bounding_box()  # noqa: E731
-    tops = {
-        k: box(f"#{k}")["y"] for k in [*HEADER_ICONS, "bell", "help-btn", "tab-fleet"]
-    }
-    assert max(tops.values()) - min(tops.values()) < 8, tops
-    assert box("#tablist")["y"] >= box("#tab-fleet")["y"] + box("#tab-fleet")["height"]
+    assert not pg.is_visible("#tab-fleet")
+    assert abs(box("#hdr-burger")["y"] - box("#tablist")["y"]) < 8
+    assert not pg.is_visible("#help-btn")
     pg.close()
 
 
