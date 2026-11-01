@@ -113,7 +113,12 @@ body{background:#000}
 .a2 .tab{cursor:pointer;user-select:none}
 .a2 .tab .tname{max-width:22ch;overflow:hidden;text-overflow:ellipsis}
 .a2 .tab.home{font-weight:500}
-.a2 .tab.add{font-size:15px;padding:4px 12px}
+/* New session reads as an action, not as one more tab (#906). */
+.a2 .new-session{flex:none;align-self:center;display:inline-flex;align-items:center;justify-content:center;gap:6px;height:28px;margin:0 6px 6px;padding:0 11px 0 9px;font-family:var(--font-chrome);font-size:12.5px;font-weight:500;white-space:nowrap;color:var(--strong);background:var(--accent-soft);border:1px solid var(--accent);border-radius:var(--r);cursor:pointer}
+.a2 .new-session .plus{font-size:17px;line-height:1}
+.a2 .new-session:hover{background:color-mix(in srgb,var(--accent) 28%,transparent)}
+.a2 .new-session:focus-visible{outline:2px solid var(--strong);outline-offset:2px}
+.a2 .new-session.on{background:var(--accent);color:var(--on-accent)}
 .a2 .tab.asleep{opacity:.6}
 .a2 .tab.dragging{opacity:.35}
 .a2 .tab.drop{box-shadow:inset 2px 0 0 var(--accent)}
@@ -1999,7 +2004,8 @@ body{background:#000}
   .a2 .tabs{gap:1px;padding:max(4px,env(safe-area-inset-top)) 2px 0}
   .a2 .tabs .tab.home,.a2 .tabs .gap{display:none}
   .a2 .tablist{padding:0 2px}
-  .a2 .tabs .tab.add{padding-left:8px;padding-right:8px}
+  .a2 .tabs .new-session{width:40px;height:38px;margin:0 4px 4px 2px;padding:0}
+  .a2 .tabs .new-session .lbl{display:none}
   .a2 .keys-btn:not(.bell):not(.set-btn):not(.help-btn){display:none}
   .a2 .hdr-burger{position:relative;display:grid;place-items:center;min-width:44px;min-height:40px;padding:0;background:none;border:0;color:var(--muted);cursor:pointer}
   .a2 .hdr-burger .ic{width:18px;height:18px}
