@@ -179,7 +179,31 @@ and its log line before you re-run. In #506, 26 commits flipped from red to
 green with no change, and the three flakes found while measuring had no
 issue. A re-run without a record hides the race until it fails every run.
 
-## 6. Merge, then confirm it merged
+## 6. Where a change goes on its own
+
+| When | It lands on | And runs on |
+|---|---|---|
+| a maintainer's PR goes green | the `smoke` branch | the maintainer's smoke server, to try it from a phone |
+| the maintainer approves the merge | `main` | the maintainer's own server, once `main`'s CI is green |
+| a release is published | PyPI | every server that follows releases |
+
+The machinery lives on the maintainer's host, and the host's notes describe it.
+What an author needs to know:
+
+- `smoke` is `main` plus every open, non-draft, same-repo PR of the maintainer
+  whose checks are all green, rebuilt whenever one of those changes. Never push
+  to it or branch from it: a PR that goes red or closes leaves it on the next
+  rebuild. A contributor's PR from a fork stays out.
+- A green PR that does not merge with the others carries the label
+  `smoke-conflict` and is not on the smoke server. Rebase it on `main`.
+- The smoke server wipes its fictitious data on each new commit of `smoke`.
+- A merge restarts the maintainer's server, and with it the turn of every
+  session on it. Each one continues with a note that the server restarted.
+
+So when your PR goes green, tell the maintainer it is on the smoke server and
+ask for the merge. Nothing but their yes moves a PR to `main`.
+
+## 7. Merge, then confirm it merged
 
 ```bash
 gh pr merge <n> --rebase --delete-branch
