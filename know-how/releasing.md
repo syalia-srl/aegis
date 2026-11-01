@@ -160,6 +160,10 @@ no user-facing doc.
     then testing `$?` reports `tail`'s status and turns a failed install
     green.
 
+13. The servers that follow releases upgrade themselves within minutes of the
+    publish, and restart. A failed one rolls back and tells the maintainer. The
+    host's notes say which they are and how to check them.
+
 ## Keeping the landing film current
 
 The film on the landing page (`site/video/aegis.mp4`) is recorded from the
