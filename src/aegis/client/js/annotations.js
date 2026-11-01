@@ -1,6 +1,12 @@
 // Visual annotations for images and PDFs (#780). The browser keeps normalized
 // coordinates in the same comment tray as text comments. They survive a
 // resize and a reload, and become JSON in the message the person sends.
+//
+// Point, area and off are icons. A click is still a point and a drag is still
+// a region; the richer tools wait for a follow-up. Off leaves the PDF's own
+// scrolling and zoom in reach.
+
+import { icon } from "./glyphs.js";
 
 function el(tag, cls, text) {
   const n = document.createElement(tag);
@@ -20,11 +26,26 @@ export function annotate(stage, tray, { path, kind }) {
   if (!target) return null;
   stage.classList.add("visual-annotations");
   const tools = el("div", "vatools");
-  const toggle = el("button", "btn", "Annotate");
-  toggle.type = "button";
-  toggle.setAttribute("aria-pressed", "false");
-  toggle.title = "Draw a point or region for the agent";
-  tools.append(toggle);
+  const glyph = {
+    point: icon("point"),
+    area: icon("region"),
+    off: icon("close"),
+  };
+  const buttons = [
+    ["point", "Point"],
+    ["area", "Area"],
+    ["off", "Annotate off"],
+  ].map(([name, title]) => {
+    const b = el("button", "btn icon");
+    b.type = "button";
+    b.dataset.tool = name;
+    b.title = title;
+    b.setAttribute("aria-label", title);
+    b.setAttribute("aria-pressed", name === "off" ? "true" : "false");
+    b.append(glyph[name]);
+    tools.append(b);
+    return b;
+  });
   let page = null;
   if (kind === "pdf") {
     const label = el("label", "vapage", "page ");
@@ -57,11 +78,11 @@ export function annotate(stage, tray, { path, kind }) {
   resize.observe(target);
   requestAnimationFrame(sync);
 
-  toggle.addEventListener("click", () => {
-    const on = toggle.getAttribute("aria-pressed") !== "true";
-    toggle.setAttribute("aria-pressed", String(on));
-    layer.classList.toggle("active", on);
-  });
+  const select = (name) => {
+    for (const b of buttons) b.setAttribute("aria-pressed", String(b.dataset.tool === name));
+    layer.classList.toggle("active", name !== "off");
+  };
+  for (const b of buttons) b.addEventListener("click", () => select(b.dataset.tool));
 
   let start = null;
   let draft = null;

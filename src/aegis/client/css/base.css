@@ -2363,10 +2363,10 @@ body{background:#000}
 #a2 .ctray .chead{display:flex;align-items:center;gap:6px;padding:6px 12px}
 #a2 .ctray .cn{margin-right:auto;color:var(--muted)}
 #a2 .ctray .clist{list-style:none;margin:0;padding:0 12px 8px}
-#a2 .ctray li{display:flex;align-items:center;gap:8px;padding:2px 0}
-#a2 .ctray li .n{min-width:18px;height:18px;border-radius:9px;background:var(--accent);color:var(--on-accent);text-align:center;line-height:18px;font-size:11px}
+#a2 .ctray li{display:flex;align-items:flex-start;gap:8px;padding:2px 0}
+#a2 .ctray li .n{min-width:18px;height:18px;margin-top:4px;border-radius:9px;background:var(--accent);color:var(--on-accent);text-align:center;line-height:18px;font-size:11px}
 #a2 .ctray li .loc{max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-family:var(--font-mono)}
-#a2 .ctray li .note{flex:1;min-width:0;padding:3px 8px;background:var(--bg);border:1px solid var(--rule);border-radius:var(--r);color:var(--strong);outline:none}
+#a2 .ctray li .note{flex:1;min-width:0;min-height:26px;padding:3px 8px;background:var(--bg);border:1px solid var(--rule);border-radius:var(--r);color:var(--strong);outline:none;resize:vertical;font:inherit;line-height:1.35}
 #a2 .ctray li .note:focus{border-color:var(--accent)}
 #a2 .pin{position:absolute;transform:translate(-110%,-20%);user-select:none;pointer-events:none}
 #a2 .pin::before{content:attr(data-n);display:block;min-width:16px;height:16px;border-radius:8px;background:var(--accent);color:var(--on-accent);text-align:center;font:600 10px/16px var(--font-chrome)}
@@ -2374,6 +2374,8 @@ body{background:#000}
    only active drawing mode takes its pointer, so a PDF can still scroll. */
 #a2 .visual-annotations{position:relative}
 #a2 .visual-annotations .vatools{position:absolute;z-index:4;top:8px;left:8px;display:flex;align-items:center;gap:5px;padding:4px;background:color-mix(in srgb,var(--surface) 92%,transparent);border:1px solid var(--rule);border-radius:var(--r);box-shadow:0 3px 10px rgba(0,0,0,.18);font:12px var(--font-chrome)}
+#a2 .visual-annotations .vatools .btn{padding:4px 6px}
+#a2 .visual-annotations .vatools .btn .ic{width:14px;height:14px}
 #a2 .visual-annotations .vatools .btn[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
 #a2 .visual-annotations .vapage{display:flex;align-items:center;gap:4px;color:var(--muted)}
 #a2 .visual-annotations .vapage input{width:44px;padding:3px 4px;border:1px solid var(--rule);border-radius:var(--r);background:var(--bg);color:var(--strong);font:12px var(--font-mono)}

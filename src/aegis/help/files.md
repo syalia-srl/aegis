@@ -157,15 +157,17 @@ as before, without the menu or the bar inside it.
 
 ## Annotating images and PDFs
 
-An image or PDF opened in Files, or opened from a sent file's card, has an
-Annotate control over its preview. Turn it on, then click to mark a point or
-drag to outline a region. Turn it off to use the PDF's own scrolling and zoom
-controls again. For a PDF, set the page box to the page currently visible
+An image or PDF opened in Files, or opened from a sent file's card, has three
+icon tools over its preview. The name shows on hover: Point, Area, and
+Annotate off. Point or Area turns drawing on. A click marks a point and a drag
+outlines a region. Annotate off leaves the PDF's own scrolling and zoom
+controls in reach. For a PDF, set the page box to the page currently visible
 before drawing; the browser's built-in PDF viewer does not report its current
 page to aegis.
 
-Each point or region adds a numbered mark and an editable note to the same
-comment tray used for text. Remove individual marks, Discard them all, or Send
+Each point or region adds a numbered mark and a note to the same comment tray
+used for text. The note takes more than one line: Enter and Shift+Enter add a
+line, and neither sends. Remove individual marks, Discard them all, or Send
 them together. The message names the file and carries the annotation type,
 PDF page when applicable, and normalized x, y, width and height as JSON, so an
 agent can identify the same place at any display size. Unsent annotations stay

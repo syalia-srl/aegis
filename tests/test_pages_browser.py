@@ -264,17 +264,21 @@ def test_an_image_region_becomes_a_structured_annotation(server, page):  # noqa:
     page.locator("#viewer .stage.image img").evaluate(
         "img => { img.style.width = '400px'; img.style.height = '300px'; }"
     )
-    page.click("#viewer .vatools .btn")
+    page.click("#viewer .vatools [data-tool=area]")
     drag_region(page, "#viewer .valayer")
-    page.keyboard.type("increase this label")
+    page.keyboard.type("increase this")
+    page.keyboard.press("Enter")
+    page.keyboard.type("label")
     tray = page.locator("#viewer .ctray")
     assert tray.locator(".cn").inner_text() == "1 annotation"
     assert page.locator("#viewer .vpin.region").count() == 1
+    assert "Annotations on" not in page.input_value("#input")
     tray.locator("[data-act=send]").click()
     assert page.input_value("#input") == (
         'Annotations on chart.png:\n1. {"file":"chart.png","type":"region",'
         '"region":{"x":0.2,"y":0.25,"width":0.5,"height":0.5}}\n'
-        "   increase this label\n\n"
+        "   increase this\n"
+        "   label\n\n"
     )
     assert page.errors == []
 
@@ -285,7 +289,7 @@ def test_a_pdf_region_names_its_page_in_files(server, page):  # noqa: F811
     key = spawn(page)
     page.goto(f"{server.url.split('#')[0]}#files=report.pdf")
     page.wait_for_selector(".v-files .fstage.pdf iframe")
-    page.click(".v-files .vatools .btn")
+    page.click(".v-files .vatools [data-tool=area]")
     page.fill(".v-files .vapage input", "3")
     drag_region(page, ".v-files .valayer", (0.1, 0.2), (0.4, 0.6))
     page.keyboard.type("check this figure")

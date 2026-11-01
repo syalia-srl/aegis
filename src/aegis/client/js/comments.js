@@ -67,7 +67,7 @@ export class Tray {
     this.save();
     this.draw();
     this.pins();
-    this.node.querySelector("li:last-child input")?.focus();
+    this.node.querySelector("li:last-child .note")?.focus();
   }
 
   clear() {
@@ -105,8 +105,8 @@ export class Tray {
     const list = el("ol", "clist");
     this.items.forEach((c, i) => {
       const li = el("li");
-      const note = el("input", "note");
-      note.type = "text";
+      const note = el("textarea", "note");
+      note.rows = 2;
       note.placeholder = "Note";
       note.value = c.note;
       note.setAttribute("aria-label", `Note ${i + 1}`);
@@ -114,8 +114,7 @@ export class Tray {
         c.note = note.value;
         this.save();
       });
-      // Enter is done with the note; it never sends.
-      note.addEventListener("keydown", (ev) => ev.key === "Enter" && (ev.preventDefault(), note.blur()));
+      // Enter and Shift+Enter add a line. Neither sends the tray.
       const rm = el("button", "btn icon rm", "×");
       rm.type = "button";
       rm.title = "Remove this comment";
