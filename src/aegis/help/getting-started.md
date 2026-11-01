@@ -24,8 +24,8 @@ page setup).
 
 This level starts one agent and spends quota.
 
-1. Start a session. Open the new-session page with the + at the end of the
-   tab bar, or press Alt+N. The chips under the box name the agent, its
+1. Start a session. Open the new-session page with the New session button at
+   the end of the tab bar, or press Alt+N. The chips under the box name the agent, its
    harness, model, effort and permission. Type "List the files in this
    directory and tell me what this project is" and press Enter. You should
    see a new tab named after your message, the session's handle beside it,

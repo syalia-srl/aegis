@@ -5828,6 +5828,34 @@ def test_offline_what_needs_the_server_is_disabled(server, page):
     assert page.errors == []
 
 
+def test_new_session_is_a_labelled_button_on_a_desktop_and_a_plus_on_a_phone(
+    server, browser
+):
+    ctx = browser.new_context(viewport={"width": 1280, "height": 800})
+    pg = ctx.new_page()
+    pg.goto(server.url)
+    pg.wait_for_selector("#a2[data-view=fleet]")
+    assert pg.get_attribute("#tab-add", "aria-label") == "New session"
+    assert pg.is_visible("#tab-add .lbl")
+    assert pg.inner_text("#tab-add .lbl") == "New session"
+    pg.focus("#tab-add")
+    pg.keyboard.press("Enter")
+    pg.wait_for_selector("#a2[data-view=spawn]")
+    ctx.close()
+
+    ctx = browser.new_context(viewport={"width": 390, "height": 800})
+    pg = ctx.new_page()
+    pg.goto(server.url)
+    pg.wait_for_selector("#a2[data-view=fleet]")
+    assert not pg.is_visible("#tab-add .lbl")
+    box = pg.locator("#tab-add").bounding_box()
+    assert box["width"] >= 40 and box["height"] >= 38
+    assert box["x"] + box["width"] <= 390
+    pg.click("#tab-add")
+    pg.wait_for_selector("#a2[data-view=spawn]")
+    ctx.close()
+
+
 def test_a_message_written_offline_is_queued_and_goes_out_on_reconnect(server, page):
     page.goto(server.url)
     page.wait_for_selector("#a2[data-view=fleet]")

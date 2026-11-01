@@ -16,7 +16,7 @@ Closing the browser leaves every session running.
 
 ## Start a session
 
-Open a new tab with the + at the end of the tab bar, or Alt+N. Type what the
+Open a new tab with the New session button at the end of the tab bar, or Alt+N. Type what the
 agent should do and press Enter; Shift+Enter adds a line. The session starts
 and its tab opens. On a touch screen Enter adds a line and the send button
 starts the session, so a mistap does not start one with half a message. The
