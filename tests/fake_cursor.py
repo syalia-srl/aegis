@@ -8,6 +8,9 @@ answers (spec ``2026-10-19-aegis-2-cursor-harness-design.md``, fixture
     sleep N        a Bash call left running for N seconds, then text. An
                    interrupt kills the fake mid-call, so the call never
                    completes.
+    linger         message chunks forever, one every 0.05 s. With
+                   FAKE_CURSOR_HANG the process also ignores a closed
+                   stdin, which is what cursor-agent does during a turn.
     stream N       N single-word chunks, one every 0.15 s, then text.
     bash D => OUT  a Bash call of D whose output is OUT.
     edit P         an edit call of P completed with a diff.
@@ -382,6 +385,16 @@ def turn(rid: int, p: dict) -> None:
             rawOutput={"exitCode": 0, "stdout": "", "stderr": ""},
         )
         say(sid, "slept")
+    elif word == "linger":
+        n = 0
+        while True:
+            n += 1
+            update(
+                sid,
+                sessionUpdate="agent_message_chunk",
+                content={"type": "text", "text": f"linger-{n} "},
+            )
+            time.sleep(0.05)
     elif word == "bash":
         cmd, _, out = args.partition(" => ")
         tool(

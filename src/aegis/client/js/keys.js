@@ -97,7 +97,7 @@ export const ACTIONS = [
       on("browse", "0…9", (ev) => bare(ev) && /^[0-9]$/.test(ev.key)),
     ],
   },
-  { id: "escape", title: "Interrupt the agent; close a dialog or a list", keys: [on("global", "Esc", key("Escape"))] },
+  { id: "escape", title: "Interrupt the agent, twice in a row; once closes a dialog or a list", keys: [on("global", "Esc Esc", key("Escape"))] },
   { id: "help", title: "Every key, in one list", keys: [on("browse", "?", key("?"))] },
   { id: "next", title: "Next row", keys: [on("session", "j  ↓", key("j", "ArrowDown"))] },
   { id: "prev", title: "Previous row", keys: [on("session", "k  ↑", key("k", "ArrowUp"))] },
