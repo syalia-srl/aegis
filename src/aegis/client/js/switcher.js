@@ -7,7 +7,7 @@
 
 import { fuzzy } from "./commands.js";
 import { ago, markNode } from "./fleet.js";
-import { LABEL } from "./glyphs.js";
+import { icon, LABEL } from "./glyphs.js";
 
 // Attention first, as Alt+J walks: needs_you, error, review, the longest
 // waiting first; then working, waiting and the rest, the most recent first.
@@ -101,12 +101,20 @@ export class Switcher {
     this.q.setAttribute("role", "combobox");
     this.q.setAttribute("aria-controls", "switcher-rows");
     this.q.setAttribute("aria-expanded", "true");
+    // A phone's way out: its panel leaves no backdrop to tap and it has no Esc (#901).
+    const x = el("button", "x");
+    x.type = "button";
+    x.setAttribute("aria-label", "Close");
+    x.append(icon("close"));
+    x.addEventListener("click", () => this.close());
+    const head = el("div", "head");
+    head.append(this.q, x);
     this.rows = el("div", "rows");
     this.rows.id = "switcher-rows";
     this.rows.setAttribute("role", "listbox");
     const foot = el("div", "foot");
     for (const t of ["↑↓ Alt+P move", "PgUp PgDn server", "Enter open", "Esc close"]) foot.append(el("span", null, t));
-    panel.append(this.q, this.rows, foot);
+    panel.append(head, this.rows, foot);
     box.replaceChildren(panel);
     this.panel = panel;
     this.q.addEventListener("input", () => this.refresh({ reselect: true }));
