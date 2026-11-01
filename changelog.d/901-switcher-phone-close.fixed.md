@@ -1,0 +1,1 @@
+- **The session switcher can be closed on a phone.** It filled the screen with nothing to tap, so with no session open, or a filter that matched none, you could not leave it. It now has a close button beside its field.
