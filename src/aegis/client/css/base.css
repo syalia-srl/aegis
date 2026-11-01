@@ -34,6 +34,13 @@ body{background:#000}
 #a2 .tab.on{background:var(--bg);color:var(--strong);box-shadow:inset 0 2px 0 var(--accent)}
 #a2 .tabs .gap{flex:1}
 #a2 .tabs{min-width:0}
+/* Only the tab list gives way when the tabs outgrow the row: it scrolls. */
+#a2 .tabs>:not(.tablist,.gap),#a2 .hdr-menu>*{flex-shrink:0}
+/* The phone's menu (#896) holds these controls; a wider header lays them out as
+   its own children. */
+#a2 .hdr-menu{display:contents}
+#a2 .hdr-burger,#a2 .hdr-scrim,#a2 .menu-fleet{display:none}
+@keyframes hdr-menu-in{from{transform:translateX(-100%)}}
 #a2 .tablist{display:flex;gap:2px;flex:0 1 auto;min-width:0;overflow-x:auto;scrollbar-width:none}
 #a2 .tablist::-webkit-scrollbar{display:none}
 #a2 .tab-more{flex:none;align-self:center;margin:0 4px 6px;padding:2px 8px;font:12px var(--font-chrome);color:var(--muted);background:none;border:1px solid transparent;border-radius:var(--r);cursor:pointer}
@@ -78,7 +85,7 @@ body{background:#000}
 #a2 .tab.asleep{opacity:.6}
 #a2 .tab.dragging{opacity:.35}
 #a2 .tab.drop{box-shadow:inset 2px 0 0 var(--accent)}
-#a2 .tabs .servers{display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--faint);padding:0 10px}
+#a2 .tabs .servers{display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--faint);padding:0 10px;margin-bottom:6px}
 /* The header's buttons are bare icons at every width (#586): no box, a tint on hover. */
 #a2 .keys-btn{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-width:30px;height:28px;background:none;border:1px solid transparent;border-radius:var(--r);color:var(--muted);font-family:var(--font-mono);font-size:11.5px;padding:0 4px;margin:0 1px 6px;cursor:pointer}
 #a2 .keys-btn:hover{color:var(--strong);background:color-mix(in srgb,var(--ink) 7%,transparent)}
@@ -102,6 +109,40 @@ body{background:#000}
 #a2 .palette kbd{font-family:var(--font-mono);font-size:11.5px;color:var(--faint);white-space:pre}
 #a2 .palette .cmd-row.on kbd{color:var(--muted)}
 #a2 .palette .empty{padding:6px 8px;color:var(--faint)}
+/* the session switcher (js/switcher.js, #781): the palette's backdrop, wider, two-line rows */
+#a2 .switcher .panel{width:min(760px,94vw);max-height:76vh}
+#a2 .switcher .panel:focus{outline:none}
+#a2 .switcher .head{display:flex;align-items:center;gap:4px;margin-bottom:4px}
+#a2 .switcher .head input{flex:1;min-width:0;margin-bottom:0}
+#a2 .switcher .head .x{display:none;flex:none;align-items:center;justify-content:center;min-width:44px;min-height:44px;background:none;border:0;color:var(--muted);cursor:pointer}
+#a2 .switcher .sw-gh{display:flex;gap:8px;align-items:baseline;padding:8px 8px 3px;font-family:var(--font-mono);font-size:11px;color:var(--faint)}
+#a2 .switcher .sw-gh .nm{color:var(--muted)}
+#a2 .switcher .sw-gh .off{color:var(--err)}
+#a2 .switcher .sw-row{display:grid;grid-template-columns:14px minmax(0,auto) minmax(0,1fr) auto;grid-template-areas:"mk h t st" ". ln ln ln";column-gap:10px;row-gap:1px;padding:5px 8px;border-radius:4px;cursor:pointer;align-items:center}
+#a2 .switcher .sw-row.on{background:var(--accent-soft)}
+#a2 .switcher .sw-row.dim{opacity:.55}
+#a2 .switcher .sw-row.dim.on{opacity:1}
+#a2 .switcher .sw-row .mk{grid-area:mk;display:inline-flex;align-items:center}
+#a2 .switcher .sw-row .mk svg{width:12px;height:12px}
+#a2 .switcher .sw-row .h{grid-area:h;font-family:var(--font-mono);color:var(--strong);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#a2 .switcher .sw-row .h b{color:var(--accent);font-weight:inherit}
+#a2 .switcher .sw-row .h .at{color:var(--faint);font-size:11px;margin-left:6px}
+#a2 .switcher .sw-row .t{grid-area:t;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#a2 .switcher .sw-row .st{grid-area:st;font-family:var(--font-mono);font-size:11px;color:var(--faint);white-space:nowrap}
+#a2 .switcher .sw-row .st .here{color:var(--accent);margin-right:6px}
+#a2 .switcher .sw-row .ln{grid-area:ln;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#a2 .switcher .sw-row .ln:empty{display:none}
+#a2 .switcher .sw-row .ln.at-needs_you{color:var(--accent)}
+#a2 .switcher .sw-row .ln.at-error{color:var(--err)}
+#a2 .switcher .foot{display:flex;gap:14px;flex-wrap:wrap;padding:6px 8px 2px;border-top:1px solid var(--rule);margin-top:4px;font-family:var(--font-mono);font-size:10.5px;color:var(--faint)}
+@media (max-width:640px){
+  #a2 .switcher{padding-top:0}
+  #a2 .switcher .panel{width:100vw;height:100%;max-height:100%;border-radius:0}
+  #a2 .switcher .sw-row{grid-template-columns:14px minmax(0,1fr) auto;grid-template-areas:"mk h st" ". t t" ". ln ln"}
+  #a2 .switcher .foot{display:none}
+  #a2 .switcher .head .x{display:flex}
+}
+@media (pointer:coarse){#a2 .switcher .sw-row{min-height:44px}}
 #a2 .dialog{position:fixed;inset:0;z-index:60;display:grid;place-items:center;background:rgba(0,0,0,.45);padding:16px}
 #a2 .dialog[hidden]{display:none}
 #a2 .dialog .panel{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-lg);padding:18px 20px;max-width:420px;width:100%}
@@ -305,14 +346,16 @@ body{background:#000}
 #a2 .row.prose .body{font-family:var(--font-prose);font-size:var(--prose-size);line-height:1.55;color:var(--ink);overflow-wrap:anywhere}
 #a2 .row.prose .g{color:var(--ink)}
 /* reading: the margin mark on agent messages */
-#a2 .row.prose{grid-template-columns:var(--row-cols) 16px}
-#a2 .row.prose .rm{line-height:1.9;text-align:center}
+/* The read mark and the read-aloud chip side by side, centred on the first
+   line: stacked, they made a one-line reply's row taller than its text (#743). */
+#a2 .row.prose{grid-template-columns:var(--row-cols) 30px}
+#a2 .row.prose .rm{display:flex;align-items:center;gap:2px;height:calc(var(--prose-size) * 1.55)}
 #a2 .row.prose .rm .ic{width:12px;height:12px}
 #a2 .row.prose .rm .ic.i-unread{color:var(--accent)}
 #a2 .row.prose .rm .ic.i-read{color:var(--faint)}
-/* the read-aloud chip under the read mark (speak.js): shown on hover like a
+/* the read-aloud chip after the read mark (speak.js): shown on hover like a
    copy button, always on a touch screen, which has no hover */
-#a2 .row.prose .rm .speak{position:relative;display:grid;place-items:center;width:16px;height:18px;margin:2px auto 0;padding:0;border:none;background:none;color:var(--faint);cursor:pointer;opacity:0;transition:opacity .12s}
+#a2 .row.prose .rm .speak{position:relative;display:grid;place-items:center;width:16px;height:18px;margin:0;padding:0;border:none;background:none;color:var(--faint);cursor:pointer;opacity:0;transition:opacity .12s}
 #a2 .row.prose .rm .speak .ic{width:13px;height:13px}
 #a2 .row.prose:hover .rm .speak,#a2 .row.prose .rm .speak:focus-visible,#a2 .row.prose .rm .speak.on{opacity:1}
 #a2 .row.prose .rm .speak:hover{color:var(--strong)}
@@ -521,6 +564,7 @@ body{background:#000}
 /* the command menu, drawn above the composer */
 #a2 .composer{position:relative}
 #a2 .cmd-menu{position:absolute;left:22px;right:22px;bottom:calc(100% - 6px);background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-lg);padding:4px;max-height:280px;overflow:auto;font-family:var(--font-chrome);font-size:12.5px;z-index:5}
+#a2 .cmd-menu.empty{display:none}
 /* the new tab's menu (#632): in the form's flow, under its box */
 #a2 .spawn .cmd-menu{position:static;margin-top:6px}
 #a2 .cmd-menu input{width:100%;margin-bottom:4px;padding:6px 8px;background:var(--bg);border:1px solid var(--accent);border-radius:4px;color:var(--strong);font:inherit;outline:none}
@@ -689,6 +733,7 @@ body{background:#000}
 #a2 .side .ver{border-top:1px solid var(--rule);padding-top:8px;font-family:var(--font-mono);font-size:11px;color:var(--faint)}
 #a2 .side .ver>.prow{display:flex;gap:6px;align-items:center;margin:-4px -8px;padding:4px 8px}
 #a2 .side .ver>.prow>span{display:flex;gap:6px;align-items:center}
+#a2 .side .ver>.prow>span>:is(.ok,.upd){margin-left:0}
 #a2 .ver .v{font-family:var(--font-mono);color:var(--ink)}
 #a2 .ver .kv.dim .v{color:var(--faint)}
 #a2 .tag{font-size:10.5px;padding:0 6px;border-radius:4px;margin-left:6px;border:1px solid var(--comms);color:var(--comms)}
@@ -929,6 +974,10 @@ body{background:#000}
 @media (pointer:coarse){#a2 .gate .btn,#a2 .edit .btn,#a2 .again .btn{min-height:44px}}
 /* A secret's card (entries.js fillSecret, fillRequest): the value only ever in this DOM. */
 #a2 .scard .fbar{flex-wrap:wrap}
+/* On a phone the title takes the rest of the icon's line and wraps there, and
+   the size and the buttons take the next (#633): a title wider than what was
+   left of the line dropped below the icon. 25 px: the icon and the gap. */
+@media (max-width:760px){#a2 .scard .fbar .fn{flex:1 1 calc(100% - 25px);white-space:normal;overflow-wrap:anywhere}}
 #a2 .scard .sbody{border-top:1px solid var(--rule);background:var(--bg);padding:10px 12px;font-size:13px}
 #a2 .scard .sbody.val{font-family:var(--font-mono);font-size:14px;color:var(--strong);overflow-wrap:anywhere}
 #a2 .scard .sbody.dim{color:var(--muted);font-size:12.5px}
@@ -939,6 +988,8 @@ body{background:#000}
 #a2 .scard .sform input{flex:1;min-width:0;background:var(--surface);border:1px solid var(--rule);border-radius:var(--r);padding:6px 9px;font-family:var(--font-mono);font-size:12px;color:var(--strong)}
 #a2 .scard .sform input:focus{outline:none;border-color:var(--accent)}
 #a2 .scard.gone .fbar>.ic,#a2 .scard.gone .fn{color:var(--muted)}
+#a2 .lcard .steps{margin:0 0 4px;padding-left:20px;color:var(--ink)}
+#a2 .lcard .steps li{margin:2px 0}
 #a2 .ccard .cdiff{margin:0;border-top:1px solid var(--rule);background:var(--bg);padding:8px 12px;font-family:var(--font-mono);font-size:12px;line-height:1.5;color:var(--muted);white-space:pre-wrap;overflow-wrap:anywhere;max-height:360px;overflow:auto}
 #a2 .ccard .cdiff .add{color:var(--ok)}
 #a2 .ccard .cdiff .del{color:var(--err)}
@@ -963,6 +1014,10 @@ body{background:#000}
 #a2 .stage.phone>iframe[data-artifact]{width:390px;max-width:100%;flex:none;border-inline:1px solid var(--rule)}
 #a2 .btn.phone[aria-pressed=true]{color:var(--accent);background:var(--accent-soft)}
 @media (max-width:480px){#a2 .btn.phone{display:none}}
+#a2 .stage>.dictbar{position:sticky;top:6px;z-index:2;display:flex;align-items:center;gap:8px;width:fit-content;max-width:calc(100% - 12px);margin:6px 6px -44px auto;padding:4px 6px 4px 10px;background:var(--raised);color:var(--ink);border:1px solid var(--accent);border-radius:var(--r);font-family:var(--font-chrome);font-size:12.5px;box-shadow:0 1px 6px rgba(0,0,0,.2)}
+#a2 .stage.phone:has(>.dictbar){flex-wrap:wrap}
+#a2 .dictbar .ic{color:var(--accent);flex:none}
+#a2 .dictbar[data-state=listening] .ic{color:var(--err)}
 #a2 .acard .done{padding:10px 12px;color:var(--muted);font-family:var(--font-chrome);font-size:12.5px;border-top:1px solid var(--rule)}
 #a2 :is(.acard,.docked,.viewer) .refused{padding:8px 12px;color:var(--err);background:var(--err-bg);font-family:var(--font-chrome);font-size:12.5px;border-top:1px solid var(--rule);overflow-wrap:anywhere}
 #a2 .acard[data-status=submitted] .fbar>.ic{color:var(--ok)}
@@ -1127,6 +1182,9 @@ body{background:#000}
 @media (prefers-reduced-motion:reduce){#a2 .mcard{transition:none}}
 
 #a2 .mcard .hd{padding:13px 16px 10px;border-bottom:1px solid var(--rule)}
+#a2 .mcard .facts .src{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:none;border:none;padding:0;color:var(--accent);font:inherit;text-align:left;cursor:pointer}
+#a2 .mcard .facts .src:hover{text-decoration:underline}
+@media (pointer:coarse){#a2 .mcard .facts .src{padding:10px 0}}
 #a2 .mcard .hd .t{display:flex;gap:10px;align-items:flex-start}
 #a2 .mcard .hd .d{flex:1;color:var(--strong);font-family:var(--font-ui);font-size:13.5px;font-weight:500;line-height:1.35}
 #a2 .mcard .pill{flex:none;font-size:10.5px;padding:2px 8px;border-radius:9px;background:var(--accent-soft);color:var(--accent);margin-top:1px}
@@ -1715,11 +1773,13 @@ body{background:#000}
    its runs, and the editor laid out as the same layers. */
 #a2[data-view=schedules] .v-schedules{display:flex;flex-direction:column;overflow:auto}
 #a2 .schedules{max-width:1100px;width:100%;margin:0 auto;padding:22px 28px 32px;font-size:13px}
-#a2 .sch-btn .n{margin-left:5px;color:var(--muted)}
+#a2 .sch-btn{position:relative}
+#a2 .sch-btn .n{position:absolute;top:1px;right:1px;font-size:9px;line-height:1;color:var(--muted)}
 #a2 .sch-btn .n:empty{display:none}
 #a2 .sch-btn .n.err{color:var(--err)}
 #a2 .schedules .sch-top{display:flex;align-items:baseline;gap:12px;margin-bottom:14px}
 #a2 .schedules .sch-top h2{margin:0;font-family:var(--font-mono);font-weight:500;font-size:15px;color:var(--strong)}
+#a2 .schedules .sch-server{background:none;border:none;font-family:var(--font-mono);font-size:12px;color:var(--accent);cursor:pointer}
 #a2 .schedules .sch-grid{display:grid;grid-template-columns:280px minmax(0,1fr);gap:16px;align-items:start}
 #a2 .schedules .sch-row{border:1px solid var(--rule);border-radius:var(--r);padding:8px 10px;margin-bottom:6px;cursor:pointer;background:var(--surface)}
 #a2 .schedules .sch-row.on{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
@@ -1901,32 +1961,29 @@ body{background:#000}
 /* A phone: the desktop markup, wrapped. Tabs take their own scrolling row, the
    side panel slides in as a drawer (data-side=open), the band stacks. */
 @media (max-width:760px){
-  #a2 .tabs{flex-wrap:wrap;padding:4px 6px 0;padding-top:max(4px,env(safe-area-inset-top))}
-  /* Two rows (#631): the server and the buttons, then Fleet, the tabs, the
-     overflow menu and + on the tab row. The spacer is the line between. */
-  #a2 .tabs .gap{order:7;flex:1 0 100%;height:0;margin:2px -2px 0;border-top:1px solid var(--rule)}
-  #a2 .tabs .tab.home{order:8}
-  #a2 .tablist{order:9;flex:1 1 0;padding:0 2px}
-  #a2 .tabs .tab-more{order:10}
-  #a2 .tabs .tab.add{order:11}
-  /* the name takes the row's free width with a zero basis, and shrinks first */
-  #a2 .tabs .servers{flex:1 1 0;justify-content:flex-start;padding:0 6px;margin-bottom:4px;min-width:0;overflow:hidden}
-  /* the server's name gives way first, so the header's buttons keep their row */
+  /* One row (#896): the menu button, the session tabs, the switcher and +.
+     The rest waits in a drawer from the left, so the sessions get the width
+     and the transcript the height a second row took (#631, #752). */
+  #a2 .tabs{gap:1px;padding:max(4px,env(safe-area-inset-top)) 2px 0}
+  #a2 .tabs .tab.home,#a2 .tabs .gap{display:none}
+  #a2 .tablist{padding:0 2px}
+  #a2 .tabs .tab.add{padding-left:8px;padding-right:8px}
+  #a2 .keys-btn:not(.bell):not(.set-btn):not(.help-btn){display:none}
+  #a2 .hdr-burger{position:relative;display:grid;place-items:center;min-width:44px;min-height:40px;padding:0;background:none;border:0;color:var(--muted);cursor:pointer}
+  #a2 .hdr-burger .ic{width:18px;height:18px}
+  /* what needs attention in the closed menu: the connection, a paused schedule */
+  #a2 .hdr-burger.alert::after{content:"";position:absolute;top:7px;right:8px;width:8px;height:8px;border-radius:50%;background:var(--err)}
+  #a2[data-menu=open] .hdr-scrim{display:block;position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.5)}
+  #a2 .hdr-menu{flex-direction:column;position:fixed;top:0;bottom:0;left:0;width:min(280px,84vw);z-index:41;overflow-y:auto;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom);background:var(--chrome);border-right:1px solid var(--rule);display:none}
+  #a2[data-menu=open] .hdr-menu{display:flex;animation:hdr-menu-in .15s}
+  #a2 .hdr-menu .servers{min-height:48px;margin:0;padding:0 16px;border-bottom:1px solid var(--rule)}
   #a2 #conn-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   #a2 .tabs .ver-top{display:none}
-  #a2 .keys-btn:not(.bell):not(.set-btn):not(.help-btn){display:none}
-  /* the header's buttons: bare icons, the tap target kept by (pointer:coarse) */
-  #a2 .tabs .keys-btn.bell,#a2 .tabs .set-btn,#a2 .tabs .jr-btn,#a2 .tabs .help-btn{display:grid;place-items:center;background:none;border-color:transparent;margin:0 0 4px;padding:0}
-  /* Files joins this row (#586): the 40 px targets stay, and the row gives up
-     a pixel of each gap and most of its side padding instead. */
-  #a2 .tabs .set-btn,#a2 .tabs .jr-btn,#a2 .tabs .help-btn{min-width:40px}
-  #a2 .tabs{gap:1px;padding-left:2px;padding-right:2px}
-  #a2 .tabs .tab.home,#a2 .tabs .tab.add{padding-left:8px;padding-right:8px}
-  #a2 .tabs .servers{padding:0 2px}
-  #a2 .tabs .help-btn{font-size:16px}
-  #a2 .tabs .keys-btn.bell .ic,#a2 .tabs .set-btn .ic,#a2 .tabs .jr-btn svg{width:18px;height:18px}
-  #a2 .set-btn .lbl{display:none}
-  #a2 .set-btn .ic{display:inline-block}
+  #a2 .tabs .hdr-menu button:not(.side-btn){display:flex;justify-content:flex-start;align-items:center;gap:14px;flex:none;width:100%;max-width:none;min-height:44px;height:auto;margin:0;padding:0 16px;background:none;border:0;border-radius:0;color:var(--ink);font:inherit;font-size:14px;cursor:pointer}
+  #a2 .hdr-menu button:not(.side-btn)::after{content:attr(aria-label)}
+  #a2 .hdr-menu button.on{color:var(--strong);background:color-mix(in srgb,var(--ink) 7%,transparent)}
+  #a2 .hdr-menu .ic,#a2 .hdr-menu .jr-btn svg,#a2 .hdr-menu .q{display:block;flex:none;width:18px;height:18px;line-height:18px;text-align:center}
+  #a2 .hdr-menu .sch-btn .n{position:static;order:1;margin-left:auto;font-size:12px}
   #a2 .journal{padding:12px 12px 24px}
   #a2 .jfiles{display:inline-flex;align-items:center;gap:8px;min-height:44px;margin:0 0 8px;padding:0 14px;font-family:var(--font-mono);font-size:12px;color:var(--muted);border:1px solid var(--rule);border-radius:999px;text-decoration:none}
   #a2 .jfiles .ic{width:15px;height:15px}

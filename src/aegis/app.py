@@ -59,6 +59,7 @@ from pydantic import BaseModel, Field, model_validator
 from pydantic.json_schema import SkipJsonSchema
 
 from . import archive, attachments as att, commands, dictation, files, restarts, speech
+from . import pause
 from . import feedback, harness_versions, multiuser, setup
 from . import layout as canvas
 from . import workflow_store
@@ -72,6 +73,7 @@ from .agent_ops import (
 from .artifact_ops import register_artifact_ops
 from .config_suggest import register_config_suggest
 from .secret_ops import register_secret_ops
+from .claude.login import SignIn
 from .agents import (
     EFFORTS,
     HARNESSES,
@@ -84,7 +86,7 @@ from .cascade import Cooling, Fall, classify, pick
 from .cgroups import SessionCgroups
 from .channels import Channels, Throttle
 from .claude.process import PERMISSION_MODE, ControlError
-from .config import Config, Snapshot, accept_version
+from .config import Config, Snapshot, accept_version, write
 from .harness import harness_for
 from .config_ops import register_config_ops
 from .doctor_watch import DoctorWatch
@@ -93,6 +95,7 @@ from .help_ops import register_help_ops
 from .host import HostSampler
 from .load import LoadSampler
 from .net.service import NetService
+from .exit import Exits
 from .links import LinkError, Links, probe
 from .mcp import PATH as MCP_PATH, Tokens, build_mcp
 from . import refs
@@ -107,6 +110,7 @@ from .push import register_push_ops
 from .queues import Queues
 from .journal.ops import register_journal_ops
 from .journal.service import Journal
+from .knowledge.know_how import KnowHow
 from .knowledge.service import Knowledge
 from .knowledge.items import NAME_RE, Item
 from .skill_mcp import SkillServers
@@ -220,7 +224,12 @@ class SpawnParams(_Strict):
         "resolves against yours.",
     )
     prompt: str | None = Field(
-        None, min_length=1, description="The new session's first message."
+        None,
+        min_length=1,
+        description=(
+            "The new session's first message. A / line runs as if typed in "
+            "that session's box: an aegis command runs, // sends a leading /."
+        ),
     )
     # Set by a server that links this one, for an agent of its own that
     # spawns here (app.spawn); refused from anything but a link.
@@ -309,6 +318,26 @@ class LogParams(_Strict):
     log_id: str
 
 
+class HandoffParams(_Strict):
+    """What a handoff starts, when it is not what the old session ran (#874)."""
+
+    # A person names the session; an agent hands off its own.
+    log_id: SkipJsonSchema[str | None] = Field(None, exclude=True)
+    agent: str | None = Field(
+        None, description="The agent that continues; omitted, your own."
+    )
+    msg: str | None = Field(
+        None, description="What the new session should do, the last thing it reads."
+    )
+    host: str | None = Field(
+        None, description="A linked server to continue on; omitted, this one."
+    )
+    model: str | None = None
+    effort: Effort | None = None
+    permission: Permission | None = None
+    cwd: str | None = None
+
+
 class PreviewParams(_Strict):
     harness: str
     cwd: str | None = None
@@ -387,6 +416,10 @@ class LinkAdd(_Strict):
 class LinkTrust(_Strict):
     name: str
     trusted: bool
+
+
+class LinkExit(_Strict):
+    name: str | None = None
 
 
 class LinkName(_Strict):
@@ -530,6 +563,7 @@ class App:
             lambda: self.config.current().network,
             watched=lambda: self.channels.subscribers("host") > 0,
             on_change=self.host.check,
+            exit_now=self._exit_now,
         )
         reg = self.sessions
         reg.tokens, reg.monitors, reg.queues, reg.server_name = (
@@ -541,6 +575,11 @@ class App:
         reg.context = lambda: self.config.current().context
         reg.version_policy = lambda: self.config.current().harness_versions
         reg.quota = self.quota
+        reg.sign_in = SignIn(
+            reg.sessions,
+            lambda: self.claude_bin,
+            lambda text, s: self.toast(text, "error", source=s),
+        )
         self.journal = Journal(
             roots.state_root,
             self.publish,
@@ -558,6 +597,9 @@ class App:
             roots.state_root, self.config.current().knowledge["embeddings"]
         )
         reg.knowledge = self.knowledge
+        # knowledge.know_how too.
+        if self.config.current().knowledge["know_how"]:
+            reg.know_how = KnowHow(self._linux_user_of_session)
         self.skill_servers = SkillServers()
         reg.skill_servers = self.skill_servers
         reg.principal_of = lambda s: s.spec.owner or self.user
@@ -624,14 +666,31 @@ class App:
             )
         self.links = Links(roots.state_root, server_name, self.user, self.publish)
         self.links.answer = self.answer_link
+        self.exits = Exits(
+            self.links,
+            lambda: (
+                None
+                if self.multi_user is None
+                else "an exit is off on a multi-user server"
+            ),
+        )
+        launch.configure_exits(self.exits, self._exit_for)
+        # Bytes each linked server took through this one as its exit (exit.py).
+        self.exit_bytes: dict[str, int] = {}
         self.queues.far_callback = self._far_callback
         self.monitors.far_list = self._far_list
         # Sessions a pause or a continue is under way for, so a reading that
         # lands before it finishes does not start a second one.
         self._quota_busy: set[str] = set()
+        # Every session paused by the person, and the ones resumed since
+        # (pause.py); read before boot, so a cut turn waits.
+        self.paused = pause.read(roots.state_root)
+        self.resumed: set[str] = set()
         self.quota.listeners.append(self.on_quota)
         self.quota.listeners.append(self.journal.quota)
+        self.quota.history = self.journal.usual_spend
         reg.gate = self.gate
+        reg.pause_hold = self.pause_hold
         # Who each session's processes run as, in multi-user mode (users.py).
         reg.multi_user = multi_user is not None
         reg.acts_for = lambda name: self.principals.acts_for(name)
@@ -644,6 +703,7 @@ class App:
         self._cool_at: float | None = None
         reg.start_spec = self.start_spec
         reg.cascade = self.cascade_next
+        reg.start_pending_handoff = self.start_pending_handoff
         self.registry = Ops()
         self.registry.who = self.who
         self.registry.owner_of = self.owner_of
@@ -695,6 +755,25 @@ class App:
                 "link to trust this one"
             )
         return None
+
+    def _exit_for(self, agent: str | None) -> str | None:
+        """The link a process of ``agent`` exits through; None for direct."""
+        snap = self.config.current()
+        named = next((a.exit for a in snap.agents if a.name == agent), "")
+        if named:
+            return None if named == "off" else named
+        return snap.exit_via
+
+    def _exit_now(self):
+        """The exit the Host rows show: the server's, or the first a profile names."""
+        snap = self.config.current()
+        name = snap.exit_via or next(
+            (a.exit for a in snap.agents if a.exit and a.exit != "off"), None
+        )
+        return None if name is None else self.exits.get(name)
+
+    def count_exit(self, server: str, n: int) -> None:
+        self.exit_bytes[server] = self.exit_bytes.get(server, 0) + n
 
     async def answer_link(self, server: str, op: str, params) -> dict:
         """Run a call a trusted linked server sent back down its link: as this
@@ -776,7 +855,10 @@ class App:
         """The spec a start runs and the gate it passes. A cascade starts on
         its first model that is neither cooling nor gated, or is closed with
         why. A spec with no cascade, or whose model a person moved outside it
-        (a handoff after /model), asks that model's gate alone."""
+        (a handoff after /model), asks that model's gate alone. Nothing new
+        starts while every session is paused (pause.py)."""
+        if self.paused is not None:
+            return spec, Gate("stopped", pause.WHY)
         if spec.model not in spec.cascade:
             return spec, self.gate(spec.owner, spec.harness, spec.model)
         model, why = pick(
@@ -843,6 +925,8 @@ class App:
             # A turn the restart guard declined waits for a person (restarts.py).
             if s.log_id in self._quota_busy or s.log_id in self.sessions.declined:
                 continue
+            if self.pause_hold(s) is not None:
+                continue  # the person's pause outranks the gate (pause.py)
             policy = self.principals.policy_of(s.spec.owner or self.user)
             if policy is None:
                 continue
@@ -925,6 +1009,88 @@ class App:
             if paused:
                 msgs = msgs[1:]  # the next continue writes its own
             s.held = [m | {"held_for": "quota"} for m in msgs + s.held]
+            self.sessions.metas.write(s.meta())
+            s._publish_now()
+
+    def pause_hold(self, s) -> str | None:
+        """Why ``s`` may not start a turn while every session is paused, or
+        None: no pause, or the person resumed this one."""
+        if self.paused is None or s.log_id in self.resumed:
+            return None
+        return pause.WHY
+
+    async def pause_all(self, by: str) -> int:
+        """Pause every session (pause.py): mark and cut each working turn,
+        then end every process, which kills what its agent left running.
+        The number of sessions whose process it ended."""
+        self.paused = pause.write(self.roots.state_root, by)
+        self.resumed.clear()
+        ended = 0
+        for s in list(self.sessions.sessions.values()):
+            if not self._live(s):
+                continue
+            if s.status == "working" and not s.quota_paused:
+                s.report({"kind": "server_paused"})
+                s.quota_paused = pause.WHY
+                self.sessions.metas.write(s.meta())
+            if s.running:
+                await s.stop()
+                ended += 1
+            s._publish_now()
+        self.toast("Every session is paused: nothing runs until you resume it.")
+        return ended
+
+    async def resume_all(self) -> None:
+        """Remove the pause, continue every turn it cut and release what the
+        gate held."""
+        self.paused = None
+        self.resumed.clear()
+        pause.clear(self.roots.state_root)
+        for s in list(self.sessions.sessions.values()):
+            if s.quota_paused == pause.WHY or s.held:
+                self._quota_task(s, self._unpause(s))
+        self._release_held()
+        self.toast("Every session is resumed.")
+
+    async def resume_one(self, s) -> None:
+        """A person's message resumes this session alone, its cut turn first."""
+        if self.pause_hold(s) is None:
+            return
+        self.resumed.add(s.log_id)
+        await self._unpause(s)
+
+    async def _unpause(self, s) -> None:
+        """Continue a session the pause held: ``RESUMED`` ahead of what it
+        held when the pause cut its turn, in one turn. One the quota gate
+        still holds keeps waiting for it."""
+        if not self._live(s) or self.pause_hold(s) is not None:
+            return
+        cut = s.quota_paused == pause.WHY
+        if cut:
+            s.quota_paused = None
+        if self.sessions.quota_hold(s) is not None:
+            self.sessions.metas.write(s.meta())
+            return
+        msgs = [{k: v for k, v in m.items() if k != "held_for"} for m in s.held]
+        if cut:
+            msgs.insert(
+                0,
+                {
+                    "header": f"> from aegis:pause · {iso_now()}",
+                    "body": pause.RESUMED,
+                    "ts": time.time(),
+                },
+            )
+        s.held = msgs
+        self.sessions.metas.write(s.meta())
+        if s.in_turn or not msgs:
+            s._publish_now()
+            return
+        try:
+            await s._flush_held()
+        except Exception:
+            log.exception("aegis: could not continue %s after the pause", s.handle)
+            s.held = msgs + s.held
             self.sessions.metas.write(s.meta())
             s._publish_now()
 
@@ -1056,6 +1222,9 @@ class App:
             self.terminal_cgroups = self.sessions.cgroups.sibling(
                 "terminals", lambda: self.config.current().terminal_memory_max
             )
+            # One cgroup for every browser, capped only by the work's (#782).
+            if browsers := self.sessions.cgroups.sibling("browsers", lambda: "max"):
+                self.browsers.cgroup = browsers.create("chromium")
         # Before sessions.boot(), which records server_stopped for every session
         # whose turn the last run's end cut: the journal must see those records.
         self.journal.start()
@@ -1077,6 +1246,12 @@ class App:
         # the continue; before the queues resume, so a worker the registry
         # continued needs no second message from its queue.
         await self.sessions.continue_after_boot()
+        # A turn that ended before the stop and whose handoff had not started:
+        # nothing else will end it. A cut turn continues above, and starts it
+        # when it ends.
+        for s in list(self.sessions.sessions.values()):
+            if s.continued_by == "pending" and not s.in_turn:
+                await self.start_pending_handoff(s)
         self.monitors.arm_all()
         await self.queues.resume_after_boot(resume)
         for s in list(self.sessions.sessions.values()):
@@ -1154,6 +1329,9 @@ class App:
             self._config_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._config_task
+        await self.exits.shutdown()
+        if launch.exits_in_force() is self.exits:
+            launch.configure_exits(None, None)
         await self.links.shutdown()
         await self.parker.stop()
         await self.nudges.stop()
@@ -1703,6 +1881,19 @@ class App:
             return await self._spawn_line(
                 commands.parse_spawn(arg), caller, s, untested
             )
+        if name == "handoff":
+            line = commands.parse_handoff(arg)
+            params = {
+                k: v
+                for k, v in dataclasses.asdict(line).items()
+                if v is not None and k not in ("server", "text")
+            }
+            r = await self.registry.call(
+                "session.handoff",
+                {"log_id": s.log_id, "msg": line.text, "host": line.server, **params},
+                caller,
+            )
+            return {"server": self.server_name, **r}
         if name == "announce":
             text, level, until = commands.parse_announce(arg)
             params = {"text": text, "level": level, "until": until}
@@ -1718,6 +1909,8 @@ class App:
         on a workflow's locked step, behind a closed quota gate, and on a
         harness version outside the tested range until the person says so."""
         s.check_lock()
+        if not caller.is_agent:
+            await self.resume_one(s)
         if (why := self.sessions.quota_hold(s)) is not None:
             raise OpError("quota_closed", _held(s.spec.owner or self.user, why))
         not_saved = await self._version_gate(caller, s.spec.harness, untested, s)
@@ -1822,6 +2015,168 @@ class App:
             raise OpError("server_offline", f"{link.describe()}; nothing was started")
         r = await link.call("session.spawn", params)
         return {**r, "server": far}
+
+    def _handoff_spec(self, old, p: HandoffParams, capped: bool) -> SpawnSpec:
+        """What a handoff from ``old`` starts: its own spec with what ``p``
+        names changed, so a model chosen by hand stays, or with ``p.agent`` the
+        spec a spawn of that agent gets. ``capped``: an agent asked, and cannot
+        hand a session more power than it has itself."""
+        spec = old.spec
+        overrides = {"model": p.model, "effort": p.effort, "permission": p.permission}
+        if p.agent:
+            agents, default = self._agents()
+            spec = resolve(
+                agents,
+                default,
+                p.agent,
+                {"harness": None, **overrides},
+                spec.cwd,
+                spawned_by=spec.spawned_by,
+                owner=spec.owner,
+            )
+        else:
+            spec = dataclasses.replace(
+                spec, **{k: v for k, v in overrides.items() if v is not None}
+            )
+        if p.cwd:
+            spec = dataclasses.replace(spec, cwd=self._resolve_cwd(p.cwd, old.spec.cwd))
+        if capped and PERMISSION_ORDER.index(spec.permission) > PERMISSION_ORDER.index(
+            old.spec.permission
+        ):
+            raise OpError(
+                "not_allowed",
+                f"your session runs with {old.spec.permission}, so a session you "
+                f"hand off to can have at most that (this one would have "
+                f"{spec.permission}); pass permission",
+            )
+        return spec
+
+    def _check_far_handoff(self, old, far: str, caller: Caller) -> None:
+        """What refuses a handoff across a link before anything changes.
+        ``_spawn_far`` checks the rest when it starts."""
+        if caller.link is not None:
+            raise OpError("not_relayed", "a link is not relayed to another server")
+        if not self.who(caller).is_admin:
+            raise OpError(
+                "not_for_members",
+                "handing off to a linked server is for an admin of this one",
+            )
+        link = self.links.get(far)
+        if link is None:
+            raise OpError("unknown_server", f"this server links no server named {far}")
+        if link.state != "linked":
+            raise OpError("server_offline", f"{link.describe()}; nothing was started")
+        # They report to their parent, and nothing reaches one across a link.
+        if kids := self.sessions.descendants(old.log_id):
+            names = ", ".join(k.handle for k in kids)
+            raise OpError(
+                "has_children",
+                f"{old.handle} still has {names} open; close them or let them "
+                "finish first",
+            )
+
+    def _far_of(self, p: HandoffParams) -> str | None:
+        """The linked server a handoff goes to, or None for this one."""
+        return None if p.host in (None, self.server_name) else p.host
+
+    async def _start_far_handoff(self, old, p: HandoffParams, far, caller) -> dict:
+        """Start the session that continues ``old`` on a linked server, under
+        the policies a far spawn has. Nothing here hears when its first turn
+        ends, so the old one is archived once the far side has taken the first
+        message; a refusal leaves it open."""
+        report = old.standing.get("report") or {}
+        prompt = handoff_opening(
+            old.handle,
+            report.get("handoff"),
+            spawn_tail(old.entries()),
+            instruction=p.msg,
+            far=True,
+        )
+        name = p.agent or old.spec.agent
+        params = SpawnParams(
+            agent=name,
+            prompt=prompt,
+            model=p.model,
+            effort=p.effort,
+            permission=p.permission,
+            cwd=p.cwd,
+        )
+        old.mark_continued("starting")
+        try:
+            r = await self._spawn_far(params, name, far, old, caller)
+        except BaseException:
+            old.mark_continued(None)
+            raise
+        old.mark_continued(r["handle"])
+        await self.sessions.close(old.log_id)
+        return r
+
+    async def _start_handoff(
+        self, old, p: HandoffParams, capped: bool, caller: Caller
+    ) -> dict:
+        """Start the session that continues ``old``, and send its first message.
+        The old one is archived when it finishes its first turn."""
+        if (far := self._far_of(p)) is not None:
+            return await self._start_far_handoff(old, p, far, caller)
+        reg = self.sessions
+        report = old.standing.get("report") or {}
+        # The new session takes the old one's place in its group (#641):
+        # it joins it, heads it when the old one did, and adopts the old
+        # one's children once the old one is archived (_retire_predecessor).
+        leads = old.spec.group is None or old.spec.leads
+        kids = tuple(
+            k.handle for k in reg.sessions.values() if k.spec.spawned_by == old.log_id
+        )
+        prompt = handoff_opening(
+            old.handle,
+            report.get("handoff"),
+            spawn_tail(old.entries()),
+            kids=kids,
+            leads=leads and bool(kids),
+            instruction=p.msg,
+        )
+        spec = dataclasses.replace(
+            self._handoff_spec(old, p, capped),
+            continues=old.log_id,
+            spawned_from=None,
+            group=old.group_key(),
+            leads=leads,
+        )
+        spec, g = self.start_spec(spec)
+        if not g.may_start:
+            raise OpError("quota_closed", refusal(spec.owner or self.user, g))
+        # Set before the spawn awaits, so a second click in that window is
+        # refused rather than starting a second session.
+        old.mark_continued("starting")
+        try:
+            s = await reg.spawn(spec)
+        except (OSError, TimeoutError) as e:
+            old.mark_continued(None)
+            raise OpError(
+                "harness_failed", f"{self._bin(spec.harness)!r} did not start: {e}"
+            ) from e
+        except BaseException:
+            old.mark_continued(None)
+            raise
+        old.mark_continued(s.log_id)
+        try:
+            await s.send(prompt)
+        except (BrokenPipeError, ConnectionResetError, FileNotFoundError) as e:
+            old.mark_continued(None)
+            raise OpError(
+                "harness_failed", f"{s.handle} did not take its first message: {e}"
+            ) from e
+        return {"log_id": s.log_id, "handle": s.handle}
+
+    async def start_pending_handoff(self, old) -> None:
+        """The agent's turn ended: start the handoff it asked for. Nobody waits
+        on an answer here, so a refusal gives the session back and says why."""
+        params = HandoffParams(**(old.handoff_pending or {}))
+        try:
+            caller = Caller("agent", old.log_id)
+            await self._start_handoff(old, params, capped=True, caller=caller)
+        except OpError as e:
+            self.sessions.call_off_pending(old, f"did not start: {e.message}")
 
     async def _spawn_far(
         self, p: SpawnParams, name: str, far: str, parent, caller: Caller
@@ -2102,7 +2457,23 @@ class App:
                 raise OpError(
                     "harness_failed", f"{self._bin(spec.harness)!r} did not start: {e}"
                 ) from e
-            if p.prompt:
+            ran = None
+            if p.prompt and commands.split(p.prompt) is not None:
+                # A / line runs as if typed in the new session (#545), as the
+                # new tab does (#570): as text, the harness answered an aegis
+                # command with its own builtin of that name.
+                try:
+                    ran = await deliver(
+                        SendParams(log_id=s.log_id, text=p.prompt), caller
+                    )
+                except OpError as e:
+                    raise OpError(
+                        e.code,
+                        f"{s.handle} ({s.log_id}) started, but its first line "
+                        f"failed: {e.message}",
+                        e.data,
+                    ) from e
+            elif p.prompt:
                 try:
                     await s.send(p.prompt, by_person=person)
                 except (BrokenPipeError, ConnectionResetError, FileNotFoundError) as e:
@@ -2112,6 +2483,8 @@ class App:
                         f"failed: {e}",
                     ) from e
             out = {"log_id": s.log_id, "handle": s.handle}
+            if ran is not None:
+                out["command"] = ran
             if parent is not None and s.last_notice:
                 out["untested"] = s.last_notice
             if not_saved:
@@ -2121,6 +2494,7 @@ class App:
         async def deliver(p: SendParams, caller):
             s = reg.open(p.log_id)
             s.check_lock()  # before a / command or an upload acts on it
+            s.check_handed_off()
             # A message written offline carries the transcript's revision as the
             # writer saw it: if anything a person reads has happened since, it
             # goes back to ask instead of answering a question no longer asked.
@@ -2156,6 +2530,8 @@ class App:
             text = commands.escape(p.text)
             if p.dictated and cmd is None:
                 text = dictation.with_note(text)
+            if not caller.is_agent:
+                await self.resume_one(s)
             if (why := reg.quota_hold(s)) is not None:
                 raise OpError("quota_closed", _held(s.spec.owner or self.user, why))
             not_saved = None
@@ -2201,12 +2577,27 @@ class App:
             except (BrokenPipeError, ConnectionResetError) as e:
                 raise _dead(e) from e
 
-        @r.op("session.handoff", LogParams, owned="log_id")
-        async def handoff(p: LogParams, caller):
-            """Continue a session's work in a fresh one: the same agent, folder,
-            model and effort, opened with its handoff brief and last turns. The
-            old session is archived when the new one finishes its first turn."""
-            old = reg.open(p.log_id)
+        @r.op("session.handoff", HandoffParams, agent=True, owned="log_id")
+        async def handoff(p: HandoffParams, caller):
+            """Continue your work in a new session and end this one: from this
+            call nobody can write to it. The new session starts when your turn
+            ends, with `msg`, your turn_end brief and your last turns, so end
+            your turn right after this call. Pass `agent` to continue on another
+            agent, with at most your permission, and `host` to continue on a
+            linked server. Refused while a monitor, a background task, a queue
+            task or a held message waits for you. A workflow you own follows the
+            new session, except across a link, where it and any open session you
+            started refuse the call."""
+            if caller.is_agent:
+                if p.log_id not in (None, caller.log_id):
+                    raise OpError(
+                        "not_yours", "an agent can hand off only its own session"
+                    )
+                old = reg.open(caller.log_id)
+            else:
+                if p.log_id is None:
+                    raise OpError("bad_params", "session.handoff needs a log_id")
+                old = reg.open(p.log_id)
             old.check_lock()
             if old.worker:
                 raise OpError(
@@ -2214,59 +2605,39 @@ class App:
                 )
             if reg.successor(old) is not None:
                 raise OpError("handed_off", f"{old.handle} is already being continued")
+            far = self._far_of(p)
+            # What would wake a session nobody can write to, or lose its result.
+            # A run follows its owner's successor only on this server.
+            if wakers := reg.wakers(old, run=far is not None):
+                raise OpError(
+                    "has_wakers",
+                    f"{old.handle} still waits on {', '.join(wakers)}; "
+                    "cancel them or let them finish first",
+                )
+            # Refused now, not when the turn ends and nobody is there to hear it.
+            if far is None:
+                self._handoff_spec(old, p, capped=caller.is_agent)
+            else:
+                self._check_far_handoff(old, far, caller)
+            if caller.is_agent and old.in_turn:
+                if old.held:
+                    raise OpError(
+                        "held_messages",
+                        f"{len(old.held)} messages wait for your next turn; "
+                        "read them first",
+                    )
+                old.mark_handoff_pending(p.model_dump(exclude_none=True))
+                return (
+                    "Handed off: this session takes no more messages. End your turn "
+                    "now with a short final message; the new session starts then."
+                )
             if old.in_turn:
                 raise OpError(
                     "busy", f"{old.handle} is working; hand it off when its turn ends"
                 )
-            report = old.standing.get("report") or {}
-            # The new session takes the old one's place in its group (#641):
-            # it joins it, heads it when the old one did, and adopts the old
-            # one's children once the old one is archived (_retire_predecessor).
-            leads = old.spec.group is None or old.spec.leads
-            kids = tuple(
-                k.handle
-                for k in reg.sessions.values()
-                if k.spec.spawned_by == old.log_id
+            return await self._start_handoff(
+                old, p, capped=caller.is_agent, caller=caller
             )
-            prompt = handoff_opening(
-                old.handle,
-                report.get("handoff"),
-                spawn_tail(old.entries()),
-                kids=kids,
-                leads=leads and bool(kids),
-            )
-            spec = dataclasses.replace(
-                old.spec,
-                continues=old.log_id,
-                spawned_from=None,
-                group=old.group_key(),
-                leads=leads,
-            )
-            spec, g = self.start_spec(spec)
-            if not g.may_start:
-                raise OpError("quota_closed", refusal(spec.owner or self.user, g))
-            # Set before the spawn awaits, so a second click in that window is
-            # refused rather than starting a second session.
-            old.mark_continued("starting")
-            try:
-                s = await reg.spawn(spec)
-            except (OSError, TimeoutError) as e:
-                old.mark_continued(None)
-                raise OpError(
-                    "harness_failed", f"{self._bin(spec.harness)!r} did not start: {e}"
-                ) from e
-            except BaseException:
-                old.mark_continued(None)
-                raise
-            old.mark_continued(s.log_id)
-            try:
-                await s.send(prompt)
-            except (BrokenPipeError, ConnectionResetError, FileNotFoundError) as e:
-                old.mark_continued(None)
-                raise OpError(
-                    "harness_failed", f"{s.handle} did not take its first message: {e}"
-                ) from e
-            return {"log_id": s.log_id, "handle": s.handle}
 
         @r.op("session.send", SendParams, owned="log_id")
         async def send(p: SendParams, caller):
@@ -2736,8 +3107,42 @@ class App:
         @r.op("link.incoming")
         async def link_incoming(_, caller):
             """The servers that linked this one with trust, so their agents
-            reach this one over their link."""
-            return self.links.incoming()
+            reach this one over their link, and what each took as an exit."""
+            return [
+                {**row, "exit_bytes": self.exit_bytes.get(row["name"], 0)}
+                for row in self.links.incoming()
+            ]
+
+        @r.op("link.exit", LinkExit, admin=True)
+        async def link_exit(p: LinkExit, caller):
+            """Make a link this server's exit, or stop exiting: what aegis
+            starts from now on reaches the internet from there (exit.py)."""
+            snap = self.config.current()
+            if p.name is not None and self.links.outbound(p.name) is None:
+                raise OpError("not_found", f"no link named {p.name}")
+            doc = snap.doc.model_copy(update={"exit_via": p.name})
+            if problems := write(self.config.path, doc, snap.stamp):
+                raise OpError("bad_config", problems[0].message)
+            return {"exit_via": p.name}
+
+        @r.op("server.paused", admin=True)
+        async def server_paused(p, caller):
+            """The pause in force (pause.py), or null."""
+            return {"paused": self.paused}
+
+        @r.op("server.pause", admin=True)
+        async def server_pause(p, caller):
+            """Pause every session: end their processes, hold all new work."""
+            ended = await self.pause_all(
+                by=caller.principal.name if caller.principal else self.user
+            )
+            return {"paused": self.paused, "ended": ended}
+
+        @r.op("server.resume", admin=True)
+        async def server_resume(p, caller):
+            """Resume every session the pause held, and the work it held."""
+            await self.resume_all()
+            return {"paused": None}
 
         @r.op("token.list", admin=True)
         async def token_list(_, caller):

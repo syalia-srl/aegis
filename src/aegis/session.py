@@ -45,7 +45,7 @@ import pwd
 from typing import Any, Literal
 
 from .as_user import Runners
-from . import attachments, cache, harness_versions, restarts
+from . import attachments, cache, harness_versions, launch as launching, restarts
 from . import layout as canvas
 from .artifacts import ArtifactError, Board
 from .claude.control import Catalog
@@ -56,6 +56,7 @@ from .claude.stream import (
     Delta,
     Init,
     Notice,
+    RateLimit,
     Result,
     Title,
     ToolCall,
@@ -87,6 +88,7 @@ _NOW = (
     "model_id",
     "standing",
     "continued_by",
+    "handoff_pending",
     "quiet",
     "autoclose",
     "workflow",
@@ -150,6 +152,11 @@ class Host:
 
     def turn_ended(self, session: "Session") -> None: ...
 
+    def flush_ended(self, session: "Session") -> None:
+        """A held flush ended with the session idle: the turn it started
+        ended before its send returned, so what reads finished() looks again,
+        without a second turn end."""
+
     def recorded(self, session: "Session", record: dict, events: list | None) -> None:
         """A record was stored and folded: the journal derives from it."""
 
@@ -181,6 +188,11 @@ class Host:
         node of a live workflow run, workflows.py), or None."""
         return None
 
+    def successor_name(self, session: "Session") -> str | None:
+        """What continues the session after a handoff, for a refusal to name,
+        or None when nothing does (registry.py)."""
+        return None
+
     def cascade_next(
         self, session: "Session", text: str
     ) -> tuple[str | None, float] | None:
@@ -194,6 +206,12 @@ class Host:
         ``at`` is "send" for a prompt, "tool" for a tool result."""
         return ""
 
+    def know_how_touched(self, session: "Session", tool_input: dict) -> None:
+        """A tool call of the session's own named these paths."""
+
+    async def know_how_ready(self, session: "Session") -> None:
+        """Before a send: a first one waits for its directory's know-how."""
+
     def knowledge_hint(self, session: "Session", text: str) -> str:
         """The skills and memories that may matter to a send of ``text``
         (knowledge/hint.py), or ""."""
@@ -206,6 +224,12 @@ class Host:
 
     def compacted(self, session: "Session") -> None:
         """The harness compacted the session's context."""
+
+    def sign_in_failed(self, session: "Session") -> None:
+        """A turn failed because the harness could not sign in (claude/login.py)."""
+
+    def rate_limit(self, session: "Session", windows: dict) -> None:
+        """The harness reported the account's usage windows (quota/claude.py)."""
 
 
 NO_HOST = Host()
@@ -381,6 +405,7 @@ class Session:
         restart_continues: int = 0,
         quota_paused: str | None = None,
         notices_sent: dict[str, str] | None = None,
+        know_how_sent: list[str] | None = None,
         items_sent: dict[str, str] | None = None,
         skills: list[str] | None = None,
         skill_runs: dict[str, int] | None = None,
@@ -390,6 +415,7 @@ class Session:
         cache_recent: list[list] | None = None,
         compactions: int = 0,
         continued_by: str | None = None,
+        handoff_pending: dict | None = None,
         quiet: bool = False,
         autoclose: bool = False,
         checked_version: str | None = None,
@@ -488,6 +514,8 @@ class Session:
         # {"disk": "warn", "announce:<id>": "warn"}. In the meta, so a restart
         # neither repeats a notice nor forgets a clear.
         self.notices_sent: dict[str, str] = dict(notices_sent or {})
+        # The main checkouts whose menu it was told (knowledge/know_how.py).
+        self.know_how_sent: list[str] = list(know_how_sent or [])
         # What per-session notice sources told it, apart from the host kinds
         # (notices.py): their restore reads every key in notices_sent.
         self.items_sent: dict[str, str] = dict(items_sent or {})
@@ -510,6 +538,7 @@ class Session:
         # The session a handoff started from this one (#354): "starting" while
         # it spawns, its log id after, None when the archive was called off.
         self.continued_by = continued_by
+        self.handoff_pending = handoff_pending
         # The process's start time from /proc, so a crashed server's successor
         # can tell this harness from a later process that reused its pid.
         self._pid_started: int | None = None
@@ -525,6 +554,8 @@ class Session:
         # parked session's wake included, is unattended.
         self.launch_by = "agent"
         self.last_verdict: harness_versions.Verdict | None = None
+        # The link the last launch exits through (exit.py); None for direct.
+        self.exit_via: str | None = None
         # The last launch's version when it was outside the tested range, for
         # the panel's warning colour (#456); None in range or before a launch.
         self.untested_version: dict | None = None
@@ -577,6 +608,7 @@ class Session:
             "restart_continues": self.restart_continues,
             "quota_paused": self.quota_paused,
             "notices_sent": self.notices_sent,
+            "know_how_sent": self.know_how_sent,
             "items_sent": self.items_sent,
             "skills": self.skills,
             "skill_runs": self.skill_runs,
@@ -586,6 +618,7 @@ class Session:
             "cache_recent": self.cache_recent,
             "compactions": self.compactions,
             "continued_by": self.continued_by,
+            "handoff_pending": self.handoff_pending,
             "quiet": self.quiet,
             "autoclose": self.autoclose,
             "checked_version": self.checked_version,
@@ -624,6 +657,7 @@ class Session:
         # differently depending on whether a turn had run (#243).
         m["model"] = self.spec.model or "default"
         m["harness_label"] = self.harness.label
+        m["exit"] = self.exit_via
         m["untested_version"] = self.untested_version
         m["cache_hit"] = cache.hit_rate(self.cache_recent)
         m["cache_alarm"] = cache.alarm(self.cache_recent, self.spec.harness)
@@ -654,7 +688,12 @@ class Session:
     def mark_continued(self, log_id: str | None) -> None:
         """Name the session a handoff started from this one, or clear it when
         the archive was called off (registry._retire_predecessor)."""
-        self._set(continued_by=log_id)
+        self._set(continued_by=log_id, handoff_pending=None)
+
+    def mark_handoff_pending(self, params: dict) -> None:
+        """An agent asked for a handoff in this turn: the lock starts now, the
+        new session when the turn ends (registry.turn_ended, #874)."""
+        self._set(continued_by="pending", handoff_pending=params)
 
     @property
     def in_turn(self) -> bool:
@@ -777,8 +816,10 @@ class Session:
         inbox = await self._host.runners.get(user)(
             attachments.ensure_inbox, self.state_root, self.log_id, self._home()
         )
+        self.exit_via = launching.resolve_via(self.spec.agent)
         proc = self.harness.process(
             Launch(
+                via=self.exit_via,
                 cwd=self.spec.cwd,
                 model=self.spec.model,
                 effort=self.spec.effort,
@@ -933,6 +974,16 @@ class Session:
         if (why := self._host.workflow_lock(self)) is not None:
             raise OpError("in_workflow", why)
 
+    def check_handed_off(self) -> None:
+        """Refuse a message to a session a handoff has replaced (#874). Apart
+        from check_lock, which also guards an interrupt and a close: those stay
+        open here. ``through_lock`` passes this too, for the server's own
+        continue after a restart."""
+        if (next_ := self._host.successor_name(self)) is not None:
+            raise OpError(
+                "handed_off", f"{self.handle} was handed off; {next_} continues it"
+            )
+
     async def deliver(
         self,
         header: str,
@@ -954,6 +1005,7 @@ class Session:
             raise Archived(self.log_id)
         if not through_lock:
             self.check_lock()
+            self.check_handed_off()
         msg = {"header": header, "body": body, "ts": time.time()}
         if by_person:
             msg["by_person"] = True
@@ -979,8 +1031,8 @@ class Session:
 
     async def _flush_held(self) -> None:
         self._flushing = True
+        batch, self.held = self.held, []
         try:
-            batch, self.held = self.held, []
             if batch:
                 # Before the send gathers notices: the "held" warning ends here.
                 self._host.status_changed(self)
@@ -990,6 +1042,10 @@ class Session:
                 )
         finally:
             self._flushing = False
+            if batch and not self.busy:
+                # The turn the send started ended before it returned, and its
+                # end found the session busy flushing (#536).
+                self._host.flush_ended(self)
 
     @property
     def inbox(self) -> Path:
@@ -1028,6 +1084,7 @@ class Session:
         person typed it (``person_turn``)."""
         if not through_lock:
             self.check_lock()
+            self.check_handed_off()
         await self._send(text, typed, attached, by_person=by_person)
 
     async def _send(
@@ -1047,6 +1104,7 @@ class Session:
         if self.cascade_exhausted:
             self.cascade_exhausted = False  # a new turn starts
         if not text.startswith("/"):
+            await self._host.know_how_ready(self)
             # The hint first, then the notices. The record and the harness get
             # the same text, so the fold pairs them; the fold splits the
             # blocks off into their own rows.
@@ -1331,7 +1389,11 @@ class Session:
         if self._publish_timer is not None:
             self._publish_timer.cancel()
             self._publish_timer = None
-        self._publish("sessions", [{"upsert": self.wire()}])
+        # A closed session's row is gone from every browser (Registry.close); a
+        # timer armed before the close, or a cost paid after it, must not put
+        # it back as a tab that can be neither closed nor reopened (#856).
+        if not self.archived:
+            self._publish("sessions", [{"upsert": self.wire()}])
 
     def _on_line(self, line: str) -> None:
         try:
@@ -1374,6 +1436,8 @@ class Session:
             if isinstance(ev, ToolCall) and ev.parent is None:
                 tools += 1
                 changes["tool_calls"] = tools
+                self._host.know_how_touched(self, ev.input)
+                self._steer_owed()
             if isinstance(ev, ToolCall) and ev.name in TIMER_TOOLS:
                 self.timers.add(ev.name)
             if isinstance(ev, Compact):
@@ -1387,6 +1451,10 @@ class Session:
                     changes["model_id"] = ev.model
                 if ev.session_id:
                     changes["resume_id"] = ev.session_id
+            if isinstance(ev, RateLimit):
+                self._host.rate_limit(self, ev.windows)
+            if isinstance(ev, Result) and ev.auth_failed:
+                self._host.sign_in_failed(self)
             if isinstance(ev, Notice) and ev.task_id:
                 if ev.subtype == "task_started":
                     self.open_tasks.add(ev.task_id)
@@ -1415,6 +1483,32 @@ class Session:
             self._host.status_changed(self)
         if any(isinstance(ev, Result) for ev in events) and not falling:
             self._turn_over()
+
+    def _steer_owed(self) -> None:
+        """What the session is owed goes into the running turn: this tool
+        call's result has yet to reach the model, so another request is coming
+        and the write joins it instead of starting a turn. A write outside a
+        running turn would start one, so nothing goes then. Stored only as
+        the harness's echo: this is no send (no clock, no nudge, no recap)."""
+        if (
+            not self.harness.steers_notices
+            or self.status != "working"
+            or self._proc is None
+            or self._falling is not None
+            or (self._interrupt_timer is not None and not self._interrupt_timer.done())
+        ):
+            return
+        if blocks := self._host.notice_blocks(self, "tool"):
+            asyncio.get_running_loop().create_task(self._steer(blocks))
+
+    async def _steer(self, text: str) -> None:
+        proc = self._proc
+        if proc is None:
+            return
+        try:
+            await proc.send(text)
+        except Exception:
+            log.warning("%s: a notice did not reach the agent", self.handle)
 
     def _turn_over(self) -> None:
         """A turn ended: send what it held, unless the gate says no new turn."""

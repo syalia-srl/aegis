@@ -67,6 +67,7 @@ class SideNotes:
                 btw.TIMEOUT_S,
                 self.app.sessions.user_for(s.spec),
                 oneshot.message(btw.SYSTEM, text, cfg["harness"]),
+                harness=cfg["harness"],
             )
         except (oneshot.OneshotError, PermissionError) as e:
             self._answer(s, {**base, "status": "failed", "why": str(e)})
@@ -92,8 +93,10 @@ class SideNotes:
             },
         )
 
-    @staticmethod
-    def _answer(s, record: dict) -> None:
+    def _answer(self, s, record: dict) -> None:
+        # Free the slot first: whoever reads the settled block may ask again at
+        # once, before this task's done callback runs (#826).
+        self._running.pop(s.log_id, None)
         if not s.archived:  # a closed session's store is shut
             s.report(record)
 

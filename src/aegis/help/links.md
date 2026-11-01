@@ -60,8 +60,9 @@ A session on a linked server is addressed `handle@server`. An agent here can:
   arrives headed `> from agent:<handle>@<server> (<user>)`;
 - see those sessions in `session_list`, by handle and state only.
 
-It cannot read a session there, enqueue there, close one there or wait on one
-with `monitor_sessions`; those calls are refused and say so. Over a
+It cannot read a session there, enqueue there, close one there, wait on one
+with `monitor_sessions` or touch a schedule there; those calls are refused and
+say so. Over a
 [trusted link](#trusted-links) it can do all of them. Text a far server
 wrote, such as titles, messages or error text, never reaches an agent here.
 Only an admin's agents act through a link.
@@ -101,12 +102,67 @@ too: `queue_enqueue` with `queue@server` (the result comes back to the
 inbox), `task_status`, `task_cancel` and `task_resume` with `task-id@server`,
 `monitor_sessions` on `handle@server`, and `session_close` on
 `handle@server`, which closes a session the agent started there at once when
-it is done and any other on a second call with the token, as at home.
+it is done and any other on a second call with the token, as at home. Every
+`schedule_*` tool takes `name@server` too: the schedule lives and ticks on that
+server, and it [waits for a person](schedules#an-agent-s-schedule-waits-for-you) as at home.
 A person in the far server's browser can call this server too, with
 `/spawn agent@<this server>`, but its Fleet and tabs do not show this
 server's sessions: live views still go one way. Nothing is relayed: a call
 that came over a link never goes on to a third server. The far server's
 Settings lists this server under Links here.
+
+## Exit through a trusted link
+
+A server can send what it starts out to the internet through a trusted link,
+from the far server's address, with no VPN and no change to the machine's
+routes. Name the link in `.aegis.yaml`:
+
+```yaml
+exit_via: host
+```
+
+or press Exit here on its row in Settings, Servers. Sessions, queue workers,
+workflow steps, monitors, skill tools, terminals and browsers started after that
+go through a listener on loopback: each gets the proxy variables, Chromium its
+launch setting, and `git` over SSH a `GIT_SSH_COMMAND`, unless you set one. A running process keeps the
+environment it started with, so a change applies to the next one started, and a
+session's sidebar says which exit it has. The Host rows gain a Via row with the
+address they exit from.
+
+One agent can differ from the rest, with `exit:` naming a link or `off`:
+
+```yaml
+agents:
+  opus: {harness: claude-code, model: opus}
+  opus-local: {harness: claude-code, model: opus, exit: "off"}
+```
+
+A terminal profile whose `env:` names `HTTPS_PROXY` or `HTTP_PROXY` keeps it.
+The server's own work stays on its own route: `git` and `systemctl` it runs,
+its doctor, its version checks and its network probes.
+
+What it does not cover:
+
+- A program that ignores the proxy variables goes out directly: a bare `ssh`, a
+  raw socket, UDP. `curl`, `git` over HTTPS, `gh`, `npm`, `uv`, Python, Node's
+  `fetch` and Claude Code all honour them. It is no guarantee for every packet.
+- Only a trusted link can be an exit, and a multi-user server cannot use one,
+  so the far server has only its admin's token.
+- The relay connects to public addresses only, so an agent cannot reach the far
+  server's private network through it.
+
+When the link is down, a connection through the exit fails with a 502 that says
+why, and nothing falls back to this machine's address. `aegis doctor` flags a
+name that is not a trusted link.
+
+The near server must reach the far server's aegis URL without the VPN: a far
+server only on an overlay network cannot replace that overlay. The far server
+sees the host and port of each HTTPS connection and all of any plain HTTP, and
+Settings on it shows the bytes each link took.
+
+An exit changes the address and the country a provider sees, and does not change
+what the provider's terms allow. It is not a way around a provider's rules about
+where its service may be used.
 
 ## When a link is down
 

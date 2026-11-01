@@ -47,7 +47,7 @@ from typing import TYPE_CHECKING
 from . import layout as canvas
 from . import launch, refs, restarts
 from .agents import PERMISSION_ORDER, resolve
-from .monitors import CONDITION_LIMIT_S, _percent
+from .monitors import CONDITION_LIMIT_S, _percent, iso_now
 from .ops import OpError
 from .workflow_lang import (
     MAX_ROUNDS,
@@ -158,6 +158,7 @@ async def run_sh(
         stderr=launch.PIPE,
         new_session=True,
         user=user,
+        via=launch.resolve_via(),
     )
     on_pid(proc.pid)
     try:
@@ -194,10 +195,6 @@ def _news(o: dict) -> bool:
     """Whether an open item only tells the main agent something: a person's
     gate opened or passed. Nothing waits on its answer."""
     return o["kind"] == "passed" or (o["kind"] == "gate" and o.get("by") == "person")
-
-
-def iso_now() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%S")
 
 
 def _fold(kids: list[str]) -> str:
@@ -854,9 +851,14 @@ class Workflows:
             if last != "done":
                 return _fold([last, "running"])
             if "probe" in node.body:
-                return (
-                    "done" if (s.untils.get(s.round) or {}).get("pass") else "running"
-                )
+                u = s.untils.get(s.round)
+                if u is None:
+                    return "running"  # its until has not answered yet
+                if u.get("pass"):
+                    return "done"
+                # Spent, as _repeat ends it: no round is left to run.
+                spent = s.round >= s.max and node.body.get("at_max") == "done"
+                return "done" if spent else "running"
             return "done" if s.round >= s.max else "running"
         if node.kind == "map":
             if s is None or s.items is None:
@@ -2469,7 +2471,7 @@ class Workflows:
             while True:
                 rc, out, err = await self._probe_sh(cmd, self._cwd(st), env, st)
                 self._readings[(st.run, inst)] = (
-                    f"exit {rc if rc is not None else '?'} at {iso_now()[11:16]}"
+                    f"exit {rc if rc is not None else '?'} at {time.strftime('%H:%M')}"
                 )
                 self._publish(st.run)
                 n = st.nodes.get(inst)
@@ -2656,7 +2658,7 @@ class Workflows:
         try:
             rc, out, err = await self._probe_sh(cmd, self._cwd(st), env, st)
             self._readings[(st.run, inst)] = (
-                f"exit {rc if rc is not None else '?'} at {iso_now()[11:16]}"
+                f"exit {rc if rc is not None else '?'} at {time.strftime('%H:%M')}"
             )
             last = (err.strip().splitlines() or out.strip().splitlines() or [""])[-1]
             why = f"exit {rc if rc is not None else '?'}" + (

@@ -250,6 +250,7 @@ export class Settings {
       this.browser(),
       this.knowledge(),
       this.servers(),
+      this.pauseView(),
       this.tokens(),
       w.error && h("p", { className: "set-alert err", id: "set-error", textContent: `The file on disk does not parse, so aegis is still using the last version that did. ${w.error}` }),
       this.stale && this.staleAlert(),
@@ -500,8 +501,28 @@ export class Settings {
     this.pushNode.replaceChildren(...(rows.length ? [h("div", { className: "set-browser-k", textContent: "Push to" }), ...rows] : []));
   }
 
+  // What aegis starts from now on reaches the internet from this link (exit.py).
+  async exitVia(name) {
+    if (this.dirty) {
+      this.status = "Save or discard your edits first";
+      this.draw();
+      return;
+    }
+    try {
+      await this.call("link.exit", { name });
+    } catch (e) {
+      this.status = e.message;
+      this.draw();
+    }
+  }
+
   // The servers: this one, each link with its state, and a form to add one.
   servers() {
+    const exitButton = (...args) => {
+      const b = button(...args);
+      b.dataset.key = "exit_via";
+      return b;
+    };
     const since = (t) => new Date(t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     const trust = (l) => (!l.trusted || l.state !== "linked" ? "" : l.granted ? " · trusted, both ways" : l.trust_error ? ` · trust refused: ${l.trust_error}` : "");
     const state = (l) =>
@@ -530,7 +551,7 @@ export class Settings {
           h("td", {}, h("b", { textContent: l.name })),
           h("td", { className: "m", textContent: l.url }),
           h("td", {}, h("span", { className: `set-pill ${l.state === "linked" ? "ok" : "bad"}`, textContent: state(l) })),
-          h("td", {}, button("Remove", null, () => this.unlink(l.name))),
+          h("td", {}, !this.server && l.trusted && l.granted ? exitButton(l.name === this.doc?.exit_via ? "Stop exit" : "Exit here", null, () => this.exitVia(l.name === this.doc?.exit_via ? null : l.name)) : null, button("Remove", null, () => this.unlink(l.name))),
         ),
       ),
       ...this.incoming.map((l) =>
@@ -539,7 +560,7 @@ export class Settings {
           { className: `set-link set-incoming link-${l.name}` },
           h("td", {}, h("b", { textContent: l.name })),
           h("td", { className: "m", textContent: "links here" }),
-          h("td", {}, h("span", { className: `set-pill ${l.state === "linked" ? "ok" : "bad"}`, textContent: l.state === "linked" ? "trusted · both ways" : l.state })),
+          h("td", {}, h("span", { className: `set-pill ${l.state === "linked" ? "ok" : "bad"}`, textContent: l.exit_bytes ? `exit · ${Math.round(l.exit_bytes / 1e6)} MB` : l.state === "linked" ? "trusted · both ways" : l.state })),
           h("td"),
         ),
       ),
@@ -554,6 +575,9 @@ export class Settings {
       h("span", { textContent: "Trusted (both ways)" }),
     );
     const add = button("Link", "set-link-add", () => this.link(url.value.trim(), token.value.trim(), trusted.checked), "btn primary");
+    const via = this.doc?.exit_via;
+    const exitLine = h("p", { className: "set-none", id: "set-exit", textContent: via ? `What aegis starts reaches the internet through ${via}.` : "What aegis starts uses this machine's route. A trusted link's row can make it the exit." });
+    exitLine.dataset.key = "exit_via";
     const picker =
       this.links.length > 0 &&
       h(
@@ -572,9 +596,51 @@ export class Settings {
       h("h3", { textContent: "Servers" }),
       h("p", { className: "set-none", textContent: "A linked server's sessions show in the Fleet and the tab bar. Nothing on it can reach this machine, unless the link is trusted: only for a server you alone use." }),
       h("table", { className: "tbl" }, ...rows),
+      exitLine,
       h("div", { className: "set-linkrow" }, url, token, trustBox, add),
       this.linkError && h("p", { className: "err-text", id: "set-link-error", textContent: this.linkError }),
       picker,
+    );
+  }
+
+  // Every session paused at once (pause.py): their processes end and nothing
+  // new starts until Resume all, or a message to one session resumes it.
+  pauseView() {
+    if (this.paused === undefined) {
+      this.paused = null;
+      this.conn
+        .call("server.paused")
+        .then((r) => {
+          this.paused = r.paused;
+          if (r.paused && !this.dirty) this.editing() ? this.later() : this.draw();
+        })
+        .catch(() => {});
+    }
+    const act = async (op) => {
+      this.pauseBusy = true;
+      this.draw();
+      try {
+        this.paused = (await this.conn.call(op)).paused;
+      } finally {
+        this.pauseBusy = false;
+        this.draw();
+      }
+    };
+    const on = this.paused;
+    const since = on && new Date(on.at * 1000).toLocaleString([], { dateStyle: "short", timeStyle: "short" });
+    const b = on ? button("Resume all", "set-resume-all", () => act("server.resume"), "btn primary") : button("Pause all", "set-pause-all", () => act("server.pause"));
+    b.disabled = !!this.pauseBusy;
+    return h(
+      "section",
+      { className: "set-pause", id: "set-pause" },
+      h("h3", { textContent: "Sessions" }),
+      h("p", {
+        className: "set-none",
+        textContent: on
+          ? `Every session is paused, since ${since}${on.by.startsWith("aegis ") ? `, by ${on.by}` : ""}. Nothing runs until you resume it: here for all, or by writing to one.`
+          : "Pause all ends every session's process, with what its agent left running, and holds new work, messages and spawns until you resume. It lasts across a restart.",
+      }),
+      h("div", { className: "set-linkrow" }, b),
     );
   }
 
@@ -1356,7 +1422,7 @@ export class Settings {
       this.draw();
     }, "link danger");
     const fold = h("details", { className: "set-priming", open: !!a.priming }, h("summary", { textContent: a.priming ? "Priming" : "Add a priming" }), priming);
-    card.append(name, h("div", { className: "picks" }, harness, effort, permission), casc, h("div", { className: "set-card-foot" }, fold, this.keepFold(a), star, del));
+    card.append(name, h("div", { className: "picks" }, harness, effort, permission), casc, h("div", { className: "set-card-foot" }, fold, this.keepFold(a), this.exitFold(a), star, del));
     if (isDefault) card.classList.add("is-default");
     return card;
   }
@@ -1384,6 +1450,18 @@ export class Settings {
     });
     const fold = h("details", { className: "set-priming set-keep", open: keep.length > 0 }, summary, h("p", { className: "set-none", textContent: "Claude Code sessions start without these, since aegis has its own; an agent whose work needs one keeps it." }), h("div", { className: "set-tools" }, ...toggles));
     fold.dataset.key = "agents.*.keep_harness_tools";
+    return fold;
+  }
+
+  // The link this agent exits through (exit.py), or "off"; blank is the server's.
+  exitFold(a) {
+    const input = h("input", { className: "set-in", value: a.exit || "", spellcheck: false, placeholder: "the server's exit, or a link's name, or off" });
+    input.addEventListener("input", () => {
+      a.exit = input.value.trim();
+      this.touch();
+    });
+    const fold = h("details", { className: "set-priming set-exit", open: !!a.exit }, h("summary", { textContent: a.exit ? `Exits through ${a.exit}` : "Exit through a link" }), input);
+    fold.dataset.key = "agents.*.exit";
     return fold;
   }
 

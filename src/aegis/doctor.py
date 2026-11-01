@@ -21,12 +21,14 @@ import platform
 import shlex
 import shutil
 import tempfile
+import time
 from asyncio.subprocess import PIPE, STDOUT
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
 from . import launch, users
+from .claude import login
 from .agents import EFFORTS, HARNESSES, Agent
 from .cgroups import parse_size, total_ram
 from .claude.control import Catalog, Model
@@ -42,6 +44,7 @@ from .config import (
     load,
 )
 from .harness import harness_for
+from .links import LinkStore
 from .harness_versions import OUTSIDE, VERSION_TIMEOUT_S, judge
 from .knowledge import embed
 from .ranking import annotate, ranking
@@ -82,7 +85,9 @@ class Found:
 
 
 async def _version(bin: str) -> str:
-    proc = await launch.child([bin, "--version"], stdout=PIPE, stderr=STDOUT, user=None)
+    proc = await launch.child(
+        [bin, "--version"], stdout=PIPE, stderr=STDOUT, user=None, via=None
+    )
     try:
         out, _ = await asyncio.wait_for(proc.communicate(), VERSION_TIMEOUT_S)
     except TimeoutError:
@@ -417,6 +422,35 @@ def _network(snap: Snapshot) -> Finding:
     )
 
 
+def _exit(snap: Snapshot, roots, multi_user: bool) -> list[Finding]:
+    """An exit that cannot carry anything is an error: what names it fails on
+    purpose, with a 502, rather than leaving from this machine's address."""
+    names = {snap.exit_via} | {a.exit for a in snap.agents if a.exit != "off"}
+    names.discard(None)
+    names.discard("")
+    if not names:
+        return []
+    if multi_user:
+        return [Finding("error", "exit_via", "an exit is off on a multi-user server")]
+    links = {
+        e.get("name"): e for e in LinkStore(roots.state_root / "links.json").load()
+    }
+    out = []
+    for name in sorted(names):
+        link = links.get(name)
+        if link is None:
+            out.append(Finding("error", "exit_via", f"{name} is not a link here"))
+        elif not link.get("trusted"):
+            out.append(
+                Finding("error", "exit_via", f"the link to {name} is not trusted")
+            )
+        else:
+            out.append(
+                Finding("ok", "exit_via", f"what aegis starts exits through {name}")
+            )
+    return out
+
+
 def _workflows(w: dict, agents: tuple[str, ...] = ()) -> Finding:
     if "error" in w:
         return Finding("error", "workflows", w["error"])
@@ -699,6 +733,9 @@ async def doctor(
             out.append(
                 Finding("ok", where, f"{f.bin}, {f.version}, {len(f.models)} models")
             )
+    if any(a.harness == "claude-code" for a in snap.agents):
+        if (token := _claude_token(time.time())) is not None:
+            out.append(token)
     by_name = {a.name: a for a in snap.agents}
     for a in snap.agents:
         out += _agent(a, found.get(a.harness))
@@ -720,6 +757,7 @@ async def doctor(
     if "error" in snap.harness_versions:
         out.append(Finding("error", "harness_versions", snap.harness_versions["error"]))
     out.append(_network(snap))
+    out += _exit(snap, roots, multi_user=snap.multi_user is not None)
     if snap.host_error:
         out.append(Finding("error", "host", snap.host_error))
     out.append(_workflows(snap.workflows, tuple(a.name for a in snap.agents)))
@@ -738,6 +776,35 @@ async def doctor(
             {h: bins.get(h, h) for h in used},
         )
     return out
+
+
+def _claude_token(now: float) -> Finding | None:
+    """The token Claude Code sessions sign in with (claude/login.py): None
+    when there is no file, so the stored sign-in is in use."""
+    path = login.token_path()
+    if not path.exists():
+        return None
+    if why := login.file_problem(path):
+        return Finding("error", "claude.token", why)
+    when = login.expiry(path)
+    if when is None:
+        return Finding(
+            "error", "claude.token", f"{path} does not hold a Claude Code token"
+        )
+    written, expires = when
+    day = lambda t: time.strftime("%Y-%m-%d", time.gmtime(t))  # noqa: E731
+    if expires - now < login.WARN_S:
+        return Finding(
+            "warn",
+            "claude.token",
+            f"{path} expires about {day(expires)}: run claude setup-token "
+            "and paste the new token into the sign-in card or the file",
+        )
+    return Finding(
+        "ok",
+        "claude.token",
+        f"{path}, written {day(written)}, expires about {day(expires)}",
+    )
 
 
 def _knowledge(roots: Roots) -> list[Finding]:

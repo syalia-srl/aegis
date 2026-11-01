@@ -44,6 +44,7 @@ from starlette.applications import Starlette
 import httpx
 from starlette.responses import (
     FileResponse,
+    HTMLResponse,
     JSONResponse,
     PlainTextResponse,
     RedirectResponse,
@@ -54,6 +55,7 @@ from starlette.routing import Mount, Route, WebSocketRoute
 from starlette.staticfiles import StaticFiles
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
+from . import exit as exit_
 from . import files, fs_paths
 from .app import App
 from .as_user import Place
@@ -355,8 +357,12 @@ def build_web(
             if valid(given):
                 return signed_in(RedirectResponse("/", status_code=303), request, given)
             return RedirectResponse("/?refused=1", status_code=303)
-        return FileResponse(
-            CLIENT_DIR / "index.html", headers={"Cache-Control": "no-cache"}
+        # The build the page belongs to, which the welcome repeats: a page
+        # older than the server takes the new build by itself (#499).
+        html = (CLIENT_DIR / "index.html").read_text()
+        return HTMLResponse(
+            html.replace("__AEGIS_BUILD__", listing()["build"]),
+            headers={"Cache-Control": "no-cache"},
         )
 
     async def login(request):
@@ -567,6 +573,33 @@ def build_web(
             )
         return StreamingResponse(body(), headers=headers)
 
+    async def tunnel(websocket: WebSocket) -> None:
+        """One stream of a trusted link's exit (exit.py). A program's, like a
+        link's socket: a browser always sends an ``Origin``."""
+        host = websocket.headers.get("host", "")
+        if websocket.headers.get("origin") is not None or (
+            host not in allowed_hosts and host not in public
+        ):
+            await websocket.close(code=BAD_ORIGIN)
+            return
+        scheme, _, given = websocket.headers.get("authorization", "").partition(" ")
+        via = websocket.headers.get(exit_.LINK_HEADER, "")
+
+        def refusal() -> str | None:
+            principal = (
+                app.principals.resolve(given) if scheme.lower() == "bearer" else None
+            )
+            if principal is None:
+                return "bad token"
+            return app.trust_refusal(principal, via) if via else "no link named"
+
+        await exit_.relay(
+            websocket,
+            websocket.headers.get(exit_.TARGET_HEADER, ""),
+            refusal,
+            lambda n: app.count_exit(via, n),
+        )
+
     async def ws(websocket: WebSocket) -> None:
         host = websocket.headers.get("host", "")
         origin = websocket.headers.get("origin")
@@ -707,6 +740,7 @@ def build_web(
                 "t": "welcome",
                 "proto": PROTO,
                 "server": app.server_name,
+                "build": listing()["build"],
                 # A spawn through a link may say its group (#586): a link
                 # sends it only to a server that says this.
                 "groups": True,
@@ -882,6 +916,7 @@ def build_web(
             Route("/dictation/{pin}/{name}", dictation_file),
             Route("/speech/{pin}/{name:path}", speech_file),
             WebSocketRoute("/ws", ws),
+            WebSocketRoute("/tunnel", tunnel),
             *app.mcp_app.routes,
         ],
         lifespan=lifespan,

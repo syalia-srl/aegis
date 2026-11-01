@@ -2,6 +2,8 @@
 schedule's layers and runs with the quiet ticks folded, and the editor."""
 
 import json
+import subprocess
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -10,8 +12,12 @@ import pytest
 
 from .test_browser import (  # noqa: F401
     CONFIG,
+    Linked,
     Server,
+    beta_session,
     browser,
+    linked,
+    pick,
     new_page,
     page,
     spawn,
@@ -134,6 +140,8 @@ def server(tmp_path: Path, fake_claude: str, fake_opencode: str):
 def open_view(page, server) -> None:  # noqa: F811
     page.goto(server.url)
     page.wait_for_selector("#a2[data-view=fleet]")
+    if page.is_visible("#hdr-burger"):  # a phone: the button is in the menu
+        page.click("#hdr-burger")
     page.click("#schedules-btn")
     page.wait_for_selector("#a2[data-view=schedules] .sch-row")
 
@@ -150,6 +158,41 @@ def test_the_button_counts_schedules_and_is_red_while_one_is_paused_by_errors(
     page.click(".sch-dhead button >> text=Resume")
     page.wait_for_selector("#schedules-n:not(.err)")
     assert page.text_content("#schedules-n") == "2" and not page.errors
+
+
+def test_the_count_keeps_the_desktop_header_buttons_one_size_on_one_line(
+    server,
+    page,  # noqa: F811
+):
+    # #801: the count widened Schedules to 42 px beside 30 px buttons, and the
+    # server's name and version sat 3 px below the icons.
+    page.set_viewport_size({"width": 1440, "height": 900})
+    page.goto(server.url)
+    page.wait_for_selector("#schedules-n >> text=2")
+    row = page.evaluate(
+        """ids => Object.fromEntries(ids.map(id => {
+          const b = document.getElementById(id), r = document.createRange();
+          r.selectNodeContents(b);
+          const q = (b.querySelector('svg, .ic') ?? r).getBoundingClientRect();
+          const o = b.getBoundingClientRect();
+          return [id, [q.y + q.height / 2, q.x + q.width / 2 - o.x - o.width / 2, o.width, o.height]];
+        }))""",
+        [
+            "schedules-btn",
+            "settings-btn",
+            "files-btn",
+            "journal-btn",
+            "bell",
+            "help-btn",
+            "conn-text",
+        ],
+    )
+    mids = [m for m, _, _, _ in row.values()]
+    assert max(mids) - min(mids) <= 1, row
+    buttons = {k: v for k, v in row.items() if k != "conn-text"}
+    assert {(w, h) for _, _, w, h in buttons.values()} == {(30, 28)}, row
+    assert all(abs(off) <= 1 for _, off, _, _ in buttons.values()), row
+    assert not page.errors
 
 
 def test_a_schedule_shows_its_layers_and_its_runs_with_quiet_ticks_folded(server, page):  # noqa: F811
@@ -265,6 +308,152 @@ def test_an_agents_schedule_shows_a_card_a_person_unpauses(server, page):  # noq
     page.click(".apcard[data-state=waiting] button >> text=Unpause")
     page.wait_for_selector(".apcard[data-name=nightly-tests][data-state=running]")
     assert not page.errors
+
+
+SPEC = {
+    "name": "nightly-tests",
+    "clock": {"every": "1h"},
+    "fire": {"agent": "opus"},
+    "prompt": "run the tests",
+}
+
+
+def test_a_linked_agents_schedule_is_approved_from_this_server(linked, browser, page):  # noqa: F811
+    lid = beta_session(linked, browser, "/mcp schedule_create " + json.dumps(SPEC))
+    page.goto(linked.alpha.url)
+    page.click(f"#tablist .tab[data-id='beta/{lid}']")
+    page.wait_for_selector(".apcard[data-state=waiting] >> text=run the tests")
+    page.click(".apcard[data-state=waiting] button >> text=Unpause")
+    page.wait_for_selector(".apcard[data-name=nightly-tests][data-state=running]")
+    assert not page.errors
+
+
+def test_the_view_picks_a_linked_server_and_acts_there(linked, browser, page):  # noqa: F811
+    """A schedule of beta's, seen and paused from alpha; alpha has none of that
+    name, and the picker goes back to alpha's empty list."""
+    beta_session(linked, browser, "/mcp schedule_create " + json.dumps(SPEC))
+    page.goto(linked.alpha.url)
+    page.click("#schedules-btn")
+    page.wait_for_selector("#a2[data-view=schedules] >> text=No schedules yet.")
+    pick(page, ".sch-server", "beta")
+    row = ".sch-row[data-name=nightly-tests]"
+    page.wait_for_selector(row)
+    page.click(".sch-detail button >> text=Resume")
+    page.wait_for_selector(".sch-detail button >> text=Pause")
+    pick(page, ".sch-server", "alpha")
+    page.wait_for_selector("#a2[data-view=schedules] >> text=No schedules yet.")
+    assert not page.errors
+
+
+def test_a_card_for_a_far_schedule_unpauses_it_on_the_far_server(  # noqa: F811
+    tmp_path,
+    fake_claude,
+    fake_opencode,
+    browser,  # noqa: F811
+    page,  # noqa: F811
+):
+    """Alpha's agent makes it on beta: the card is in alpha's transcript, and
+    Unpause reaches beta, where the schedule lives. Alpha has none of that name."""
+    pair = Linked(tmp_path, fake_claude, fake_opencode, trusted=True).start()
+    try:
+        page.goto(pair.alpha.url)
+        page.wait_for_function("document.querySelector('#a2')")
+        spec = SPEC | {"name": "nightly-tests@beta"}
+        spawn(page, "/mcp schedule_create " + json.dumps(spec))
+        card = ".apcard[data-name=nightly-tests][data-server=beta]"
+        page.wait_for_selector(f"{card}[data-state=waiting] >> text=run the tests")
+        page.click(f"{card} button >> text=Unpause")
+        page.wait_for_selector(f"{card}[data-state=running]")
+        beta = new_page(browser, [])
+        beta.goto(pair.beta.url)
+        beta.click("#schedules-btn")
+        beta.wait_for_selector(".sch-row[data-name=nightly-tests]")
+        beta.wait_for_selector(".sch-detail button >> text=Pause")
+        beta.close()
+        page.click("#schedules-btn")
+        page.wait_for_selector("#a2[data-view=schedules] >> text=No schedules yet.")
+        assert not page.errors
+    finally:
+        pair.stop()
+
+
+def test_a_far_transcript_cannot_aim_a_card_at_this_server(  # noqa: F811
+    tmp_path,
+    fake_claude,
+    fake_opencode,
+    browser,  # noqa: F811
+    page,  # noqa: F811
+):
+    """Beta's agent makes a schedule on alpha, over the way back. Read through
+    alpha, the card in beta's transcript offers no Unpause, though the schedule
+    waits on alpha: a far transcript's word never picks where a click goes."""
+    pair = Linked(tmp_path, fake_claude, fake_opencode, trusted=True).start()
+    try:
+        spec = SPEC | {"name": "nightly-tests@alpha"}
+        lid = beta_session(pair, browser, "/mcp schedule_create " + json.dumps(spec))
+        page.goto(pair.alpha.url)
+        page.click(f"#tablist .tab[data-id='beta/{lid}']")
+        card = ".apcard[data-name=nightly-tests][data-server=alpha]"
+        page.wait_for_selector(f"{card} >> text=on alpha: see its Schedules view")
+        assert page.locator(f"{card} button").count() == 0
+        page.click("#schedules-btn")
+        page.wait_for_selector(".sch-row[data-name=nightly-tests]")
+        assert not page.errors
+    finally:
+        pair.stop()
+
+
+def test_a_far_transcript_cannot_aim_a_card_at_another_link(  # noqa: F811
+    tmp_path,
+    fake_claude,
+    fake_opencode,
+    browser,  # noqa: F811
+    page,  # noqa: F811
+):
+    """Alpha links beta and gamma, and beta's agent makes a schedule on gamma.
+    Read through alpha, the card in beta's transcript names a server alpha also
+    links, and still offers no Unpause: only a session here picks where it goes."""
+    pair = Linked(tmp_path, fake_claude, fake_opencode)
+    gamma = Server(tmp_path / "gamma", fake_claude, fake_opencode)
+    gamma.root.mkdir()
+    (gamma.root / ".aegis.yaml").write_text(CONFIG)
+    gamma.args = ["--name", "gamma"]
+    pair.start()
+    gamma.start()
+    try:
+        token = (gamma.root / ".aegis" / "state" / "token").read_text().strip()
+        for near, name, extra in (
+            (pair.beta, "beta", ["--trusted"]),
+            (pair.alpha, "alpha", []),
+        ):
+            link = subprocess.run(
+                [sys.executable, "-m", "aegis", "link", "add", "gamma",
+                 f"http://127.0.0.1:{gamma.port}", "--root", str(near.root),
+                 "--as", name, *extra],
+                input=token + "\n", capture_output=True, text=True, timeout=30,
+            )  # fmt: skip
+            assert link.returncode == 0, link.stdout + link.stderr
+        spec = SPEC | {"name": "nightly-tests@gamma"}
+        call = "/mcp schedule_create " + json.dumps(spec)
+        lid = None
+        for _ in range(40):  # the running servers pick the links up within a second
+            lid = beta_session(pair, browser, call)
+            time.sleep(0.5)
+            if (gamma.root / ".aegis" / "state" / "schedules.json").exists():
+                break
+        page.goto(pair.alpha.url)
+        pick_up = ".sch-server"
+        page.click("#schedules-btn")
+        pick(page, pick_up, "gamma")
+        page.wait_for_selector(".sch-row[data-name=nightly-tests]")
+        page.click(f"#tablist .tab[data-id='beta/{lid}']")
+        card = ".apcard[data-name=nightly-tests][data-server=gamma]"
+        page.wait_for_selector(f"{card} >> text=on gamma: see its Schedules view")
+        assert page.locator(f"{card} button").count() == 0
+        assert not page.errors
+    finally:
+        gamma.stop()
+        pair.stop()
 
 
 def test_the_card_waits_when_the_session_was_open_before_the_call(server, page):  # noqa: F811

@@ -66,7 +66,7 @@ park would kill the task; that is why each of those blocks it.
 **A session's memory is its own, where the unit delegates.** When the server
 runs as a systemd service with `Delegate=yes`, it moves itself into
 `<unit>/server` at boot, before any session starts, and runs each harness
-child in `<unit>/sessions/<log_id>` with `memory.max` from
+child in `<unit>/work/sessions/<log_id>` with `memory.max` from
 `session_memory_max`. The child joins its cgroup before it execs, through a
 `/bin/sh` wrapper, so nothing it starts escapes the cap. When the process ends
 (exit, Sleep, Restart, Archive, shutdown) its cgroup is killed and removed, and boot
@@ -74,6 +74,27 @@ removes the empty ones a crash left. Everything stays inside the unit, so the
 unit's `MemoryMax` still covers the whole tree and `KillMode` still kills every
 session when the unit stops. Without delegation every child lives in the
 server's cgroup, as before (`cgroups.py`, #360).
+
+**Nothing the server starts can starve it.** Sessions, terminals and
+browsers all live in `<unit>/work/`. `work/memory.max` is the unit's lowest
+memory limit less a 512 MiB reserve that `server/memory.min` protects, so the
+work under its own caps ends in an OOM kill inside it, not in the unit's
+`memory.high` throttling the server with it. `work/pids.max` leaves the server
+512 tasks, and each cgroup in the work is capped at 4096, so a fork bomb dies
+in its session. `server/cpu.weight` is 1000 against the work's 100, and
+`server/io.prio.class` is `promote-to-rt`, so the server runs and reads first
+on a busy host while the work keeps every idle core and disk slot
+(`cgroups.SessionCgroups.shield`, #782). What a session starts outside the
+tree, through dockerd or `systemd-run`, has only the OOM scores against it.
+
+**The person can pause every session.** `<state>/paused.json` holds the
+pause, written by Settings' Pause all or `aegis serve --paused` before boot,
+so it outlives a restart. Pause all ends every session's process and marks
+a cut turn with `quota_paused`, as the quota gate does. While the record is
+there, `start_spec` refuses every start and `quota_hold` holds every session
+the person has not resumed, so the gate's own checks hold messages, queue
+tasks, schedule ticks, workflow nodes and the restart's continues. Resume
+all removes it and continues as a quota gate that opens (`pause.py`, #788).
 
 **In a host OOM, a session dies before the server.** The server raises each
 child's `oom_score_adj` to 500 right after the spawn
@@ -128,7 +149,19 @@ monitors are armed, and writes through the ordinary send path. A handoff
 (#354) is meta too: the new session's spec names the session it `continues`,
 the old one's meta names it in `continued_by`, so the old session is archived
 when the new one's first turn ends, before or after a restart, with nothing
-held in memory.
+held in memory. While a live successor is named, the old session refuses every
+message (`Session.check_handed_off`, apart from `check_lock` because Interrupt
+and Archive stay open), and an archived one that names a successor cannot be
+reopened. A failed first turn, a dead process or a closed successor clears the
+name, and a `handoff_off` record says so in the old transcript (#874). An agent's
+`session_handoff` during its turn sets `continued_by` to `pending` with the
+request in `handoff_pending`, both in the meta: the lock starts at the call, and
+`Registry.turn_ended` starts the new session, so its tail holds the turn's last
+message. Boot starts a pending handoff whose turn already ended. A handoff across
+a link goes through `_spawn_far` and archives the old session once the far side
+takes the first message, since a plain link says nothing of the far turn; its
+`continued_by` holds `handle@server`. Children and a run cannot follow across a
+link, so they refuse it.
 
 **A restart gives back what it cut.** aegis writes `<state>/server.json` at both ends
 of a clean shutdown, so boot tells a restart from a crash. A turn the server's own
@@ -250,8 +283,9 @@ model that worked its answer out in its thinking believes it was shown, so it
 needs the fact; the opening, not a verdict, because a status line before a
 tool call is prose too and only the agent can tell it from its answer (#679).
 A queue worker hears `noted`, since its final message is its task's result. The brief rides in the report, and
-`session.handoff`, which only a person can call, starts the fresh session
-from it. The fold also
+`session.handoff`, through the chip, the menu, `/handoff` with an instruction or
+an agent's `session_handoff`, starts the fresh session from it, and refuses
+while `Registry.wakers` lists anything but a run, which follows its owner. The fold also
 times the plan from the records' `ts`: work is time inside a turn and after a
 turn that did not hand back to the person, idle is the rest, and each item gets
 the work done while it was `doing`. It accrues only at a plan record and at turn
@@ -351,6 +385,20 @@ so its chunk lines each carry the block's text so far as a keyed part and are
 stored — they are the only copy, and a fresh fold rebuilds exactly what
 streamed (`cursor/stream.py`).
 
+**Claude Code signs in with a token nobody refreshes.** Claude Code processes
+sharing one stored sign-in race to refresh its single-use token, and the losers
+are logged out. So every Claude Code process the server starts as itself
+(sessions, recaps, side notes) gets `CLAUDE_CODE_OAUTH_TOKEN` from a 0600 file
+(`claude/login.py`), read at each spawn, unless the server's environment or the
+pool file already sets it. A turn that fails to sign in (`Result.auth_failed`)
+raises one card, in the first failing session's transcript, which every later
+failure joins. Its field goes to the person-only `claude.token` operation, which
+checks the shape, asks Claude Code itself with one `claude -p` in a scratch
+config directory, writes the file and restarts the sessions on the card. aegis
+runs no step of the OAuth flow. The usage endpoint refuses that token, so each
+turn's `rate_limit_event` (`stream.RateLimit`) feeds `QuotaService.observe`, and
+once one has, an unauthorized fetch no longer marks the gauges failed.
+
 **Where aegis has a tool, the harness's twin is off.** A Claude Code session
 with aegis's tools starts with `--disallowedTools` naming every Claude Code tool
 aegis replaces (`claude/process.py` `REPLACED_TOOLS`: subagents, messaging,
@@ -449,16 +497,32 @@ never earns another and nothing loops.
 **A notice rides on what a session already receives; it never starts a
 turn.** `Notices` (`notices.py`), built beside `Nudges`, tells every live
 session once per episode that the disk, memory, CPU or quota is short, or
-that a person or an admin's agent announced something. It has two delivery
-points: `Session._send` appends the pending blocks to the next send (never to
-a `/` command), and `OpTool.run` appends them to the next successful aegis
-tool result, unless the call came through `aegis call`, whose output is
-parsed. A notice never goes into the system prompt: a changed
-`--append-system-prompt` would invalidate a resumed session's prompt cache.
+that a person or an admin's agent announced something. `Session._send` appends
+the pending blocks to the next send (never to a `/` command). During a turn,
+a harness with `steers_notices` (Claude Code) gets them from
+`Session._steer_owed`, which writes them to its stdin when the stream names a
+tool call: that result has yet to reach the model, so the write joins the next
+request instead of starting a turn, and it costs a stdin write only when
+something is owed, where a `PostToolUse` hook forks on every call. It writes
+nothing unless a turn is running, and no `send` record: the harness's echo is
+what the transcript keeps. Any other harness gets them from `OpTool.run`, on
+the next successful aegis tool result, unless the call came through `aegis
+call`, whose output is parsed. A notice never goes into the system prompt: a
+changed `--append-system-prompt` would invalidate a resumed session's prompt
+cache.
 What each session was told is `notices_sent` in its meta, so a restart
 neither repeats a notice nor forgets its clear; the episodes and the one
 asker per kind and owner live in memory. A 30 s loop turns the episodes so a
 notice at critical toasts while nobody is talking to anyone.
+
+**A repository's know-how stays in its tree and is told once per session.**
+`knowledge/know_how.py` lists `know-how/*.md` at the git root a session first
+touches, read from the session's working directory and the paths its tool
+calls name, and owes it one block of each doc's `when:` line. The block rides
+with the notices (`Registry.notice_blocks`), and `Session.know_how_sent` keeps
+the main checkouts told. It is not the store below: a repository's docs are
+reviewed, shared and differ by branch. It ranks nothing, because the message a
+turn starts with predicts the doc read no better than chance.
 
 **Knowledge is per principal, on the server, found per message.** Each
 principal's skills and memories are Markdown files under
@@ -552,7 +616,9 @@ queue worker is finished only when its turn has ended with no live monitor, no
 held message and no Claude task still open (`task_started` without its
 `task_notification`), and no session it spawned still working. Reading the
 turn boundary alone as done closed a worker mid-wait in the legacy tree. The
-test is `Registry.finished`, and a schedule's run ends on it too.
+test is `Registry.finished`, and a schedule's run ends on it too. A flush of
+held messages counts as busy until its send returns, and the turn it started
+can end first, so the flush's end asks again (`Host.flush_ended`, #536).
 
 **A schedule's tick passes four layers, and its state is folded from a log.**
 `schedules.py` runs one clock task in the server. It wakes at the next tick or
@@ -798,7 +864,11 @@ for the browser: a linked server's sent file reaches this origin only through
 `/via`, under headers this server decides from the file's name
 (`files.via_headers`), and the client rebuilds every far file link from a path
 of that one shape, since a page or a `javascript:` URL running on this origin
-holds the cookie that drives every agent here. A socket with no `Origin` is a
+holds the cookie that drives every agent here. A far server's workflow run
+reaches the client over its link the same way as its sessions, and the client
+routes a card's calls by the server its row came from, so a far run id can
+never take a row of this server's or another server's run and steer a call
+there. A socket with no `Origin` is a
 program, never a browser, and only such a socket may say it is a link; a link
 socket keys subscriptions by `sid` and is not relayed on. "A link" means any
 holder of the token that says so: per-link credentials come with per-user
@@ -827,7 +897,26 @@ the result comes back through the link-only `queue.deliver`; `session_close`
 goes through the link-only `peer.close`, which applies the local two-step rule
 with `spawned_from` as the starter; `monitor_sessions` reads the far session
 list each interval (`App._far_list`), keeping the last reading while the link
-is down.
+is down. A schedule tool's `name@server` runs the operation on the far server,
+which keeps every rule because the near server names the calling agent in
+`from_agent`: a link call with one is an agent, born paused and refused an
+unpause or a fire while it waits, and a link call without one is a person, which
+is how a card's Unpause in a browser arrives. A server without the field refuses
+it, so a newer server's agent never passes as a person on an older one. Ownership
+goes by the far session's log id, which survives a rename. The approval card
+stays in the near session's transcript and names the server; the client honours
+that name only for a session on its own server (`cardServer` in `app.js`), since
+a far transcript could otherwise aim a person's Unpause at another server.
+
+**A trusted link can be an exit** (#862, `exit.py`). A child named to exit gets the
+proxy variables for a listener on loopback, which opens one websocket per stream
+to the far server's `/tunnel`; the relay there connects to the target. It is
+limited to trusted links, because plain HTTP through a relay is text from a linked
+server reaching an agent, and a trusted link's token already runs a shell there.
+The relay asks `App.trust_refusal` for every stream and connects only to public
+addresses, checked after resolving the name. A dead exit answers 502 and nothing
+falls back to the near server's own address. It covers what honours the proxy
+variables and nothing else.
 
 **The client knows no subsystem by name.** Server state reaches the browser as
 named channels: a snapshot on subscribe, then numbered patches. A gap in the
@@ -910,7 +999,11 @@ cache named after the build and serves `/`, `/static/**` and the manifest from
 it, so aegis opens with no connection. The page and its scripts always come from
 the same build: a new build downloads beside the old one and waits, the page
 offers a reload (or takes it at once when the socket closes with 4400), and every
-tab the old build loaded reloads when the new worker takes over. Only a complete
+tab the old build loaded reloads when the new worker takes over. The page
+carries its build id (`<meta name="aegis-build">`, written in by `web.py`) and
+the socket's welcome names the server's; when they differ, as after an
+upgrade, the page takes the new build without asking, and without a worker it
+reloads once per build (#499). Only a complete
 build is served; a failed download never fails the worker's install, so
 notifications keep working, and the worker downloads again when a page asks,
 which every page does when it loads and reconnects. A sign-in
@@ -1011,7 +1104,11 @@ the client offers by key (its id, title, keys and the views where it applies) an
 the one `keydown` listener that dispatches from it; app.js gives each id its run,
 and a missing or extra one throws at boot. The `?` list and the command palette
 (`js/palette.js`, Ctrl+K or ⌘K) are drawn from the same registry, so neither can
-name an action that does nothing, and a new action shows in all three at once. No
+name an action that does nothing, and a new action shows in all three at once. The session switcher
+(`js/switcher.js`, Alt+P, #781; on a phone it fills the screen and has its own close
+button, #901) lists the metas the client already holds, every
+server's, and opens through the Fleet card's path (`openCard`), so it never waits on
+the network and a quiet session gets its tab back the same way. No
 other module listens for keys on the document. Chrome binds Ctrl+K to its address
 bar search but does not reserve it, so the page's `preventDefault` wins; on a Mac
 it is ⌘K alone, because Ctrl+K there deletes to the end of a line. Chrome keeps Ctrl+T,
@@ -1032,6 +1129,13 @@ names is vendored in `fonts.css`, or the theme looks different on every
 machine. Anything a theme draws over the whole window, such as Phosphor's
 scanlines, is positioned against `#a2` and never the viewport, because the
 landing page applies the same rules to a window that sits inside a page.
+
+**A quota projection reads history once per window.** `quota.core.window_pace`
+keeps what is spent and runs the time left at the posterior mean of a rate with
+a Gamma prior, centred on what finished windows of that kind spent.
+`Quota._usual_spend` reads that from `usage_quota` through
+`Journal.usual_spend` when a window's reset time changes, and keeps it, because
+a snapshot is taken every minute. No finished window yet means a usual of 100%.
 
 **The session panel is rows that open cards.** Each section of the panel is a
 compact row (`.prow`) that holds its own card (`.pcard`) in the markup, so the
@@ -1380,9 +1484,15 @@ a piece with under a second of voice is never transcribed alone. The server
 keeps the pinned engine and model, downloaded once from Hugging Face and checked
 against their sha256, serves them at `/dictation/<pin>/` with an immutable cache
 header, and answers `dictation.prepare` with that base and the keywords that bias
-the model toward names it knows (`dictation.py`). Nothing carries samples, so
+the model toward names it knows (`dictation.py`). The page keeps the files in
+Cache Storage under that pin and fills it once for both workers, because a
+phone's HTTP cache evicts 17.8 MB long before a year is up. Nothing carries samples, so
 dictation works through any proxy that serves the page, and the server pays
-nothing per word. A send from a box that got dictated text says so
+nothing per word. An artifact's frame has an opaque origin, so the microphone and
+Cache Storage refuse it even with `allow="microphone"`; `aegis.dictate` keeps both in
+the host page and hands the frame text over `postMessage` (`js/artifacts.js`). It
+starts only while `navigator.userActivation` says the person just clicked, and the
+bar that says it is on is the host's, out of the page's reach. A send from a box that got dictated text says so
 (`dictated`), and the server adds `dictation.NOTE` after the text for the
 agent; the fold strips that exact line off the person's row and marks it
 `detail.dictated`, so the transcript and the harness keep the same text.

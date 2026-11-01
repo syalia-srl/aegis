@@ -110,7 +110,9 @@ async def test_real_claude_arms_a_monitor_through_the_endpoint_and_is_woken(
         s = app.sessions.sessions[r["log_id"]]
         flag = tmp_path / "ready.flag"
         await s.send(
-            f"Use the aegis monitor_start tool to wait until the file {flag} exists "
+            "Use Bash to run `echo starting the job`, which stands for starting a "
+            f"job that creates the file {flag}. Then use the aegis monitor_start tool "
+            "to wait until that file exists "
             "(done condition `test -f <that path>`, interval 2 seconds). Then end your turn. "
             "When you are woken, reply with the single word WOKEN."
         )
@@ -119,6 +121,9 @@ async def test_real_claude_arms_a_monitor_through_the_endpoint_and_is_woken(
             timeout=120,
             what="the monitor armed by Claude",
         )
+        [m] = app.monitors.of(s.log_id)
+        bash = [e["id"] for e in s.entries() if e["title"] == "Bash"]
+        assert m.source and m.source["id"] in bash, m.source  # #870
         await until(
             lambda: s.status == "idle", timeout=60, what="Claude ending its turn"
         )
@@ -1820,6 +1825,59 @@ async def test_real_claude_passes_a_brief_past_handoff_at_and_hands_off(tmp_path
         await asyncio.wait_for(task, 30)
 
 
+async def test_real_claude_hands_off_with_the_tool_and_the_new_session_acts(
+    tmp_path: Path,
+):
+    """A real session calls session_handoff (#874): its session locks at the
+    call, a new one starts when its turn ends and does what msg says, and the
+    old one is archived after that first turn."""
+    import asyncio
+
+    import uvicorn
+
+    from aegis.app import App
+    from aegis.roots import make_roots
+    from aegis.web import build_web
+
+    from .test_agents import _free_port
+
+    claude = shutil.which("claude")
+    assert claude, "claude is not on PATH"
+    (tmp_path / ".aegis.yaml").write_text(
+        f"agents:\n  sonnet: {{harness: claude-code, model: {SONNET}, effort: low, permission: full}}\n"
+    )
+    port = _free_port()
+    app = App(
+        make_roots(tmp_path, None),
+        claude_bin=claude,
+        base_url=f"http://127.0.0.1:{port}",
+    )
+    server = uvicorn.Server(
+        uvicorn.Config(
+            build_web(app, "t", {f"127.0.0.1:{port}"}), port=port, log_level="warning"
+        )
+    )
+    task = asyncio.create_task(server.serve())
+    await until(lambda: server.started, timeout=10, what="uvicorn")
+    try:
+        r = await app.registry.call("session.spawn", {"agent": "sonnet"})
+        s = app.sessions.sessions[r["log_id"]]
+        await s.send(
+            "Call the aegis session_handoff tool with msg set to: Write the word "
+            "BETA into a file named handed.txt in your working directory. Then "
+            "end your turn."
+        )
+        await until(
+            lambda: s.log_id in app.sessions.archived,
+            timeout=240,
+            what="the old session archived after the new one's first turn",
+        )
+        assert (tmp_path / "handed.txt").read_text().strip() == "BETA"
+    finally:
+        server.should_exit = True
+        await asyncio.wait_for(task, 30)
+
+
 async def test_real_btw_answers_mid_turn_and_the_agent_never_receives_it(
     tmp_path: Path,
 ):
@@ -2204,6 +2262,141 @@ async def test_real_claude_is_woken_by_a_stalled_monitor_and_acts(tmp_path: Path
         )
         await asyncio.sleep(5)
         assert len(stalls(s)) == 1
+    finally:
+        server.should_exit = True
+        await asyncio.wait_for(task, 30)
+
+
+async def test_real_claude_takes_a_notice_at_its_next_tool_call(tmp_path: Path):
+    """A warning set while a real Sonnet's first Bash runs reaches it at its
+    second Bash, inside the turn, and starts no turn of its own (#880)."""
+    import asyncio
+
+    import uvicorn
+
+    from aegis.app import App
+    from aegis.notices import Item
+    from aegis.roots import make_roots
+    from aegis.transcript.store import read_store
+    from aegis.web import build_web
+
+    from .test_agents import _free_port
+
+    claude = shutil.which("claude")
+    assert claude, "claude is not on PATH"
+    (tmp_path / ".aegis.yaml").write_text(
+        f"agents:\n  sonnet: {{harness: claude-code, model: {SONNET}, effort: low, permission: full}}\n"
+    )
+    port = _free_port()
+    app = App(
+        make_roots(tmp_path, None),
+        claude_bin=claude,
+        base_url=f"http://127.0.0.1:{port}",
+    )
+    server = uvicorn.Server(
+        uvicorn.Config(
+            build_web(app, "t", {f"127.0.0.1:{port}"}), port=port, log_level="warning"
+        )
+    )
+    task = asyncio.create_task(server.serve())
+    await until(lambda: server.started, timeout=10, what="uvicorn")
+    try:
+        r = await app.registry.call("session.spawn", {"agent": "sonnet"})
+        s = app.sessions.sessions[r["log_id"]]
+        await s.send(
+            "This is a test of aegis itself. Run `sleep 3` with Bash, then run "
+            "`echo two` with Bash, in two separate calls, then reply in one line."
+        )
+        await until(
+            lambda: any(e["kind"] == "tool" for e in s.entries()),
+            timeout=120,
+            what="the first Bash",
+        )
+        app.notices.set(s.log_id, "monitors", [Item("live:on", "warn", "steer-mark-7")])
+        await until(lambda: s.status == "idle", timeout=180, what="the turn's end")
+        records, _ = read_store(app.sessions.store_path(s.log_id))
+        store = json.dumps(records)
+        assert "steer-mark-7" in store, "the notice never reached the agent"
+        rows = [e["kind"] for e in s.entries()]
+        assert any(
+            e["kind"] == "inbox" and "steer-mark-7" in (e.get("md") or "")
+            for e in s.entries()
+        ), rows
+        sends = [x for x in records if x.get("kind") == "send"]
+        results = [
+            x
+            for x in records
+            if '"type":"result"' in str(x.get("line")).replace(" ", "")
+        ]
+        assert len(sends) == 1 and "steer-mark-7" not in sends[0]["text"]
+        assert len(results) == 1, "a steered notice started a turn of its own"
+    finally:
+        server.should_exit = True
+        await asyncio.wait_for(task, 30)
+
+
+async def test_real_claude_follows_know_how_it_was_told_about_mid_turn(tmp_path: Path):
+    """No instruction names know-how. A real Sonnet started outside a repository
+    touches it, gets its menu, and follows a rule only the doc states (#881)."""
+    import asyncio
+    import subprocess
+
+    import uvicorn
+
+    from aegis.app import App
+    from aegis.roots import make_roots
+    from aegis.web import build_web
+
+    from .test_agents import _free_port
+
+    claude = shutil.which("claude")
+    assert claude, "claude is not on PATH"
+    quill = tmp_path / "repos" / "quill"
+    (quill / "know-how").mkdir(parents=True)
+    (quill / "widget.py").write_text("print('hello')\n")
+    (quill / "know-how" / "landing-a-change.md").write_text(
+        "---\nwhen: committing any change in this repository\n---\n\n"
+        "The commit subject must start with `WID:`. CI rejects anything else.\n"
+    )
+    git = ["git", "-C", str(quill), "-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run(["git", "init", "-q", str(quill)], check=True)
+    subprocess.run([*git, "add", "."], check=True)
+    subprocess.run([*git, "commit", "-qm", "init"], check=True)
+    subprocess.run(["git", "-C", str(quill), "config", "user.name", "t"], check=True)
+    subprocess.run(["git", "-C", str(quill), "config", "user.email", "t@t"], check=True)
+    (tmp_path / ".aegis.yaml").write_text(
+        f"agents:\n  sonnet: {{harness: claude-code, model: {SONNET}, effort: low, permission: full}}\n"
+    )
+    port = _free_port()
+    app = App(
+        make_roots(tmp_path, None),
+        claude_bin=claude,
+        base_url=f"http://127.0.0.1:{port}",
+    )
+    server = uvicorn.Server(
+        uvicorn.Config(
+            build_web(app, "t", {f"127.0.0.1:{port}"}), port=port, log_level="warning"
+        )
+    )
+    task = asyncio.create_task(server.serve())
+    await until(lambda: server.started, timeout=10, what="uvicorn")
+    try:
+        r = await app.registry.call("session.spawn", {"agent": "sonnet"})
+        s = app.sessions.sessions[r["log_id"]]
+        await s.send(
+            "In repos/quill, change the greeting in widget.py to 'hola' and commit it."
+        )
+        await until(lambda: s.status == "working", timeout=60, what="the turn")
+        await until(lambda: s.status == "idle", timeout=240, what="its end")
+        subject = subprocess.run(
+            ["git", "-C", str(quill), "log", "-1", "--format=%s"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        rows = [e["title"] for e in s.entries() if e["kind"] == "inbox"]
+        assert [t for t in rows if "· know-how · quill" in t], rows
+        assert subject.startswith("WID:"), subject
     finally:
         server.should_exit = True
         await asyncio.wait_for(task, 30)

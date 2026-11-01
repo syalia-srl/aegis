@@ -22,6 +22,8 @@ class Ops:
     @property
     def btw(self) -> _btw: ...
     @property
+    def claude(self) -> _claude: ...
+    @property
     def commands(self) -> _commands: ...
     @property
     def config(self) -> _config: ...
@@ -120,9 +122,15 @@ class _artifact:
     async def create(
         self, *, title: str, caption: str | None = ..., state: Any = ...
     ) -> Any:
-        """Start an interactive page for the person: a decision to make, values to tune, a form, a visualization to play with. Writes a working skeleton and returns its path and text; edit that file with your Edit tool, then artifact_send. The page talks to aegis through `window.aegis`: `aegis.ready((state, theme) => ...)` runs once the host has handed over the state and the theme's CSS variables; `aegis.state(obj)` keeps state silently for you to artifact_read; `aegis.emit(name, obj)` wakes you and leaves the page live; `aegis.submit(obj, label)` wakes you with the answer and closes the page, the card collapsing to `label`; `aegis.onState(fn)` hears your artifact_update; `aegis.onStatus(fn)` hears `{status, refused}`, where `refused` is `{code, message}` when the server refused the last submit (the card shows the person the message), also on `<html data-refused>`. Answers reach you as a user turn headed `> from artifact:<id> · submit|<event>|error · …` with the JSON in a code block. Rules the checks cannot catch: an event name is one word, `[a-z][a-z0-9_-]{0,31}`, never `submit`, `error` or `close`; state, event data and the submit's data are at most 64 KB each; at most 20 emits a minute; a submit's label is one line of at most 140 characters. Keep the skeleton's script tag and stylesheet link, or drop the stylesheet for your own look."""
+        """Start an interactive page for the person: a decision to make, values to tune, a form, a visualization to play with. Writes a working skeleton and returns its path and text; edit that file with your Edit tool, then artifact_send. The page talks to aegis through `window.aegis`: `aegis.ready((state, theme) => ...)` runs once the host has handed over the state and the theme's CSS variables; `aegis.state(obj)` keeps state silently for you to artifact_read; `aegis.emit(name, obj)` wakes you and leaves the page live; `aegis.submit(obj, label)` wakes you with the answer and closes the page, the card collapsing to `label`; `aegis.onState(fn)` hears your artifact_update; `aegis.onStatus(fn)` hears `{status, refused}`, where `refused` is `{code, message}` when the server refused the last submit (the card shows the person the message), also on `<html data-refused>`; `aegis.dictate(field, fn)` inside a click dictates into a textarea, `fn` hearing loading, listening, finishing and idle; `aegis.upload(file, onProgress)` puts a file of up to 100 MB in your inbox, wakes you with its path and resolves to `{name, path, mime, size}` (help_read artifacts, "Take dictation or a file"). Answers reach you as a user turn headed `> from artifact:<id> · submit|<event>|upload|error · …` with the JSON in a code block. Rules the checks cannot catch: an event name is one word, `[a-z][a-z0-9_-]{0,31}`, never `submit`, `error`, `close` or `upload`; state, event data and the submit's data are at most 64 KB each; at most 20 emits a minute; a submit's label is one line of at most 140 characters. Keep the skeleton's script tag and stylesheet link, or drop the stylesheet for your own look."""
     async def emit(
-        self, *, log_id: str, artifact_id: str, name: str, data: Any = ...
+        self,
+        *,
+        log_id: str,
+        artifact_id: str,
+        name: str,
+        data: Any = ...,
+        dictated: bool = ...,
     ) -> Any:
         """artifact.emit"""
     async def error(
@@ -146,7 +154,13 @@ class _artifact:
     async def state(self, *, log_id: str, artifact_id: str, state: Any = ...) -> Any:
         """artifact.state"""
     async def submit(
-        self, *, log_id: str, artifact_id: str, data: Any = ..., label: str
+        self,
+        *,
+        log_id: str,
+        artifact_id: str,
+        data: Any = ...,
+        label: str,
+        dictated: bool = ...,
     ) -> Any:
         """artifact.submit"""
     async def update(
@@ -158,6 +172,8 @@ class _artifact:
         resend: bool = ...,
     ) -> Any:
         """Change a live page: push `state` into it, change its caption, or with `resend` snapshot the edited draft again and swap the page (the state carries over unless `state` is also given)."""
+    async def upload(self, *, log_id: str, artifact_id: str, upload_id: str) -> Any:
+        """Move a file the page uploaded (attachment.begin and .put) into the session's inbox and wake the agent with its path. It counts as an event, and the count comes first, so a refused file stays staged and reaches nobody. The page gets the record, for the person to see."""
 
 class _attachment:
     async def begin(self, *, log_id: str, name: str, size: int) -> Any:
@@ -248,6 +264,10 @@ class _browser:
 class _btw:
     async def cancel(self, *, log_id: str, id: str) -> Any:
         """Cancel a running side note; its block keeps the question, folded."""
+
+class _claude:
+    async def token(self, *, log_id: str, id: str, secret: str) -> Any:
+        """The sign-in card's field (claude/login.py): check a setup-token, keep it, restart the sessions that failed to sign in."""
 
 class _commands:
     async def list(self, *, log_id: str) -> Any:
@@ -462,8 +482,10 @@ class _link:
         self, *, url: str, token: str, name: str | None = ..., trusted: bool = ...
     ) -> Any:
         """Link another aegis server: connect once with its token, take the name it gives itself, and keep the link in links.json."""
+    async def exit(self, *, name: str | None = ...) -> Any:
+        """Make a link this server's exit, or stop exiting: what aegis starts from now on reaches the internet from there (exit.py)."""
     async def incoming(self) -> Any:
-        """The servers that linked this one with trust, so their agents reach this one over their link."""
+        """The servers that linked this one with trust, so their agents reach this one over their link, and what each took as an exit."""
     async def list(self) -> Any:
         """The servers this one links, with their state; never their tokens."""
     async def remove(self, *, name: str) -> Any:
@@ -517,6 +539,7 @@ class _monitor:
         done: str,
         fail: str | None = ...,
         progress: str | None,
+        source: str | None,
         interval_s: float = ...,
         timeout_s: float = ...,
         cwd: str | None = ...,
@@ -632,23 +655,23 @@ class _schedule:
         quota: dict[str, dict[str, int | Literal["pace"]]] = ...,
         name: str,
     ) -> Any:
-        """Fire a prompt on a clock: every 5m, a cron line, or once at a time, into a new session from an agent or into an existing session's inbox. With a bash check, a tick fires only when the check exits 0 with a stdout different from the last fire's, and that stdout is appended to the prompt. You own what you create; schedule_delete removes it. A schedule you create or change waits, paused, until a person approves it from the card under your call."""
+        """Fire a prompt on a clock: every 5m, a cron line, or once at a time, into a new session from an agent or into an existing session's inbox. With a bash check, a tick fires only when the check exits 0 with a stdout different from the last fire's, and that stdout is appended to the prompt. You own what you create; schedule_delete removes it. A schedule you create or change waits, paused, until a person approves it from the card under your call. `name@server` makes it on a server linked with trust: it lives and ticks there, its runs start there, and a directory or a session in it is that server's."""
     async def delete(self, *, name: str) -> Any:
-        """Delete a schedule you own. A live run keeps going."""
+        """Delete a schedule you own. A live run keeps going. `name@server` is one on a server linked with trust."""
     async def fire(self, *, name: str) -> Any:
-        """Fire a schedule you own now, skipping its clock and its check. The overlap rule still holds: with a live run, wait holds it and skip drops it. A schedule that fires a workflow fires only on its clock for an agent: the person approved the clock, not runs on demand."""
+        """Fire a schedule you own now, skipping its clock and its check. The overlap rule still holds: with a live run, wait holds it and skip drops it. A schedule that fires a workflow fires only on its clock for an agent: the person approved the clock, not runs on demand. `name@server` is one on a server linked with trust, and its run starts there."""
     async def list(self) -> Any:
-        """Every schedule on this server: its clock, layers and owner, its next tick, its live runs, and whether it is paused."""
+        """Every schedule on this server: its clock, layers and owner, its next tick, its live runs, and whether it is paused. An agent also gets each server's linked with trust, named `name@server` and with `server`."""
     async def pause(self, *, name: str) -> Any:
-        """Stop a schedule you own from ticking until it is resumed."""
+        """Stop a schedule you own from ticking until it is resumed. `name@server` is one on a server linked with trust."""
     async def pools(self) -> Any:
         """The pools a schedule's quota lines may name, with their windows, and the lines a schedule gets when it names none: for the view's editor."""
     async def resume(self, *, name: str, workflow: str | None = ...) -> Any:
-        """Start a paused schedule again from now, its error count cleared. The ticks that fell during the pause do not fire."""
+        """Start a paused schedule again from now, its error count cleared. The ticks that fell during the pause do not fire. `name@server` is one on a server linked with trust; one waiting for a person stays a person's to unpause there too."""
     async def runs(
         self, *, name: str, offset: int = ..., limit: int = ..., quiet: bool = ...
     ) -> Any:
-        """One schedule's fires and ticks, newest first, a page at a time. The ticks that changed nothing are left out unless you pass quiet."""
+        """One schedule's fires and ticks, newest first, a page at a time. The ticks that changed nothing are left out unless you pass quiet. `name@server` reads one on a server linked with trust."""
     async def test(
         self,
         *,
@@ -658,7 +681,7 @@ class _schedule:
         cwd: str | None = ...,
         name: str | None = ...,
     ) -> Any:
-        """Try a clock and a check without saving anything: the next three ticks, and whether the check would fire now and why."""
+        """Try a clock and a check without saving anything: the next three ticks, and whether the check would fire now and why. With `name@server` both are tried on a server linked with trust."""
     async def update(
         self,
         *,
@@ -670,7 +693,7 @@ class _schedule:
         quota: dict[str, dict[str, int | Literal["pace"]]] = ...,
         name: str,
     ) -> Any:
-        """Replace a schedule you own with a new definition. It applies from the next tick; a live run is not touched."""
+        """Replace a schedule you own with a new definition. It applies from the next tick; a live run is not touched. `name@server` is one on a server linked with trust."""
 
 class _secret:
     async def provide(self, *, log_id: str, id: str, secret: str) -> Any:
@@ -690,6 +713,12 @@ class _secret:
         """Hand the person a secret (a password, a token, a key) that only they can read, once. The server reads the file at path and you get back an id, never the content. The person sees a card with a Reveal button until ttl runs out, and the first reveal burns it. Write the secret into the file without printing it (umask 077; openssl rand -base64 18 > /tmp/pw), and pass delete_source when the file was made only to carry it."""
 
 class _server:
+    async def pause(self) -> Any:
+        """Pause every session: end their processes, hold all new work."""
+    async def paused(self) -> Any:
+        """The pause in force (pause.py), or null."""
+    async def resume(self) -> Any:
+        """Resume every session the pause held, and the work it held."""
     async def version(self) -> Any:
         """server.version"""
 
@@ -707,8 +736,18 @@ class _session:
         permission: Literal["read", "write", "full", "auto"] | None = ...,
     ) -> Any:
         """session.configure"""
-    async def handoff(self, *, log_id: str) -> Any:
-        """Continue a session's work in a fresh one: the same agent, folder, model and effort, opened with its handoff brief and last turns. The old session is archived when the new one finishes its first turn."""
+    async def handoff(
+        self,
+        *,
+        agent: str | None = ...,
+        msg: str | None = ...,
+        host: str | None = ...,
+        model: str | None = ...,
+        effort: Literal["low", "medium", "high", "xhigh", "max"] | None = ...,
+        permission: Literal["read", "write", "full", "auto"] | None = ...,
+        cwd: str | None = ...,
+    ) -> Any:
+        """Continue your work in a new session and end this one: from this call nobody can write to it. The new session starts when your turn ends, with `msg`, your turn_end brief and your last turns, so end your turn right after this call. Pass `agent` to continue on another agent, with at most your permission, and `host` to continue on a linked server. Refused while a monitor, a background task, a queue task or a held message waits for you. A workflow you own follows the new session, except across a link, where it and any open session you started refuse the call."""
     async def interrupt(self, *, log_id: str) -> Any:
         """session.interrupt"""
     async def kills(self, *, log_id: str) -> Any:

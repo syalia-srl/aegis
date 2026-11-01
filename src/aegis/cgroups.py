@@ -5,15 +5,18 @@ build a tree below it. It then runs every harness child, and all that child
 starts, in a cgroup of its own with a memory cap, so one session's runaway
 test run hits a memcg OOM inside that session and nothing else::
 
-    <unit>/                 the unit: its MemoryMax still covers everything
-    <unit>/server/          the server, and whatever the unit started it through
-    <unit>/sessions/<id>/   one harness child and its descendants
+    <unit>/                       the unit: its MemoryMax still covers everything
+    <unit>/server/                the server, and whatever the unit started it through
+    <unit>/work/                  everything the server starts, capped together
+    <unit>/work/sessions/<id>/    one harness child and its descendants
+    <unit>/work/terminals/<id>/   one terminal's shell
+    <unit>/work/browsers/chromium/  every browser the server drives
 
 The server leaves the unit's own cgroup first because of cgroup v2's
 no-internal-processes rule: a cgroup that enables controllers for its
 children may hold no processes itself. It moves every process of the unit
 into ``server/``, which is only itself and its ancestors (``uv run``, a
-shell), then enables ``memory`` and ``pids`` below the unit and below
+shell), then enables ``memory`` and ``pids`` below the unit, ``work/`` and
 ``sessions/``. Stopping the unit still kills every session: the session
 cgroups sit inside the unit, and ``KillMode=control-group`` kills the subtree.
 
@@ -45,6 +48,43 @@ with its tests, and the person would lose the turn that could have noticed.
 runaway at its cap would otherwise page into swap until the host thrashes, and
 the OOM the cap exists for would never come.
 
+All the work is also capped together (#782). Each session's cap stops one
+runaway, but fifteen sessions under their caps still filled the unit up to
+its ``MemoryHigh``, and the unit's ``memory.high`` throttles every process
+below it, the server too: the server stayed up but stopped answering, which
+to the person is aegis dying. So ``work/memory.max`` is the unit's lowest
+memory limit, or the host's RAM without one, less ``SERVER_RESERVE``. At it
+the kernel kills the largest process in the work, as at one session's cap,
+and the unit never reaches its own limit from the work alone.
+``server/memory.min`` keeps that reserve out of any reclaim, the host's
+included. ``memory.max`` and not ``memory.high`` for the group, for the same
+reason as per session: without swap, ``high`` only throttles. Terminals and
+browsers sit in ``work/`` for the same reason: a build in a terminal or a
+heavy page counts against the same cap. Chromium joins its cgroup through a
+launcher script Playwright runs as its executable (``browsers.py``); it
+sets its own OOM scores, all above the server's.
+
+Tasks follow too. ``pids`` counts threads, and the unit's ``TasksMax`` is
+the only limit, so one fork bomb or runaway test pool would take every task
+and leave the server unable to start a thread. ``work/pids.max`` leaves the
+server ``SERVER_PIDS_RESERVE`` (it peaks near 200), and each cgroup in the
+work gets ``SESSION_PIDS_MAX``, far above the busiest session measured (239).
+
+CPU follows the same idea with ``cpu.weight``, not ``cpu.max``: the server
+gets ``SERVER_CPU_WEIGHT`` against the default 100 of ``work/``, so when
+every core is busy the server runs first, and when it idles the work uses
+every core. A ``cpu.max`` would leave a core unused all day to protect a
+server that rarely needs one. Disk requests get ``io.prio.class``
+``promote-to-rt`` on ``server/``: mq-deadline and BFQ serve them first, and
+their aging still serves the work's. Not ``io.weight``, which only BFQ or a
+root-configured io.cost honour, and not ``io.latency``, which stock Ubuntu
+kernels build without. ``cpu`` and ``io`` are enabled below the unit only,
+each in a write of its own, so a kernel that refuses one still gets the rest.
+
+Nothing a session starts outside this tree is covered: a ``docker run``
+goes to dockerd's cgroup, ``sudo systemd-run`` to a unit of its own. The
+server's negative OOM score is all that protects it from those.
+
 A session's cgroup is emptied (``cgroup.kill``) and removed when its process
 ends, by exit, Stop, Close or shutdown, so a background job the harness left
 does not outlive the session. Boot removes the empty ``sessions/*`` a crash
@@ -68,6 +108,11 @@ MOUNT = Path("/sys/fs/cgroup")
 PROC = Path("/proc")
 CONTROLLERS = ("memory", "pids")
 DEFAULT_MEMORY_MAX = "40%"
+SERVER_RESERVE = 512 * 1024**2
+SERVER_CPU_WEIGHT = 1000
+SERVER_PIDS_RESERVE = 512
+SESSION_PIDS_MAX = 4096
+SERVER_IO_CLASS = "promote-to-rt"
 _SIZE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*([KMGT%]?)\s*$", re.IGNORECASE)
 _UNITS = {"": 1, "K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4}
 # The join, then the harness: $0 is the cgroup, "$@" the harness's argv.
@@ -143,6 +188,25 @@ def _procs(d: Path) -> list[int]:
         return []
 
 
+def _limit(f: Path) -> int | None:
+    try:
+        v = f.read_text().strip()
+    except OSError:
+        return None
+    return int(v) if v.isdigit() else None
+
+
+def group_cap(unit: Path, total: int) -> int | None:
+    """What every session together may hold: the unit's lowest memory limit,
+    or the host's RAM when it has none, less the server's reserve. None when
+    that would leave the sessions less than the reserve itself."""
+    limits = [
+        n for n in (_limit(unit / "memory.high"), _limit(unit / "memory.max")) if n
+    ]
+    cap = min(limits, default=total) - SERVER_RESERVE
+    return cap if cap > SERVER_RESERVE else None
+
+
 def wrap(cgroup: Path | None, argv: list[str]) -> list[str]:
     """``argv`` started inside ``cgroup``, or unchanged when there is none.
     Raises FileNotFoundError for a missing binary, as the spawn would without
@@ -159,7 +223,8 @@ def wrap(cgroup: Path | None, argv: list[str]) -> list[str]:
 class SessionCgroups:
     def __init__(self, unit: Path, memory_max: Callable[[], object]) -> None:
         self.unit = unit
-        self.sessions = unit / "sessions"
+        self.work = unit / "work"
+        self.sessions = self.work / "sessions"
         self._memory_max = memory_max
 
     @staticmethod
@@ -220,22 +285,67 @@ class SessionCgroups:
             for p in _procs(unit):
                 (unit / "server" / "cgroup.procs").write_text(f"{p}\n")
             (unit / "cgroup.subtree_control").write_text(enable)
+            self.work.mkdir(exist_ok=True)
+            (self.work / "cgroup.subtree_control").write_text(enable)
             self.sessions.mkdir(exist_ok=True)
             (self.sessions / "cgroup.subtree_control").write_text(enable)
         except OSError as e:
             log.warning("aegis: no cgroup per session: setting up %s: %s", unit, e)
             return None
+        self.shield()
         self.sweep()
         log.info("aegis: one cgroup per session under %s", self.sessions)
         return self
 
+    def shield(self) -> None:
+        """Keep all the work together below the unit's limits, the server's
+        memory out of its reclaim, and the server first in line for a CPU and
+        a disk, so the work's pressure stays in it."""
+        cap = group_cap(self.unit, total_ram())
+        try:
+            (self.unit / "server" / "memory.min").write_text(str(SERVER_RESERVE))
+            if cap is not None:
+                (self.work / "memory.max").write_text(str(cap))
+        except OSError as e:
+            log.warning("aegis: the server shares the work's memory limit: %s", e)
+        pids = _limit(self.unit / "pids.max")
+        if pids is not None and pids > 2 * SERVER_PIDS_RESERVE:
+            try:
+                (self.work / "pids.max").write_text(str(pids - SERVER_PIDS_RESERVE))
+            except OSError as e:
+                log.warning("aegis: the server shares the work's task limit: %s", e)
+        available = set()
+        try:
+            available = set((self.unit / "cgroup.controllers").read_text().split())
+        except OSError:
+            pass
+        try:
+            if "cpu" in available:
+                (self.unit / "cgroup.subtree_control").write_text("+cpu")
+                (self.unit / "server" / "cpu.weight").write_text(str(SERVER_CPU_WEIGHT))
+        except OSError as e:
+            log.warning("aegis: the server waits for a CPU like a session: %s", e)
+        try:
+            if "io" in available:
+                (self.unit / "cgroup.subtree_control").write_text("+io")
+                (self.unit / "server" / "io.prio.class").write_text(SERVER_IO_CLASS)
+        except OSError as e:
+            log.warning("aegis: the server waits for the disk like a session: %s", e)
+        log.info(
+            "aegis: work capped together at %s and %s tasks, server keeps %s",
+            cap,
+            pids and pids - SERVER_PIDS_RESERVE,
+            SERVER_RESERVE,
+        )
+
     def sibling(
         self, name: str, memory_max: Callable[[], object]
     ) -> SessionCgroups | None:
-        """Cgroups for another kind of child beside ``sessions/``, such as
-        terminals: the same unit and controllers, their own memory cap."""
+        """Cgroups for another kind of child beside ``sessions/`` in ``work/``,
+        such as terminals: the same controllers and group cap, their own
+        memory cap."""
         other = SessionCgroups(self.unit, memory_max)
-        other.sessions = self.unit / name
+        other.sessions = self.work / name
         try:
             enabled = (self.sessions / "cgroup.subtree_control").read_text().split()
             other.sessions.mkdir(exist_ok=True)
@@ -276,6 +386,10 @@ class SessionCgroups:
             (d / "memory.swap.max").write_text("max" if limit is None else "0")
         except OSError:
             pass  # a kernel without swap accounting has no swap to cap
+        try:
+            (d / "pids.max").write_text(str(SESSION_PIDS_MAX))
+        except OSError:
+            pass  # without the pids controller the unit's TasksMax is the cap
         return d
 
     def release(self, log_id: str, user: str | None = None) -> None:

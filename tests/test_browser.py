@@ -291,7 +291,14 @@ def turns_done(pg, n: int) -> None:
     )
 
 
+def online(pg) -> None:
+    """Wait until the page's socket is open. Until then + does nothing, and
+    goto returns at the load event, before it opens (#809)."""
+    pg.wait_for_selector("#conn-dot.ready", state="attached")
+
+
 def spawn(pg, prompt: str | None = None) -> str:
+    online(pg)
     pg.click("#tab-add")
     pg.wait_for_selector("#a2[data-view=spawn]")
     pg.wait_for_function("document.querySelector('#sp-agent').value !== ''")
@@ -303,6 +310,19 @@ def spawn(pg, prompt: str | None = None) -> str:
     if prompt:
         turns_done(pg, 1)
     return pg.evaluate("location.hash.slice(3)")
+
+
+def test_spawn_waits_for_the_socket(server, page):
+    # #809: goto returns at the load event; a click on + before the socket is
+    # open does nothing. The client's first send, its hello, is held 2 s here.
+    page.add_init_script(
+        """(() => { const send = WebSocket.prototype.send; let first = true;
+        WebSocket.prototype.send = function (d) { if (first) { first = false;
+          setTimeout(() => send.call(this, d), 2000); } else send.call(this, d); }; })()"""
+    )
+    page.goto(server.url)
+    page.set_default_timeout(8000)
+    assert spawn(page)
 
 
 def pick(pg, sel: str, text: str) -> None:
@@ -937,7 +957,6 @@ def close_session(pg) -> None:
         pg.click("#dialog .ok")
 
 
-@pytest.mark.quarantine("#693")
 def test_a_session_from_spawn_to_close(server, page):
     page.goto(server.url)
     assert "token=" not in page.url, "the token stays out of the address bar"
@@ -960,10 +979,14 @@ def test_a_session_from_spawn_to_close(server, page):
 
     page.fill("#input", "/busy 5")
     page.press("#input", "Enter")
-    page.wait_for_selector(".row.tool.running")
+    busy = page.locator(".row.tool.running").get_attribute("data-id")
     page.keyboard.press("Escape")
     turns_done(page, 3)
-    assert page.locator(".row.tool.err .tr2").last.inner_text() == "interrupted"
+    # textContent, not inner_text: a row below the fold is skipped by
+    # content-visibility:auto, and Chromium's innerText reads it as '' (#693).
+    tr2 = page.locator(f'.row.tool.err[data-id="{busy}"] .tr2')
+    tr2.wait_for(state="attached", timeout=8000)
+    assert tr2.text_content() == "interrupted"
 
     ids = page.evaluate(
         "[...document.querySelectorAll('#entries .row')].map(r => r.dataset.id)"
@@ -1172,7 +1195,7 @@ def test_archiving_the_open_tab_opens_the_next_one_as_quiet_does(server, browser
 
 HOLD = (
     '/mcp monitor_start {"description": "hold", "done": "false", '
-    '"progress": null, "interval_s": 60}'
+    '"progress": null, "source": null, "interval_s": 60}'
 )
 
 
@@ -1445,6 +1468,7 @@ def test_a_monitor_shows_in_the_sidebar_and_its_wake_arrives_as_an_inbox_row(
             "description": "wait for the flag",
             "done": f"test -f {flag}",
             "progress": None,
+            "source": None,
             "interval_s": 1,
         }
     )
@@ -1497,11 +1521,17 @@ def test_a_monitor_with_no_reading_animates_and_one_with_a_reading_fills(
     page.wait_for_selector("#a2[data-view=fleet]")
     spawn(page)
     for args in (
-        {"description": "no command", "done": "false", "progress": None},
+        {
+            "description": "no command",
+            "done": "false",
+            "progress": None,
+            "source": None,
+        },
         {
             "description": "a pct file",
             "done": "false",
             "progress": f"cat {pct}",
+            "source": None,
             "interval_s": 1,
         },
     ):
@@ -1522,6 +1552,7 @@ def test_a_monitor_with_no_reading_animates_and_one_with_a_reading_fills(
 
 
 def arm(page, **args):
+    args.setdefault("source", None)
     page.fill("#input", f"/mcp monitor_start {json.dumps(args)}")
     page.press("#input", "Enter")
     page.wait_for_selector(f"#s-monitors .mon >> text={args['description']}")
@@ -1568,6 +1599,63 @@ def test_hovering_a_monitor_opens_its_card_and_it_stays_open_as_readings_arrive(
     assert page.evaluate("window.closes") == 0
     page.keyboard.press("Escape")
     page.wait_for_selector("#mcard:not(.show)", state="attached")
+    assert page.errors == []
+
+
+def test_clicking_a_monitor_goes_to_the_tool_call_it_waits_on(server, page):
+    """The row selected and open, and the card out of its way (#870)."""
+    page.goto(server.url)
+    page.wait_for_selector("#a2[data-view=fleet]")
+    spawn(page, "/bash run the tests => 12 passed")
+    page.wait_for_selector(".row.tool .tn >> text=Bash")
+    page.fill("#input", "/many 40")
+    page.press("#input", "Enter")
+    page.wait_for_selector(".row >> text=step 39", state="attached")
+    arm(page, description="tests", done="false", progress=None, source="run the tests")
+    page.click("#s-monitors .mon")
+    row = page.locator(".row.tool.sel")
+    row.wait_for()
+    assert "run the tests" in row.inner_text()
+    assert row.locator("details[open]").count() == 1
+    assert page.locator("#mcard.show").count() == 0
+    assert page.evaluate(
+        """() => {
+          const r = document.querySelector(".row.tool.sel").getBoundingClientRect();
+          const s = document.querySelector("#tr").getBoundingClientRect();
+          return r.top >= s.top && r.top <= s.bottom;
+        }"""
+    )
+    assert page.errors == []
+
+
+def test_a_monitor_with_no_source_still_opens_its_card_on_click(server, page):
+    page.goto(server.url)
+    page.wait_for_selector("#a2[data-view=fleet]")
+    spawn(page)
+    arm(page, description="plain", done="false", progress=None)
+    page.click("#s-monitors .mon")
+    page.wait_for_selector("#mcard.show")
+    assert "Waits on" not in page.inner_text("#mcard")
+    assert page.errors == []
+
+
+def test_on_a_phone_a_monitors_card_holds_the_link_to_its_tool_call(server, page):
+    page.goto(server.url)
+    page.wait_for_selector("#a2[data-view=fleet]")
+    spawn(page, "/bash run the tests => 12 passed")
+    page.wait_for_selector(".row.tool .tn >> text=Bash")
+    arm(page, description="tests", done="false", progress=None, source="run the tests")
+    page.set_viewport_size({"width": 390, "height": 800})
+    page.wait_for_selector("#nav:not([hidden])")
+    page.click("#nav-side")
+    page.wait_for_function("document.getElementById('a2').dataset.side === 'open'")
+    page.click("#s-monitors .mon")
+    page.wait_for_selector("#mcard.show")
+    page.click("#mcard .src")
+    page.wait_for_selector(".row.tool.sel")
+    assert page.locator("#mcard.show").count() == 0
+    page.wait_for_function("document.getElementById('a2').dataset.side !== 'open'")
+    assert page.evaluate("document.documentElement.scrollWidth") <= 390
     assert page.errors == []
 
 
@@ -1648,6 +1736,12 @@ def test_the_running_build_and_the_latest_release_show_in_the_top_bar_and_sideba
     assert page.inner_text("#ver-latest").startswith("99.0.0")
     if not run["dev"]:
         assert "update" in page.inner_text("#ver-latest")
+        # #801: the line's gap and the marker's own margin added up to 12 px.
+        gap = page.evaluate(
+            """() => { const v = document.querySelector('#ver-line .v').getBoundingClientRect();
+              return document.querySelector('#ver-line .upd').getBoundingClientRect().x - v.right; }"""
+        )
+        assert abs(gap - 6) <= 1, gap
     assert page.errors == []
 
 
@@ -1655,10 +1749,11 @@ def test_the_fleet_band_and_the_sidebar_show_quota_and_the_host(quota_server, pa
     page.goto(quota_server.url)
     five = page.locator("#band .gauge[data-kind=session]")
     five.wait_for()
-    # 71% with 38% of the window gone: on pace for about 187%, so a warning.
+    # 71% with 38% of the window gone: 71 spent, then the time left at a rate the
+    # prior pulls below the 1.87 seen so far (#829), for about 156%, so a warning.
     assert "warning" in five.get_attribute("class")
     assert "71%" in five.inner_text()
-    assert re.search(r"18\d%", five.locator(".proj").inner_text())
+    assert re.search(r"15\d%", five.locator(".proj").inner_text())
     assert five.locator(".proj svg.ic").count() == 1
     assert five.locator(".tick").count() == 1
     week = page.locator("#band .gauge[data-kind=weekly_all]")
@@ -1682,7 +1777,7 @@ def test_the_fleet_band_and_the_sidebar_show_quota_and_the_host(quota_server, pa
     five = page.locator("#s-tiles .tile[data-kind=session]")
     five.wait_for()
     assert "warning" in five.get_attribute("class")
-    assert re.search(r"71%18\d", five.inner_text().replace("\n", ""))
+    assert re.search(r"71%15\d", five.inner_text().replace("\n", ""))
     assert five.locator("small svg.ic").count() == 1
     page.wait_for_selector("#s-host-sec:not([hidden]) #s-host-tiles .tile")
     assert "CPU" in page.inner_text("#s-host-tiles")
@@ -1774,6 +1869,7 @@ def harness_quota_server(tmp_path: Path, fake_claude: str, fake_opencode: str):
 
 
 def spawn_agent(pg, agent: str, prompt: str = "hello") -> None:
+    online(pg)
     pg.click("#tab-add")
     pg.wait_for_selector("#a2[data-view=spawn]")
     pg.wait_for_function("document.querySelector('#sp-agent').value !== ''")
@@ -3108,6 +3204,28 @@ def test_spawn_completes_agents_here_and_on_a_link_then_flags_and_their_values(
     assert page.errors == []
 
 
+def test_the_menu_shows_nothing_inside_spawns_prompt_and_comes_back(server, page):
+    """#764: once /spawn's prompt began, the menu stayed open with no rows,
+    an empty strip over the box. It hides, lets keys through, and shows again
+    when the line has something to offer."""
+    page.goto(server.url)
+    page.wait_for_selector("#a2[data-view=fleet]")
+    spawn(page)
+    page.click("#input")
+    page.keyboard.type("/spawn o")
+    page.wait_for_selector("#cmd-menu .cmd-row", state="visible")
+    page.keyboard.press("Tab")
+    page.keyboard.type("fix the flaky test")
+    assert page.input_value("#input") == "/spawn opus fix the flaky test"
+    assert not page.is_visible("#cmd-menu")
+    page.keyboard.press("Tab")  # nothing to accept: the text stays as typed
+    assert page.input_value("#input") == "/spawn opus fix the flaky test"
+    page.fill("#input", "")
+    page.keyboard.type("/spawn ")
+    page.wait_for_selector("#cmd-menu .cmd-row", state="visible")
+    assert page.errors == []
+
+
 def test_the_chip_keeps_the_configured_model_and_the_panel_adds_the_resolved_id(
     server, page
 ):
@@ -3909,6 +4027,40 @@ def test_a_reply_read_on_screen_turns_its_mark_and_clears_the_done_badge(server,
     assert page.errors == []
 
 
+@pytest.mark.parametrize("width", [1280, 390])
+def test_a_one_line_reply_is_as_tall_as_its_line(server, browser, width):
+    """#743: the gutter stacked the read mark over the read-aloud chip, 45 px
+    beside a 26 px line, so each one-line reply left a band under it. The two
+    sit side by side on the line, and the row is as tall as its text."""
+    errors: list = []
+    if width < 760:
+        page = phone(browser, errors)
+    else:
+        page = browser.new_context(viewport={"width": width, "height": 800}).new_page()
+    page.goto(server.url)
+    page.wait_for_selector("#a2[data-view=fleet]")
+    spawn(page, "hello")
+    page.wait_for_selector(".row.prose .rm .speak", state="attached")
+    got = page.evaluate(
+        """() => {
+          const row = document.querySelector('.row.prose'), body = row.querySelector('.body');
+          const mark = row.querySelector('.rm > .ic').getBoundingClientRect();
+          const chip = row.querySelector('.rm .speak').getBoundingClientRect();
+          const first = body.firstElementChild.getBoundingClientRect(), last = body.lastElementChild.getBoundingClientRect();
+          const b = { top: first.top, bottom: last.bottom, height: last.bottom - first.top };
+          return { row: row.getBoundingClientRect().height, body: b.height, top: b.top, bottom: b.bottom,
+                   mark: [mark.top, mark.bottom], chip: [chip.top, chip.bottom, chip.left, mark.right] };
+        }"""
+    )
+    assert got["row"] <= got["body"] + 0.5, got
+    # Both marks sit beside the line, inside its height, the chip after the mark.
+    for top, bottom in (got["mark"], got["chip"][:2]):
+        assert top >= got["top"] - 0.5 and bottom <= got["bottom"] + 0.5, got
+    assert got["chip"][2] >= got["chip"][3], got
+    assert errors == []
+    page.context.close()
+
+
 def test_a_reply_that_turns_read_keeps_its_row(server, page):
     page.goto(server.url)
     page.wait_for_selector("#a2[data-view=fleet]")
@@ -4595,6 +4747,45 @@ def test_the_page_registers_the_service_worker(server, page):
     origin = re.match(r"https?://[^/]+", server.url).group(0)
     assert url == origin + "/sw.js"
     assert page.errors == []
+
+
+@pytest.mark.parametrize("workers", ["allow", "block"])
+def test_an_open_tab_takes_the_new_build_after_an_upgrade(server, browser, workers):
+    """#499: after an upgrade an open tab kept the old client, and new features
+    did nothing until a hard refresh. The welcome names the build the server
+    serves; a page of another build takes it by itself, once, with a service
+    worker or without one."""
+    import aegis.web
+
+    errors: list = []
+    ctx = browser.new_context(service_workers=workers)
+    page = ctx.new_page()
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(server.url)
+    page.wait_for_selector("#a2[data-view=fleet]")
+    if workers == "allow":
+        page.wait_for_function("!!navigator.serviceWorker.controller")
+    old = page.get_attribute("meta[name=aegis-build]", "content")
+    assert re.fullmatch(r"[0-9a-f]{12}", old)
+    page.evaluate("window.__before = true")
+    # An upgrade: the server restarts serving another client. The build id
+    # hashes each file's mtime, so a newer mtime is a new build.
+    css = aegis.web.CLIENT_DIR / "css" / "base.css"
+    st = css.stat()
+    server.stop()
+    try:
+        os.utime(css, ns=(st.st_atime_ns, st.st_mtime_ns + 10**9))
+        server.start()
+        page.wait_for_function(
+            "old => !window.__before && document.querySelector('meta[name=aegis-build]').content !== old",
+            arg=old,
+            timeout=20000,
+        )
+    finally:
+        os.utime(css, ns=(st.st_atime_ns, st.st_mtime_ns))
+    page.wait_for_selector("#a2[data-view=fleet]")
+    assert errors == []
+    ctx.close()
 
 
 def test_the_title_favicon_and_a_notification_ping_when_a_session_needs_you(
@@ -6430,6 +6621,40 @@ def test_a_phone_reaches_tabs_the_drawer_and_the_chips(server, browser):
     assert errors == []
 
 
+HEADER_ROWS = """() => {
+  const kids = [...document.querySelector('#a2 .tabs').children].filter(e => e.offsetWidth && !e.classList.contains('gap'));
+  const rows = [];
+  for (const e of kids) {
+    const r = e.getBoundingClientRect(), row = rows.find((x) => r.top < x.bottom && r.bottom > x.top);
+    if (row) row.ids.push(e.id || e.className); else rows.push({ top: r.top, bottom: r.bottom, ids: [e.id || e.className] });
+  }
+  return rows.sort((a, b) => a.top - b.top).map((x) => x.ids);
+}"""
+
+
+@pytest.mark.parametrize("width", [360, 390])
+def test_a_phone_header_is_one_row_with_the_tabs_beside_the_menu(
+    server, browser, width
+):
+    """#896: Fleet, the server and the buttons took a row above the tabs (#631,
+    #752). They wait behind the menu button, and the row holds the sessions."""
+    errors: list = []
+    page = phone(browser, errors)
+    page.set_viewport_size({"width": width, "height": 844})
+    page.goto(server.url)
+    page.wait_for_selector("#a2[data-view=fleet]")
+    for n in range(3):
+        spawn(page, f"session {n}")
+    rows = page.evaluate(HEADER_ROWS)
+    assert rows == [["hdr-burger", "tablist", "tab-more", "tab-add"]], rows
+    header = page.locator("#a2 > .tabs").bounding_box()
+    assert header["height"] <= 52, header
+    tabs = page.locator("#tablist").bounding_box()
+    assert tabs["width"] > width - 140, tabs
+    assert page.evaluate(WIDER) == []
+    assert errors == []
+
+
 def test_a_long_tip_does_not_widen_the_new_tab_on_a_phone(server, browser):
     """#711: the tip is one nowrap line, and the spawn grid's auto column took
     its full width, pushing the composer, chips and hints past a 390 px screen."""
@@ -6497,6 +6722,40 @@ def archived(root: Path, n: int) -> list[str]:
     return ids[::-1]
 
 
+# What the row measures, all in one task: a locator's bounding_box() resolves
+# the node and then measures it, and a redraw between the two returns None.
+ARCHIVE_ROW_LAYOUT = """id => {
+  const row = document.querySelector(`#arch-list tr[data-id='${id}']`);
+  const box = (n) => {
+    const { x, width, height } = n.getBoundingClientRect();
+    return { x, width, height };
+  };
+  return {
+    row: box(row),
+    read: getComputedStyle(row.querySelector('.btn.read')).display,
+    reopen: box(row.querySelector('.btn.reopen')),
+  };
+}"""
+# The server filter's All reads the page again, through the same loadArchive.
+ARCHIVE_REDRAWS = """() => {
+  window.archiveRedraws = setInterval(
+    () => document.querySelector('#arch-servers button').click(), 5);
+}"""
+# Stops those and waits out the replies still coming, for a tap to land on a row
+# that stays: 300 ms without a redraw.
+ARCHIVE_QUIET = """() => new Promise((done) => {
+  clearInterval(window.archiveRedraws);
+  let timer;
+  const wait = () => {
+    clearTimeout(timer);
+    timer = setTimeout(done, 300);
+  };
+  new MutationObserver(wait).observe(
+    document.getElementById('arch-list'), { childList: true });
+  wait();
+})"""
+
+
 def test_a_phone_fits_the_archive_and_a_tap_on_a_row_reads_it(
     tmp_path, fake_claude, fake_opencode, browser
 ):
@@ -6519,11 +6778,16 @@ def test_a_phone_fits_the_archive_and_a_tap_on_a_row_reads_it(
         )
         assert servers[0] <= servers[1], f"the server filter is cut: {servers}"
         row = page.locator(f"#arch-list tr[data-id='{ids[0]}']")
-        assert row.bounding_box()["height"] <= 64, "a row is two lines and a button"
-        assert page.is_hidden(f"#arch-list tr[data-id='{ids[0]}'] .btn.read")
-        reopen = row.locator(".btn.reopen").bounding_box()
+        # A link's state change reads the page again and rebuilds every row
+        # (#774), so the layout is read in one task, here under such redraws.
+        page.evaluate(ARCHIVE_REDRAWS)
+        layout = page.evaluate(ARCHIVE_ROW_LAYOUT, ids[0])
+        assert layout["row"]["height"] <= 64, "a row is two lines and a button"
+        assert layout["read"] == "none"
+        reopen = layout["reopen"]
         assert reopen["x"] + reopen["width"] <= 390 and reopen["height"] >= 44
         assert reopen["width"] >= 44
+        page.evaluate(ARCHIVE_QUIET)
         row.locator("td").first.tap()
         page.wait_for_function("id => location.hash === '#read=' + id", arg=ids[0])
         assert errors == []
@@ -6603,6 +6867,7 @@ def test_a_phone_sees_the_monitor_card_every_reply_and_a_one_line_composer(
         "description": "a phone monitor",
         "done": "false",
         "progress": "echo 30",
+        "source": None,
         "interval_s": 1,
     }
     page.fill("#input", f"/mcp monitor_start {json.dumps(args)}")
@@ -6624,12 +6889,14 @@ def test_a_phone_sees_the_monitor_card_every_reply_and_a_one_line_composer(
     assert on_top, "the card is under the drawer"
     page.mouse.click(5, 300)
     page.wait_for_selector("#mcard:not(.show)", state="attached")
-    # The header's icons are icons: the bell's svg shares its button's class.
+    # The menu's icons are icons: the bell's svg shares its button's class.
+    page.tap("#hdr-burger")
     assert rect("#bell svg")["width"] <= 20 and rect("#settings-btn svg")["width"] <= 20
     # Settings has a button on a phone.
     page.tap("#settings-btn")
     page.wait_for_selector("#a2[data-view=settings]")
-    page.tap("#tab-fleet")
+    page.tap("#hdr-burger")
+    page.tap("#menu-fleet")
     page.wait_for_selector(".card .mons >> text=1 monitor")
     assert page.evaluate(WIDER) == []
     # A card's footer wraps whole items, never inside one.
@@ -7039,6 +7306,37 @@ def test_dictation_puts_late_text_in_the_draft_the_textarea_no_longer_shows(
     assert got[1].startswith("draft of a [3.0s kw=2]")
 
 
+def test_dictation_downloads_the_model_once_and_boots_from_the_cache(dict_server, page):
+    """#751: a phone downloaded the 17.8 MB model on every use, because its
+    HTTP cache did not keep it. The files go to Cache Storage under their pin,
+    once for both workers; a later boot fetches nothing, and an older pin's
+    cache is dropped."""
+    from aegis.dictation import pin_id
+
+    fetched = []
+    page.on("request", lambda r: "/dictation/" in r.url and fetched.append(r.url))
+    page.goto(dict_server.url)
+    page.evaluate("caches.open('dictation:/dictation/old/')")
+    boot = """const d = new m.Dictation({ prepare });
+        await d.boot((await prepare()).base);
+        for (const w of d.workers) w.w.terminate();
+        return await caches.keys();"""
+    first = run_dictation(page, boot)
+    assert sorted(u.rsplit("/", 1)[1] for u in fetched) == [
+        "needle.js",
+        "needle.wasm",
+        "whistle.cact",
+    ], "each file downloaded once, not once per worker"
+    assert "dictation:/dictation/old/" not in first
+    assert f"dictation:/dictation/{pin_id()}/" in first
+    fetched.clear()
+    for f in (Path(dict_server.env["AEGIS_DICTATION_DIR"]) / pin_id()).iterdir():
+        f.unlink()  # the server has nothing left to give
+    page.reload()
+    run_dictation(page, boot)
+    assert fetched == [], "the second use downloads nothing"
+
+
 def test_dictation_says_why_when_the_browser_ends_the_capture(dict_server, page):
     page.goto(dict_server.url)
     got = run_dictation(
@@ -7354,6 +7652,29 @@ def beta_session(linked, browser, prompt: str = "from beta") -> str:
     lid = spawn(pg, prompt)
     pg.close()
     return lid
+
+
+def test_a_linked_session_closed_during_a_recap_leaves_no_tab_behind(
+    tmp_path, fake_claude, fake_opencode, browser, page
+):
+    pair = Linked(tmp_path, fake_claude, fake_opencode)
+    (pair.beta.root / ".aegis.yaml").write_text(CONFIG + "recap: {agent: opus}\n")
+    # The one-shot answers nothing usable, and is paid, a while after the close.
+    pair.beta.env |= {"FAKE_CLAUDE_ONESHOT": "empty", "FAKE_CLAUDE_ONESHOT_SLEEP": "2"}
+    pair.start()
+    try:
+        lid = beta_session(pair, browser)
+        page.goto(pair.alpha.url)
+        tab = f"#tablist .tab[data-id='beta/{lid}']"
+        page.click(tab)
+        page.wait_for_selector("#nav-recap")
+        page.click("#nav-recap")
+        close_session(page)
+        page.wait_for_selector(tab, state="detached", timeout=8000)
+        page.wait_for_timeout(3000)  # the one-shot ends and its card change is out
+        assert page.locator(tab).count() == 0
+    finally:
+        pair.stop()
 
 
 def test_a_linked_servers_sessions_show_under_its_band(linked, browser, page):
@@ -8251,8 +8572,11 @@ def test_the_header_opens_the_journal_from_a_book_icon(server, browser, page):
     pg = phone(browser, errors)
     pg.goto(server.url)
     pg.wait_for_selector("#a2[data-view=fleet]")
+    pg.tap("#hdr-burger")
+    pg.wait_for_timeout(250)  # the slide
     box = pg.locator("#journal-btn").bounding_box()
-    assert box and box["x"] + box["width"] <= 390 and box["width"] >= 40
+    # A whole row of the phone's menu (#896).
+    assert box and box["x"] == 0 and box["width"] >= 200 and box["height"] >= 44
     assert pg.evaluate(WIDER) == []
     pg.tap("#journal-btn")
     pg.wait_for_selector("#a2[data-view=journal]")
@@ -8508,6 +8832,35 @@ def test_a_pasted_image_and_a_dropped_file_attach_and_a_message_of_files_alone_s
     turns_done(page, 1)
     row = page.locator(".row.user").last
     assert row.locator(".fcard .count").inner_text() == "1 / 2"
+    assert page.errors == []
+
+
+def test_a_file_whose_provider_reports_size_0_arrives_whole(server, page):
+    """#697: an Android document provider reported File.size 0 for a 148 KB
+    file, slicing by that size read nothing, and an empty file reached the
+    inbox. Here a .trm file reports 0 and slices empty, as on that phone, while
+    reading it whole gives its bytes."""
+    page.goto(server.url)
+    page.wait_for_selector("#a2[data-view=fleet]")
+    lid = spawn(page)
+    page.evaluate(
+        """() => {
+          const size = Object.getOwnPropertyDescriptor(Blob.prototype, 'size').get;
+          const slice = Blob.prototype.slice;
+          const android = (b) => b instanceof File && b.name.endsWith('.trm');
+          Object.defineProperty(Blob.prototype, 'size', { get() { return android(this) ? 0 : size.call(this); } });
+          Blob.prototype.slice = function (...a) { return android(this) ? new Blob([]) : slice.apply(this, a); };
+          const drop = new DataTransfer();
+          drop.items.add(new File([new Uint8Array(150000).fill(7)], 'backup.trm'));
+          document.querySelector('#composer').dispatchEvent(
+            new DragEvent('drop', {dataTransfer: drop, bubbles: true, cancelable: true}));
+        }"""
+    )
+    page.wait_for_selector("#atts .chip.att.done", timeout=8000)
+    page.click("#send")
+    turns_done(page, 1)
+    (got,) = inbox_of(server, lid).glob("*-backup.trm")
+    assert got.read_bytes() == bytes([7]) * 150000
     assert page.errors == []
 
 
@@ -8974,6 +9327,7 @@ def test_the_policy_editor_fits_a_phone(quota_server, browser):
     pg = ctx.new_page()
     pg.goto(quota_server.url)
     pg.wait_for_selector("#a2[data-view=fleet]")
+    pg.click("#hdr-burger")
     pg.click("#settings-btn")
     pg.wait_for_selector("#set-tok-default")
     pick(pg, "#set-tok-default .poolrow.pool-claude pick-chip", "lines")
@@ -9176,6 +9530,38 @@ def test_the_handoff_chip_continues_fresh_at_once(server, page):
         arg=old,
         timeout=8000,
     )
+
+
+def test_the_handoff_chip_shows_and_taps_on_a_phone(server, browser):
+    """#428: on a phone the first tap on the handoff chip did nothing. The
+    focused message box is taller, and the tap's blur shrank it and moved the
+    chip from under the finger before the click."""
+    errors: list = []
+    page = phone(browser, errors)
+    page.goto(server.url)
+    page.wait_for_selector("#a2[data-view=fleet]")
+    old = spawn(page, "/ctx 342000")
+    args = {"attention": "done", "line": "Shipped.", "handoff": "Done: A. Next: B."}
+    page.fill("#input", f"/mcp turn_end {json.dumps(args)}")
+    page.tap("#send")  # Enter adds a line on a touch screen
+    turns_done(page, 2)
+    chip = page.locator("#replies .rp.hand")
+    chip.wait_for(state="visible")
+    box = chip.bounding_box()
+    assert box["x"] >= 0 and box["x"] + box["width"] <= 390, box
+    assert box["y"] >= 0 and box["y"] + box["height"] <= 844, box
+    # Nothing covers it: the tap lands on the chip itself.
+    hit = page.evaluate(
+        """([x, y]) => document.elementFromPoint(x, y)?.closest('.rp.hand') !== null""",
+        [box["x"] + box["width"] / 2, box["y"] + box["height"] / 2],
+    )
+    assert hit
+    # The box still has the focus from the send, as it would with the keyboard
+    # up: the first tap hands off.
+    assert page.evaluate("document.activeElement.id") == "input"
+    page.tap("#replies .rp.hand")
+    page.wait_for_function("k => location.hash.slice(3) !== k", arg=old)
+    assert errors == []
 
 
 @pytest.mark.quarantine("#411")

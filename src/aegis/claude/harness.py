@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 import os
 
 from ..harness import Launch, session_env
+from . import login
 from . import control
 from .control import Catalog
 from .process import (
@@ -67,9 +68,10 @@ class ClaudeSession:
             launch.stderr_path,
             launch.on_line,
             launch.on_exit,
-            env=env,
+            env=login.with_token(env, launch.user),
             cgroup=launch.cgroup,
             user=launch.user,
+            via=launch.via,
         )
 
     @property
@@ -116,6 +118,7 @@ class ClaudeCode:
     src = "claude"
     label = "Claude Code"
     steers_mid_turn = True  # a user message read at the next tool boundary
+    steers_notices = True
     tool_prefix = "mcp__aegis__"
 
     def __init__(self, bin: str) -> None:

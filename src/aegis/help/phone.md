@@ -30,7 +30,9 @@ this device keeps and its size. A browser that never offers it can still
 install it from its own menu.
 
 When a new version is served, the device downloads it in the background and a
-toast offers Reload. Every open tab moves to the new version together.
+toast offers Reload. After an upgrade of the server itself, an open tab takes
+the new version by itself as soon as it reconnects, so no tab keeps running the
+old client. Every open tab moves to the new version together.
 
 ## Without a connection
 
@@ -147,6 +149,18 @@ Microsoft's); a self-hosted one is allowed with an environment variable naming
 its hosts, such as `AEGIS_PUSH_HOSTS=push.example.org`. A push that waits more
 than five minutes behind a slow service is dropped, and a device whose push
 service refuses it, or that fails five times in a row, is removed.
+
+## The header on a phone
+
+Under 760 px wide the header is one row: the menu button, the session tabs,
+the button that lists every open session, and + for a new one. The menu button
+opens a drawer with the server and its connection, Fleet, and what a wider top
+bar shows as buttons: Schedules, Settings, Files, Journal, Knowledge, Usage,
+Notifications and Help.
+
+Pick something, tap beside the drawer or press Escape to close it. A red mark
+on the menu button means something inside needs you: the connection dropped or
+a schedule paused on errors.
 
 ## The canvas on a phone
 

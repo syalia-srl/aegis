@@ -330,6 +330,19 @@ under a cap gets no swap, so it is killed at the cap instead of paging the
 host into the ground. A new value applies to
 the next process a session starts.
 
+Everything aegis starts is capped together too: sessions, terminals and the
+browsers it drives, at the service's lowest memory limit less 512 MiB that
+stays the server's. When they fill the host under their own caps, the kernel
+kills the largest process among them, and the server keeps answering. Each
+of them may run at most 4096 tasks (processes and threads), and all of them
+together leave the server 512, so a fork bomb dies in its own session. The
+server also runs and reads the disk before any of them when the host is
+busy; an idle CPU or disk is still theirs. None of this has a key.
+
+What an agent starts outside aegis's processes is not covered: a container
+from `docker run` lives under dockerd, and a unit from `systemd-run` under
+systemd. Run heavy work in the session itself, where the caps hold it.
+
 The cap needs a cgroup per session, which aegis makes only when it runs as a
 systemd service with `Delegate=yes`. Anywhere else, every session shares the
 server's cgroup, as before, and the key has no effect. A value that is not a
@@ -487,6 +500,16 @@ is read when aegis starts, so a change needs a restart. Without the extra,
 `aegis doctor` warns and search goes on by keywords alone.
 
 Settings → Search embeddings edits it.
+
+`knowledge.know_how`, true by default, tells a session about a repository's
+`know-how/` docs when it reaches that repository (help_read knowledge). Set it to
+false to turn that off. It is read when aegis starts.
+
+## Exit through a link
+
+`exit_via:` names a trusted link: what aegis starts reaches the internet from
+that server's address. `exit:` on an agent names another link, or `off` for the
+machine's own route. See [links](links#exit-through-a-trusted-link).
 
 ## Terminals
 

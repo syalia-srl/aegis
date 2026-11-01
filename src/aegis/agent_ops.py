@@ -25,7 +25,7 @@ from pydantic.json_schema import SkipJsonSchema
 from . import files
 from . import layout as canvas
 from .confirm import TTL_S
-from .monitors import iso_now
+from .monitors import find_source, iso_now
 from .names import SPAWN_HEAD, SPAWN_TASK, valid_handle
 from .ops import Caller, OpError
 from .session import ASLEEP_WHY, Archived, asleep_from
@@ -68,6 +68,13 @@ class MonitorStart(_Strict):
         "written, test lines passed), or as a last resort elapsed seconds over the "
         "expected duration, capped at 99. Pass null only when nothing about the "
         "process can be counted or estimated."
+    )
+    # Required but nullable, as progress is: agents leave optional fields out.
+    source: str | None = Field(
+        min_length=1,
+        description="Text from your tool call that started what you wait on, such "
+        "as the comment line that opens its Bash command: clicking the monitor goes "
+        "to the latest call holding it. Pass null when no call of yours started it.",
     )
     interval_s: float = Field(10, ge=1, le=3600)
     timeout_s: float = Field(3600, gt=0, le=7 * 86400)
@@ -382,9 +389,15 @@ SPAWN_TAIL_CHARS = 8000
 
 
 HANDOFF_HEAD = (
-    "You continue the work of session {handle}, whose context had grown large. "
+    "You continue the work of session {handle}. "
     "It is archived once you finish your first turn; peer_read {handle} still "
     "reads it after that, if you need more than what follows."
+)
+# On a linked server: nothing tells the old server when the first turn ends, and
+# peer_read reaches an archived session only from its own server (#874).
+HANDOFF_HEAD_FAR = (
+    "You continue the work of session {handle}, on another server. It is archived "
+    "as you start, so what follows is all you have of it."
 )
 
 
@@ -403,11 +416,14 @@ def handoff_opening(
     tail: str,
     kids: tuple[str, ...] = (),
     leads: bool = False,
+    instruction: str | None = None,
+    far: bool = False,
 ) -> str:
     """A handoff's first message: who it continues, the sessions it started
-    that the new one adopts (#641), the brief when the agent wrote one, and
-    the last turns as /spawn carries them (#354)."""
-    parts = [HANDOFF_HEAD.format(handle=handle)]
+    that the new one adopts (#641), the brief when the agent wrote one, the
+    last turns as /spawn carries them (#354), and last, so it is what the agent
+    reads last, the instruction it was handed off with (#874)."""
+    parts = [(HANDOFF_HEAD_FAR if far else HANDOFF_HEAD).format(handle=handle)]
     if kids:
         line = HANDOFF_KIDS.format(handle=handle, kids=", ".join(kids))
         parts.append(line + (HANDOFF_LEADS.format(handle=handle) if leads else ""))
@@ -415,6 +431,8 @@ def handoff_opening(
         parts.append("Its brief for you:\n\n" + brief)
     if tail:
         parts.append("Its last turns:\n\n" + tail)
+    if instruction:
+        parts.append("What to do now:\n\n" + instruction)
     return "\n\n".join(parts)
 
 
@@ -683,6 +701,37 @@ def split_address(target: str, own: str) -> tuple[str, str | None]:
     return (handle, None) if not at or server == own else (handle, server)
 
 
+def across(app: App, server: str, caller: Caller):
+    """The link for an agent's call to ``server``, which only a link both
+    servers trust carries (links.py, #684); the refusal otherwise."""
+    if caller.link is not None:
+        raise OpError("not_relayed", "a link is not relayed to another server")
+    if not app.links.trusted(server):
+        raise OpError("not_across_links", f"{server} is another server; {ACROSS}")
+    if not app.who(caller).is_admin:
+        raise OpError(
+            "not_for_members", "acting across a link is for an admin's agents"
+        )
+    link = app.links.get(server)
+    assert link is not None
+    return link
+
+
+def from_trusted(app: App, caller: Caller, sender: FarAgent) -> str:
+    """A trusted link speaking for one of its own agents: its address."""
+    if (
+        caller.link is None
+        or sender.server != caller.link
+        or not app.links.trusted(caller.link)
+    ):
+        raise OpError(
+            "not_a_link", "only a trusted link, for its own server, says this"
+        )
+    if not valid_handle(sender.handle):
+        raise OpError("bad_sender", "a sender is a handle")
+    return f"{sender.handle}@{sender.server}"
+
+
 def register_agent_ops(app: App) -> None:
     r = app.registry
     reg = app.sessions
@@ -700,35 +749,6 @@ def register_agent_ops(app: App) -> None:
                 "not_across_links", f"{target} is on another server; {ACROSS}"
             )
         return handle
-
-    def across(server: str, caller: Caller):
-        """The link for an agent's call to ``server``, which only a link both
-        servers trust carries (links.py, #684); the refusal otherwise."""
-        if caller.link is not None:
-            raise OpError("not_relayed", "a link is not relayed to another server")
-        if not app.links.trusted(server):
-            raise OpError("not_across_links", f"{server} is another server; {ACROSS}")
-        if not app.who(caller).is_admin:
-            raise OpError(
-                "not_for_members", "acting across a link is for an admin's agents"
-            )
-        link = app.links.get(server)
-        assert link is not None
-        return link
-
-    def from_trusted(caller: Caller, sender: FarAgent) -> str:
-        """A trusted link speaking for one of its own agents: its address."""
-        if (
-            caller.link is None
-            or sender.server != caller.link
-            or not app.links.trusted(caller.link)
-        ):
-            raise OpError(
-                "not_a_link", "only a trusted link, for its own server, says this"
-            )
-        if not valid_handle(sender.handle):
-            raise OpError("bad_sender", "a sender is a handle")
-        return f"{sender.handle}@{sender.server}"
 
     def target(handle: str):
         handle = here(handle)
@@ -774,6 +794,7 @@ def register_agent_ops(app: App) -> None:
         cwd = Path(p.cwd).expanduser() if p.cwd else s.spec.cwd
         if not cwd.is_absolute():
             cwd = s.spec.cwd / cwd
+        source = find_source(s.entries(), p.source) if p.source else None
         m = app.monitors.start(
             s.log_id,
             str(cwd),
@@ -781,10 +802,20 @@ def register_agent_ops(app: App) -> None:
             done=p.done,
             fail=p.fail,
             progress=p.progress,
+            source=source,
             interval_s=p.interval_s,
             timeout_s=p.timeout_s,
         )
-        return {"monitor_id": m.id, "other_live_monitors": roster(s.log_id, m.id)}
+        said = {
+            "monitor_id": m.id,
+            "source": source,
+            "other_live_monitors": roster(s.log_id, m.id),
+        }
+        if p.source and not source:
+            said["note"] = (
+                "none of your tool calls holds that text, so the monitor links to none"
+            )
+        return said
 
     @r.op("monitor.sessions", MonitorSessions, agent=True, read=True)
     async def monitor_sessions(p: MonitorSessions, caller):
@@ -799,7 +830,7 @@ def register_agent_ops(app: App) -> None:
         for handle in p.sessions:
             h, server = split_address(handle, app.server_name)
             if server is not None:
-                link = across(server, caller)
+                link = across(app, server, caller)
                 try:
                     listed = await link.call("session.list")
                 except OpError as e:
@@ -874,7 +905,7 @@ def register_agent_ops(app: App) -> None:
         inbox, and the task id comes back as `task-id@server`."""
         name, server = split_address(p.queue, app.server_name)
         if server is not None:
-            link = across(server, caller)
+            link = across(app, server, caller)
             me = own(caller)
             try:
                 r = await link.call(
@@ -891,7 +922,7 @@ def register_agent_ops(app: App) -> None:
             return {**r, "task_id": f"{r['task_id']}@{server}"}
         far = None
         if p.from_agent is not None:
-            from_trusted(caller, p.from_agent)
+            from_trusted(app, caller, p.from_agent)
             far = p.from_agent.model_dump()
         if name not in app.queues.queues:
             known = ", ".join(sorted(app.queues.queues)) or "none configured"
@@ -935,7 +966,7 @@ def register_agent_ops(app: App) -> None:
         task_id, server = split_address(p.task_id, app.server_name)
         if server is None:
             return None
-        link = across(server, caller)
+        link = across(app, server, caller)
         try:
             return {"result": await link.call(op, {"task_id": task_id})}
         except OpError as e:
@@ -1251,7 +1282,7 @@ def register_agent_ops(app: App) -> None:
             raise OpError("bad_params", "handle is required")
         h, server = split_address(p.handle, app.server_name)
         if server is not None:
-            link = across(server, caller)
+            link = across(app, server, caller)
             try:
                 return await link.call(
                     "peer.close",
@@ -1314,7 +1345,7 @@ def register_agent_ops(app: App) -> None:
         """session_close from an agent on a server linked with trust, under
         the same rule as here: a session it started closes at once when done,
         any other on a second call with the token it was given."""
-        key = from_trusted(caller, p.sender)
+        key = from_trusted(app, caller, p.sender)
         s = target(p.target)
         s.check_lock()
         card = s.wire()

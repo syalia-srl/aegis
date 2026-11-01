@@ -798,6 +798,25 @@ class Fold:
             return self._upsert(
                 _entry(f"e{i}", "system", "ok", ts, d.SYSTEM_GLYPH, summary=line)
             )
+        if kind == "handoff_off":
+            # The session a handoff started will not take over (registry.py).
+            line = f"handoff called off: {rec.get('handle')} {rec.get('why')}"
+            return self._upsert(
+                _entry(f"e{i}", "system", "ok", ts, d.SYSTEM_GLYPH, summary=line)
+            )
+        if kind == "server_paused":
+            # The person paused every session (app.pause_all); the stop's
+            # own record follows.
+            return self._upsert(
+                _entry(
+                    f"e{i}",
+                    "system",
+                    "ok",
+                    ts,
+                    d.SYSTEM_GLYPH,
+                    summary="paused: the person paused every session",
+                )
+            )
         if kind == "quota_paused":
             # The quota gate interrupted the turn (app.on_quota); the
             # interrupt's own record and result follow.
@@ -819,6 +838,9 @@ class Fold:
                 "name": str(rec.get("name")),
                 "action": str(rec.get("action")),
             }
+            # On another server: the agent named it across a trusted link.
+            if rec.get("server"):
+                det["server"] = str(rec["server"])
             return self._upsert(
                 _entry(
                     f"e{i}",
@@ -1005,6 +1027,36 @@ class Fold:
                     summary=status,
                     detail=det,
                 )
+            )
+        if kind == "claude_login":
+            # The Claude sign-in card (claude/login.py): a later record with the
+            # same id adds the sessions that failed since.
+            cid = str(rec.get("card_id"))
+            prev = self._entries.get(cid)
+            det = {
+                "handles": list(rec.get("handles") or []),
+                "path": rec.get("path"),
+                "restarted": None,
+            }
+            return self._upsert(
+                _entry(
+                    cid,
+                    "claude_login",
+                    "waiting",
+                    prev["ts"] if prev else ts,
+                    d.ERROR_GLYPH,
+                    title="Claude sign-in failed",
+                    summary="waiting",
+                    detail=det,
+                )
+            )
+        if kind == "claude_login_done":
+            e = self._entries.get(str(rec.get("card_id")))
+            if e is None:
+                return []
+            det = {**e["detail"], "restarted": list(rec.get("restarted") or [])}
+            return self._upsert(
+                {**e, "status": "renewed", "summary": "renewed", "detail": det}
             )
         if kind in ("secret_gone", "secret_provided"):
             e = self._entries.get(str(rec.get("secret_id")))
@@ -1239,6 +1291,10 @@ class Fold:
                         typed = (self._entries.get(pid) or {}).get("md")
                 if pid is None:
                     pid = self._take(None, command=False)
+            elif ev.text.startswith(NOTICE_HEADER):
+                # Steered mid-turn (Session._steer_owed), with no send of its
+                # own: it must not take the row of a prompt still pending.
+                pid = self._exact(ev.text)
             else:
                 pid = self._take(ev.text, command=False)
             carried = self._entries.get(pid) if pid is not None else None
@@ -1508,7 +1564,11 @@ class Fold:
                 report = None  # made in an earlier turn; this one ended without one
             error = ""
             if ev.is_error and not interrupted:
-                error = f"turn failed ({ev.subtype or 'error'})"
+                error = (
+                    "Claude sign-in failed"
+                    if ev.auth_failed
+                    else f"turn failed ({ev.subtype or 'error'})"
+                )
             self._stand(report=report, turn_error=error)
             # A turn that handed back to the person starts idle; one that ended
             # to wait on a monitor or a queue task keeps working (spec
@@ -1534,11 +1594,7 @@ class Fold:
             if ev.turns == 0 and len(parts) == 1 and not ev.is_error:
                 return ops  # a local command that cost nothing: its own entry says it
             if ev.is_error:
-                head = (
-                    "interrupted"
-                    if interrupted
-                    else f"turn failed ({ev.subtype or 'error'})"
-                )
+                head = "interrupted" if interrupted else error
                 return ops + self._upsert(
                     _entry(
                         id,

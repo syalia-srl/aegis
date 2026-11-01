@@ -22,6 +22,7 @@ import { age, countdown, diskRows, elapsed, hostRow, hostSeverity, mbps, netRows
 import { closeCard, initSide, restState, toggleCollapsed } from "./side.js";
 import { installKeys, renderKeys } from "./keys.js";
 import { Palette } from "./palette.js";
+import { Switcher } from "./switcher.js";
 import { entryIcon, factIcon, glyph, gorgoneion, icon, iconText, installGlyphs, LABEL } from "./glyphs.js";
 import { CommandMenu } from "./commands.js";
 import * as cmenu from "./menu.js";
@@ -47,7 +48,7 @@ import { setToastOpener, toast } from "./toast.js";
 import { Speaker } from "./speak.js";
 import { closeTerm, drawCard, openTerm } from "./termview.js";
 import { browserSources, closeBrowser, drawBrowser, mountBrowser, openBrowser } from "./browserview.js";
-import { applyUpdate, checkForUpdate, setAutoApply, startWorker } from "./appworker.js";
+import { applyUpdate, checkForUpdate, setAutoApply, startWorker, takeBuild } from "./appworker.js";
 import { closeInstallDialog, startInstall } from "./install.js";
 import { checkRotation, closePushPanel, openPushPanel, pushSupported, setupPush } from "./pushpanel.js";
 import { clearDevice, loadFleet, loadTranscript, saveFleet, saveTranscript } from "./devicestore.js";
@@ -156,6 +157,10 @@ artifacts.setup({
   entry: (id) => transcript.entries.get(id),
   key: () => shown,
   point: (frame, params) => pagePoint(frame, params),
+  dictation: () => dictation,
+  toast: (message) => toast(message, { kind: "error" }),
+  waitOnline: () => waitOnline(),
+  local: (key) => !forKey(key).server,
 });
 const pointing = { items: (ctx) => pointItems(ctx), send: (key, text) => toComposer(key, text) };
 const viewer = new Viewer($("viewer"), { entry: (id) => transcript.entries.get(id), point: pointing });
@@ -271,6 +276,8 @@ $("nav-last").append(icon("start"));
 $("nav-up").append(icon("up"));
 $("nav-down").append(icon("down"));
 $("jump").append(icon("latest"));
+$("hdr-burger").append(icon("menu"));
+$("menu-fleet").append(icon("fleet"));
 $("bell").append(icon("bell"));
 $("settings-btn").prepend(icon("gear"));
 $("journal-btn").append(icon("book"));
@@ -294,7 +301,8 @@ $("closing-g").append(glyph("done"));
 $("sp-mark").prepend(gorgoneion());
 $("boot-mark").append(gorgoneion());
 $("band-mark").append(gorgoneion());
-installBell($("bell"), pushSupported() ? openPushPanel : null);
+// On a phone the bell closes its menu, so the panel hangs from the menu button.
+installBell($("bell"), pushSupported() ? (bell) => openPushPanel(phoneHeader.matches ? $("hdr-burger") : bell) : null);
 $("nav-up").addEventListener("click", () => transcript.message(-1));
 $("nav-down").addEventListener("click", () => transcript.message(1));
 $("nav-pos").addEventListener("click", () => transcript.firstUnread());
@@ -517,6 +525,9 @@ $("login").addEventListener("submit", async (ev) => {
 
 // -- the connection -----------------------------------------------------------
 let wasClosed = false; // a reconnect checks for a new build
+// The build this page is (web.py writes it in), against the one the server
+// names in each welcome: they differ after an upgrade (#499).
+const PAGE_BUILD = document.querySelector("meta[name=aegis-build]")?.content || "";
 
 // The banner while the connection is down: a state, so it stays at the top of
 // the page rather than a toast. A socket that comes back within 3 s never
@@ -592,6 +603,7 @@ const conn = new Connection(`${location.protocol === "https:" ? "wss" : "ws"}://
     $("conn-dot").className = `dot ${state === "open" ? "ready" : state === "connecting" ? "ghost" : "err"}`;
     $("conn-text").textContent =
       state === "open" ? server : state === "connecting" ? "connecting" : state === "closed" ? "disconnected, retrying" : state;
+    markHdrMenu();
     // For the band offline, where the welcome that names the server is out of reach.
     if (state === "open" && server) localStorage.setItem("aegis.server", server);
     // What arrived before a close is still the server's latest: kept at once.
@@ -616,7 +628,8 @@ const conn = new Connection(`${location.protocol === "https:" ? "wss" : "ws"}://
     }
     if (state === "closed") wasClosed = true;
     if (state === "open") {
-      if (wasClosed) checkForUpdate();
+      if (conn.build && PAGE_BUILD && !PAGE_BUILD.startsWith("__") && conn.build !== PAGE_BUILD) takeBuild(conn.build);
+      else if (wasClosed) checkForUpdate();
       wasClosed = false;
       setWho(conn.me, conn.owner);
       checkPush(); // after setWho: the rows are this token's
@@ -722,35 +735,45 @@ for (const id of ["band-quota-link", "s-quota-head"]) $(id).addEventListener("cl
 // paused by errors.
 const schedules = new Schedules(conn, $("schedules"), {
   go,
-  sessions: () => local(),
+  sessions: (server) => (server ? on(server) : local()),
   onCount: (n, red) => {
     $("schedules-n").textContent = n ? String(n) : "";
     $("schedules-n").classList.toggle("err", red);
+    markHdrMenu();
   },
 });
 setSecrets((op, params) => callFor(shown, op, params));
+// A card asks the server of the session it is shown in: names are per server.
+const shownServer = () => (shown ? forKey(shown).server : null);
+// A card a session here made across a trusted link goes to the server it names.
+// In a far session's transcript the name is that server's word about its own
+// links, and undefined finds no schedule: it could otherwise put an Unpause for
+// a schedule of this server or another link in front of a person.
+const cardServer = (named) => (!named ? shownServer() : shownServer() ? undefined : named);
 setApprovals({
-  schedule: (name) => schedules.items.get(name) || null,
-  call: (op, params) => conn.call(op, params),
+  schedule: (name, named) => schedules.on(cardServer(named)).get(name) || null,
+  call: (op, params, named) => conn.call(op, params, cardServer(named)),
 });
-conn.subscribe(
-  "schedules",
+const scheduleHandlers = (server) => [
   (list) => {
-    schedules.onSnapshot(list);
+    schedules.onSnapshot(list, server);
     refreshApprovals();
   },
   (ops) => {
-    schedules.onPatch(ops);
+    schedules.onPatch(ops, server);
     refreshApprovals();
   },
-);
+];
+conn.subscribe("schedules", ...scheduleHandlers(null));
 
 // The workflow runs (workflows.py), for their cards in the transcript and
 // their canvas panes. A running card counts its times up once a second.
 // `workflow-runs` has every run's summary, without the tree and the story a
 // card draws: those were 96% of the bytes (#525). A card's run comes whole
-// from `workflow:<run>`, subscribed while a card of it is in the page.
-const wfRuns = new Map(); // run -> its summary
+// from `workflow:<run>`, subscribed while a card of it is in the page. A linked
+// server's runs come the same way over its link (#489), each with its `server`,
+// and a card's subscribe and calls go there.
+const wfRuns = new Map(); // run -> its summary, with `server`: null for this one
 const wfWhole = new Map(); // run -> {w: the run whole, or null until it lands; unsub}
 function wfGet(run) {
   const summary = wfRuns.get(run);
@@ -759,13 +782,22 @@ function wfGet(run) {
   if (!d) {
     d = { w: null, unsub: null };
     wfWhole.set(run, d);
+    // The run is the one asked for, whatever a far server says: a card's calls
+    // are routed by it, and must not reach a run of this server.
     const land = (w) => {
-      d.w = w;
+      d.w = { ...w, run };
       wfChanged(new Set([run]));
     };
-    d.unsub = conn.subscribe(`workflow:${run}`, land, (ops) => {
-      for (const op of ops) if (op.set) land(op.set);
-    });
+    d.unsub = conn.subscribe(
+      `workflow:${run}`,
+      land,
+      (ops) => {
+        for (const op of ops) if (op.set) land(op.set);
+      },
+      undefined,
+      undefined,
+      summary.server,
+    );
   }
   // Until it lands, the card draws from the summary, with no rows yet.
   return d.w || { ...summary, tree: [], story: [] };
@@ -782,8 +814,8 @@ setInterval(wfForget, 10000);
 setWorkflows({
   get: wfGet,
   summary: (run) => wfRuns.get(run) || null,
-  call: (op, params) => conn.call(op, params),
-  view: (files, line) => viewer.open({ files, at: 0, remote: false, glyph: "file", line }),
+  call: (op, params) => conn.call(op, params, wfRuns.get(params.run)?.server),
+  view: (files, line, remote) => viewer.open({ files, at: 0, remote, glyph: "file", line }),
 });
 const locked = workflowLocked;
 // A patch redraws only the cards of the runs it carries.
@@ -794,27 +826,36 @@ const wfChanged = (runs) => {
   const s = sessions.get(shown);
   if (s?.workflow && (!runs || runs.has(s.workflow.run))) renderMeta(s);
 };
-conn.subscribe(
-  "workflow-runs",
-  (list) => {
-    wfRuns.clear();
-    for (const w of list || []) wfRuns.set(w.run, w);
-    wfChanged();
-  },
-  (ops) => {
-    const runs = new Set();
-    for (const op of ops) {
-      const w = op.upsert || (op.merge && wfRuns.has(op.merge.run) && { ...wfRuns.get(op.merge.run), ...op.merge });
-      if (!w) continue;
-      wfRuns.set(w.run, w);
-      // A whole run that is followed takes the summary's news too.
-      const d = wfWhole.get(w.run);
-      if (d?.w) d.w = { ...d.w, ...w };
-      runs.add(w.run);
-    }
-    wfChanged(runs);
-  },
-);
+// A far server cannot take over a run id already held by another server, and
+// this server's own runs always win: a card's calls go where its row says.
+function wfPut(w, server) {
+  const had = wfRuns.get(w.run);
+  if (server && had && had.server !== server) return false;
+  wfRuns.set(w.run, { ...w, server });
+  return true;
+}
+function wfHandlers(server) {
+  return [
+    (list) => {
+      for (const [run, w] of wfRuns) if (w.server === server) wfRuns.delete(run);
+      for (const w of list || []) wfPut(w, server);
+      wfChanged();
+    },
+    (ops) => {
+      const runs = new Set();
+      for (const op of ops) {
+        const w = op.upsert || (op.merge && wfRuns.has(op.merge.run) && { ...wfRuns.get(op.merge.run), ...op.merge });
+        if (!w || !wfPut(w, server)) continue;
+        // A whole run that is followed takes the summary's news too.
+        const d = wfWhole.get(w.run);
+        if (d?.w) d.w = { ...d.w, ...w };
+        runs.add(w.run);
+      }
+      wfChanged(runs);
+    },
+  ];
+}
+conn.subscribe("workflow-runs", ...wfHandlers(null));
 setInterval(() => {
   if ([...wfRuns.values()].some((w) => w.status === "running")) tickWorkflows();
 }, 1000);
@@ -884,6 +925,7 @@ function onLinks(list) {
   linksArrived();
   settings.onLinks(links, conn.server);
   drawServerPick();
+  schedules.onLinks(links, conn.server);
   const names = new Set(links.map((l) => l.name));
   for (const [name, r] of remote) {
     if (names.has(name)) continue;
@@ -891,6 +933,8 @@ function onLinks(list) {
     r.unsubHost?.();
     remote.delete(name);
     for (const [k, m] of sessions) if (m.server === name) sessions.delete(k);
+    for (const [run, w] of wfRuns) if (w.server === name) wfRuns.delete(run);
+    wfChanged();
   }
   for (const l of links) {
     let r = remote.get(l.name);
@@ -899,6 +943,8 @@ function onLinks(list) {
       remote.set(l.name, r);
       r.unsubs.push(
         conn.subscribe("sessions", ...sessionHandlers(l.name), undefined, undefined, l.name),
+        conn.subscribe("workflow-runs", ...wfHandlers(l.name), undefined, undefined, l.name),
+        conn.subscribe("schedules", ...scheduleHandlers(l.name), undefined, undefined, l.name),
         conn.subscribe(
           "quota",
           (snap) => {
@@ -1036,6 +1082,8 @@ function flushSessions() {
   changed = new Set();
   if (!booted) return;
   ordered = ordered.map((m) => sessions.get(m.key)).filter(Boolean);
+  switcher.refresh();
+  sizeTabMore(); // its count includes quiet sessions, which have no tab
   // A session that went quiet or came back changes the set of tabs (#386).
   if (quietChanged()) {
     render();
@@ -1067,6 +1115,8 @@ function onSessions() {
   const since = (m) => m.created_at ?? m.started_at ?? 0;
   const ids = order.arrange([...sessions.values()].sort((a, b) => since(a) - since(b)).map((m) => m.key));
   ordered = ids.map((id) => sessions.get(id));
+  switcher.refresh();
+  sizeTabMore(); // its count includes quiet sessions, which have no tab
   render();
   drawNav(); // the needs count
   ping();
@@ -1270,6 +1320,7 @@ function render() {
   renderTabs($("tablist"), tabbed(), tabFocus(r), tabActions);
   $("tablist").querySelector(".tab.on")?.scrollIntoView({ block: "nearest", inline: "nearest" });
   $("tab-fleet").classList.toggle("on", r.view === "fleet");
+  $("menu-fleet").classList.toggle("on", r.view === "fleet");
   $("tab-add").classList.toggle("on", r.view === "spawn");
   $("settings-btn").classList.toggle("on", r.view === "settings");
   $("journal-btn").classList.toggle("on", r.view === "journal");
@@ -2233,6 +2284,8 @@ function renderMeta(s) {
   drawCold(s);
   drawClosing(s);
   $("s-cwd").textContent = s.cwd;
+  $("s-exit-row").hidden = !s.exit;
+  $("s-exit").textContent = s.exit || "";
   $("chip-model").replaceChildren(factIcon("h", s.harness), s.model);
   $("chip-model").title = s.model_id || "";
   $("chip-effort").replaceChildren(factIcon("e", s.effort), `${s.effort} effort`);
@@ -2243,13 +2296,15 @@ function renderMeta(s) {
   drawWaiting(s);
   const mons = s.monitors || [];
   $("s-mon-sec").hidden = !mons.length;
-  renderMonitors($("s-monitors"), mons);
+  renderMonitors($("s-monitors"), mons, revealToolRow);
   const working = s.state === "working";
   $("interrupt").hidden = !working;
   // A member reads another's session and changes nothing in it (tokens.py).
   const theirs = !mine(s);
-  // A workflow's node is the engine's while its run lives.
-  const held = locked(s);
+  // A workflow's node is the engine's while its run lives, and a handed-off
+  // session its successor's (#874).
+  const held = locked(s) || !!s.continued_by;
+  $("composer").hidden = !!s.continued_by;
   $("continue").disabled = working || theirs || held;
   $("restart").disabled = theirs || held || !!s.old;
   $("working").hidden = !working;
@@ -3349,6 +3404,7 @@ for (const [kind, id] of [
 
 // -- tab bar and keys -----------------------------------------------------------
 $("tab-fleet").addEventListener("click", () => go("#fleet"));
+$("menu-fleet").addEventListener("click", () => go("#fleet"));
 $("tab-add").addEventListener("click", () => {
   spawnFrom = null;
   if (!offline()) go("#new");
@@ -3366,6 +3422,14 @@ $("files-btn").addEventListener("click", () => go(filesView.path ? filesHash(fil
 $("schedules-btn").addEventListener("click", () => go("#schedules"));
 keymap.addEventListener("click", (ev) => ev.target === keymap && help(false));
 const palette = new Palette($("palette"), () => route().view);
+// Alt+P and the strip's "N ▾" button (#781): every open session, by server.
+const switcher = new Switcher($("switcher"), {
+  metas: () => ordered,
+  here: () => fleetStacks.here || "this server",
+  links: () => links,
+  current: () => tabFocus(route()),
+  open: (key) => openCard(key),
+});
 
 // Alt+J and the navigator's button. In byNeed's order, from the tab after this
 // one; from the top when this one is not in the list, as after reading a
@@ -3478,6 +3542,10 @@ installKeys(
     },
     escape() {
       if (cancelAsk() || closeInstallDialog() || closePushPanel()) return;
+      if (root.dataset.menu === "open") {
+        setHdrMenu(false);
+        return $("hdr-burger").focus();
+      }
       if (root.dataset.side === "open") return closeSide();
       if (!keymap.hidden) help(false);
       else if (cmenu.close() || cmenu.unbar() || viewer.close() || find.close() || closeMonitorCard() || closeCard()) return;
@@ -3494,6 +3562,10 @@ installKeys(
       if (route().view === "session" && !b.disabled) b.click();
     },
     palette: () => palette.toggle(),
+    sessions: () => {
+      palette.close();
+      switcher.open();
+    },
   },
   () => (booted ? route().view : "boot"),
 );
@@ -3623,9 +3695,11 @@ const dictation = new Dictation({
   prepare: () => conn.call("dictation.prepare"),
   onState(state) {
     for (const [b, el] of mics()) b.dataset.state = dictation.target?.el === el ? state : "idle";
+    artifacts.dictationState(state);
   },
   onLevel(x) {
     for (const [b] of mics()) b.style.setProperty("--level", Math.min(1, x * 8).toFixed(2));
+    artifacts.dictationCheck();
   },
   onError(message) {
     toast(message, { kind: "error" });
@@ -3750,10 +3824,15 @@ function drawReplies(s) {
   if (box.dataset.key === key) return;
   box.dataset.key = key;
   box.hidden = !replies.length && !brief && !s.continued_by;
+  // A press keeps the focus where it is (#428): on a phone the focused box is
+  // two lines taller, and its blur moved the chip from under the finger
+  // before the click, so the first tap did nothing.
+  const keepFocus = (e) => e.preventDefault();
   const chips = replies.map((text) => {
     const b = document.createElement("button");
     b.className = "rp";
     b.textContent = text;
+    b.addEventListener("mousedown", keepFocus);
     b.addEventListener("click", () => sendLine(text, false));
     return b;
   });
@@ -3761,18 +3840,23 @@ function drawReplies(s) {
     const h = document.createElement("button");
     h.className = "rp hand";
     h.textContent = `continue fresh · ${fmtTokens(s.context_tokens)}`;
+    h.addEventListener("mousedown", keepFocus);
     h.addEventListener("click", () => handOff(s));
     chips.unshift(h);
   }
   $("replies-pills").replaceChildren(...chips);
   const next = s.continued_by && sessions.get(keyOf(s.server, s.continued_by));
   $("handoff-done").hidden = !s.continued_by;
-  const who = next ? next.handle : "a fresh session";
-  $("handoff-done").textContent = !s.continued_by
-    ? ""
-    : s.archived
-      ? `continued in ${who}`
-      : `continued in ${who}; this tab is archived when it finishes its first turn`;
+  const who = document.createElement(next ? "a" : "span");
+  who.textContent = next ? next.handle : s.continued_by?.includes("@") ? s.continued_by : "a fresh session";
+  if (next) who.href = `#s=${keyOf(s.server, s.continued_by)}`;
+  $("handoff-done").replaceChildren(
+    ...(!s.continued_by
+      ? []
+      : s.archived
+        ? ["continued in ", who]
+        : ["continued in ", who, "; this tab takes no messages and is archived when it finishes its first turn"]),
+  );
   // Outside the rows the transcript watches for growth: follow the end here.
   if (transcript.following) transcript.toBottom();
 }
@@ -3959,7 +4043,11 @@ async function sendLine(text, fromComposer, attachments = [], target = focused()
     if (shown === s.key) transcript.toBottom();
     // /tutorial and /whats-new start a guide in a new session (help.guide):
     // open its tab, on the server that runs it, as a spawn from the new tab does.
-    if (/^\/(tutorial|whats-new|doctor)(\s|$)/.test(text) && r?.log_id) go(`#s=${keyOf(forKey(s.key).server, r.log_id)}`);
+    if (/^\/(tutorial|whats-new|doctor|handoff)(\s|$)/.test(text) && r?.log_id) {
+      // A handoff across a link answers with the server it went to.
+      const far = r.server && r.server !== conn.server ? r.server : forKey(s.key).server;
+      go(`#s=${keyOf(far, r.log_id)}`);
+    }
   };
   if (fromComposer) {
     sending.add(s.key);
@@ -4295,6 +4383,15 @@ function toggleSide() {
   if (root.dataset.side === "open") closeSide();
   else root.dataset.side = "open";
 }
+// A monitor's link to the tool call it waits on: the row open, as find opens it.
+const revealToolRow = (id) => {
+  if (!transcript.entries.has(id)) return false;
+  transcript.reveal(id);
+  transcript.open(id);
+  if (drawerMode.matches) closeSide();
+  return true;
+};
+
 // The header's height, for the drawer to start under it: it wraps to two rows
 // on a phone and grows with the safe area.
 const header = document.querySelector("#a2 > .tabs");
@@ -4303,29 +4400,44 @@ new ResizeObserver(() => root.style.setProperty("--hdr", `${header.getBoundingCl
 new ResizeObserver(() => root.style.setProperty("--composer-h", `${$("composer").offsetHeight}px`)).observe($("composer"));
 $("side-btn").addEventListener("click", toggleSide);
 
-// The strip's menu (#586): while the tabs overflow, a button after them lists
-// every open session in bar order; a choice opens it, and the route's render
-// scrolls its tab into view.
-const MARK_ICON = { needs_you: "need", working: "work", waiting: "wait", error: "err", review: "rev", done: "done" };
+// The strip's button (#586, #781): while the tabs overflow, and always on a
+// phone, where the header has no room for another, it opens the session
+// switcher. Its count is every open session, quiet ones included, as the
+// switcher lists them. A tap opens it without the field's focus, so no
+// on-screen keyboard covers the list.
+const phoneHeader = matchMedia("(max-width:760px)"); // the one-row header (base.css)
 function sizeTabMore() {
   const list = $("tablist");
-  $("tab-more").hidden = list.scrollWidth <= list.clientWidth + 1;
-  $("tab-more").replaceChildren(`${tabbed().length} `, icon("caret-d"));
+  $("tab-more").hidden = !phoneHeader.matches && list.scrollWidth <= list.clientWidth + 1;
+  $("tab-more").replaceChildren(`${ordered.length} `, icon("caret-d"));
 }
 new ResizeObserver(sizeTabMore).observe($("tablist"));
 new MutationObserver(sizeTabMore).observe($("tablist"), { childList: true });
-$("tab-more").addEventListener("click", () => {
-  // In the bar's order, a group's members under its head (#586).
-  const items = blocksOf(tabbed(), tabActions.here).flatMap((b) =>
-    b.members.map((m, i) => ({
-      id: m.key,
-      label: `${i ? "↳ " : ""}${m.handle}${m.server ? ` · ${m.server}` : ""}`,
-      icon: MARK_ICON[m.mark] || "dot",
-      run: () => go(`#s=${m.key}`),
-    })),
-  );
-  cmenu.open({ groups: [items] }, { anchor: $("tab-more") }, $("tab-more"));
+phoneHeader.addEventListener("change", sizeTabMore);
+$("tab-more").addEventListener("click", () => switcher.open({ focus: !matchMedia("(pointer:coarse)").matches }));
+
+// The phone header's menu (#896): the controls a one-row header has no room
+// for. A pick, a tap beside it, Escape or another view closes it.
+function setHdrMenu(open) {
+  if (open) root.dataset.menu = "open";
+  else delete root.dataset.menu;
+  $("hdr-burger").setAttribute("aria-expanded", String(open));
+}
+// The closed menu still says when something in it needs attention.
+function markHdrMenu() {
+  const err = (id) => $(id).classList.contains("err");
+  $("hdr-burger").classList.toggle("alert", err("conn-dot") || err("schedules-n"));
+}
+$("hdr-burger").addEventListener("click", () => {
+  setHdrMenu(true);
+  $("menu-fleet").focus({ preventScroll: true });
 });
+$("hdr-scrim").addEventListener("click", () => setHdrMenu(false));
+$("hdr-menu").addEventListener("click", (ev) => {
+  if (ev.target.closest("button")) setHdrMenu(false);
+});
+window.addEventListener("hashchange", () => setHdrMenu(false));
+phoneHeader.addEventListener("change", () => setHdrMenu(false));
 $("nav-side").addEventListener("click", toggleSide);
 // The dimmed transcript is the session view's own ::after, so a tap on it
 // lands on the view itself and goes no further.

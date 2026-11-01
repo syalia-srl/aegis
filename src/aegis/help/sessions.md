@@ -33,7 +33,10 @@ preset back. An agent is a named preset from
 with the paperclip go out with the first message.
 
 An agent starts a session with `session_spawn`, and a person can type
-`/spawn <agent> <prompt>` in any session's box (see the commands page).
+`/spawn <agent> <prompt>` in any session's box (see the commands page). A
+first message that starts with `/` runs as if typed in the new session's box,
+so `/feedback <words>` runs aegis's command instead of reaching the harness as
+text; start it with `//` to send a leading `/`.
 
 ## An untested harness version
 
@@ -209,10 +212,12 @@ them too.
 
 aegis tells every live session when the host runs short: the disk is full,
 memory is short, the CPU is saturated or the quota runs ahead of pace. A
-notice never starts a turn. It rides on the session's next message or on the
-result of its next aegis tool call, whichever comes first, and never goes
-into the system prompt. A call made with `aegis call` carries none, so its
-output still parses. An agent reads a block headed like an inbox message:
+notice never starts a turn, and never goes into the system prompt. It rides
+on the session's next message. During a turn, Claude Code reads it right after
+the agent's next tool call of any kind. Codex, OpenCode and Cursor read it on
+the result of their next aegis tool call, and a call made with `aegis call`
+carries none, so its output still parses. An agent reads a block headed like
+an inbox message:
 
 ```text
 > from aegis:notice · disk · warn · 2026-10-18T09:12:04
@@ -304,6 +309,27 @@ group, and any other member moves only inside its group. Alt+Shift+[ and
 Alt+Shift+] move the tab in front one place left or right by the same rules,
 from the message box too.
 
+## Switch between sessions
+
+Alt+P lists every open session: this server's at the top, then each linked
+server's in the Fleet's order, then the quiet ones from all of them, each
+named with its server. A row shows the session's mark, handle and title, its
+state and when it last changed, and the line it is on: what it asks you, its
+plan item, or what it is doing.
+
+- Within a server, the sessions that need you lead, then errors, then
+  results to review, the longest waiting on top, as Alt+J walks them. The
+  rest follow, the most recent on top.
+- Type to narrow the list by handle, title, that line or the server's name.
+  Arrows, Tab or Alt+P move; Alt+Shift+P moves back; Page Down and Page Up go
+  to the next or previous server. Enter opens the session; Esc closes the list.
+- Opening a quiet session brings its tab back, as a click on its Fleet card
+  does.
+- The "N ▾" button at the end of the tab bar opens the same list. It shows
+  while the tabs overflow, and always on a phone, where it is the way in. On
+  a phone the list fills the screen, and the close button beside its field
+  takes you back.
+
 ## Quiet sessions
 
 A quiet session has no tab. Its card stays in the Fleet, dimmed and marked
@@ -317,6 +343,8 @@ until it is quieted again; a queue worker comes back only on an error.
 - `/quiet` in a session's box quiets that session, as Alt+Q does.
 - An agent calls `session_quiet` with a handle, its own included.
 - Clicking a quiet card in the Fleet brings the session back at once.
+- Opening it from the Alt+P list does the same (see
+  [Switch between sessions](#switch-between-sessions)).
 
 Quiet is about the tab, not the process: a quiet session keeps working, and
 sleeping one keeps it quiet. Wake, Continue and Restart leave it quiet too;
@@ -457,6 +485,29 @@ to twice in a row after clean restarts and once after a crash; the next cut
 leaves it waiting for you, with a note saying so. After a crash, a harness
 the dead server left running is ended first. A harness that failed on its own
 is not restarted.
+
+## Pause every session
+
+When the sessions together overload the host, a restart alone brings the
+load back: it continues every turn it cut. Pause every session instead.
+
+- **Settings, Sessions, Pause all**, on a running server. Every session's
+  process ends, and with it whatever its agent left running: builds, test
+  suites, browsers. A turn this cuts shows `paused: the person paused every
+  session` in its transcript.
+- **`aegis serve --paused`** starts or restarts with every session paused:
+  the turns the stop cut stay cut, in a one-off run or a systemd drop-in.
+
+While the pause lasts, nothing new starts. Messages from agents and monitors
+wait in each session's held list, queued tasks stay pending, and spawns
+wait, each saying why: `the person paused every session`. The pause lasts
+across a restart, until you lift it:
+
+- **Resume all**, in the same place, continues each cut turn with a note
+  that the pause cut it, sends what each session held, and starts what
+  waited.
+- **A message you write to one session** resumes that session alone, with
+  its cut turn. The others stay paused. An agent's message cannot resume one.
 
 ## Load
 

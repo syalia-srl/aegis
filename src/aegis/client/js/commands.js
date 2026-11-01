@@ -88,6 +88,37 @@ function spawnChoices(before, partial, catalog) {
     .map(([f, [, doc]]) => ({ v: `--${f}`, doc, source: "" }));
 }
 
+// /handoff's flags as commands.parse_handoff reads them: each before the text.
+const HANDOFF_FLAGS = {
+  agent: ["agents", "the agent that continues, agent@server for a linked server's"],
+  model: ["models", "the new session's model"],
+  effort: ["efforts", "its reasoning effort"],
+  permission: ["permissions", "what it may do"],
+  cwd: [null, "the directory it works in"],
+};
+
+// `before`: the whole words after `/handoff`; the first that is no flag starts
+// the text, which completes nothing.
+function handoffChoices(before, partial, catalog, meta) {
+  let pending = null;
+  let model = meta && meta.model;
+  for (const w of before) {
+    if (pending) {
+      if (pending === "model") model = w;
+      pending = null;
+      continue;
+    }
+    if (!w.startsWith("--") || !HANDOFF_FLAGS[w.slice(2)]) return [];
+    pending = w.slice(2);
+  }
+  if (pending === "agent") return catalog.agents || [];
+  if (pending) return values(HANDOFF_FLAGS[pending][0], catalog, model);
+  if (!partial.startsWith("-")) return [];
+  return Object.entries(HANDOFF_FLAGS)
+    .filter(([f]) => !before.includes(`--${f}`))
+    .map(([f, [, doc]]) => ({ v: `--${f}`, doc, source: "" }));
+}
+
 // /announce's flags stand anywhere (commands.parse_announce); a word that
 // does not start with "-" is the text, which completes nothing.
 function announceChoices(before, partial) {
@@ -119,12 +150,17 @@ export function complete(line, catalog, meta) {
   const cmd = catalog.commands.find((c) => c.name === name);
   if (!cmd || !cmd.args) return { items: [] };
   let partial, head, choices;
-  if (cmd.args === "spawn" || cmd.args === "announce") {
+  if (cmd.args === "spawn" || cmd.args === "announce" || cmd.args === "handoff") {
     const words = line.slice(sp + 1).split(" ");
     partial = words.pop();
     head = line.slice(0, line.length - partial.length);
     const before = words.filter(Boolean);
-    choices = cmd.args === "spawn" ? spawnChoices(before, partial, catalog) : announceChoices(before, partial);
+    choices =
+      cmd.args === "spawn"
+        ? spawnChoices(before, partial, catalog)
+        : cmd.args === "handoff"
+          ? handoffChoices(before, partial, catalog, meta)
+          : announceChoices(before, partial);
   } else {
     partial = line.slice(sp + 1).trim();
     if (partial.includes(" ")) return { items: [] };
@@ -243,6 +279,9 @@ export class CommandMenu {
     this.items = complete(line, this.catalog, this.meta()).items.slice(0, 50);
     this.at = 0;
     this.rows.replaceChildren(...this.items.map((it, i) => rowNode(it, i === this.at)));
+    // Nothing to offer, as in /spawn's prompt (#764): the inline menu stays
+    // open, to come back as the line changes, but shows nothing.
+    this.box.classList.toggle("empty", !this.items.length && !this.overlay);
   }
 
   // Whether the line names a known command, for the composer's outline. An
@@ -272,7 +311,7 @@ export class CommandMenu {
   // whose required argument is missing never sends: Enter opens its
   // arguments. One whose argument is optional (`[page]`) sends as it is.
   onKey(ev) {
-    if (!this.isOpen) return false;
+    if (!this.isOpen || this.box.classList.contains("empty")) return false;
     const line = this.line();
     const it = this.items[this.at];
     if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {

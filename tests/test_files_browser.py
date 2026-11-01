@@ -292,14 +292,14 @@ def test_on_a_phone_files_is_reached_from_the_journal_view(
     page,  # noqa: F811
 ):
     """The Journal view carries a way into Files on a phone, beside the
-    header's Files button (#586); on a desktop the link stays hidden."""
+    Files button in the header's menu (#586, #896); on a desktop the link stays
+    hidden."""
     page.goto(server.url)
     page.wait_for_selector("#a2[data-view=fleet]")
     page.click("#journal-btn")
     page.wait_for_selector("#a2[data-view=journal]")
     assert page.locator(".jfiles").is_hidden()
     page.set_viewport_size({"width": 390, "height": 800})
-    assert page.locator("#files-btn").is_visible()
     link = page.locator(".jfiles")
     box = link.bounding_box()
     assert box and box["height"] >= 44, box

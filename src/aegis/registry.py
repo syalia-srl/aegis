@@ -135,10 +135,12 @@ class Registry(Host):
         self.browsers = None  # browsers.py, set by the app: docked browser panes
         self.quota = None
         self.notices = None  # notices.Notices, set by App
+        self.sign_in = None  # claude.login.SignIn, set by App
         self.load = None  # load.LoadSampler, set by App
         # knowledge.Knowledge, and whose knowledge a session's sends are
         # hinted from (its owner, else the admin); both set by App.
         self.knowledge = None
+        self.know_how = None  # knowledge.know_how.KnowHow, set by App
         self.skill_servers = None  # skill_mcp.SkillServers, set by App
         self._hint_failures: set[str] = set()  # causes already logged
         self.principal_of: Callable[[Session], str] = lambda s: s.spec.owner or ""
@@ -155,11 +157,16 @@ class Registry(Host):
         self.version_policy: Callable[[], dict | None] = lambda: None
         # The app's quota gate: (owner, harness, model) -> quota_gate.Gate.
         self.gate = None
+        # The person's pause of every session (pause.py): session -> why.
+        self.pause_hold = None
         # The app's start_spec: a spec -> the spec to start (its cascade's
         # first model free now) and the gate it passes.
         self.start_spec = None
         # The app's cascade_next, which cools and picks (Host.cascade_next).
         self.cascade = None
+        # Starts the handoff an agent asked for in the turn that just ended
+        # (app.start_pending_handoff).
+        self.start_pending_handoff = None
         self.journal = None
         self.catalogs = None
         # One cgroup per session, when the unit is delegated (cgroups.py); the
@@ -237,6 +244,7 @@ class Registry(Host):
         if self.quota is not None:
             self.quota.turn_ended()
         self._retire_predecessor(session)
+        self._pending_handoff(session)
         self._close_when_finished(session)
         self._maybe_unquiet(session)
         if self.schedules is not None:
@@ -252,24 +260,33 @@ class Registry(Host):
             loop = asyncio.get_running_loop()
             loop.call_later(silent_s, lambda: loop.create_task(nudges.check(session)))
 
+    def flush_ended(self, session: Session) -> None:
+        """What turn_ended does that reads finished(), which was False then:
+        the flush was still in flight (#536)."""
+        if self.queues is not None:
+            self.queues.turn_ended(session)
+        self._close_when_finished(session)
+        self._maybe_unquiet(session)
+        if self.schedules is not None:
+            self.schedules.changed()
+        if self.workflows is not None:
+            self.workflows.changed()
+
     def _retire_predecessor(self, new: Session) -> None:
         """After a handoff, archive the old session once the new one has
         answered (#354). Stateless, so a restart in between changes nothing:
         the new session's spec names the old one, the old one's meta names the
-        new. Called off, with continued_by cleared, when the new turn failed or
-        the person has used the old session since the new one started."""
+        new. Called off, with continued_by cleared, when the new turn failed.
+        Nothing else can have used the old session: it refuses messages meanwhile
+        (Session.check_handed_off, #874)."""
         old = self.sessions.get(new.spec.continues or "")
         if old is None or old.continued_by != new.log_id:
             return
         # Only a turn that ended with the model's answer counts: a send that
         # failed reaches here with no Result, so no "ended" at all.
         ended = new.standing.get("ended") or {}
-        if (
-            ended.get("how") not in ("reported", "silent", "command")
-            or old.in_turn
-            or old.last_activity > new.created_at
-        ):
-            old.mark_continued(None)
+        if ended.get("how") not in ("reported", "silent", "command") or old.in_turn:
+            self._call_off_handoff(old, new, "its first turn did not finish")
             return
         # The sessions the old one started report to the new one now (#641).
         for kid in self.sessions.values():
@@ -278,6 +295,29 @@ class Registry(Host):
                 self.metas.write(kid.meta())
         self.refresh_card(new.log_id)
         asyncio.get_running_loop().create_task(self._archive(old))
+
+    def _pending_handoff(self, s: Session) -> None:
+        """The turn that asked for a handoff ended: start it, or give the
+        session back when the turn failed."""
+        if s.continued_by != "pending":
+            return
+        if s.standing.get("turn_error"):
+            self.call_off_pending(s, "the turn that asked for it failed")
+        elif self.start_pending_handoff is not None:
+            asyncio.get_running_loop().create_task(self.start_pending_handoff(s))
+
+    def call_off_pending(self, s: Session, why: str) -> None:
+        """A handoff an agent asked for will not start."""
+        s.mark_continued(None)
+        s.report({"kind": "handoff_off", "handle": "the new session", "why": why})
+
+    def _call_off_handoff(self, old: Session, new: Session, why: str) -> None:
+        """The new session will not take over: the old one opens again and its
+        transcript says so. Safe to call twice for one failure: the first call
+        clears the name the guard reads."""
+        if old.continued_by == new.log_id:
+            old.mark_continued(None)
+            old.report({"kind": "handoff_off", "handle": new.handle, "why": why})
 
     async def _archive(self, s: Session) -> None:
         try:
@@ -295,12 +335,13 @@ class Registry(Host):
             frontier = {s.log_id for s in kids}
         return out[::-1]
 
-    def wakers(self, s: Session) -> list[str]:
+    def wakers(self, s: Session, *, run: bool = True) -> list[str]:
         """What will still wake ``s`` with a new turn, one phrase each: its
         approved run, monitors, background tasks and callback queue tasks.
         turn_end refuses done while any is live (#608): the task is not over.
         Its children are not here; they do not wake it, and one spawned for the
-        person may outlive the task that started it."""
+        person may outlive the task that started it. ``run=False`` leaves the
+        run out, for a handoff: a run follows its owner's successor."""
         n_mon = len(self.monitors.of(s.log_id)) if self.monitors is not None else 0
         n_tasks = sum(1 for w in self._waiting_for(s) if w["kind"] == "task")
         counts = (
@@ -308,8 +349,8 @@ class Registry(Host):
             (len(s.open_tasks), "background task"),
             (n_tasks, "queue task"),
         )
-        run = self._running(s)
-        out = [f"workflow {run.run}"] if run is not None else []
+        live = self._running(s) if run else None
+        out = [f"workflow {live.run}"] if live is not None else []
         out += [f"{n} {noun}{'' if n == 1 else 's'}" for n, noun in counts if n]
         return out
 
@@ -341,6 +382,8 @@ class Registry(Host):
         report = s.standing.get("report") or {}
         if not report.get("close") or report.get("attention") != "done":
             return
+        if s.continued_by == "pending":
+            return  # its handoff retires it, and its children go to the new one
         if s.standing.get("turn_error") or not self.finished(s):
             return
         if self.close_blockers(s):
@@ -379,8 +422,11 @@ class Registry(Host):
         # A handoff whose new session died before answering: the old one stays.
         # One that answered has already archived the old one, so this is a no-op.
         old = self.sessions.get(session.spec.continues or "")
-        if old is not None and old.continued_by == session.log_id:
-            old.mark_continued(None)
+        if old is not None:
+            self._call_off_handoff(old, session, "its process ended")
+        # The turn that asked for a handoff will never end now.
+        if session.continued_by == "pending":
+            self.call_off_pending(session, "the session's process ended")
         # A process that ends on its own failed: whatever its card says, the
         # person should see it (#386). A SIGTERM is most likely the server's
         # own stop under systemd, and the next boot continues the session.
@@ -392,11 +438,22 @@ class Registry(Host):
     def successor(self, old: Session) -> Session | str | None:
         """The live session continuing ``old`` after a handoff: "starting"
         while it spawns, the open session it names, or None when the name is
-        stale (the new session was closed, or a crash left it behind)."""
+        stale (the new session was closed, or a crash left it behind);
+        "pending" while the agent that asked ends its turn; ``handle@server``
+        for the moment before a handoff across a link archives it."""
         c = old.continued_by
-        if c == "starting":
+        if c in ("starting", "pending") or (c and "@" in c):
             return c
         return self.sessions.get(c) if c else None
+
+    def successor_name(self, session: Session) -> str | None:
+        """The handle continuing ``session`` after a handoff, or None."""
+        next_ = self.successor(session)
+        if next_ is None:
+            return None
+        if isinstance(next_, str):
+            return next_ if "@" in next_ else "a new session"
+        return next_.handle
 
     def workflow_lock(self, session: Session) -> str | None:
         """A node's session is the workflow's while its run is live: nobody
@@ -410,7 +467,21 @@ class Registry(Host):
         return None if self.cascade is None else self.cascade(session, text)
 
     def notice_blocks(self, session: Session, at: str) -> str:
-        return "" if self.notices is None else self.notices.pending(session, at)
+        blocks = "" if self.notices is None else self.notices.pending(session, at)
+        menus = "" if self.know_how is None else self.know_how.pending(session)
+        return "\n\n".join(b for b in (blocks, menus) if b)
+
+    def know_how_touched(self, session: Session, tool_input: dict) -> None:
+        if self.know_how is not None:
+            self.know_how.touched(session, tool_input)
+
+    async def know_how_ready(self, session: Session) -> None:
+        # An extra, as the hint is: whatever breaks in it, the send still goes.
+        if self.know_how is not None:
+            try:
+                await self.know_how.ready(session)
+            except Exception:
+                log.exception("know-how failed for %s", session.handle)
 
     def knowledge_native(self, owner: str | None) -> bool:
         return self.native_of(owner)
@@ -433,11 +504,24 @@ class Registry(Host):
     def compacted(self, session: Session) -> None:
         if self.notices is not None:
             self.notices.forget(session.log_id)
+        if self.know_how is not None:
+            self.know_how.reset(session)
+
+    def sign_in_failed(self, session: Session) -> None:
+        if self.sign_in is not None:
+            self.sign_in.failed(session)
+
+    def rate_limit(self, session: Session, windows: dict) -> None:
+        # A member's stream reports the member's account, not the server's.
+        if self.quota is not None and session.spec.linux_user is None:
+            self.quota.observe(windows)
 
     def quota_hold(self, session: Session) -> str | None:
         """A paused session waits for its gate to open; any other may start a
         turn unless its owner is stopped, or closed and the harness would
-        have to start (quota_gate.py)."""
+        have to start (quota_gate.py), or every session is paused (pause.py)."""
+        if self.pause_hold is not None and (why := self.pause_hold(session)):
+            return why
         if session.quota_paused:
             return session.quota_paused
         if self.gate is None:
@@ -681,6 +765,7 @@ class Registry(Host):
             restart_continues=meta.get("restart_continues") or 0,
             quota_paused=meta.get("quota_paused"),
             notices_sent=meta.get("notices_sent"),
+            know_how_sent=meta.get("know_how_sent"),
             items_sent=meta.get("items_sent"),
             skills=meta.get("skills"),
             skill_runs=meta.get("skill_runs"),
@@ -691,6 +776,7 @@ class Registry(Host):
             continued_by=None
             if meta.get("continued_by") == "starting"
             else meta.get("continued_by"),
+            handoff_pending=meta.get("handoff_pending"),
             quiet=bool(meta.get("quiet")),
             autoclose=bool(meta.get("autoclose")),
             checked_version=meta.get("checked_version"),
@@ -926,12 +1012,16 @@ class Registry(Host):
             self.side_notes.drop(log_id)
         if self.knowledge is not None:
             self.knowledge.forget(log_id)
+        if self.know_how is not None:
+            self.know_how.drop(log_id)
         if self.skill_servers is not None:
             try:
                 await self.skill_servers.stop_session(log_id)
             except Exception:
                 log.exception("aegis: %s's skill servers did not stop", log_id)
         await s.stop()
+        if (old := self.sessions.get(s.spec.continues or "")) is not None:
+            self._call_off_handoff(old, s, "it was closed")
         if self.secrets is not None:
             # Pads and open requests die with the session, and so do the
             # files people provided to it, unless the agent moved them.
@@ -956,17 +1046,22 @@ class Registry(Host):
     def reopen(self, log_id: str) -> Session:
         if log_id in self.sessions:
             raise OpError("not_archived", f"{log_id} is open")
-        meta = self.archived.pop(log_id, None)
+        meta = self.archived.get(log_id)
         if meta is None:
             raise OpError("no_session", f"no session {log_id!r}")
-        # A person reopening a handed-off session is using it again: it must
-        # not be archived a second time when its successor's next turn ends.
+        if (c := meta.get("continued_by")) is not None:
+            # Its work moved on for good; the transcript stays readable (#874).
+            live = self.sessions.get(c)
+            who = live.handle if live else self.archived.get(c, {}).get("handle", c)
+            raise OpError(
+                "handed_off", f"{meta['handle']} was handed off to {who}; open that one"
+            )
+        del self.archived[log_id]
         meta = {
             **meta,
             "archived": False,
             "last_status": "asleep",
             "asleep_why": "slept",
-            "continued_by": None,
             "quiet": False,  # a person reopening it wants to see it (#386)
         }
         # An open session may have taken its handle meanwhile (#673).

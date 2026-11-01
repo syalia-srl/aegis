@@ -146,19 +146,19 @@ export function entryFiles(e) {
 // round from the last file to the first, and a preview is built only when
 // its file is shown. The preview kind was decided at send (files.py); Open
 // hands the set to the viewer, at the file shown.
+function viaFile(f) {
+  // A linked server's file: every link is rebuilt here from a path of the
+  // one shape /via serves, so no URL the far server chose reaches an href
+  // or a frame on this origin (a javascript: download ran with the cookie).
+  const ok = typeof f.url === "string" && /^\/files\/[A-Za-z0-9_-]+\/[^/?#]+$/.test(f.url);
+  f.url = ok ? fileBase + f.url : "about:blank";
+  f.download = ok ? `${f.url}?download=1` : "about:blank";
+  return f;
+}
 function fileCard(files, glyph) {
   const sent = files.map((f) => ({ ...f }));
   const remote = fileBase !== "";
-  if (remote) {
-    // A linked server's card: every link is rebuilt here from a path of the
-    // one shape /via serves, so no URL the far server chose reaches an href
-    // or a frame on this origin (a javascript: download ran with the cookie).
-    for (const f of sent) {
-      const ok = typeof f.url === "string" && /^\/files\/[A-Za-z0-9_-]+\/[^/?#]+$/.test(f.url);
-      f.url = ok ? fileBase + f.url : "about:blank";
-      f.download = ok ? `${f.url}?download=1` : "about:blank";
-    }
-  }
+  if (remote) for (const f of sent) viaFile(f);
   const card = el("div", "fcard");
   const bar = el("div", "fbar");
   const name = el("span", "fn");
@@ -272,12 +272,14 @@ export function refreshApprovals() {
 }
 
 function fillApproval(card) {
-  const s = approvals.schedule(card.dataset.name);
+  // Set when the agent made it on another server, across a trusted link.
+  const where = card.dataset.server;
+  const s = approvals.schedule(card.dataset.name, where);
   const bar = el("div", "fbar");
   bar.append(entryIcon(card.dataset.glyph), el("span", "fn", card.dataset.name));
   if (!s) {
     card.dataset.state = "gone";
-    bar.append(el("span", "fs", "deleted"));
+    bar.append(el("span", "fs", where ? `on ${where}: see its Schedules view` : "deleted"));
     card.replaceChildren(bar);
     return;
   }
@@ -300,7 +302,7 @@ function fillApproval(card) {
       go.disabled = true;
       try {
         // A workflow's version goes with it: the server pins what this card showed.
-        await approvals.call("schedule.resume", { name: card.dataset.name, ...(wf?.sha ? { workflow: wf.sha } : {}) });
+        await approvals.call("schedule.resume", { name: card.dataset.name, ...(wf?.sha ? { workflow: wf.sha } : {}) }, where);
       } catch (err) {
         go.disabled = false;
         go.title = String(err?.message || err);
@@ -429,6 +431,59 @@ function fillRequest(card, e) {
   };
   form.append(input, go);
   body.append(el("div", "prompt", d.prompt || ""), form, hint);
+  card.replaceChildren(bar, body);
+}
+
+// The Claude sign-in card (claude/login.py): how to get a setup-token, and a
+// field the server checks it in. The token never enters the transcript.
+function fillLogin(card, e) {
+  const d = e.detail || {};
+  const who = (d.handles || []).join(", ");
+  card.classList.toggle("gone", e.status !== "waiting");
+  if (e.status !== "waiting") {
+    const { bar } = secretBar(e, "Claude sign-in renewed", "renewed");
+    const done = (d.restarted || []).length ? `Restarted ${d.restarted.join(", ")}.` : "No session was waiting.";
+    card.replaceChildren(bar, el("div", "sbody dim", `The new token is in ${d.path}. ${done}`));
+    return;
+  }
+  const n = (d.handles || []).length;
+  const { bar } = secretBar(e, "Claude sign-in failed", `${n} ${n === 1 ? "session" : "sessions"} waiting`);
+  const body = el("div", "sbody");
+  const steps = el("ol", "steps");
+  for (const [before, code, after] of [
+    ["On any machine with a browser, run ", "claude setup-token", "."],
+    ["Approve access in the browser. If the browser shows a code, paste it back into that terminal.", "", ""],
+    ["The terminal prints a line starting with ", "sk-ant-oat01-", ". Paste that line here."],
+  ]) {
+    const li = el("li", null, before);
+    if (code) li.append(el("code", null, code), after);
+    steps.append(li);
+  }
+  const form = el("form", "sform");
+  const input = el("input");
+  Object.assign(input, { type: "password", autocomplete: "off", placeholder: "sk-ant-oat01-…", required: true });
+  input.setAttribute("aria-label", "Claude token");
+  input.dataset.lpignore = "true";
+  const go = el("button", "btn primary", "Save and check");
+  go.type = "submit";
+  const hint = el("span", "hint", `Waiting: ${who}. The token lasts a year and is kept in ${d.path}, mode 0600.`);
+  form.onsubmit = async (ev) => {
+    ev.preventDefault();
+    if (!input.value) return;
+    go.disabled = true;
+    hint.classList.remove("err");
+    hint.textContent = "Checking with one request on haiku…";
+    try {
+      await secretCall("claude.token", { id: e.id, secret: input.value });
+      input.value = "";
+    } catch (err) {
+      go.disabled = false;
+      hint.textContent = String(err?.message || err);
+      hint.classList.add("err");
+    }
+  };
+  form.append(input, go);
+  body.append(steps, form, hint);
   card.replaceChildren(bar, body);
 }
 
@@ -795,8 +850,11 @@ function seeChip(w, r) {
   chip.onclick = async () => {
     try {
       const got = await workflows.call("workflow.see", { run: w.run, node: r.id });
-      const files = got.files.map((f) => (got.fragment ? { ...f, url: `${f.url}#${got.fragment}` } : f));
-      workflows.view(files, got.line);
+      const remote = fileBase !== "";
+      const files = got.files
+        .map((f) => (remote ? viaFile({ ...f }) : f))
+        .map((f) => (got.fragment ? { ...f, url: `${f.url}#${got.fragment}` } : f));
+      workflows.view(files, got.line, remote);
     } catch (err) {
       chip.title = String(err?.message || err);
       chip.classList.add("bad");
@@ -1777,6 +1835,7 @@ const RENDERERS = {
     const card = el("div", "fcard apcard");
     card.dataset.object = e.detail?.object || "";
     card.dataset.name = e.detail?.name || "";
+    card.dataset.server = e.detail?.server || "";
     card.dataset.glyph = e.glyph || "";
     fillApproval(card);
     body.append(card);
@@ -1799,6 +1858,15 @@ const RENDERERS = {
     fillConfig(card, e);
     body.append(card);
     return row(e, "config", body);
+  },
+
+  claude_login(e) {
+    // A failed Claude sign-in: steps and a token field (fillLogin).
+    const body = el("div", "body");
+    const card = el("div", "fcard scard lcard");
+    fillLogin(card, e);
+    body.append(card);
+    return row(e, "claude_login", body);
   },
 
   knowledge(e) {

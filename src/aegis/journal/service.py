@@ -40,6 +40,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
+from ..quota.core import PACE_HISTORY_LONG, PACE_HISTORY_SHORT
 from ..transcript.store import read_store
 from ..usage import tables
 from ..usage.context import successor_start
@@ -433,6 +434,21 @@ class Journal:
         a window's percent or reset moved."""
         self._q.put(("quota", snapshot))
 
+    def usual_spend(self, billing: str, window: str, span_s: float) -> float | None:
+        """What the last finished windows of this kind spent (tables.usual_spend).
+        None when the file or its table is not there yet, as before a backfill."""
+        keep = PACE_HISTORY_SHORT if span_s < 86400 else PACE_HISTORY_LONG
+        try:
+            con = db.open_read(self.path)
+            try:
+                return tables.usual_spend(
+                    con, billing, window, span_s, time.time(), keep
+                )
+            finally:
+                con.close()
+        except sqlite3.Error:
+            return None
+
     def _usage_changed(self) -> None:
         self._usage_at = time.time()
         self._published = time.monotonic()
@@ -457,13 +473,22 @@ class Journal:
         top = touches[0][4] if touches else None
         sha = None
         unknown = False
+        text = row.text
         if row.commit:
             # The guessed directory first, then where the turn wrote. A hash
             # found nowhere names no repo rather than a wrong one.
             directory, h = row.commit
             files = None
             for d in dict.fromkeys((directory, *row.near)):
-                files = paths.commit_files(d, h, user)
+                found = h
+                if not h:  # it printed none: its subject is all there is
+                    subject = row.text.partition(" ")[2]
+                    found = paths.commit_by_subject(d, subject, row.ts, user)
+                    if not found:
+                        continue
+                    text = f"{found[:7]} {subject}"
+                    h = found
+                files = paths.commit_files(d, found, user)
                 if files is not None:
                     directory = d
                     break
@@ -472,6 +497,8 @@ class Journal:
             )
             sha = paths.full_sha(directory, h, user) if files is not None else None
             unknown = files is None
+            if not h:  # no ref holds it any more, but the command named its repo
+                repo, _, top = paths.place(directory, user)
             touches += [
                 ("commit", repo, f, paths.full(repo, f), top) for f in files or []
             ]
@@ -489,7 +516,7 @@ class Journal:
             repo,
             row.kind,
             row.tag,
-            row.text,
+            text,
             row.source,
             unknown,
             touches,

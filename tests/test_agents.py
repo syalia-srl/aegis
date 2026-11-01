@@ -189,7 +189,10 @@ async def test_a_read_session_keeps_its_card_and_is_refused_what_acts(world):
     assert await turn(s, mcp("session_list")) and s.standing.get("plan")
     for tool, args in (
         ("session_spawn", {"agent": "reviewer"}),
-        ("monitor_start", {"description": "w", "done": "true", "progress": None}),
+        (
+            "monitor_start",
+            {"description": "w", "done": "true", "progress": None, "source": None},
+        ),
         ("peer_handoff", {"target": s.handle, "context": "x"}),
     ):
         said = await turn(s, mcp(tool, **args))
@@ -255,6 +258,25 @@ async def test_messages_to_a_busy_session_are_held_and_arrive_once_in_one_turn(w
     assert row["md"].count(f"> from agent:{a.handle}") == 2
     assert row["md"].index("first note") < row["md"].index("second note")
     assert b.held == []
+
+
+async def test_a_prompt_sent_right_after_a_wake_gets_its_own_reply(world):
+    """The wake's reply never reads as the answer to it: the prompt's row moves
+    under that reply when the harness reads it (#445)."""
+    a = await world.spawn()
+    await a.deliver("> from agent:peer · now", "the wake")
+    await a.send("my prompt", by_person=True)
+    await until(
+        lambda: (
+            a.status == "idle"
+            and len([e for e in a.entries() if e["kind"] == "prose"]) == 2
+        ),
+        what="both replies",
+    )
+    rows = [e for e in a.entries() if e["kind"] in ("inbox", "user", "prose")]
+    assert [e["kind"] for e in rows] == ["inbox", "prose", "user", "prose"]
+    assert "the wake" in rows[1]["md"] and "my prompt" not in rows[1]["md"]
+    assert rows[2]["md"] == "my prompt" and "my prompt" in rows[3]["md"]
 
 
 async def busy(s, seconds: float = 1) -> None:
@@ -328,6 +350,7 @@ async def test_a_monitor_wakes_its_owner_with_the_roster(world, tmp_path):
             done=f"test -f {flag}",
             progress=None,
             interval_s=1,
+            source=None,
         ),
     )
     first = json.loads(said.removeprefix("mcp ok: "))["monitor_id"]
@@ -339,6 +362,7 @@ async def test_a_monitor_wakes_its_owner_with_the_roster(world, tmp_path):
             done="false",
             progress=None,
             interval_s=60,
+            source=None,
         ),
     )
     assert [m["description"] for m in a.wire()["monitors"]] == [
@@ -369,6 +393,7 @@ async def test_monitor_progress_and_fail(world, tmp_path):
             fail="test -f broke",
             progress="cat pct",
             interval_s=1,
+            source=None,
         ),
     )
     await until(
@@ -393,6 +418,7 @@ async def test_a_monitors_card_carries_its_commands_readings_and_eta(world, tmp_
             done="false",
             progress="cat pct",
             interval_s=1,
+            source=None,
         ),
     )
     for prev, v in ((0, 20), (20, 40)):
@@ -430,6 +456,7 @@ async def test_a_check_that_cannot_run_shows_its_exit_code_and_stderr(world):
             done="no-such-aegis-cmd --status",
             progress=None,
             interval_s=1,
+            source=None,
         ),
     )
     await until(
@@ -447,14 +474,78 @@ async def test_a_monitor_needs_progress_or_an_explicit_null(world):
     """Leaving `progress` out is refused, so an agent decides to opt out instead of
     forgetting: 44 of 51 monitors armed on zion in early October had none (#165)."""
     a = await world.spawn()
-    said = await turn(a, mcp("monitor_start", description="forgot", done="false"))
+    said = await turn(
+        a, mcp("monitor_start", description="forgot", done="false", source=None)
+    )
     assert said.startswith("mcp error") and "progress" in said
     assert a.wire()["monitors"] == []
     said = await turn(
-        a, mcp("monitor_start", description="opted out", done="false", progress=None)
+        a,
+        mcp(
+            "monitor_start",
+            description="opted out",
+            done="false",
+            progress=None,
+            source=None,
+        ),
     )
     assert said.startswith("mcp ok: ")
     assert [m["description"] for m in a.wire()["monitors"]] == ["opted out"]
+
+
+async def test_a_monitor_links_to_the_latest_tool_call_holding_its_source(world):
+    """An agent never sees a row's id, so it names the call by what it wrote
+    there, and its own monitor_start, which holds the same text, never wins (#870)."""
+    a = await world.spawn()
+    await turn(a, "/bash run the tests => old")
+    await turn(a, "/bash build the image => other")
+    await turn(a, "/bash run the tests => new")
+    said = await turn(
+        a,
+        mcp(
+            "monitor_start",
+            description="tests",
+            done="false",
+            progress=None,
+            source="run the tests",
+        ),
+    )
+    assert said.startswith("mcp ok: ") and '"note"' not in said
+    calls = [e for e in a.entries() if e["title"] == "Bash"]
+    [m] = a.wire()["monitors"]
+    assert m["source"] == {
+        "id": calls[-1]["id"],
+        "title": "Bash",
+        "summary": calls[-1]["summary"],
+    }
+
+
+async def test_a_monitor_whose_source_matches_nothing_arms_and_says_so(world):
+    a = await world.spawn()
+    await turn(a, "/bash build the image => done")
+    said = await turn(
+        a,
+        mcp(
+            "monitor_start",
+            description="w",
+            done="false",
+            progress=None,
+            source="no such call",
+        ),
+    )
+    assert said.startswith("mcp ok: ") and '"note"' in said
+    [m] = a.wire()["monitors"]
+    assert m["source"] is None
+
+
+async def test_a_monitor_needs_a_source_or_an_explicit_null(world):
+    """As with progress (#165): leaving it out is refused, so an agent decides."""
+    a = await world.spawn()
+    said = await turn(
+        a, mcp("monitor_start", description="forgot", done="false", progress=None)
+    )
+    assert said.startswith("mcp error") and "source" in said
+    assert a.wire()["monitors"] == []
 
 
 async def test_an_agent_cannot_cancel_another_agents_monitor(world):
@@ -467,6 +558,7 @@ async def test_an_agent_cannot_cancel_another_agents_monitor(world):
             done="false",
             progress=None,
             interval_s=60,
+            source=None,
         ),
     )
     mid = json.loads(said.removeprefix("mcp ok: "))["monitor_id"]
@@ -489,6 +581,7 @@ async def test_a_monitor_survives_a_restart_and_resumes_a_stopped_owner(
             done=f"test -f {flag}",
             progress=None,
             interval_s=1,
+            source=None,
         ),
     )
     log_id = a.log_id
@@ -524,6 +617,7 @@ async def hold(s) -> str:
             done="false",
             progress=None,
             interval_s=60,
+            source=None,
         ),
     )
     return json.loads(said.removeprefix("mcp ok: "))["monitor_id"]
@@ -639,11 +733,13 @@ async def test_a_turn_that_ends_without_turn_end_is_not_finished(world):
         timeout=3,
         what="b read as idle",
     )
+    # a's own silent turn draws a nudge once b's turns outlast silent_s.
+    wakes = lambda: [e for e in inbox(a) if "aegis:nudge" not in e["title"]]  # noqa: E731
     (m,) = a.wire()["monitors"]
-    assert m["sessions"][0]["state"] == "running" and inbox(a) == []
+    assert m["sessions"][0]["state"] == "running" and wakes() == []
     await turn(b, mcp("turn_end", attention="done", line="Shipped."))
-    await until(lambda: inbox(a), timeout=5, what="the wake")
-    assert " · ok · " in inbox(a)[0]["title"]
+    await until(wakes, timeout=5, what="the wake")
+    assert " · ok · " in wakes()[0]["title"]
 
 
 async def test_a_session_silent_past_the_grace_ends_the_wait_blocked(
@@ -699,6 +795,7 @@ async def test_a_worker_with_a_live_monitor_is_not_finished(world, tmp_path):
         done=f"test -f {flag}",
         progress=None,
         interval_s=1,
+        source=None,
     )
     said = await turn(a, mcp("queue_enqueue", queue="general", payload=payload))
     task_id = json.loads(said.removeprefix("mcp ok: "))["task_id"]
@@ -1163,6 +1260,7 @@ async def test_raising_max_parallel_on_disk_starts_a_waiting_task(world, tmp_pat
         done=f"test -f {flag}",
         progress=None,
         interval_s=1,
+        source=None,
     )
     ids = [
         (
@@ -1202,6 +1300,7 @@ def _held(tmp_path, n: int, flag):
         done=f"test -f {flag}",
         progress=None,
         interval_s=1,
+        source=None,
     )
     return [
         Task(
