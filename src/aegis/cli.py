@@ -1,5 +1,6 @@
 """``aegis serve``, ``aegis init``, ``aegis doctor``, ``aegis link``, ``aegis service``, ``aegis usage``,
-``aegis journal``, ``aegis map``, ``aegis call``, ``aegis tools``, and ``aegis`` alone, which is ``serve --window``.
+``aegis journal``, ``aegis map``, ``aegis call``, ``aegis tools``, ``aegis completions``, and ``aegis``
+alone, which is ``serve --window``.
 
 This is the only module that reads the process's working directory.
 
@@ -22,6 +23,10 @@ HELP = "aegis: a web-native workplace for coding agents."
 DEFAULT_PORT = 8742
 
 app = typer.Typer(add_completion=False, help=HELP)
+
+from .completions import register as _register_completions  # noqa: E402
+
+_register_completions()
 
 from wayfind.cli import app as map_app  # noqa: E402
 from .journal.cli import app as journal_app  # noqa: E402
@@ -910,6 +915,38 @@ def tools(
     from .call import tools as run
 
     run(name)
+
+
+completions_app = typer.Typer(
+    add_completion=False,
+    no_args_is_help=True,
+    help="Install tab completions for bash, fish, zsh and nushell.",
+)
+app.add_typer(completions_app, name="completions")
+
+
+@completions_app.command("install")
+def completions_install(
+    shell: str | None = typer.Argument(
+        None, help="bash, fish, zsh or nushell. Default: this shell."
+    ),
+) -> None:
+    """Install tab completions for a shell. Open a new shell afterwards."""
+    from .completions import install
+
+    install(shell)
+
+
+@completions_app.command("show")
+def completions_show(
+    shell: str | None = typer.Argument(
+        None, help="bash, fish, zsh or nushell. Default: this shell."
+    ),
+) -> None:
+    """Print a shell's completion script."""
+    from .completions import show
+
+    typer.echo(show(shell))
 
 
 def main() -> None:
