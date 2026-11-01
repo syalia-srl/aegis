@@ -103,8 +103,8 @@ what a local run cannot.
    passes, not only the required ones, then asks the maintainer whether to
    merge and stops. Every merge to `main` is the maintainer's yes for that PR:
    a plan or a workflow does not stand in for it. A maintainer's green PR
-   reaches the `smoke` branch by itself, so they can try it before they answer
-   (`know-how/landing-a-change.md`). The full smoke test waits for the release,
+   reaches the `smoke` branch by itself, so they can try it before they answer.
+   The full smoke test waits for the release,
    unless they ask for one. Check the merge landed. `gh pr merge` run from
    inside a worktree prints `fatal: 'main' is already used by worktree` after
    the merge has already succeeded on GitHub; read `gh pr view <n> --json state`
