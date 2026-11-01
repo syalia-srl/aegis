@@ -1659,6 +1659,29 @@ def test_on_a_phone_a_monitors_card_holds_the_link_to_its_tool_call(server, page
     assert page.errors == []
 
 
+def test_a_long_waits_on_line_stays_inside_the_monitor_card(server, page):
+    """It is cut with an ellipsis instead of widening the card's facts (#909)."""
+    long = "run the tests " + "--with-a-very-long-flag " * 12
+    page.goto(server.url)
+    page.wait_for_selector("#a2[data-view=fleet]")
+    spawn(page, f"/bash {long.strip()} => 12 passed")
+    page.wait_for_selector(".row.tool .tn >> text=Bash")
+    arm(page, description="tests", done="false", progress=None, source="run the tests")
+    page.hover("#s-monitors .mon")
+    page.wait_for_selector("#mcard.show")
+    fit = """() => {
+      const card = document.getElementById("mcard");
+      const src = card.querySelector(".src");
+      return {
+        cardFits: card.scrollWidth <= card.clientWidth,
+        srcInside: src.getBoundingClientRect().right <= card.getBoundingClientRect().right,
+        cut: src.scrollWidth > src.clientWidth,
+      };
+    }"""
+    assert page.evaluate(fit) == {"cardFits": True, "srcInside": True, "cut": True}
+    assert page.errors == []
+
+
 def test_a_monitor_whose_check_cannot_run_is_marked_and_its_card_says_why(server, page):
     page.goto(server.url)
     page.wait_for_selector("#a2[data-view=fleet]")

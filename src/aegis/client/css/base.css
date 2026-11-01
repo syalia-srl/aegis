@@ -1233,7 +1233,7 @@ body{background:#000}
 #a2 .mcard .budget .ax{display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:10.5px;color:var(--faint);margin-top:5px}
 
 /* facts */
-#a2 .mcard .facts{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;padding:10px 16px 12px}
+#a2 .mcard .facts{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 14px;padding:10px 16px 12px}
 #a2 .mcard .facts dt{color:var(--faint)}
 #a2 .mcard .facts dd{margin:0;color:var(--ink);font-family:var(--font-mono);font-size:11.5px;text-align:right}
 #a2 .mcard .facts dd span{color:var(--faint)}
