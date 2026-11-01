@@ -1,0 +1,1 @@
+- **A long "Waits on" line stays inside the monitor card.** The line that names the command a monitor follows widened the card's facts past its edge; it is now cut with an ellipsis, and a click still opens the full call.
