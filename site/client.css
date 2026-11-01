@@ -2395,19 +2395,61 @@ body{background:#000}
 .a2 .sbar .btn{display:flex;gap:6px;align-items:center;border:0;white-space:nowrap}
 .a2 .sbar .btn .ic{flex-shrink:0;width:14px;height:14px;color:var(--muted)}
 @media (pointer:coarse){.a2 .sbar .btn{min-height:44px;min-width:44px;justify-content:center}.a2 .sbar .btn .lb{display:none}}
-/* The comment tray at the bottom of the viewer or the Files pane, and its pins (#479). */
+/* The comment tray at the bottom of the viewer or the Files pane, and its pins (#479).
+   Marks on a picture sit beside it when there is room (#918), so the list
+   scrolls instead of shrinking the preview. A text comment stays underneath. */
 .a2 .ctray{flex:none;max-height:40%;overflow:auto;border-top:1px solid var(--rule);background:var(--surface);font-family:var(--font-chrome);font-size:12.5px}
 .a2 .ctray[hidden]{display:none}
 .a2 .ctray .chead{display:flex;align-items:center;gap:6px;padding:6px 12px}
 .a2 .ctray .cn{margin-right:auto;color:var(--muted)}
 .a2 .ctray .clist{list-style:none;margin:0;padding:0 12px 8px}
-.a2 .ctray li{display:flex;align-items:center;gap:8px;padding:2px 0}
-.a2 .ctray li .n{min-width:18px;height:18px;border-radius:9px;background:var(--accent);color:var(--on-accent);text-align:center;line-height:18px;font-size:11px}
+.a2 .ctray li{display:flex;align-items:flex-start;gap:8px;padding:2px 0}
+.a2 .ctray li .n{min-width:18px;height:18px;margin-top:4px;border-radius:9px;background:var(--accent);color:var(--on-accent);text-align:center;line-height:18px;font-size:11px}
 .a2 .ctray li .loc{max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-family:var(--font-mono)}
-.a2 .ctray li .note{flex:1;min-width:0;padding:3px 8px;background:var(--bg);border:1px solid var(--rule);border-radius:var(--r);color:var(--strong);outline:none}
+.a2 .ctray li .note{flex:1;min-width:0;min-height:26px;padding:3px 8px;background:var(--bg);border:1px solid var(--rule);border-radius:var(--r);color:var(--strong);outline:none;resize:vertical;font:inherit;line-height:1.35}
 .a2 .ctray li .note:focus{border-color:var(--accent)}
 .a2 .pin{position:absolute;transform:translate(-110%,-20%);user-select:none;pointer-events:none}
 .a2 .pin::before{content:attr(data-n);display:block;min-width:16px;height:16px;border-radius:8px;background:var(--accent);color:var(--on-accent);text-align:center;font:600 10px/16px var(--font-chrome)}
+/* Image and PDF annotations (#780). The layer follows the rendered media.
+   Active drawing takes the pointer. A wheel on a PDF steps the layer aside
+   (.valayer.passing, #919) so the viewer's own scrolling still works. */
+.a2 .visual-annotations{position:relative}
+.a2 .visual-annotations .vatools{position:absolute;z-index:4;top:8px;left:8px;display:flex;align-items:center;gap:5px;padding:4px;background:color-mix(in srgb,var(--surface) 92%,transparent);border:1px solid var(--rule);border-radius:var(--r);box-shadow:0 3px 10px rgba(0,0,0,.18);font:12px var(--font-chrome)}
+.a2 .visual-annotations .vatools .btn{padding:4px 6px}
+.a2 .visual-annotations .vatools .btn .ic{width:14px;height:14px}
+.a2 .visual-annotations .vatools .btn[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.a2 .visual-annotations .vapage{display:flex;align-items:center;gap:4px;color:var(--muted)}
+.a2 .visual-annotations .vapage input{width:44px;padding:3px 4px;border:1px solid var(--rule);border-radius:var(--r);background:var(--bg);color:var(--strong);font:12px var(--font-mono)}
+.a2 .visual-annotations .valayer{position:absolute;z-index:3;pointer-events:none;touch-action:none}
+.a2 .visual-annotations .valayer.active{pointer-events:auto;cursor:crosshair;background:color-mix(in srgb,var(--accent) 4%,transparent)}
+.a2 .visual-annotations .valayer.passing{pointer-events:none;cursor:auto;background:none}
+@media (min-width:880px){
+  .a2 .viewer:not([hidden]):has(.visual-annotations):has(> .ctray:not([hidden])){display:grid;grid-template-columns:minmax(0,1fr) min(300px,32%);grid-template-rows:auto minmax(0,1fr)}
+  .a2 .viewer:not([hidden]):has(.visual-annotations):has(> .ctray:not([hidden]))>.vbar{grid-column:1 / -1;grid-row:1}
+  .a2 .viewer:not([hidden]):has(.visual-annotations):has(> .ctray:not([hidden]))>.vbody{grid-column:1;grid-row:2;min-width:0;min-height:0}
+  .a2 .viewer:not([hidden]):has(.visual-annotations):has(> .ctray:not([hidden]))>.ctray{grid-column:2;grid-row:2}
+  .a2 .fpane:has(> .visual-annotations):has(> .ctray:not([hidden])){flex-direction:row}
+  .a2 .fpane:has(> .visual-annotations):has(> .ctray:not([hidden]))>.visual-annotations{flex:1;min-width:0}
+  .a2 .fpane:has(> .visual-annotations):has(> .ctray:not([hidden]))>.ctray{flex:0 0 min(300px,32%);width:min(300px,32%)}
+  .a2 .fpane:has(.fview:not([hidden]) > .visual-annotations):has(> .ctray:not([hidden])){display:grid;grid-template-columns:minmax(0,1fr) min(300px,32%);grid-template-rows:auto minmax(0,1fr)}
+  .a2 .fpane:has(.fview:not([hidden]) > .visual-annotations):has(> .ctray:not([hidden]))>.fstrip{grid-column:1 / -1;grid-row:1}
+  .a2 .fpane:has(.fview:not([hidden]) > .visual-annotations):has(> .ctray:not([hidden]))>.fview{grid-column:1;grid-row:2;min-width:0;min-height:0}
+  .a2 .fpane:has(.fview:not([hidden]) > .visual-annotations):has(> .ctray:not([hidden]))>.ctray{grid-column:2;grid-row:2}
+  .a2 :is(.viewer,.fpane):has(.visual-annotations):has(> .ctray:not([hidden]))>.ctray{max-height:none;min-height:0;border-top:0;border-left:1px solid var(--rule)}
+}
+@container pane (min-width:560px){
+  .a2 .canvas>.pane.docked:has(.visual-annotations):has(> .ctray:not([hidden])){display:grid;grid-template-columns:minmax(0,1fr) min(260px,34%);grid-template-rows:auto minmax(0,1fr)}
+  .a2 .canvas>.pane.docked:has(.visual-annotations):has(> .ctray:not([hidden]))>.pbar{grid-column:1 / -1;grid-row:1}
+  .a2 .canvas>.pane.docked:has(.visual-annotations):has(> .ctray:not([hidden]))>.pbody{grid-column:1;grid-row:2;min-width:0;min-height:0}
+  .a2 .canvas>.pane.docked:has(.visual-annotations):has(> .ctray:not([hidden]))>.ctray{grid-column:2;grid-row:2;max-height:none;min-height:0;border-top:0;border-left:1px solid var(--rule)}
+}
+.a2 .visual-annotations .vadraft,.a2 .visual-annotations .vpin{position:absolute;box-sizing:border-box;border:2px solid var(--accent);background:color-mix(in srgb,var(--accent) 15%,transparent);transform:none;pointer-events:none}
+.a2 .visual-annotations .vpin.point{width:18px!important;height:18px!important;border-radius:50%;transform:translate(-50%,-50%)}
+.a2 .visual-annotations .vadraft.highlight,.a2 .visual-annotations .vpin.highlight{background:color-mix(in srgb,var(--warn) 45%,transparent);border-color:color-mix(in srgb,var(--warn) 70%,transparent)}
+.a2 .visual-annotations .vadraft.draw,.a2 .visual-annotations .vpin.draw,.a2 .visual-annotations .vpin.arrow{left:0;top:0;width:100%;height:100%;border:0;background:none;overflow:visible}
+.a2 .visual-annotations .mark{position:absolute;inset:0;width:100%;height:100%;overflow:visible;color:var(--accent);pointer-events:none}
+.a2 .visual-annotations .vpin::before{position:absolute;left:-9px;top:-9px}
+.a2 .visual-annotations .vpin.draw::before,.a2 .visual-annotations .vpin.arrow::before{left:var(--nx);top:var(--ny);transform:translate(-110%,-20%)}
 /* Aizome: indigo-dyed cloth; cotton-white sashiko stitches for the thread and rules, seigaiha waves in the panel. */
 [data-theme=aizome] .a2{
   --bg:#15213f;--chrome:#0f1832;--side:#121d39;--surface:#1b2a4f;--raised:#22335d;--rule:#33477a;

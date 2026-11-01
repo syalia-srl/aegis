@@ -8,7 +8,7 @@ import json
 
 import pytest
 
-from .test_browser import EXPECTED_CONSOLE, _artifact, spawn, turns_done
+from .test_browser import EXPECTED_CONSOLE, PNG, _artifact, spawn, turns_done
 from .test_browser import browser, server  # noqa: F401
 
 pytestmark = [pytest.mark.browser, pytest.mark.slow]
@@ -241,6 +241,167 @@ def test_unsent_comments_survive_a_reload_in_that_browser(server, page):  # noqa
     page.reload()
     view(page, ".src code")
     assert page.locator("#viewer .ctray").is_hidden()
+    assert page.errors == []
+
+
+def drag_region(pg, layer: str, start=(0.2, 0.25), end=(0.7, 0.75)) -> None:
+    box = pg.locator(layer).bounding_box()
+    pg.mouse.move(
+        box["x"] + box["width"] * start[0], box["y"] + box["height"] * start[1]
+    )
+    pg.mouse.down()
+    pg.mouse.move(box["x"] + box["width"] * end[0], box["y"] + box["height"] * end[1])
+    pg.mouse.up()
+
+
+def test_the_annotation_list_sits_beside_the_picture(server, page):  # noqa: F811
+    (server.root / "chart.png").write_bytes(PNG)
+    page.goto(server.url)
+    spawn(page)
+    send(page, 1, ["chart.png"])
+    view(page, ".stage.image img")
+    page.locator("#viewer .stage.image img").evaluate(
+        "img => { img.style.width = '400px'; img.style.height = '300px'; }"
+    )
+    before = page.locator("#viewer .stage.image img").bounding_box()
+    page.click("#viewer .vatools [data-tool=area]")
+    drag_region(page, "#viewer .valayer")
+    img = page.locator("#viewer .stage.image img").bounding_box()
+    tray = page.locator("#viewer .ctray").bounding_box()
+    assert abs(img["height"] - before["height"]) <= 1
+    assert tray["x"] >= img["x"] + img["width"] - 1
+    # A wheel on a picture still belongs to the picture: the layer stays put.
+    page.mouse.move(img["x"] + img["width"] / 2, img["y"] + img["height"] / 2)
+    page.mouse.wheel(0, 80)
+    assert "passing" not in page.locator("#viewer .valayer").get_attribute("class")
+    assert page.errors == []
+
+
+def test_a_wheel_reaches_the_pdf_while_a_tool_is_on(server, page):  # noqa: F811
+    (server.root / "report.pdf").write_bytes(b"%PDF-1.4\n%%EOF\n")
+    page.goto(server.url)
+    spawn(page)
+    page.goto(f"{server.url.split('#')[0]}#files=report.pdf")
+    page.wait_for_selector(".v-files .fstage.pdf iframe")
+    before = page.locator(".v-files .fstage iframe").bounding_box()
+    page.click(".v-files .vatools [data-tool=area]")
+    layer = page.locator(".v-files .valayer")
+    box = layer.bounding_box()
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    page.mouse.wheel(0, 120)
+    page.wait_for_function(
+        "() => document.querySelector('.v-files .valayer').classList.contains('passing')"
+    )
+    hit = page.evaluate(
+        """() => {
+          const layer = document.querySelector('.v-files .valayer');
+          const r = layer.getBoundingClientRect();
+          const el = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+          return el && el.tagName;
+        }"""
+    )
+    assert hit == "IFRAME"
+    # Choosing the tool again puts the layer back, and a drag still draws.
+    page.click(".v-files .vatools [data-tool=area]")
+    assert "passing" not in layer.get_attribute("class")
+    drag_region(page, ".v-files .valayer", (0.2, 0.2), (0.5, 0.5))
+    assert page.locator(".v-files .ctray .cn").inner_text() == "1 annotation"
+    frame = page.locator(".v-files .fstage iframe").bounding_box()
+    tray = page.locator(".v-files .ctray").bounding_box()
+    assert abs(frame["height"] - before["height"]) <= 1
+    assert tray["x"] >= frame["x"] + frame["width"] - 1
+    assert page.errors == []
+
+
+def test_an_image_region_becomes_a_structured_annotation(server, page):  # noqa: F811
+    (server.root / "chart.png").write_bytes(PNG)
+    page.goto(server.url)
+    spawn(page)
+    send(page, 1, ["chart.png"])
+    view(page, ".stage.image img")
+    # The fixture is one pixel; size it like a real chart so the drag has room.
+    page.locator("#viewer .stage.image img").evaluate(
+        "img => { img.style.width = '400px'; img.style.height = '300px'; }"
+    )
+    page.click("#viewer .vatools [data-tool=area]")
+    drag_region(page, "#viewer .valayer")
+    page.keyboard.type("increase this")
+    page.keyboard.press("Enter")
+    page.keyboard.type("label")
+    tray = page.locator("#viewer .ctray")
+    assert tray.locator(".cn").inner_text() == "1 annotation"
+    assert page.locator("#viewer .vpin.region").count() == 1
+    assert "Annotations on" not in page.input_value("#input")
+    tray.locator("[data-act=send]").click()
+    assert page.input_value("#input") == (
+        'Annotations on chart.png:\n1. {"file":"chart.png","type":"region",'
+        '"region":{"x":0.2,"y":0.25,"width":0.5,"height":0.5}}\n'
+        "   increase this\n"
+        "   label\n\n"
+    )
+    assert page.errors == []
+
+
+def test_a_pdf_region_names_its_page_in_files(server, page):  # noqa: F811
+    (server.root / "report.pdf").write_bytes(b"%PDF-1.4\n%%EOF\n")
+    page.goto(server.url)
+    key = spawn(page)
+    page.goto(f"{server.url.split('#')[0]}#files=report.pdf")
+    page.wait_for_selector(".v-files .fstage.pdf iframe")
+    page.click(".v-files .vatools [data-tool=area]")
+    page.fill(".v-files .vapage input", "3")
+    drag_region(page, ".v-files .valayer", (0.1, 0.2), (0.4, 0.6))
+    page.keyboard.type("check this figure")
+    page.locator(".v-files .ctray [data-act=send]").click()
+    page.wait_for_function(f"location.hash === '#s={key}'")
+    assert page.input_value("#input") == (
+        'Annotations on report.pdf:\n1. {"file":"report.pdf","type":"region",'
+        '"page":3,"region":{"x":0.1,"y":0.2,"width":0.3,"height":0.4}}\n'
+        "   check this figure\n\n"
+    )
+    assert page.errors == []
+
+
+def _marks(text: str) -> list[dict]:
+    return [json.loads(ln.split(". ", 1)[1]) for ln in text.splitlines() if ". {" in ln]
+
+
+def test_draw_highlight_arrow_and_point_keep_their_shape(server, page):  # noqa: F811
+    (server.root / "chart.png").write_bytes(PNG)
+    page.goto(server.url)
+    spawn(page)
+    send(page, 1, ["chart.png"])
+    view(page, ".stage.image img")
+    page.locator("#viewer .stage.image img").evaluate(
+        "img => { img.style.width = '400px'; img.style.height = '300px'; }"
+    )
+    page.click("#viewer .vatools [data-tool=highlight]")
+    drag_region(page, "#viewer .valayer")
+    page.click("#viewer .vatools [data-tool=draw]")
+    drag_region(page, "#viewer .valayer")
+    page.click("#viewer .vatools [data-tool=arrow]")
+    drag_region(page, "#viewer .valayer")
+    page.click("#viewer .vatools [data-tool=point]")
+    page.click("#viewer .valayer")
+    page.keyboard.type("marks")
+    assert page.locator("#viewer .vpin.highlight").count() == 1
+    assert page.locator("#viewer .vpin.draw svg").count() == 1
+    assert page.locator("#viewer .vpin.arrow line").count() == 1
+    assert page.locator("#viewer .vpin.point").count() == 1
+    page.locator("#viewer .ctray [data-act=send]").click()
+    marks = _marks(page.input_value("#input"))
+    assert [m["type"] for m in marks] == ["highlight", "draw", "arrow", "point"]
+    assert marks[0]["region"] == {"x": 0.2, "y": 0.25, "width": 0.5, "height": 0.5}
+    assert marks[1]["points"][0] == {"x": 0.2, "y": 0.25}
+    assert marks[1]["points"][-1] == {"x": 0.7, "y": 0.75}
+    assert marks[2]["points"] == [
+        {"x": 0.2, "y": 0.25},
+        {"x": 0.7, "y": 0.75},
+    ]
+    assert marks[3]["region"]["x"] == 0.5
+    assert marks[3]["region"]["y"] == 0.5
+    assert marks[3]["region"]["width"] == 0
+    assert "marks" in page.input_value("#input")
     assert page.errors == []
 
 

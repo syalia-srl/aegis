@@ -155,6 +155,30 @@ disk, starts with none.
 A page whose own Content-Security-Policy blocks scripts from the server works
 as before, without the menu or the bar inside it.
 
+## Annotating images and PDFs
+
+An image or PDF opened in Files, opened from a sent file's card, or docked
+beside the transcript has icon tools over its preview. The name shows on
+hover: Point, Area, Draw, Highlight, Arrow, and Annotate off. Point marks a
+spot. Area and Highlight drag a region; a highlight is translucent. Draw
+follows the pointer, and Arrow runs from the press to the release. The wheel
+still scrolls a PDF while a tool is on. Annotate off leaves the viewer's zoom
+and page controls in reach. For a PDF, set
+the page box to the page currently visible before drawing; the browser's
+built-in PDF viewer does not report its current page, or the words under the
+mark, to aegis.
+
+Each mark adds a number and a note to the same comment tray used for text.
+On a wide window the list sits beside the picture, so the preview keeps its
+size. The note takes more than one line: Enter and Shift+Enter add a line, and
+neither sends. Remove individual marks, Discard them all, or Send them
+together. The message names the file and carries the annotation type, the PDF
+page when applicable, and normalized coordinates as JSON: a region for a
+point, an area or a highlight, and a list of points for a stroke or an arrow.
+An agent can identify the same place at any display size. On a docked file,
+Send writes that message into the session's composer. Unsent annotations stay
+only in this browser and are restored after a reload, like text comments.
+
 ## When the file changed on disk
 
 Sessions write the files you edit. While Files is on screen it checks the
