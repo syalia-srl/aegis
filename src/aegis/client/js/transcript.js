@@ -673,6 +673,13 @@ export class Transcript {
     n?.querySelector("a.btn, button:not(.copy)")?.click();
   }
 
+  // Left and Right (keys.js): the selected row's file card, round as its
+  // ‹ › buttons do. A row with one file, or none, has no pager.
+  pageFile(d) {
+    const n = this.selected ? this.nodes.get(this.selected) : null;
+    n?.querySelector(d < 0 ? ".fcard .pager .prev" : ".fcard .pager .next")?.click();
+  }
+
   // -- the fold levels ------------------------------------------------------
 
   // The row the reader looks at stays on screen across the switch.

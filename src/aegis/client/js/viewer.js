@@ -337,6 +337,17 @@ export class Viewer {
     return b;
   }
 
+  // The open set, one file over, round from the last to the first. The pager
+  // buttons and a swipe call this, and so do Left and Right (keys.js). False
+  // when this view has fewer than two files.
+  step(d) {
+    const item = this.isOpen ? this.items.get(this.key) : null;
+    if (!item?.files || item.files.length < 2) return false;
+    item.at = (item.at + d + item.files.length) % item.files.length;
+    this.render();
+    return true;
+  }
+
   drawFile(item, bar, body, draw) {
     const acts = el("span", "acts");
     const f = item.files[item.at];
@@ -363,23 +374,20 @@ export class Viewer {
       drawn: (content) => tray?.layer(content),
     });
     if (item.files.length > 1) {
-      // Round from the last file to the first, as on the card.
-      const go = (d) => {
-        item.at = (item.at + d + item.files.length) % item.files.length;
-        this.render();
-      };
+      // Round from the last file to the first, as on the card. Left and Right
+      // call step() too (keys.js).
       const pager = el("span", "pager");
-      const step = (d, name, title) => {
+      const stepBtn = (d, name, title) => {
         const b = el("button", "btn icon");
         b.append(icon(name));
         b.title = title;
         b.setAttribute("aria-label", title);
-        b.addEventListener("click", () => go(d));
+        b.addEventListener("click", () => this.step(d));
         return b;
       };
-      pager.append(step(-1, "left", "Previous file"), el("span", "count", `${item.at + 1} / ${item.files.length}`), step(1, "right", "Next file"));
+      pager.append(stepBtn(-1, "left", "Previous file"), el("span", "count", `${item.at + 1} / ${item.files.length}`), stepBtn(1, "right", "Next file"));
       bar.append(pager);
-      swipe(body, go);
+      swipe(body, (d) => this.step(d));
     }
     acts.append(this.closeButton());
     bar.append(acts);

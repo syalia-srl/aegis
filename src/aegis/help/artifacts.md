@@ -155,7 +155,8 @@ When the person only needs to look at something, such as a screenshot, a
 rendered PDF or a draft, `file_send` is enough. Pass `paths` (1 to 20
 absolute paths, shown as one card that pages through them with ‹ › or a
 sideways swipe on a touch screen, going round from the last to the first) and an optional
-`caption`. The files are copied, so later edits are not seen until you send
+`caption`. When that row is selected, Left and Right page the card the same
+way, and again while the set is open in the viewer. The files are copied, so later edits are not seen until you send
 the file again, and each is at most 100 MB. If one cannot be sent, none is. Send a file when it is an output
 the person asked for or something they must see to discuss it; they see the
 source code you edited as diffs already.
