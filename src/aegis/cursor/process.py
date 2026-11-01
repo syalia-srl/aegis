@@ -20,11 +20,14 @@ Measured on cursor-agent 2026.10.14 (spec
 - Model and permission are live RPCs (``session/set_model``,
   ``session/set_mode``); nothing needs a restart.
 - There is no cancel: ``session/cancel`` is method-not-found and a
-  ``session/load`` mid-turn lets the turn run on (measured). An interrupt
-  therefore closes the turn with its own ``aegis/turn_done`` line and kills
-  the child quietly: its exit is not reported, since a red "exited" row
-  after a deliberate stop would read as a crash, and the next send starts a
-  fresh child that ``session/load``s the conversation.
+  ``session/load`` mid-turn lets the turn run on (measured). Closing stdin
+  does not end a running turn either (measured 2026-11-01): the agent keeps
+  sending, and those lines put the session back to work after the interrupt.
+  An interrupt therefore closes the turn with its own ``aegis/turn_done``
+  line, drops anything still on stdout, and kills the process group at once.
+  The exit is not reported, since a red "exited" row after a deliberate stop
+  would read as a crash, and the next send starts a fresh child that
+  ``session/load``s the conversation.
 """
 
 from __future__ import annotations
@@ -125,6 +128,9 @@ class CursorProcess:
         self._queued: deque[str] = deque()
         self._turn_task: asyncio.Task | None = None
         self._quiet = False
+        # An interrupt: drop stdout so a line still in the pipe cannot open
+        # another turn after aegis/turn_done.
+        self._halted = False
         # terminate() was called: nothing may start a child after it.
         self._closed = False
 
@@ -154,6 +160,7 @@ class CursorProcess:
 
     async def _spawn(self) -> None:
         self._quiet = False
+        self._halted = False
         self._launch.stderr_path.parent.mkdir(parents=True, exist_ok=True)
         self._proc = await launch.child(
             argv(self._bin),
@@ -294,21 +301,28 @@ class CursorProcess:
         self._queued.clear()
         await self._end_child()
 
-    async def _end_child(self) -> None:
+    async def _end_child(self, *, fast: bool = False) -> None:
         self._quiet = True
+        self._halted = True
         proc = self._proc
         if proc is not None and proc.returncode is None:
-            if proc.stdin is not None:
-                proc.stdin.close()  # acp ends when its stdin ends
-            try:
-                await asyncio.wait_for(_exited(proc), TERM_GRACE_S)
-            except TimeoutError:
-                await self._signal(proc, signal.SIGTERM)
+            if fast:
+                # A running cursor-agent ignores a closed stdin (measured
+                # 2026-11-01) and keeps the turn going for the whole grace.
+                await self._signal(proc, signal.SIGKILL)
+                await _exited(proc)
+            else:
+                if proc.stdin is not None:
+                    proc.stdin.close()  # acp ends when its stdin ends
                 try:
                     await asyncio.wait_for(_exited(proc), TERM_GRACE_S)
                 except TimeoutError:
-                    await self._signal(proc, signal.SIGKILL)
-                    await _exited(proc)
+                    await self._signal(proc, signal.SIGTERM)
+                    try:
+                        await asyncio.wait_for(_exited(proc), TERM_GRACE_S)
+                    except TimeoutError:
+                        await self._signal(proc, signal.SIGKILL)
+                        await _exited(proc)
         if proc is not None:
             await self._signal(proc, signal.SIGKILL)
         for t in list(self._tasks):
@@ -333,6 +347,8 @@ class CursorProcess:
         assert self._proc is not None and self._proc.stdout is not None
         stdout = self._proc.stdout
         while raw := await stdout.readline():
+            if self._halted:
+                continue  # the turn is over; a late line would reopen it
             line = raw.decode(errors="replace").strip()
             if not line:
                 continue
@@ -513,16 +529,19 @@ class CursorProcess:
 
     async def interrupt(self) -> None:
         """The person stopped the turn. There is no cancel to send (module
-        docstring), so the turn ends here and the child is killed without
-        reporting the exit; the next send starts a child that loads the
-        conversation."""
+        docstring). The process group is killed at once, and whatever it
+        still writes is dropped; the next send starts a child that loads
+        the conversation."""
         if not self._busy:
             return
+        # Before the first await, so a line already on stdout cannot land
+        # between the interrupt and the turn's end.
+        self._halted = True
         self._emit("aegis/turn_done", {"stop_reason": "interrupted"})
         self._queued.clear()
         if self._turn_task is not None:
             self._turn_task.cancel()
-        await self._end_child()
+        await self._end_child(fast=True)
 
     # -- settings ------------------------------------------------------
     async def set(self, kind: str, value: str) -> None:
