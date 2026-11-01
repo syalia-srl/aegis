@@ -125,6 +125,9 @@ The gutter of each row names what the row is.
 | `g-comment` | Comment; a question in a workflow's story | menus, workflows |
 | `g-point` | Mark a point on an image or PDF | the annotation tools on a preview |
 | `g-region` | Outline an area on an image or PDF | the annotation tools on a preview |
+| `g-draw` | Draw a stroke on an image or PDF | the annotation tools on a preview |
+| `g-highlight` | Highlight a region on an image or PDF | the annotation tools on a preview |
+| `g-mark-arrow` | Draw an arrow on an image or PDF | the annotation tools on a preview |
 | `g-unread` | An agent message you have not read | the transcript |
 | `g-read` | Read; done; nothing left to commit | the transcript, workflows, repos, the journal |
 | `g-copy` | Copy | buttons, menus |

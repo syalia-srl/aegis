@@ -44,7 +44,9 @@
 // browser lets a click open a tab only for a few seconds (Chrome) or not at
 // all after an await (Safari).
 
+import { annotate } from "./annotations.js";
 import { browserCard } from "./browserview.js";
+import { Tray } from "./comments.js";
 import { drawArtifact, drawFile } from "./viewer.js";
 import { DOCKED, entryFiles, fileUrl, fillWorkflow, hold, inWindow, popButton, workflowTitle } from "./entries.js";
 import { icon, iconText } from "./glyphs.js";
@@ -86,12 +88,13 @@ function fit(cols, width) {
 }
 
 export class Canvas {
-  constructor(root, { transcriptPane, entryOf, latestFile, call, onChange, refuse, openWindow, mountBrowser }) {
+  constructor(root, { transcriptPane, entryOf, latestFile, call, onChange, refuse, openWindow, mountBrowser, compose }) {
     this.root = root; // #canvas
     this.tr = transcriptPane; // #tr-pane
     this.entryOf = entryOf; // (id) -> the shown transcript's entry, or undefined
     this.latestFile = latestFile; // (key) -> the newest sent file with that key, or undefined
     this.call = call; // (op, params) -> Promise, on the shown session
+    this.compose = compose; // (text) -> whether it landed in the composer (#914)
     this.onChange = onChange; // (before, after): the docked ids changed
     this.refuse = refuse; // (message): a refusal the person should read
     this.openWindow = openWindow; // (n, tab?) -> the tab of window n, focused or opened; or `tab` pointed at it
@@ -470,6 +473,7 @@ export class Canvas {
   // A page that moved to another window keeps its card's line: releasing it
   // would mount the card's frame for a moment and start the page twice.
   drop(id, node) {
+    node._annotation?.destroy();
     node._browser?.dispose();
     node.remove();
     this.panes.delete(id);
@@ -484,6 +488,8 @@ export class Canvas {
   draw(id, e) {
     const node = this.panes.get(id);
     if (!node) return;
+    node._annotation?.destroy();
+    node._annotation = null;
     const drawn = (node._drawn = (node._drawn || 0) + 1); // a late fetch for an older draw draws nothing
     if (id.startsWith("b-") && node._browser) return; // a browser view redraws itself from its card
     const bar = el("div", "fbar pbar");
@@ -533,9 +539,22 @@ export class Canvas {
       bar.title = f.summary || "";
       bar.append(el("span", "ver", `v${f.version}`));
       node.dataset.version = String(f.version);
+      this.mountMarks(node, f);
     }
     acts.append(this.moveButton(id), this.undockButton(id));
     bar.append(acts);
+  }
+
+  // The same drawing layer the viewer uses (#914). Send writes the message
+  // into the session's composer. The tray key is the file's URL, so a mark
+  // made here is still there if the file is opened in the viewer before Send.
+  mountMarks(node, f) {
+    if (!f || !this.compose || !["image", "pdf"].includes(f.preview)) return;
+    const stage = node.querySelector(".pbody .stage");
+    if (!stage) return;
+    const path = f.root_path || f.name;
+    const tray = new Tray(node, f.url, (text) => this.compose(text), path);
+    node._annotation = annotate(stage, tray, { path, kind: f.preview });
   }
 
   moveButton(id) {

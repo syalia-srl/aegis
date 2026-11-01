@@ -157,20 +157,24 @@ as before, without the menu or the bar inside it.
 
 ## Annotating images and PDFs
 
-An image or PDF opened in Files, or opened from a sent file's card, has three
-icon tools over its preview. The name shows on hover: Point, Area, and
-Annotate off. Point or Area turns drawing on. A click marks a point and a drag
-outlines a region. Annotate off leaves the PDF's own scrolling and zoom
-controls in reach. For a PDF, set the page box to the page currently visible
-before drawing; the browser's built-in PDF viewer does not report its current
-page to aegis.
+An image or PDF opened in Files, opened from a sent file's card, or docked
+beside the transcript has icon tools over its preview. The name shows on
+hover: Point, Area, Draw, Highlight, Arrow, and Annotate off. Point marks a
+spot. Area and Highlight drag a region; a highlight is translucent. Draw
+follows the pointer, and Arrow runs from the press to the release. Annotate
+off leaves the PDF's own scrolling and zoom controls in reach. For a PDF, set
+the page box to the page currently visible before drawing; the browser's
+built-in PDF viewer does not report its current page, or the words under the
+mark, to aegis.
 
-Each point or region adds a numbered mark and a note to the same comment tray
-used for text. The note takes more than one line: Enter and Shift+Enter add a
-line, and neither sends. Remove individual marks, Discard them all, or Send
-them together. The message names the file and carries the annotation type,
-PDF page when applicable, and normalized x, y, width and height as JSON, so an
-agent can identify the same place at any display size. Unsent annotations stay
+Each mark adds a number and a note to the same comment tray used for text.
+The note takes more than one line: Enter and Shift+Enter add a line, and
+neither sends. Remove individual marks, Discard them all, or Send them
+together. The message names the file and carries the annotation type, the PDF
+page when applicable, and normalized coordinates as JSON: a region for a
+point, an area or a highlight, and a list of points for a stroke or an arrow.
+An agent can identify the same place at any display size. On a docked file,
+Send writes that message into the session's composer. Unsent annotations stay
 only in this browser and are restored after a reload, like text comments.
 
 ## When the file changed on disk

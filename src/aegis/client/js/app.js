@@ -205,6 +205,7 @@ const canvas = new Canvas($("canvas"), {
   onChange: () => syncDock(),
   refuse: (message) => toast(message, { kind: "error" }),
   openWindow: (n, tab) => openWindow(shown, n, tab),
+  compose: (text) => toComposer(shown, text),
   // A browser the session drives, docked: its own view of the stream.
   mountBrowser: (host, id) => (sessions.has(id) ? mountBrowser(host, id, termCard(id), { conn }) : null),
 });

@@ -303,6 +303,49 @@ def test_a_pdf_region_names_its_page_in_files(server, page):  # noqa: F811
     assert page.errors == []
 
 
+def _marks(text: str) -> list[dict]:
+    return [json.loads(ln.split(". ", 1)[1]) for ln in text.splitlines() if ". {" in ln]
+
+
+def test_draw_highlight_arrow_and_point_keep_their_shape(server, page):  # noqa: F811
+    (server.root / "chart.png").write_bytes(PNG)
+    page.goto(server.url)
+    spawn(page)
+    send(page, 1, ["chart.png"])
+    view(page, ".stage.image img")
+    page.locator("#viewer .stage.image img").evaluate(
+        "img => { img.style.width = '400px'; img.style.height = '300px'; }"
+    )
+    page.click("#viewer .vatools [data-tool=highlight]")
+    drag_region(page, "#viewer .valayer")
+    page.click("#viewer .vatools [data-tool=draw]")
+    drag_region(page, "#viewer .valayer")
+    page.click("#viewer .vatools [data-tool=arrow]")
+    drag_region(page, "#viewer .valayer")
+    page.click("#viewer .vatools [data-tool=point]")
+    page.click("#viewer .valayer")
+    page.keyboard.type("marks")
+    assert page.locator("#viewer .vpin.highlight").count() == 1
+    assert page.locator("#viewer .vpin.draw svg").count() == 1
+    assert page.locator("#viewer .vpin.arrow line").count() == 1
+    assert page.locator("#viewer .vpin.point").count() == 1
+    page.locator("#viewer .ctray [data-act=send]").click()
+    marks = _marks(page.input_value("#input"))
+    assert [m["type"] for m in marks] == ["highlight", "draw", "arrow", "point"]
+    assert marks[0]["region"] == {"x": 0.2, "y": 0.25, "width": 0.5, "height": 0.5}
+    assert marks[1]["points"][0] == {"x": 0.2, "y": 0.25}
+    assert marks[1]["points"][-1] == {"x": 0.7, "y": 0.75}
+    assert marks[2]["points"] == [
+        {"x": 0.2, "y": 0.25},
+        {"x": 0.7, "y": 0.75},
+    ]
+    assert marks[3]["region"]["x"] == 0.5
+    assert marks[3]["region"]["y"] == 0.5
+    assert marks[3]["region"]["width"] == 0
+    assert "marks" in page.input_value("#input")
+    assert page.errors == []
+
+
 PAGE = "<html><body><h2>Setup</h2><p id=p1>kiwi</p><p>plum</p></body></html>"
 
 

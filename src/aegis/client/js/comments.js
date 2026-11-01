@@ -15,6 +15,7 @@
 // range; the number is CSS (::before), so the content's text and offsets
 // stay as they were.
 
+import { strokeNode } from "./annotations.js";
 import { quoted, rangeIn } from "./quote.js";
 
 function el(tag, cls, text) {
@@ -142,10 +143,17 @@ export class Tray {
         pin.dataset.n = String(i + 1);
         pin.dataset.tray = this.store;
         pin.dataset.chrome = "";
-        pin.style.left = `${c.at.x * 100}%`;
-        pin.style.top = `${c.at.y * 100}%`;
-        pin.style.width = `${c.at.width * 100}%`;
-        pin.style.height = `${c.at.height * 100}%`;
+        if (c.at.points) {
+          const p0 = c.at.points[0];
+          pin.style.setProperty("--nx", `${p0.x * 100}%`);
+          pin.style.setProperty("--ny", `${p0.y * 100}%`);
+          pin.append(strokeNode(c.at));
+        } else {
+          pin.style.left = `${c.at.x * 100}%`;
+          pin.style.top = `${c.at.y * 100}%`;
+          pin.style.width = `${c.at.width * 100}%`;
+          pin.style.height = `${c.at.height * 100}%`;
+        }
         root.append(pin);
         return;
       }
