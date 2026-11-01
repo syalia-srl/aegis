@@ -242,7 +242,7 @@ class Registry(Host):
         if self.queues is not None:
             self.queues.turn_ended(session)
         if self.quota is not None:
-            self.quota.turn_ended()
+            self.quota.turn_ended(session.spec.harness)
         self._retire_predecessor(session)
         self._pending_handoff(session)
         self._close_when_finished(session)

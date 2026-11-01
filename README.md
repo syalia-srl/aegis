@@ -58,8 +58,9 @@ On top of the three CLIs, aegis adds what none has on its own:
 - Sessions of every harness in one tab bar, each with its own model, effort and
   permission. `/model`, `/effort` and `/permission` change them on a running
   session.
-- The quota of each subscription: Claude's 5-hour and weekly windows, and OpenCode
-  Go's 5-hour, weekly and monthly ones. Each gauge shows how much of the window
+- The quota of each subscription: Claude's 5-hour and weekly windows, OpenCode
+  Go's 5-hour, weekly and monthly ones, and Cursor's two monthly pools, Auto and
+  API. Each gauge shows how much of the window
   is spent, how much of its time has gone, and where it will land at the reset,
   from its rate so far and what your finished windows usually spend. A session's panel shows the windows that session spends.
 - The Usage page shows what the agents' work cost, live: spend per week by

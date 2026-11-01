@@ -91,6 +91,10 @@ class QuotaWindow:
     severity: str  # "normal" | "warning" | "critical"
     resets_at: datetime | None
     is_active: bool
+    # How long this window lasts, when the payload says so. It wins over the
+    # provider's fixed ``window_spans``: a billing month is 28, 30 or 31 days,
+    # and a fixed span would miss the reset or invent elapsed time.
+    span_s: float | None = None
 
 
 @dataclass(frozen=True)
@@ -227,6 +231,12 @@ def pace_severity(
     if projected > PACE_WARN_AT and window.percent >= PACE_WARN_MIN:
         return "warning"
     return "normal"
+
+
+def _span(raw) -> float | None:
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)) or raw <= 0:
+        return None
+    return float(raw)
 
 
 def _timestamp(raw) -> datetime | None:
@@ -419,6 +429,7 @@ class QuotaService:
                             w["severity"],
                             _timestamp(w["resets_at"]),
                             bool(w["is_active"]),
+                            _span(w.get("span_s")),
                         )
                         for w in raw["windows"]
                     ),
@@ -454,6 +465,7 @@ class QuotaService:
                     "resets_at": w.resets_at.isoformat() if w.resets_at else None,
                     "is_active": w.is_active,
                 }
+                | ({"span_s": w.span_s} if w.span_s else {})
                 for w in snap.windows
             ]
             if snap
