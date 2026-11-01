@@ -755,8 +755,10 @@ async def test_a_session_silent_past_the_grace_ends_the_wait_blocked(
     held = await hold(b)
     await turn(a, wait_on(b.handle))
     await turn(b, mcp("monitor_cancel", monitor_id=held))
-    await until(lambda: inbox(a), timeout=5, what="the blocked wake")
-    (wake,) = inbox(a)
+    # a's own silent turn draws a nudge when the wake takes past silent_s.
+    wakes = lambda: [e for e in inbox(a) if "aegis:nudge" not in e["title"]]  # noqa: E731
+    await until(wakes, timeout=5, what="the blocked wake")
+    (wake,) = wakes()
     assert " · blocked · " in wake["title"]
     assert f"{b.handle} went idle without saying it finished" in wake["md"]
 
