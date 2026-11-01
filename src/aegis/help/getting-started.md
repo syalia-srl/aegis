@@ -38,7 +38,7 @@ This level starts one agent and spends quota.
    have read it.
 3. Steer it while it works. Ask "Read the README and summarize each section",
    and while it works send "Also count the Markdown files". Claude Code reads
-   a message sent during a turn at its next tool call. Esc interrupts a turn.
+   a message sent during a turn at its next tool call. Esc Esc interrupts a turn. One Esc does not, so an accidental press leaves the turn running.
    You should see one answer that covers both requests.
 4. Sleep and wake. Open the session panel with Alt+B and press Sleep, or
    type `/sleep`. Its card in the Fleet shows `zz slept`. Then send "What did

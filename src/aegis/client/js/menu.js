@@ -126,7 +126,7 @@ export function current() {
   return cur && { target: cur.target, node: cur.node };
 }
 
-// True when one was open (Esc closes it before it interrupts).
+// True when one was open (Esc closes it and does not interrupt).
 export function close() {
   if (!cur) return false;
   const { node, away, onClose } = cur;

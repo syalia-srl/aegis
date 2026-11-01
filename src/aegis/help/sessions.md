@@ -97,7 +97,7 @@ Type in the session's box and press Enter. A message you send while the
 agent works reaches it during the turn: Claude Code reads it at its next tool
 call. Messages from other sessions and from aegis are held until the turn
 ends, unless an agent sent a handoff as urgent: that one reaches the turn the
-same way yours does, and its row shows `steered in`. Esc interrupts the turn.
+same way yours does, and its row shows `steered in`. Esc Esc interrupts the turn: press Esc twice within a second. One Esc closes a dialog or a menu and leaves the turn running.
 `/model`, `/effort` and `/permission` switch those for this session; clicking
 the chips under the box does the same.
 
@@ -396,7 +396,7 @@ and Go to session) and the archive's rows (Read and Reopen).
 
 | verb | where | what it does |
 |---|---|---|
-| Interrupt | the menu, Esc, the button beside Send | ends the turn the agent is working on |
+| Interrupt | the menu, Esc Esc, the button beside Send | ends the turn the agent is working on. One Esc closes a dialog or a menu; Esc again within a second interrupts |
 | Sleep | the menu, the panel, `/sleep` (`/stop` is an alias) | ends the process and keeps the conversation; the session is asleep until a message wakes it. When ending it would also end a background task, a harness timer or a process it left running (a `nohup` command, a dev server), the menu and the panel ask first and name them; when aegis cannot check, they ask anyway |
 | Wake | the menu, on an asleep session | starts the process and sends nothing. Like a message, it is refused while the quota gate is closed, and it asks before starting a harness version outside the tested range |
 | Continue | the menu and the panel, on a session that is not working | sends "Continue" to the agent, which wakes an asleep one |

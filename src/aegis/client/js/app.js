@@ -2374,16 +2374,29 @@ function drawComposerHint(s) {
       ? "Asleep; your next message wakes it."
       : touch.matches
         ? ""
-        : "Message the agent. Enter sends, Shift+Enter adds a line, / for commands, Esc interrupts.";
+        : "Message the agent. Enter sends, Shift+Enter adds a line, / for commands, Esc Esc interrupts.";
   if (input.placeholder !== placeholder) {
     input.placeholder = placeholder;
     autosize();
   }
 }
 
+// One Esc closes a dialog. The interrupt is the next Esc within this long,
+// so a press while typing does not stop the turn.
+const ESC_AGAIN_MS = 1000;
+let escArmedAt = 0;
+
+function escHint() {
+  return Date.now() - escArmedAt < ESC_AGAIN_MS ? "Esc again to interrupt" : "Esc Esc interrupts";
+}
+
+function showEscHint() {
+  if (workingSince != null) $("working-meta").textContent = `${Math.round((Date.now() - workingSince) / 1000)}s, ${escHint()}`;
+}
+
 setInterval(() => {
   tickMonitors();
-  if (workingSince != null) $("working-meta").textContent = `${Math.round((Date.now() - workingSince) / 1000)}s, Esc interrupts`;
+  showEscHint();
   if (root.dataset.view === "fleet" && local().some((m) => m.stale)) drawBand();
   if (root.dataset.view === "fleet") for (const c of document.querySelectorAll(".card")) {
     const m = sessions.get(c.dataset.id);
@@ -3541,15 +3554,34 @@ installKeys(
       } else menu.openOverlay();
     },
     escape() {
-      if (cancelAsk() || closeInstallDialog() || closePushPanel()) return;
+      if (cancelAsk() || closeInstallDialog() || closePushPanel()) {
+        escArmedAt = 0;
+        return;
+      }
       if (root.dataset.menu === "open") {
+        escArmedAt = 0;
         setHdrMenu(false);
         return $("hdr-burger").focus();
       }
-      if (root.dataset.side === "open") return closeSide();
-      if (!keymap.hidden) help(false);
-      else if (cmenu.close() || cmenu.unbar() || viewer.close() || find.close() || closeMonitorCard() || closeCard()) return;
-      else if (route().view === "session" && !editing.size) interrupt();
+      if (root.dataset.side === "open") {
+        escArmedAt = 0;
+        return closeSide();
+      }
+      if (!keymap.hidden) {
+        escArmedAt = 0;
+        help(false);
+      } else if (cmenu.close() || cmenu.unbar() || viewer.close() || find.close() || closeMonitorCard() || closeCard()) {
+        escArmedAt = 0;
+      } else if (route().view === "session" && !editing.size && focused()?.state === "working") {
+        const now = Date.now();
+        if (escArmedAt && now - escArmedAt < ESC_AGAIN_MS) {
+          escArmedAt = 0;
+          interrupt();
+        } else {
+          escArmedAt = now;
+          showEscHint();
+        }
+      } else escArmedAt = 0;
     },
     help: () => help(),
     side: () => toggleSide(),
