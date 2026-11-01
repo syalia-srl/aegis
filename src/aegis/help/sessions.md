@@ -326,7 +326,9 @@ plan item, or what it is doing.
 - Opening a quiet session brings its tab back, as a click on its Fleet card
   does.
 - The "N ▾" button at the end of the tab bar opens the same list. It shows
-  while the tabs overflow, and always on a phone, where it is the way in.
+  while the tabs overflow, and always on a phone, where it is the way in. On
+  a phone the list fills the screen, and the close button beside its field
+  takes you back.
 
 ## Quiet sessions
 

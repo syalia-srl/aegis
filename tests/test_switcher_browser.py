@@ -171,6 +171,35 @@ def test_the_palette_and_the_key_list_offer_the_switcher(server, page):  # noqa:
     assert page.errors == []
 
 
+def test_on_a_phone_the_close_button_leaves_an_empty_list(server, browser):  # noqa: F811
+    # #901: the panel fills a phone's screen, so no backdrop is left to tap,
+    # and with no session there is no row either.
+    pg = browser.new_page(
+        viewport={"width": 390, "height": 844}, has_touch=True, is_mobile=True
+    )
+    pg.goto(server.url)
+    pg.wait_for_selector("#a2[data-view=fleet]")
+    pg.wait_for_selector("#tab-more:visible")
+    pg.tap("#tab-more")
+    pg.wait_for_selector("#switcher", state="visible")
+    assert pg.inner_text("#switcher .empty") == "No session matches"
+    box = pg.locator("#switcher .head .x").bounding_box()
+    assert box["width"] >= 44 and box["height"] >= 44
+    assert box["x"] + box["width"] <= 390
+    pg.tap("#switcher .head .x")
+    pg.wait_for_selector("#switcher", state="hidden")
+    assert pg.get_attribute("#a2", "data-view") == "fleet"
+    pg.close()
+
+
+def test_with_a_keyboard_the_close_button_is_not_drawn(server, page):  # noqa: F811
+    page.goto(server.url)
+    page.wait_for_selector("#a2[data-view=fleet]")
+    page.keyboard.press("Alt+p")
+    page.wait_for_selector("#switcher", state="visible")
+    assert not page.locator("#switcher .head .x").is_visible()
+
+
 def test_a_linked_servers_sessions_are_their_own_group_and_open(linked, page):  # noqa: F811
     lid = beta_session(linked, page.context.browser)
     page.goto(linked.alpha.url)
