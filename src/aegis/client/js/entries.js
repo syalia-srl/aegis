@@ -142,8 +142,9 @@ export function entryFiles(e) {
 }
 
 // A set of sent files as one card: a bar with the name and the actions, the
-// preview below. A set pages in place (‹ ›, or a swipe on a touch screen),
-// round from the last file to the first, and a preview is built only when
+// preview below. A set pages in place (‹ ›, a swipe on a touch screen, or
+// Left and Right when the row is selected — keys.js), round from the last
+// file to the first, and a preview is built only when
 // its file is shown. The preview kind was decided at send (files.py); Open
 // hands the set to the viewer, at the file shown.
 function viaFile(f) {

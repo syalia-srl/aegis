@@ -11,7 +11,7 @@ hints:
 A session's transcript is everything that happened in it, one row per thing:
 your messages, the agent's replies and thinking, a row for each tool call with
 its result, the messages other sessions and monitors sent it, and the files
-and pages it sent you. Select a row with j and k, or the arrow keys.
+and pages it sent you. Select a row with j and k, or with ↑ and ↓.
 
 ## Tool rows
 
@@ -111,8 +111,13 @@ an address that opens the session at that row, selected and in view.
 A file an agent sends with `file_send`, a file you attach to your message, and
 a page it sends with `artifact_send` arrive as a card in the transcript. A
 local file path the agent links in a reply opens the same viewer when you click
-it. Open shows the item inside aegis, over the transcript and the message box,
-and leaves the tabs and the session panel usable. Markdown renders in the
+it. When the card holds several files and that row is selected, Left and Right
+move through them and wrap from the last back to the first, the same way the
+‹ › buttons and a sideways swipe do. The same keys do this while the set is
+open in the viewer. They leave the picture where it is while the message box
+is focused, and on a card that holds one file. Open shows the item inside
+aegis, over the transcript and the message box, and leaves the tabs and the
+session panel usable. Markdown renders in the
 theme, source shows with line numbers and syntax colours, PDFs, HTML and images
 fill the view, and media plays. A live page runs there and answers the agent
 from there.
