@@ -5828,7 +5828,9 @@ def test_offline_what_needs_the_server_is_disabled(server, page):
     assert page.errors == []
 
 
-def test_new_session_is_a_labelled_button_on_a_desktop_and_a_plus_on_a_phone(server, browser):
+def test_new_session_is_a_labelled_button_on_a_desktop_and_a_plus_on_a_phone(
+    server, browser
+):
     ctx = browser.new_context(viewport={"width": 1280, "height": 800})
     pg = ctx.new_page()
     pg.goto(server.url)
