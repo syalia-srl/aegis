@@ -56,9 +56,10 @@ aegis usage --since 4w --measure subscription --split owner
 aegis usage --since 4w --split context --whatif 200k
 ```
 
-A turn run on a subscription (Claude Code signed in, OpenCode Go, Codex's
-plan) bills it; a turn on an API key bills `api`. `--split billing` names each
-subscription, as `claude:<hash>` for Claude Code's account. Name it and give
+A turn run on a subscription (Claude Code signed in, OpenCode Go, Cursor's
+plan, Codex's plan) bills it; a turn on an API key bills `api`. `--split
+billing` names each subscription, as `claude:<hash>` for Claude Code's
+account. Name it and give
 it a fee in the config's `usage.subscriptions` ([config](config.md)), and two
 measures appear:
 

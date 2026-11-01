@@ -2,8 +2,9 @@
 
 ``Quota`` holds one ``QuotaService`` per provider and runs one loop. Every
 ``TICK_S`` it asks each service to refresh, and the service's own floor decides
-whether that really fetches (Claude every 180 s, OpenCode Go every 60 s). So one
-loop carries both the fetch cadence and the re-evaluation of pace, which moves
+whether that really fetches (Claude every 180 s, OpenCode Go and Cursor every
+60 s). So one loop carries both the fetch cadence and the re-evaluation of
+pace, which moves
 with the clock. It then builds the wire snapshot and publishes it on the
 ``quota`` channel if it differs from the last one published; ``projected`` and
 the times are rounded so that happens at most once a tick.
@@ -42,11 +43,12 @@ from .core import (
     pace_severity,
     window_pace,
 )
+from .cursor import PROVIDER as CURSOR
 from .opencode import PROVIDER as OPENCODE_GO
 
 log = logging.getLogger("aegis.quota")
 
-PROVIDERS: tuple[QuotaProvider, ...] = (CLAUDE, OPENCODE_GO)
+PROVIDERS: tuple[QuotaProvider, ...] = (CLAUDE, OPENCODE_GO, CURSOR)
 TICK_S = 60.0
 Publish = Callable[[str, list[dict]], None]
 
@@ -105,7 +107,7 @@ def provider_wire(
         w = state.snapshot.window(kind)
         if w is None:
             continue
-        span = None if stale else provider.window_spans.get(kind)
+        span = None if stale else (w.span_s or provider.window_spans.get(kind))
         typical = PACE_USUAL_DEFAULT
         if usual is not None and span and head["account"] and w.resets_at is not None:
             billing = f"{provider.name}:{head['account']}"
@@ -248,16 +250,25 @@ class Quota:
         self.services[CLAUDE.name].observe(snap)
         self.check()
 
-    def turn_ended(self) -> None:
-        """A Claude turn just spent quota: refresh Claude before its cadence
-        would, but no sooner than its turn floor after the last fetch."""
+    def turn_ended(self, harness: str | None = None) -> None:
+        """A turn just spent quota: refresh that harness's provider before its
+        cadence would, but no sooner than its turn floor after the last fetch.
+
+        With no harness this still refreshes Claude, which is what a turn end
+        meant before Cursor had a gauge. OpenCode stays on its poll.
+        """
         if self._task is None:
             return
         for p in self._providers:
-            if p.name == CLAUDE.name:
-                t = asyncio.create_task(self._nudge(p))
-                self._nudges.add(t)
-                t.add_done_callback(self._nudges.discard)
+            if p.name not in (CLAUDE.name, CURSOR.name):
+                continue
+            if harness is None and p.name != CLAUDE.name:
+                continue
+            if harness is not None and p.harness != harness:
+                continue
+            t = asyncio.create_task(self._nudge(p))
+            self._nudges.add(t)
+            t.add_done_callback(self._nudges.discard)
 
     async def _nudge(self, p: QuotaProvider) -> None:
         await self.services[p.name].refresh(min_interval=p.turn_floor_s)

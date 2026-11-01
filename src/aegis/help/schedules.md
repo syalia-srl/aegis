@@ -186,8 +186,9 @@ A fire waits while the pool it draws on is over the schedule's own launch
 line, and goes once, at most one tick, when it drops back under. `quota` maps
 a pool to its windows and each window to a percent from 0 to 99 or to
 `"pace"`, which holds while the window is projected to pass 100% by its
-reset. The pool claude has the windows session and weekly_all, and the pool
-opencode-go has rolling, weekly and monthly. Without `quota` a
+reset. The pool claude has the windows session and weekly_all, the pool
+opencode-go has rolling, weekly and monthly, and the pool cursor has auto
+and api, the two monthly pools. Without `quota` a
 schedule holds while either weekly window is off pace; `{}` sets no line.
 
 ```json

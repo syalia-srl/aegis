@@ -5,6 +5,11 @@ The format follows Keep a Changelog; this project uses SemVer (0.x).
 
 ## [Unreleased]
 
+### Added
+
+- **Cursor's two quota pools show on the gauges.** Auto and API, both resetting with the billing month, read from the account `cursor-agent` is signed in to. The dollar included-usage figure is not a third pool.
+  help: schedules#quota-lines
+
 ## [2.21.0] - 2026-10-31
 
 ### Added

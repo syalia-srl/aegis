@@ -1,7 +1,7 @@
 """Whether a token may start a harness now, from its policy and the pool gauges.
 
-A policy maps a pool (a quota provider's name: ``claude``, ``opencode-go``, or
-``codex``, which has no gauge) to a mode. ``closed`` starts nothing there;
+A policy maps a pool (a quota provider's name: ``claude``, ``opencode-go``,
+``cursor``, or ``codex``, which has no gauge) to a mode. ``closed`` starts nothing there;
 ``open`` starts anything; ``lines`` compares each listed window of the pool's
 reading with a launch line and a stop line. Below every launch line the token
 is open. At or above any stop line it is stopped: aegis interrupts its turns

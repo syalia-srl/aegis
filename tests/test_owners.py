@@ -206,8 +206,9 @@ async def test_the_token_list_carries_the_pools_and_each_members_gates(world):
     await reg.call("token.policy", {"name": "ben", "policy": POLICY}, Caller("user"))
     listed = await reg.call("token.list", {}, Caller("user"))
     pools = {p["name"]: p for p in listed["pools"]}
-    assert set(pools) == {"claude", "opencode-go", "codex"}
+    assert set(pools) == {"claude", "opencode-go", "cursor", "codex"}
     assert [w["kind"] for w in pools["claude"]["windows"]] == ["session", "weekly_all"]
+    assert [w["kind"] for w in pools["cursor"]["windows"]] == ["auto", "api"]
     assert pools["codex"]["windows"] == [] and pools["claude"]["windows"][1]["pace"]
     rows = {r["name"]: r for r in listed["tokens"]}
     # No reading in a test: ben's lines close claude; the default opens it.
