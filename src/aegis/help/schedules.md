@@ -188,8 +188,9 @@ a pool to its windows and each window to a percent from 0 to 99, to
 reset, or to a map of `used` and `projected` (either or both), which holds
 when either is reached. A schedule's line takes no `stop`: a schedule only
 holds its fires, and a stop line, which cuts running turns, belongs on an
-agent or a queue. The pool claude has the windows session and weekly_all, and the pool
-opencode-go has rolling, weekly and monthly. Without `quota` a
+agent or a queue. The pool claude has the windows session and weekly_all, the pool
+opencode-go has rolling, weekly and monthly, and the pool cursor has auto
+and api, the two monthly pools. Without `quota` a
 schedule holds while either weekly window is off pace; `{}` sets no line.
 
 ```json
