@@ -4,8 +4,10 @@
 // sends.
 //
 // Point, area, draw, highlight, arrow and off are icons, named on hover.
-// Off leaves the PDF's own scrolling and zoom in reach. A stroke and an
-// arrow store normalized points; a highlight is a translucent region.
+// A wheel still scrolls a PDF while a tool is on: the notch that lands on
+// the layer steps it aside, and the notches after it reach the viewer.
+// Annotate off leaves the viewer's zoom and page controls in reach. A stroke
+// and an arrow store normalized points; a highlight is a translucent region.
 
 import { icon } from "./glyphs.js";
 
@@ -126,10 +128,20 @@ export function annotate(stage, tray, { path, kind }) {
   requestAnimationFrame(sync);
 
   let tool = "off";
+  // How long the PDF keeps the wheel after a notch hits the layer. The layer
+  // comes back on its own, or at once when a tool is chosen again.
+  const PASS_MS = 2500;
+  let passTimer = 0;
+  const endPass = () => {
+    clearTimeout(passTimer);
+    passTimer = 0;
+    layer.classList.remove("passing");
+  };
   const select = (name) => {
     tool = name;
     for (const b of buttons) b.setAttribute("aria-pressed", String(b.dataset.tool === name));
     layer.classList.toggle("active", name !== "off");
+    endPass();
   };
   for (const b of buttons) b.addEventListener("click", () => select(b.dataset.tool));
 
@@ -170,6 +182,17 @@ export function annotate(stage, tray, { path, kind }) {
     draft?.remove();
     draft = null;
   };
+  // The viewer's scroll container is inside the frame, so a wheel whose
+  // target is the layer never moves the PDF. Stepping the layer out of the
+  // hit test lets the rest of the gesture through (#919). An image scrolls
+  // an ancestor of the layer, which a wheel already reaches.
+  const onWheel = () => {
+    if (kind !== "pdf" || tool === "off" || start) return;
+    layer.classList.add("passing");
+    clearTimeout(passTimer);
+    passTimer = setTimeout(endPass, PASS_MS);
+  };
+  layer.addEventListener("wheel", onWheel, { passive: true });
 
   layer.addEventListener("pointerdown", (ev) => {
     if (ev.button !== 0 || tool === "off") return;
@@ -256,5 +279,12 @@ export function annotate(stage, tray, { path, kind }) {
     tray.add({ locator: `${where} ${type}`, quote: "", at, annotation });
   });
   layer.addEventListener("pointercancel", clear);
-  return { sync, destroy: () => resize.disconnect() };
+  return {
+    sync,
+    destroy: () => {
+      resize.disconnect();
+      clearTimeout(passTimer);
+      layer.removeEventListener("wheel", onWheel);
+    },
+  };
 }

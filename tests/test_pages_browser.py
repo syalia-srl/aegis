@@ -254,6 +254,65 @@ def drag_region(pg, layer: str, start=(0.2, 0.25), end=(0.7, 0.75)) -> None:
     pg.mouse.up()
 
 
+def test_the_annotation_list_sits_beside_the_picture(server, page):  # noqa: F811
+    (server.root / "chart.png").write_bytes(PNG)
+    page.goto(server.url)
+    spawn(page)
+    send(page, 1, ["chart.png"])
+    view(page, ".stage.image img")
+    page.locator("#viewer .stage.image img").evaluate(
+        "img => { img.style.width = '400px'; img.style.height = '300px'; }"
+    )
+    before = page.locator("#viewer .stage.image img").bounding_box()
+    page.click("#viewer .vatools [data-tool=area]")
+    drag_region(page, "#viewer .valayer")
+    img = page.locator("#viewer .stage.image img").bounding_box()
+    tray = page.locator("#viewer .ctray").bounding_box()
+    assert abs(img["height"] - before["height"]) <= 1
+    assert tray["x"] >= img["x"] + img["width"] - 1
+    # A wheel on a picture still belongs to the picture: the layer stays put.
+    page.mouse.move(img["x"] + img["width"] / 2, img["y"] + img["height"] / 2)
+    page.mouse.wheel(0, 80)
+    assert "passing" not in page.locator("#viewer .valayer").get_attribute("class")
+    assert page.errors == []
+
+
+def test_a_wheel_reaches_the_pdf_while_a_tool_is_on(server, page):  # noqa: F811
+    (server.root / "report.pdf").write_bytes(b"%PDF-1.4\n%%EOF\n")
+    page.goto(server.url)
+    spawn(page)
+    page.goto(f"{server.url.split('#')[0]}#files=report.pdf")
+    page.wait_for_selector(".v-files .fstage.pdf iframe")
+    before = page.locator(".v-files .fstage iframe").bounding_box()
+    page.click(".v-files .vatools [data-tool=area]")
+    layer = page.locator(".v-files .valayer")
+    box = layer.bounding_box()
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    page.mouse.wheel(0, 120)
+    page.wait_for_function(
+        "() => document.querySelector('.v-files .valayer').classList.contains('passing')"
+    )
+    hit = page.evaluate(
+        """() => {
+          const layer = document.querySelector('.v-files .valayer');
+          const r = layer.getBoundingClientRect();
+          const el = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+          return el && el.tagName;
+        }"""
+    )
+    assert hit == "IFRAME"
+    # Choosing the tool again puts the layer back, and a drag still draws.
+    page.click(".v-files .vatools [data-tool=area]")
+    assert "passing" not in layer.get_attribute("class")
+    drag_region(page, ".v-files .valayer", (0.2, 0.2), (0.5, 0.5))
+    assert page.locator(".v-files .ctray .cn").inner_text() == "1 annotation"
+    frame = page.locator(".v-files .fstage iframe").bounding_box()
+    tray = page.locator(".v-files .ctray").bounding_box()
+    assert abs(frame["height"] - before["height"]) <= 1
+    assert tray["x"] >= frame["x"] + frame["width"] - 1
+    assert page.errors == []
+
+
 def test_an_image_region_becomes_a_structured_annotation(server, page):  # noqa: F811
     (server.root / "chart.png").write_bytes(PNG)
     page.goto(server.url)

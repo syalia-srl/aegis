@@ -161,14 +161,16 @@ An image or PDF opened in Files, opened from a sent file's card, or docked
 beside the transcript has icon tools over its preview. The name shows on
 hover: Point, Area, Draw, Highlight, Arrow, and Annotate off. Point marks a
 spot. Area and Highlight drag a region; a highlight is translucent. Draw
-follows the pointer, and Arrow runs from the press to the release. Annotate
-off leaves the PDF's own scrolling and zoom controls in reach. For a PDF, set
+follows the pointer, and Arrow runs from the press to the release. The wheel
+still scrolls a PDF while a tool is on. Annotate off leaves the viewer's zoom
+and page controls in reach. For a PDF, set
 the page box to the page currently visible before drawing; the browser's
 built-in PDF viewer does not report its current page, or the words under the
 mark, to aegis.
 
 Each mark adds a number and a note to the same comment tray used for text.
-The note takes more than one line: Enter and Shift+Enter add a line, and
+On a wide window the list sits beside the picture, so the preview keeps its
+size. The note takes more than one line: Enter and Shift+Enter add a line, and
 neither sends. Remove individual marks, Discard them all, or Send them
 together. The message names the file and carries the annotation type, the PDF
 page when applicable, and normalized coordinates as JSON: a region for a
