@@ -44,6 +44,10 @@ procedure. Drop `--window` and add `--origin https://<that name>`: without it th
 is refused, so the phone shows "disconnected, retrying" (2026-10-10). Take the
 record and the site down when the tour is over.
 
+**If the host keeps a permanent smoke server, use it** instead of the steps above.
+It normally serves the `smoke` branch, which carries open PRs, so deploy `main` on
+it for the tour and hold it still; the host's own notes give the commands.
+
 ## 3. Write the tour
 
 List what changed: every `changelog.d/` fragment since the last tag (`git describe --tags --abbrev=0 origin/main`).
