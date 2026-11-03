@@ -10,6 +10,8 @@
 // it down its link and stamps `server` on what comes back (links.py). A
 // subscription is keyed by its server and channel.
 
+import { setServerTime } from "./clock.js";
+
 export const PROTO = 3;
 
 // Channels this client asks to patch with merges: a row it holds comes back as
@@ -62,6 +64,7 @@ export class Connection {
         // Who this browser is here, and whose a session with no owner is (tokens.py).
         this.me = msg.me || null;
         this.owner = msg.owner || "";
+        setServerTime(msg.now); // ages are measured on its clock (#924)
         this.onState("open", msg.server);
         for (const key of this.subs.keys()) this._sendSub(key);
         for (const w of this.watches.values()) this.ws.send(JSON.stringify(w));
