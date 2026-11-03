@@ -741,6 +741,8 @@ def build_web(
                 "proto": PROTO,
                 "server": app.server_name,
                 "build": listing()["build"],
+                # The client measures ages on this clock, not its own (#924).
+                "now": time.time(),
                 # A spawn through a link may say its group (#586): a link
                 # sends it only to a server that says this.
                 "groups": True,
