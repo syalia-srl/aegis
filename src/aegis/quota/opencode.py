@@ -1,7 +1,8 @@
 """Live OpenCode Go quota — the rolling, weekly and monthly windows.
 
-OpenCode stores its API keys locally; the Zen gateway reports the Go plan's
-current window utilisation behind one of them. This module reads the key, asks
+OpenCode stores its API keys locally, 2.x in its database and 1.x in
+``auth.json``; the Zen gateway reports the Go plan's current window utilisation
+behind one of them. This module reads the key, asks
 the endpoint, and hands back the same ``QuotaSnapshot`` the Claude provider
 produces, so the service and the gauges stay generic.
 
@@ -13,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -43,11 +45,40 @@ def _user_agent() -> str:
         return "aegis/0"
 
 
+def _share() -> Path:
+    return Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share")))
+
+
 def auth_path() -> Path:
-    """Where OpenCode keeps its API keys. ``OPENCODE_AUTH`` overrides."""
-    share = os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share"))
-    default = Path(share) / "opencode" / "auth.json"
+    """Where OpenCode 1.x keeps its API keys. ``OPENCODE_AUTH`` overrides."""
+    default = _share() / "opencode" / "auth.json"
     return Path(os.environ.get("OPENCODE_AUTH", str(default)))
+
+
+def _read_db_key() -> str | None:
+    """The Go key from OpenCode 2.x's database, which replaced ``auth.json``.
+
+    Its ``credential`` table holds one row per stored key, the value the same
+    ``{"type", "key"}`` object ``auth.json`` held. Opened read-only, since
+    OpenCode itself writes this file; any failure is None, like a missing file.
+    """
+    db = _share() / "opencode" / "opencode.db"
+    if not db.is_file():
+        return None
+    try:
+        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=1.0)
+        try:
+            row = conn.execute(
+                "SELECT value FROM credential WHERE integration_id = 'opencode-go'"
+                " AND coalesce(active, 1) = 1 ORDER BY time_updated DESC LIMIT 1"
+            ).fetchone()
+        finally:
+            conn.close()
+        entry = json.loads(row[0]) if row else None
+    except (sqlite3.Error, ValueError, TypeError):
+        return None
+    key = entry.get("key") if isinstance(entry, dict) else None
+    return key if isinstance(key, str) and key else None
 
 
 def read_key(path: Path | None = None) -> str | None:
@@ -56,8 +87,14 @@ def read_key(path: Path | None = None) -> str | None:
     Never raises: a missing file, unreadable JSON and an absent entry are all
     the same answer — we cannot ask about quota. Note this is the ``opencode-go``
     entry specifically, not the ``opencode`` (Zen pay-as-you-go) one; they are
-    separate accounts even when they currently hold the same key.
+    separate accounts even when they currently hold the same key. OpenCode 2.x
+    keeps it in its database and 1.x in ``auth.json``; the database is asked
+    first unless a path or ``OPENCODE_AUTH`` names the file.
     """
+    if path is None and "OPENCODE_AUTH" not in os.environ:
+        key = _read_db_key()
+        if key:
+            return key
     p = path or auth_path()
     try:
         with Path(p).open() as f:

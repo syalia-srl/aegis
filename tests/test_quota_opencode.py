@@ -1,4 +1,5 @@
 import json
+import sqlite3
 import urllib.error
 from datetime import timezone
 
@@ -56,6 +57,67 @@ def test_read_key_returns_none_without_a_go_entry(tmp_path):
     p = tmp_path / "auth.json"
     p.write_text(json.dumps({"google": {"type": "oauth", "access": "x"}}))
     assert read_key(p) is None
+
+
+def _opencode_db(share, rows):
+    """OpenCode 2.x's database, with its `credential` table as 2.1.2 creates it."""
+    (share / "opencode").mkdir(parents=True, exist_ok=True)
+    db = sqlite3.connect(share / "opencode" / "opencode.db")
+    db.execute(
+        "CREATE TABLE credential (id text PRIMARY KEY, integration_id text,"
+        " label text NOT NULL, value text NOT NULL, connector_id text,"
+        " method_id text, active integer, time_created integer NOT NULL,"
+        " time_updated integer NOT NULL)"
+    )
+    for i, (integration, key, active) in enumerate(rows):
+        db.execute(
+            "INSERT INTO credential VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, ?)",
+            (
+                f"cred_{i}",
+                integration,
+                integration,
+                json.dumps({"type": "key", "key": key}),
+                active,
+                i,
+                i,
+            ),
+        )
+    db.commit()
+    db.close()
+
+
+def test_read_key_reads_opencode_2s_database(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    monkeypatch.delenv("OPENCODE_AUTH", raising=False)
+    _opencode_db(
+        tmp_path,
+        [
+            ("opencode", "sk-zen", 1),
+            ("opencode-go", "sk-old", 0),
+            ("opencode-go", "sk-go", 1),
+        ],
+    )
+    assert read_key() == "sk-go"
+
+
+def test_read_key_falls_back_to_auth_json_without_a_go_credential(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    monkeypatch.delenv("OPENCODE_AUTH", raising=False)
+    _opencode_db(tmp_path, [("opencode", "sk-zen", 1)])
+    (tmp_path / "opencode" / "auth.json").write_text(
+        json.dumps({"opencode-go": {"type": "api", "key": "sk-go"}})
+    )
+    assert read_key() == "sk-go"
+
+
+def test_read_key_returns_none_on_a_database_it_cannot_read(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    monkeypatch.delenv("OPENCODE_AUTH", raising=False)
+    (tmp_path / "opencode").mkdir()
+    (tmp_path / "opencode" / "opencode.db").write_text("not a database")
+    assert read_key() is None
 
 
 def test_parse_reads_the_three_windows():
