@@ -4,6 +4,7 @@
 // the share of the window already gone, and the countdown to its reset.
 
 import { icon } from "./glyphs.js";
+import { serverNow } from "./clock.js";
 
 export const PROJECT_FROM = 80; // the projection prints from here, as quota's PACE_WARN_AT
 
@@ -36,7 +37,7 @@ export function age(seconds) {
 function clock(ts) {
   const d = new Date(ts * 1000);
   const hm = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  return ts - Date.now() / 1000 > 86400 ? `${d.toLocaleDateString([], { weekday: "short" })} ${hm}` : hm;
+  return ts - serverNow() > 86400 ? `${d.toLocaleDateString([], { weekday: "short" })} ${hm}` : hm;
 }
 
 // The share of the window already gone, clamped to the bar; null draws no tick.

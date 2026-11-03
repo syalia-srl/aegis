@@ -13,6 +13,7 @@ import { CARET_ICON, entryIcon, icon, iconText } from "./glyphs.js";
 import { diffView } from "./diff.js";
 import { cachedColour, colour, isPlain, langName, paint, splitLines } from "./highlight.js";
 import { hostIcon, repoUrl, shortLabel, sureRepo } from "./refs.js";
+import { serverNow } from "./clock.js";
 
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
@@ -330,7 +331,7 @@ const SECRET_GONE = {
   expired: "Expired before it was revealed. Ask the agent to send it again.",
   restarted: "No longer available: aegis restarted before it was revealed. Ask the agent to send it again.",
 };
-const lapsed = (e) => Date.parse(e.detail?.expires_at || "") < Date.now();
+const lapsed = (e) => Date.parse(e.detail?.expires_at || "") / 1000 < serverNow();
 const until = (iso) => `expires ${new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
 
 function secretBar(e, title, meta) {
@@ -784,7 +785,7 @@ function countLine(count) {
 
 function since(a, b) {
   if (!a) return "";
-  const s = Math.max(0, Math.round((b || Date.now() / 1000) - a));
+  const s = Math.max(0, Math.round((b || serverNow()) - a));
   return s >= 3600 ? `${Math.floor(s / 3600)}h${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}` : `${Math.floor(s / 60)}m${String(s % 60).padStart(2, "0")}`;
 }
 
@@ -1049,7 +1050,7 @@ function argRow(run, k, v) {
 function etaLine(w) {
   if (!w.started) return "";
   const t = tally(w);
-  const end = w.ended || Date.now() / 1000;
+  const end = w.ended || serverNow();
   const took = end - w.started;
   const parts = [`${since(w.started, end)} elapsed`];
   const live = w.status === "running" && t.done > 0 && t.done < t.total;

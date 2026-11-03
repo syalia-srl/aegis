@@ -9565,6 +9565,24 @@ def test_the_cold_notice_appears_for_a_large_idle_context_only(cold_server, page
     page.wait_for_selector("#coldnote:not([hidden]) >> text=150k tokens", timeout=4000)
 
 
+def test_a_device_clock_ahead_does_not_show_the_cold_notice(server, browser):
+    """#924: a phone whose clock ran an hour ahead after a daylight saving
+    change showed the cold notice the moment a turn ended. The client measures
+    idle time on the server's clock, not the device's."""
+    errors: list = []
+    page = new_page(browser, errors)
+    page.add_init_script(
+        "const real = Date.now; Date.now = () => real() + 2 * 3600 * 1000;"
+    )
+    page.goto(server.url)
+    page.wait_for_selector("#a2[data-view=fleet]")
+    spawn(page, "/ctx 150000")
+    turns_done(page, 1)
+    page.wait_for_timeout(1500)
+    assert page.is_hidden("#coldnote")
+    assert errors == []
+
+
 def test_the_handoff_chip_continues_fresh_at_once(server, page):
     page.goto(server.url)
     page.wait_for_selector("#a2[data-view=fleet]")

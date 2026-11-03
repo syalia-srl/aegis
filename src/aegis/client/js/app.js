@@ -55,6 +55,7 @@ import { clearDevice, loadFleet, loadTranscript, saveFleet, saveTranscript } fro
 import { markNeedsNet, offline } from "./net.js";
 import { discard, draftFor, flushNow, loadDrafts, onDrafts, queue, sendAnyway, setSender } from "./outbox.js";
 import { idleFor, lifecycle } from "./lifecycle.js";
+import { serverNow } from "./clock.js";
 
 const $ = (id) => document.getElementById(id);
 const root = $("a2");
@@ -66,7 +67,7 @@ let quota = { providers: [] };
 let host = null;
 let unsubHost = null;
 let quotaDrawnFor = null; // the view the quota rows were last drawn for
-const nowS = () => Date.now() / 1000;
+const nowS = serverNow;
 
 // -- theme ----------------------------------------------------------------
 // This browser's choice, picked in Settings; index.html applies it before the
@@ -1701,7 +1702,7 @@ function drawSideHost() {
     tiles.push(tile("net", net.ok ? `${net.rtt_ms} ms` : "down", { severity: net.ok ? "normal" : "critical" }));
     if (sp?.complete) tiles.push(tile("speed", mbps(sp.bps), { small: " Mbps" }));
   }
-  rows.push(...netRows(net, Date.now() / 1000, () => measureNet(server || null)));
+  rows.push(...netRows(net, serverNow(), () => measureNet(server || null)));
   $("s-host-tiles").replaceChildren(...tiles);
   $("s-host-rows").replaceChildren(...rows);
   const live = (s.server ? on(s.server) : local()).filter((m) => m.state !== "asleep" && !isTool(m));
@@ -1890,7 +1891,7 @@ function follow(id) {
 function sinceText(s) {
   const t = s?.last_read_at;
   if (!t) return "new since you left";
-  const m = Math.round((Date.now() / 1000 - t) / 60);
+  const m = Math.round((serverNow() - t) / 60);
   return `new since you left · ${m < 60 ? `${m} min` : `${Math.round(m / 60)} h`}`;
 }
 
