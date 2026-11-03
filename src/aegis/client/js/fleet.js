@@ -8,6 +8,7 @@ import { shownOwner } from "./me.js";
 import { dur, planTimes } from "./plantime.js";
 import { workflowLocked, workflowTitle } from "./entries.js";
 import { blocksOf, hueOf } from "./groups.js";
+import { serverNow } from "./clock.js";
 
 function el(tag, cls, text) {
   const n = document.createElement(tag);
@@ -18,7 +19,7 @@ function el(tag, cls, text) {
 
 export function ago(ts) {
   if (!ts) return "";
-  const s = Math.max(0, Math.round(Date.now() / 1000 - ts));
+  const s = Math.max(0, Math.round(serverNow() - ts));
   if (s < 10) return "just now";
   if (s < 60) return `${s}s ago`;
   const m = Math.floor(s / 60);
@@ -426,7 +427,7 @@ export function renderBand(band, { metas, host, server, link = "", off = false, 
     meters.push(hostRow("CPU", host.cpu, ""));
     meters.push(hostRow("RAM", host.ram.pct, `${host.ram.used_gb} / ${host.ram.total_gb} GB`));
     meters.push(...diskRows(host));
-    meters.push(...netRows(host.net, Date.now() / 1000, off ? null : measure));
+    meters.push(...netRows(host.net, serverNow(), off ? null : measure));
   }
   const live = metas.filter((m) => m.state !== "asleep" && m.context_window && m.context_tokens);
   if (live.length) {

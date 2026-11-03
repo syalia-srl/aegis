@@ -26,6 +26,7 @@ import { onPushState, pushState, unsubscribePush } from "./pushpanel.js";
 import { markNeedsNet, offline } from "./net.js";
 import { ask } from "./dialog.js";
 import { MIN_SPEED } from "./speak.js";
+import { serverNow } from "./clock.js";
 
 const h = (tag, props = {}, ...kids) => {
   const el = Object.assign(document.createElement(tag), props);
@@ -702,7 +703,7 @@ export class Settings {
 
   // Each pool's gauges now, so lines are set against the real readings.
   poolNow() {
-    const now = Date.now() / 1000;
+    const now = serverNow();
     return h(
       "div",
       { className: "poolnow", id: "set-poolnow" },
@@ -807,7 +808,7 @@ export class Settings {
     const l = pp.lines[w.kind];
     const rw = this.reading(pool.name)?.windows.find((x) => x.kind === w.kind);
     const pct = rw ? rw.percent : 0;
-    const gone = rw ? elapsed(rw, Date.now() / 1000) : null;
+    const gone = rw ? elapsed(rw, serverNow()) : null;
     const check = (act, checked, disabled, onchange) => h("input", { type: "checkbox", checked, disabled, onchange, className: `set-${act}` });
     const use = check("use", !!l, false, (e) => {
       if (e.target.checked) pp.lines[w.kind] = { launch: 50, stop: 90 };
@@ -1208,7 +1209,7 @@ export class Settings {
     };
     box.draw = () => {
       const score = (x) => (x?.intelligence == null ? "unranked" : x.intelligence.toFixed(1));
-      const now = Date.now() / 1000;
+      const now = serverNow();
       rows.replaceChildren(
         ...list.map((m, i) => {
           const x = info(m);

@@ -292,6 +292,11 @@ the work done while it was `doing`. It accrues only at a plan record and at turn
 boundaries (`transcript/plan_clock.py`); the browser adds the time running since,
 so a turn's lines do not rewrite the meta.
 
+Every age the browser draws against a stamp from the server (idle time, the
+cold-cache notice, a monitor's start, the plan's running time) is measured on
+the server's clock: the welcome carries its time and `client/js/clock.js` keeps
+the offset, so a device whose clock is off by an hour draws no age wrong (#924).
+
 **What a person has read is the server's, shared by every browser.** A session
 keeps the ids of the agent messages no person has read, and when someone last
 read, in its meta, so boot still reads no store; a new message joins the set as
