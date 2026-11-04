@@ -277,6 +277,9 @@ class AttachBegin(_Strict):
     log_id: str
     name: str = Field(min_length=1, max_length=1000)
     size: int = Field(ge=0, le=files.MAX_BYTES)
+    # A recording made by holding the composer's microphone, this long by the
+    # browser's clock: the send rewrites it as mono 16 kHz Opus (#932).
+    recorded_ms: int | None = Field(None, ge=0)
 
 
 class AttachPut(_Strict):
@@ -2668,7 +2671,9 @@ class App:
             waits, staged, until a session.send names it (attachments.py)."""
             reg.open(p.log_id)
             try:
-                uid = att.begin(self.roots.state_root, p.log_id, p.name, p.size)
+                uid = att.begin(
+                    self.roots.state_root, p.log_id, p.name, p.size, p.recorded_ms
+                )
             except files.FileError as e:
                 raise OpError(e.code, e.message) from e
             return {"upload_id": uid}

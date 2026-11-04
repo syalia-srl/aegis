@@ -176,7 +176,9 @@ class _artifact:
         """Move a file the page uploaded (attachment.begin and .put) into the session's inbox and wake the agent with its path. It counts as an event, and the count comes first, so a refused file stays staged and reaches nobody. The page gets the record, for the person to see."""
 
 class _attachment:
-    async def begin(self, *, log_id: str, name: str, size: int) -> Any:
+    async def begin(
+        self, *, log_id: str, name: str, size: int, recorded_ms: int | None = ...
+    ) -> Any:
         """Start uploading a file to a session: its upload id. The file waits, staged, until a session.send names it (attachments.py)."""
     async def drop(self, *, log_id: str, upload_id: str) -> Any:
         """Forget an upload the person removed before sending."""

@@ -42,6 +42,7 @@ import { ask, cancelAsk, choose } from "./dialog.js";
 import { modelMeta } from "./models.js";
 import "./pick.js";
 import { Dictation } from "./dictation.js";
+import { HoldToRecord } from "./record.js";
 import { Attachments } from "./attach.js";
 import { dur, planTimes } from "./plantime.js";
 import { setToastOpener, toast } from "./toast.js";
@@ -3542,7 +3543,7 @@ installKeys(
       } else menu.openOverlay();
     },
     escape() {
-      if (cancelAsk() || closeInstallDialog() || closePushPanel()) return;
+      if (recorder.discard() || cancelAsk() || closeInstallDialog() || closePushPanel()) return;
       if (root.dataset.menu === "open") {
         setHdrMenu(false);
         return $("hdr-burger").focus();
@@ -3722,6 +3723,26 @@ if (!navigator.mediaDevices) {
     b.title = "Dictation needs https or localhost";
   }
 }
+// A long press on either mic records audio instead (record.js, #932): the take
+// goes out as an attachment with what the box holds. A take that ends after
+// its tab was left waits in that session's tray rather than going out unseen.
+const recorder = new HoldToRecord({
+  busy: () => offline() || dictation.state !== "idle",
+  onError: (message) => toast(message, { kind: "error" }),
+  onDone(file, ms, ctx) {
+    if (ctx.spawn) {
+      spAtts.add([file], "spawn");
+      if (onSpawn()) spawnFromComposer();
+      return;
+    }
+    atts.add([file], ctx.key);
+    if (shown === ctx.key && onSession()) send();
+    else toast("The recording waits in its session's box: send it from there");
+  },
+});
+recorder.attach($("mic"), () => ({ key: shown }));
+recorder.attach($("sp-mic"), () => ({ spawn: true }));
+for (const [b] of mics()) if (!b.disabled) b.title += " · hold to record audio";
 $("mic").addEventListener("click", () => !offline() && dictation.toggle(sessionTarget(), "button"));
 $("sp-mic").addEventListener("click", () => !offline() && dictation.toggle(spawnTarget(), "button"));
 // On a touch screen Enter adds a line and the button sends: the key sits where

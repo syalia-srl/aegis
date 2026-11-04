@@ -1,8 +1,10 @@
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
 
-from aegis import attachments as att, files
+from aegis import attachments as att, files, recordings
 from aegis.files import FileError, find
 
 
@@ -156,3 +158,56 @@ def test_an_unusual_space_in_a_name_becomes_a_plain_one():
     # copies the path back types a plain space and misses the file.
     assert att.clean_name("Oct 10, 12.26 PM.m4a") == "Oct 10, 12.26 PM.m4a"
     assert att.clean_name("a b.txt") == "a b.txt"
+
+
+def take(tmp_path, seconds=3):
+    """A browser-like take: Opus in WebM, stereo at 48 kHz."""
+    src = tmp_path / "take.webm"
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-f", "lavfi", "-i",
+         f"sine=frequency=440:sample_rate=48000:duration={seconds}",
+         "-ac", "2", "-c:a", "libopus", "-b:a", "64k", str(src)],
+        check=True,
+    )  # fmt: skip
+    return src.read_bytes()
+
+
+def opus_head(path):
+    """Channels and input sample rate from the OpusHead packet: an Opus
+    decoder always reports 48 kHz, the rate it plays at (RFC 7845 §5.1)."""
+    data = path.read_bytes()
+    head = data[data.index(b"OpusHead") :]
+    return head[9], int.from_bytes(head[12:16], "little")
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="needs ffmpeg")
+def test_a_recording_is_sent_as_mono_16khz_opus_with_its_duration(tmp_path):
+    body = take(tmp_path)
+    uid = att.begin(tmp_path, "log1", "recording.webm", len(body), recorded_ms=2900)
+    att.put(tmp_path, "log1", uid, 0, body)
+    (rec,) = att.commit(tmp_path, "log1", [uid])
+    dest = Path(rec["path"])
+    assert dest.name.endswith("-recording.ogg") and rec["name"] == "recording.ogg"
+    assert opus_head(dest) == (1, 16000)
+    assert rec["recording_s"] == pytest.approx(3.0, abs=0.1)  # the file's, not 2.9
+    line = att.message("scene 2", [rec]).splitlines()[-1]
+    assert line.startswith(f"- {dest} (an audio recording") and "0:03 long" in line
+
+
+def test_without_ffmpeg_a_recording_keeps_its_file_and_the_browsers_clock(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(recordings.shutil, "which", lambda _: None)
+    uid = up(tmp_path, b"not really opus", "recording.webm")
+    (folder,) = staged(tmp_path).iterdir()
+    (folder / att.RECORDING).write_text("83400")
+    (rec,) = att.commit(tmp_path, "log1", [uid])
+    assert Path(rec["path"]).read_bytes() == b"not really opus"
+    assert rec["recording_s"] == 83.4
+    assert "1:23 long" in att.message("", [rec])
+
+
+def test_a_plain_file_says_nothing_of_recordings(tmp_path):
+    (rec,) = att.commit(tmp_path, "log1", [up(tmp_path, b"abc", "a.webm")])
+    assert "recording_s" not in rec
+    assert "recording" not in att.message("", [rec])
