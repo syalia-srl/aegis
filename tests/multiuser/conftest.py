@@ -196,7 +196,7 @@ def mu_server(host):
         "agents:\n"
         "  opus: {harness: claude-code, model: opus, effort: high, permission: full}\n"
         "queues:\n"
-        "  general: {agent: opus, max_parallel: 2}\n"
+        "  general: {agent: opus}\n"
         "terminals:\n"
         "  probe: {cmd: 'sh -c \"sleep 30\"'}\n"
     )

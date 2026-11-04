@@ -21,7 +21,7 @@ agents:
     effort: high
     permission: full
 queues:
-  general: {agent: free, max_parallel: 2}
+  general: {agent: free}
 """
 
 

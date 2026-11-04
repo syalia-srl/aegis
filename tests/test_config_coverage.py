@@ -34,7 +34,8 @@ agents:
   opus: {exit: "off", harness: claude-code, model: opus, effort: high, permission: full, priming: Be brief., keep_harness_tools: [Agent]}
   quick: {harness: claude-code, models: [haiku, sonnet], effort: low, permission: read}
 queues:
-  general: {agent: opus, max_parallel: 3, quiet: false}
+  general: {agent: opus, priority: 3, quiet: false}
+max_workers: 7
 recap: {agent: quick}
 btw: {agent: opus}
 context: {handoff_at: 200000, cold_after: 1800, cold_min: 50000}
@@ -100,7 +101,13 @@ def reader_keys() -> list[str]:
         "btw": ["agent"],
         "multi_user": ["env_file"],
     }
-    scalars = {"default_agent", "exit_via", "session_memory_max", "terminal_memory_max"}
+    scalars = {
+        "default_agent",
+        "exit_via",
+        "session_memory_max",
+        "terminal_memory_max",
+        "max_workers",
+    }
     out = []
     for top in config.TOP_KEYS:
         if top in scalars:

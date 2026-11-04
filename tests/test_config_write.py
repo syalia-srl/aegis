@@ -163,7 +163,7 @@ def test_a_write_over_a_broken_file_is_refused(tmp_path):
 def test_an_invalid_document_writes_nothing_and_names_each_row(tmp_path):
     p, doc = setup(tmp_path, WORKSPACE)
     doc.agents[0].effort = "huge"
-    doc.queues.append(QueueDoc(name="orphan", agent="nobody", max_parallel=0))
+    doc.queues.append(QueueDoc(name="orphan", agent="nobody", priority=-1))
     doc.default_agent = "ghost"
     before = p.read_bytes()
     problems = write(p, doc, stamp_of(p))
@@ -202,12 +202,13 @@ def test_a_new_file_is_created_from_nothing(tmp_path):
             )
         ],
         default_agent="opus",
-        queues=[QueueDoc(name="general", agent="opus", max_parallel=3)],
+        queues=[QueueDoc(name="general", agent="opus", priority=3)],
+        max_workers=5,
     )
     assert write(p, doc, None) == []
     assert p.read_text().startswith("# aegis configuration.")
     data = safe(p)
-    assert list(data) == ["default_agent", "agents", "queues"]
+    assert list(data) == ["default_agent", "agents", "queues", "max_workers"]
     assert doc_from(data) == doc
 
 

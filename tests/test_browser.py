@@ -3414,9 +3414,7 @@ def test_a_question_marks_the_tab_card_and_band_and_the_fleet_groups_it(server, 
 
 @pytest.fixture
 def queue_server(tmp_path: Path, fake_claude: str, fake_opencode: str):
-    (tmp_path / ".aegis.yaml").write_text(
-        CONFIG + "queues:\n  q: {agent: opus, max_parallel: 2}\n"
-    )
+    (tmp_path / ".aegis.yaml").write_text(CONFIG + "queues:\n  q: {agent: opus}\n")
     s = Server(tmp_path, fake_claude, fake_opencode).start()
     yield s
     s.stop()
@@ -4019,7 +4017,7 @@ def test_renaming_the_default_agent_carries_to_the_default(settings_server, page
 
 def test_renaming_an_agent_carries_to_the_queues_that_run_it(settings_server, page):
     (settings_server.root / ".aegis.yaml").write_text(
-        SETTINGS_CONFIG + "queues:\n  q: {agent: opus, max_parallel: 2}\n"
+        SETTINGS_CONFIG + "queues:\n  q: {agent: opus}\n"
     )
     open_settings(page, settings_server.url)
     page.wait_for_selector('.set-queue[data-row="queues.q"]')
@@ -4032,6 +4030,24 @@ def test_renaming_an_agent_carries_to_the_queues_that_run_it(settings_server, pa
         "document.querySelector('#set-status').textContent === 'Saved'"
     )
     assert "agent: big" in (settings_server.root / ".aegis.yaml").read_text()
+
+
+def test_settings_sets_a_queue_priority_and_the_worker_limit(settings_server, page):
+    (settings_server.root / ".aegis.yaml").write_text(
+        SETTINGS_CONFIG + "queues:\n  q: {agent: opus}\n"
+    )
+    open_settings(page, settings_server.url)
+    page.wait_for_selector('.set-queue[data-row="queues.q"]')
+    page.fill('.set-queue[data-row="queues.q"] input[name=priority]', "0")
+    page.fill("#set-max-workers input[name=max_workers]", "6")
+    page.click("#set-save")
+    page.wait_for_function(
+        "document.querySelector('#set-status').textContent === 'Saved'"
+    )
+    data = YAML(typ="safe").load((settings_server.root / ".aegis.yaml").read_text())
+    assert data["queues"]["q"] == {"agent": "opus", "priority": 0}
+    assert data["max_workers"] == 6
+    assert page.errors == []
 
 
 def test_a_reply_read_on_screen_turns_its_mark_and_clears_the_done_badge(server, page):

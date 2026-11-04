@@ -186,7 +186,7 @@ so the fold reads it like any other and nothing reads the legacy directory again
 (`legacy_import.py`). Of `.aegis.yaml`, aegis reads
 the `agents:` and `queues:` maps and `default_agent`, and nothing in them is a
 default: an agent names its harness, model, effort and permission, a queue its
-agent and `max_parallel`, and one that does not is reported by name rather than
+agent, and one that does not is reported by name rather than
 filled in or dropped. A setting the loader filled in would be one nobody chose,
 with nothing to show it.
 
