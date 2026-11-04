@@ -1483,7 +1483,8 @@ export class Settings {
       row.dataset.row = `queues.${q.name}`;
       const name = h("input", { name: "name", value: q.name, spellcheck: false, placeholder: "queue", className: "set-name" });
       const agent = select("agent", names, q.agent);
-      const limit = h("input", { name: "max_parallel", type: "number", min: 1, value: q.max_parallel ?? "", className: "pick set-limit" });
+      // Blank: left out, which reads as 1. Priority 0 pauses the queue.
+      const priority = h("input", { name: "priority", type: "number", min: 0, value: q.priority ?? "", placeholder: "1", className: "pick set-limit" });
       // Left out reads as quiet: "" keeps a quiet: true the file spells out.
       const quiet = select("quiet", ["", "false"], q.quiet === false ? "false" : "", (x) => (x ? "with a tab" : "quiet"));
       quiet.setAttribute("aria-label", "Queue quiet");
@@ -1492,12 +1493,12 @@ export class Settings {
         this.touch();
       });
       agent.dataset.key = "queues.*.agent";
-      limit.dataset.key = "queues.*.max_parallel";
+      priority.dataset.key = "queues.*.priority";
       quiet.dataset.key = "queues.*.quiet";
-      for (const el of [name, agent, limit]) {
+      for (const el of [name, agent, priority]) {
         el.setAttribute("aria-label", `Queue ${el.name}`);
         el.addEventListener("input", () => {
-          q[el.name] = el.name === "max_parallel" ? (el.value === "" ? null : Number(el.value)) : el.value;
+          q[el.name] = el.name === "priority" ? (el.value === "" ? null : Number(el.value)) : el.value;
           if (el.name === "name") row.dataset.row = `queues.${el.value}`;
           this.touch();
         });
@@ -1507,18 +1508,28 @@ export class Settings {
         this.touch();
         this.draw();
       }, "link danger");
-      row.append(h("div", { className: "set-queue-line" }, name, h("span", { textContent: "runs" }), agent, limit, h("span", { textContent: "at a time" }), quiet, del));
+      row.append(h("div", { className: "set-queue-line" }, name, h("span", { textContent: "runs" }), agent, h("span", { textContent: "at priority" }), priority, quiet, del));
       return row;
     });
     const head = h("div", { className: "set-section-head" }, h("h3", { textContent: "Queues" }), button("Add queue", "set-add-queue", () => {
-      this.doc.queues.push({ name: "", agent: this.doc.default_agent || names[0] || "", max_parallel: null });
+      this.doc.queues.push({ name: "", agent: this.doc.default_agent || names[0] || "", priority: null });
       this.touch();
       this.draw();
     }, "link"));
     const body = rows.length
       ? h("div", { className: "set-queues", id: "set-queues" }, ...rows)
       : h("p", { className: "set-none", id: "set-queues", textContent: "No queues. A queue hands tasks to fresh worker sessions of one agent." });
-    return h("section", {}, head, body);
+    // Blank: left out, which reads as the server's default.
+    const workers = h("input", { name: "max_workers", type: "number", min: 1, value: this.doc.max_workers ?? "", placeholder: String(this.wire.max_workers_default ?? 4), className: "pick set-limit" });
+    workers.setAttribute("aria-label", "Queue workers at a time");
+    workers.dataset.key = "max_workers";
+    workers.addEventListener("input", () => {
+      this.doc.max_workers = workers.value === "" ? null : Number(workers.value);
+      this.touch();
+    });
+    const pool = h("div", { className: "set-queue-line", id: "set-max-workers" }, workers, h("span", { textContent: "workers at a time, every queue together. A queue's share of them follows its priority; priority 0 pauses it." }));
+    pool.dataset.row = "max_workers";
+    return h("section", {}, head, pool, body);
   }
 
   // Terminal profiles (term_profiles.py): a command, where it runs, when it

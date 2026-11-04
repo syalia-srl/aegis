@@ -31,11 +31,13 @@ agents:
   opus: {harness: claude-code, model: opus, effort: high, permission: full}
   reviewer: {harness: claude-code, model: opus, effort: high, permission: read, priming: You review.}
 queues:
-  general: {agent: opus, max_parallel: 2}
-  solo: {agent: opus, max_parallel: 1}
-  reviewing: {agent: reviewer, max_parallel: 1}
-  broken: {agent: opus}
+  general: {agent: opus}
+  solo: {agent: opus}
+  reviewing: {agent: reviewer}
+  broken: {priority: 1}
 """
+# One worker at a time on the whole server (queues.py).
+ONE_WORKER = "max_workers: 1\n" + CONFIG
 
 
 def _free_port() -> int:
@@ -854,7 +856,8 @@ async def test_a_dead_worker_fails_its_task_and_keeps_its_tab(world):
     assert t.status == "failed" and t.worker in world.app.sessions.sessions
 
 
-async def test_the_parallel_limit_holds_tasks_back(world):
+async def test_the_worker_limit_holds_tasks_back(world):
+    (world.root / ".aegis.yaml").write_text(ONE_WORKER)
     a = await world.spawn()
     ids = []
     for i in range(2):
@@ -1195,12 +1198,12 @@ async def test_a_queue_missing_a_field_says_which(world):
     a = await world.spawn()
     said = await turn(a, mcp("queue_enqueue", queue="broken", payload="x"))
     assert said.startswith("mcp error: bad_config")
-    assert "max_parallel is missing" in said
+    assert "agent is missing" in said
 
 
 async def test_a_logged_task_on_a_queue_that_broke_does_not_stop_dispatch(world):
     # A task logged while `broken` was valid must not crash the dispatcher
-    # with a KeyError on max_parallel; the other queues keep working.
+    # with a KeyError on a field it lost; the other queues keep working.
     from aegis.queues import Task
 
     t = Task(
@@ -1221,7 +1224,7 @@ async def test_a_logged_task_on_a_queue_that_broke_does_not_stop_dispatch(world)
     # forever for a slot the queue can no longer give it.
     old = world.app.queues.tasks["task-old"]
     assert old.status == "failed"
-    assert "max_parallel is missing" in old.error
+    assert "agent is missing" in old.error
 
 
 async def test_an_agent_spawns_with_at_most_its_own_permission(world):
@@ -1242,9 +1245,7 @@ async def test_an_agent_spawns_with_at_most_its_own_permission(world):
 
 
 async def test_a_queue_added_on_disk_takes_tasks_without_a_restart(world, tmp_path):
-    (tmp_path / ".aegis.yaml").write_text(
-        CONFIG + "  late: {agent: opus, max_parallel: 1}\n"
-    )
+    (tmp_path / ".aegis.yaml").write_text(CONFIG + "  late: {agent: opus}\n")
     r = await world.app.registry.call(
         "queue.enqueue", {"queue": "late", "payload": "say hi"}
     )
@@ -1254,7 +1255,8 @@ async def test_a_queue_added_on_disk_takes_tasks_without_a_restart(world, tmp_pa
     )
 
 
-async def test_raising_max_parallel_on_disk_starts_a_waiting_task(world, tmp_path):
+async def test_raising_max_workers_on_disk_starts_a_waiting_task(world, tmp_path):
+    (tmp_path / ".aegis.yaml").write_text(ONE_WORKER)
     flag = tmp_path / "hold"
     hold = mcp(
         "monitor_start",
@@ -1275,12 +1277,7 @@ async def test_raising_max_parallel_on_disk_starts_a_waiting_task(world, tmp_pat
     first, second = (world.app.queues.tasks[i] for i in ids)
     await until(lambda: first.status == "running", timeout=8, what="the first worker")
     assert second.status == "pending"
-    (tmp_path / ".aegis.yaml").write_text(
-        CONFIG.replace(
-            "solo: {agent: opus, max_parallel: 1}",
-            "solo: {agent: opus, max_parallel: 2}",
-        )
-    )
+    (tmp_path / ".aegis.yaml").write_text("max_workers: 2\n" + CONFIG)
     await until(lambda: second.status == "running", timeout=5, what="the raised limit")
     flag.touch()
 
@@ -1293,7 +1290,7 @@ async def test_a_broken_file_keeps_spawning_with_the_last_good_agents(world, tmp
     await world.spawn()
 
 
-def _held(tmp_path, n: int, flag):
+def _held(tmp_path, n: int, flag, queue: str = "solo", start: int = 0):
     from aegis.queues import Task
 
     hold = mcp(
@@ -1307,15 +1304,108 @@ def _held(tmp_path, n: int, flag):
     return [
         Task(
             id=f"task-h{i}",
-            queue="solo",
+            queue=queue,
             payload=hold,
             callback=False,
             enqueuer=None,
             cwd=str(tmp_path),
             created_at=i,
         )
-        for i in range(n)
+        for i in range(start, start + n)
     ]
+
+
+def _running(q, queue: str) -> int:
+    return sum(
+        1 for t in q.tasks.values() if t.queue == queue and t.status == "running"
+    )
+
+
+WEIGHED = """\
+default_agent: opus
+max_workers: 3
+agents:
+  opus: {harness: claude-code, model: opus, effort: high, permission: full}
+queues:
+  heavy: {agent: opus, priority: 2}
+  light: {agent: opus}
+"""
+
+
+async def test_free_slots_follow_the_queues_priorities(world, tmp_path):
+    # heavy at 2 runs two workers for light's one, inside max_workers: 3.
+    (tmp_path / ".aegis.yaml").write_text(WEIGHED)
+    flag = tmp_path / "hold"
+    q = world.app.queues
+    for t in _held(tmp_path, 3, flag, "light") + _held(tmp_path, 3, flag, "heavy", 3):
+        q.tasks[t.id] = t
+    await q.dispatch()
+    try:
+        assert (_running(q, "heavy"), _running(q, "light")) == (2, 1)
+    finally:
+        flag.touch()
+
+
+async def test_a_queue_with_nothing_pending_leaves_its_share_to_the_others(
+    world, tmp_path
+):
+    (tmp_path / ".aegis.yaml").write_text(WEIGHED)
+    flag = tmp_path / "hold"
+    q = world.app.queues
+    for t in _held(tmp_path, 4, flag, "light"):
+        q.tasks[t.id] = t
+    await q.dispatch()
+    try:
+        assert _running(q, "light") == 3
+    finally:
+        flag.touch()
+
+
+async def test_priority_zero_pauses_a_queue_until_it_is_raised(world, tmp_path):
+    paused = WEIGHED.replace(
+        "light: {agent: opus}", "light: {agent: opus, priority: 0}"
+    )
+    (tmp_path / ".aegis.yaml").write_text(paused)
+    flag = tmp_path / "hold"
+    q = world.app.queues
+    r = await world.app.registry.call(
+        "queue.enqueue", {"queue": "light", "payload": "say hi"}
+    )
+    t = q.tasks[r["task_id"]]
+    assert t.status == "pending"
+    status = await world.app.registry.call("task.status", {"task_id": t.id})
+    assert status["paused"] is True
+    (tmp_path / ".aegis.yaml").write_text(WEIGHED)
+    await until(lambda: t.status == "completed", timeout=12, what="the raised queue")
+    flag.touch()
+
+
+async def test_max_workers_left_out_runs_four(world, tmp_path):
+    assert "max_workers" not in CONFIG
+    flag = tmp_path / "hold"
+    q = world.app.queues
+    for t in _held(tmp_path, 5, flag):
+        q.tasks[t.id] = t
+    await q.dispatch()
+    try:
+        assert _running(q, "solo") == 4
+    finally:
+        flag.touch()
+
+
+async def test_a_legacy_max_parallel_is_ignored(world, tmp_path):
+    (tmp_path / ".aegis.yaml").write_text(
+        CONFIG.replace("solo: {agent: opus}", "solo: {agent: opus, max_parallel: 1}")
+    )
+    flag = tmp_path / "hold"
+    q = world.app.queues
+    for t in _held(tmp_path, 2, flag):
+        q.tasks[t.id] = t
+    await q.dispatch()
+    try:
+        assert _running(q, "solo") == 2
+    finally:
+        flag.touch()
 
 
 async def test_a_moment_without_the_file_fails_no_pending_task(world, tmp_path):
@@ -1333,6 +1423,7 @@ async def test_a_moment_without_the_file_fails_no_pending_task(world, tmp_path):
 async def test_a_config_change_during_a_dispatch_is_not_lost(
     world, tmp_path, monkeypatch
 ):
+    (tmp_path / ".aegis.yaml").write_text(ONE_WORKER)
     flag = tmp_path / "hold"
     q = world.app.queues
     first, second = _held(tmp_path, 2, flag)
@@ -1344,12 +1435,7 @@ async def test_a_config_change_during_a_dispatch_is_not_lost(
     async def spawn(*args, **kwargs):
         if not raised:
             raised.append(True)
-            (tmp_path / ".aegis.yaml").write_text(
-                CONFIG.replace(
-                    "solo: {agent: opus, max_parallel: 1}",
-                    "solo: {agent: opus, max_parallel: 2}",
-                )
-            )
+            (tmp_path / ".aegis.yaml").write_text("max_workers: 2\n" + CONFIG)
             await q.dispatch()  # what _on_config schedules; it lands mid-dispatch
         return await real(*args, **kwargs)
 

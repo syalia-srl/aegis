@@ -23,7 +23,7 @@ agents:
     effort: high
     permission: full
 queues:
-  general: {{agent: free, max_parallel: 1}}
+  general: {{agent: free}}
 """
 
 

@@ -416,7 +416,7 @@ agents:
   opus: {harness: claude-code, model: opus, effort: high, permission: full}
   direct: {harness: claude-code, model: opus, effort: high, permission: full, exit: "off"}
 queues:
-  general: {agent: opus, max_parallel: 1}
+  general: {agent: opus}
 """
 
 

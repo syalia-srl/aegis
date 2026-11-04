@@ -12,7 +12,7 @@ from .test_whats_new_browser import open_new_tab
 
 pytestmark = [pytest.mark.browser, pytest.mark.slow]
 
-BROKEN = "queues:\n  cheap: {agent: haiku, max_parallel: 1}\n"
+BROKEN = "queues:\n  cheap: {agent: haiku}\n"
 
 
 @pytest.fixture

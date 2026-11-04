@@ -79,11 +79,16 @@ def test_unknown_top_level_keys_are_listed(tmp_path):
 
 def test_the_doc_keeps_a_broken_queue_editable(tmp_path):
     d = doc_from(
-        {"queues": {"broken": {"agent": "a"}, "ok": {"agent": "a", "max_parallel": 2}}}
+        {
+            "queues": {
+                "broken": {"agent": "a", "priority": "x"},
+                "ok": {"agent": "a", "priority": 2},
+            }
+        }
     )
     assert d.queues == [
-        QueueDoc(name="broken", agent="a", max_parallel=None),
-        QueueDoc(name="ok", agent="a", max_parallel=2),
+        QueueDoc(name="broken", agent="a", priority=None),
+        QueueDoc(name="ok", agent="a", priority=2),
     ]
 
 
