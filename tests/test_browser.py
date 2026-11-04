@@ -3414,9 +3414,7 @@ def test_a_question_marks_the_tab_card_and_band_and_the_fleet_groups_it(server, 
 
 @pytest.fixture
 def queue_server(tmp_path: Path, fake_claude: str, fake_opencode: str):
-    (tmp_path / ".aegis.yaml").write_text(
-        CONFIG + "queues:\n  q: {agent: opus}\n"
-    )
+    (tmp_path / ".aegis.yaml").write_text(CONFIG + "queues:\n  q: {agent: opus}\n")
     s = Server(tmp_path, fake_claude, fake_opencode).start()
     yield s
     s.stop()

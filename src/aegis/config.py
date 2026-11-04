@@ -280,9 +280,9 @@ def max_workers_from(raw: object) -> tuple[int, str | None]:
     """``max_workers`` over its default, and why a wrong value is not in force."""
     if raw is None:
         return DEFAULT_MAX_WORKERS, None
-    if not _positive(raw):
-        return DEFAULT_MAX_WORKERS, f"max_workers {raw!r} is not a positive integer"
-    return int(raw), None  # type: ignore[call-overload]
+    if isinstance(raw, int) and not isinstance(raw, bool) and raw >= 1:
+        return raw, None
+    return DEFAULT_MAX_WORKERS, f"max_workers {raw!r} is not a positive integer"
 
 
 def workflows_from(raw: object) -> dict:
