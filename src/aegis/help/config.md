@@ -194,7 +194,7 @@ pauses a queue. Name queues by the goal their work serves (development,
 research, a client) rather than by the model that runs it, and move the
 priorities as the goals change: aegis reads the file again at once.
 
-`max_parallel:`, each queue's own bound before 2.22, is ignored: a queue that
+`max_parallel:`, each queue's own bound before `max_workers:` existed, is ignored: a queue that
 still sets it runs, and `aegis doctor` warns. See the queues page for how
 tasks run.
 
