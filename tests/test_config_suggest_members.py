@@ -16,7 +16,7 @@ from .test_member_view import ADMIN, call, homes, spawn, world  # noqa: F401
 async def test_a_member_cannot_apply_and_its_agent_is_not_woken(world):
     lid = await spawn(world, BEN)
     s = world.app.sessions.sessions[lid]
-    base = world.app.config.path.read_text().replace("  broken: {agent: opus}\n", "")
+    base = world.app.config.path.read_text().replace("  broken: {priority: 1}\n", "")
     world.app.config.path.write_text(base)
     text = base + "# a member's idea\n"
     said = await turn(s, mcp("config_suggest", yaml=text, why="w"))
