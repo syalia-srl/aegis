@@ -25,8 +25,10 @@ agents:
   quick: {harness: claude-code, model: haiku, effort: low, permission: write}
   deepseek: {harness: opencode, model: opencode-go/deepseek-v4-pro, effort: high, permission: full}
   reviewer: {harness: claude-code, model: opus, effort: max, permission: read, priming: You review code and change nothing.}
+max_workers: 4
 queues:
-  general: {agent: opus, max_parallel: 3}
+  general: {agent: opus, priority: 2}
+  research: {agent: deepseek}
 recap: {agent: quick}
 btw: {agent: opus}
 context: {handoff_at: 300000, cold_after: 3600, cold_min: 100000}
@@ -180,10 +182,20 @@ started a session yet.
 ## Queues
 
 `queues:` maps a queue's name to `agent:` (the agent its workers start from)
-and `max_parallel:` (how many workers run at once, a positive number). A queue
-missing either is reported and takes no tasks. `quiet:` is true unless set to
-false: a worker then has no tab, only a dimmed card in the Fleet, unless it
-fails. See the queues page for how
+and `priority:` (its share of the workers, a whole number from 0 up; 1 when
+left out). A queue with no agent, or a priority that is not such a number, is
+reported and takes no tasks. `quiet:` is true unless set to false: a worker
+then has no tab, only a dimmed card in the Fleet, unless it fails.
+
+`max_workers:` is how many queue workers run at once on the server, every
+queue together: a positive number, 4 when left out. A queue at priority 2
+gets two of them for each one a queue at priority 1 gets, and priority 0
+pauses a queue. Name queues by the goal their work serves (development,
+research, a client) rather than by the model that runs it, and move the
+priorities as the goals change: aegis reads the file again at once.
+
+`max_parallel:`, each queue's own bound before 2.22, is ignored: a queue that
+still sets it runs, and `aegis doctor` warns. See the queues page for how
 tasks run.
 
 ## Recaps
