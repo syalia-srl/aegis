@@ -15,6 +15,11 @@ the person's row draws it with the card, the URLs and the sandbox a sent file
 has, and a linked server's card loads it through /via. A copy, not a link:
 the agent may edit its inbox file, and the person's row must keep showing
 what the person sent.
+
+An upload begun as a recording (the composer's held microphone, #932) keeps
+the browser's measure of the take in a ``.recording`` file beside ``.size``;
+the send rewrites it as mono 16 kHz Opus (recordings.py) before it moves, and
+the agent reads it as a recording with its duration.
 """
 
 from __future__ import annotations
@@ -28,7 +33,7 @@ import unicodedata
 from collections.abc import Callable
 from pathlib import Path
 
-from . import files
+from . import files, recordings
 from .files import FileError
 
 CHUNK_BYTES = 256 * 1024
@@ -36,6 +41,7 @@ MAX_FILES = 20
 NAME_BYTES = 120
 STAGED = ".staged"
 SIZE = ".size"
+RECORDING = ".recording"
 _UPLOAD_ID = re.compile(r"[A-Za-z0-9_-]{16,64}")
 
 
@@ -113,12 +119,19 @@ def _staged(state_root: Path, log_id: str, upload_id: str) -> Path:
 def _file(folder: Path) -> tuple[Path, int]:
     """The staged file and the size the browser declared for it."""
     declared = int((folder / SIZE).read_text())
-    (path,) = [p for p in folder.iterdir() if p.name != SIZE]
+    (path,) = [p for p in folder.iterdir() if p.name not in (SIZE, RECORDING)]
     return path, declared
 
 
-def begin(state_root: Path, log_id: str, name: str, size: int) -> str:
-    """Stage an empty file for an upload of ``size`` bytes; its upload id."""
+def begin(
+    state_root: Path,
+    log_id: str,
+    name: str,
+    size: int,
+    recorded_ms: int | None = None,
+) -> str:
+    """Stage an empty file for an upload of ``size`` bytes; its upload id.
+    ``recorded_ms`` marks it as a recording that long, by the browser's clock."""
     if size > files.MAX_BYTES:
         raise FileError(
             "too_large", f"{name} is {size} bytes; the limit is {files.MAX_BYTES}"
@@ -130,6 +143,8 @@ def begin(state_root: Path, log_id: str, name: str, size: int) -> str:
     folder = staging / upload_id
     folder.mkdir()
     (folder / SIZE).write_text(str(size))
+    if recorded_ms is not None:
+        (folder / RECORDING).write_text(str(recorded_ms))
     (folder / clean).touch()
     return upload_id
 
@@ -199,26 +214,42 @@ def commit(
     box = inbox(state_root, log_id)
     sent = []
     for path in staged:
+        took = None
+        if (mark := path.parent / RECORDING).exists():
+            path, took = recordings.normalize(path)
+            if took is None:
+                took = round(int(mark.read_text()) / 1000, 1)
         rec = files.store(state_root, path, name=path.name)
         name = f"{stamp}-{path.name}"
         dest = deliver(path, name) if deliver else _move(path, box, name)
         shutil.rmtree(path.parent)
         sent.append(
             {**{k: v for k, v in rec.items() if k != "kind"}, "path": str(dest)}
+            | ({"recording_s": took} if took is not None else {})
         )
     return sent
 
 
 def message(typed: str, sent: list[dict]) -> str:
-    """What the harness reads: the typed text, then one line per file. The
-    block never starts with ``> from ``, which marks an inbox message."""
+    """What the harness reads: the typed text, then one line per file, a
+    recording saying so with its duration. The block never starts with
+    ``> from ``, which marks an inbox message."""
     if not sent:
         return typed
-    lines = ["Attached files:"] + [
-        f"- {f['path']} ({f['mime']}, {files.human_size(int(f['size']))})" for f in sent
-    ]
+    lines = ["Attached files:"] + [_line(f) for f in sent]
     block = "\n".join(lines)
     return f"{typed}\n\n{block}" if typed.strip() else block
+
+
+def _line(f: dict) -> str:
+    size = files.human_size(int(f["size"]))
+    if "recording_s" not in f:
+        return f"- {f['path']} ({f['mime']}, {size})"
+    took = recordings.clock(f["recording_s"])
+    return (
+        f"- {f['path']} (an audio recording the person made in the composer, "
+        f"{took} long, {f['mime']}, {size}; not transcribed)"
+    )
 
 
 def clear_staged(state_root: Path) -> int:

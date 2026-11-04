@@ -4,6 +4,7 @@ started as a real process, with the fake claude behind it."""
 import json
 import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -9784,3 +9785,89 @@ def test_the_sidebar_shows_the_sessions_load(server, page):
     page.wait_for_selector("#s-load:not([hidden])", timeout=15000)
     assert re.fullmatch(r"\d+\.\d cores · \d+\.\d GB", page.inner_text("#s-load-v"))
     assert page.errors == []
+
+
+# -- hold the mic to record (record.js, #932) --------------------------------
+
+
+def sends_of(server, lid) -> list[dict]:
+    store = server.root / ".aegis" / "state" / "transcripts" / f"{lid}.jsonl"
+    recs = [json.loads(line) for line in store.read_text().splitlines()]
+    return [r for r in recs if r.get("kind") == "send"]
+
+
+def press_mic(pg, mic="#mic"):
+    box = pg.locator(mic).bounding_box()
+    x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+    pg.mouse.move(x, y)
+    pg.mouse.down()
+    return x, y
+
+
+def test_holding_the_mic_records_and_releasing_sends_the_take(server, mic_page):
+    pg = mic_page
+    pg.goto(server.url)
+    pg.wait_for_selector("#a2[data-view=fleet]")
+    lid = spawn(pg)
+    pg.fill("#input", "scene one")
+    press_mic(pg)
+    pg.wait_for_selector("#composer .rec-bar[data-state=held]", timeout=5000)
+    pg.wait_for_timeout(2500)
+    assert pg.locator("#composer .rec-time").inner_text() in ("0:02", "0:03")
+    pg.mouse.up()
+    turns_done(pg, 1)
+    assert pg.get_attribute("#mic", "data-state") == "idle", "a hold is not a tap"
+    assert pg.locator("#composer .rec-bar").is_hidden()
+    (got,) = inbox_of(server, lid).glob("*-recording.*")
+    assert got.suffix == ".ogg" or not shutil.which("ffmpeg")
+    (sent,) = sends_of(server, lid)
+    assert sent["typed"] == "scene one"
+    line = sent["text"].split("Attached files:\n")[1].splitlines()[0]
+    assert line.startswith(f"- {got} (an audio recording the person made")
+    assert re.search(r"0:0[23] long", line), line
+    row = pg.locator(".row.user").last
+    assert row.locator(".fcard").count() == 1 and "scene one" in row.inner_text()
+    assert pg.input_value("#input") == ""
+    assert pg.errors == []
+
+
+def test_sliding_up_locks_a_take_and_stop_sends_it(server, mic_page):
+    pg = mic_page
+    pg.goto(server.url)
+    pg.wait_for_selector("#a2[data-view=fleet]")
+    lid = spawn(pg)
+    x, y = press_mic(pg)
+    pg.wait_for_selector("#composer .rec-bar[data-state=held]", timeout=5000)
+    pg.mouse.move(x, y - 40, steps=4)
+    assert pg.get_attribute("#composer .rec-bar", "data-state") == "held"
+    pg.mouse.move(x, y - 90, steps=4)
+    pg.wait_for_selector("#composer .rec-bar[data-state=locked]")
+    pg.mouse.up()
+    pg.wait_for_timeout(1500)
+    assert pg.get_attribute("#composer .rec-bar", "data-state") == "locked"
+    assert not inbox_of(server, lid).exists() or not list(
+        inbox_of(server, lid).glob("*-recording.*")
+    ), "releasing a locked take sends nothing"
+    pg.click("#composer .rec-stop")
+    turns_done(pg, 1)
+    (sent,) = sends_of(server, lid)
+    assert "an audio recording the person made" in sent["text"]
+    assert pg.errors == []
+
+
+def test_esc_throws_a_locked_take_away(server, mic_page):
+    pg = mic_page
+    pg.goto(server.url)
+    pg.wait_for_selector("#a2[data-view=fleet]")
+    lid = spawn(pg)
+    x, y = press_mic(pg)
+    pg.wait_for_selector("#composer .rec-bar[data-state=held]", timeout=5000)
+    pg.mouse.move(x, y - 90, steps=4)
+    pg.mouse.up()
+    pg.wait_for_timeout(1200)
+    pg.keyboard.press("Escape")
+    pg.wait_for_selector("#composer .rec-bar", state="hidden")
+    pg.wait_for_timeout(800)
+    assert pg.locator("#atts .chip").count() == 0
+    assert sends_of(server, lid) == []
+    assert pg.errors == []

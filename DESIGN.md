@@ -1499,6 +1499,14 @@ bar that says it is on is the host's, out of the page's reach. A send from a box
 agent; the fold strips that exact line off the person's row and marks it
 `detail.dictated`, so the transcript and the harness keep the same text.
 
+The one exception is a take the person chooses to send: holding a composer's
+mic records audio with `MediaRecorder` instead of dictating (`js/record.js`,
+#932), and the take goes up as an ordinary attachment whose
+`attachment.begin` carries `recorded_ms`. The send rewrites it with `ffmpeg`
+as mono 16 kHz Opus (`recordings.py`), because browsers do not honor a
+requested sample rate, and the agent's line names it a recording with its
+duration. Without `ffmpeg` the browser's file and clock stand.
+
 Reading replies aloud follows the same rule the other way: the reply is already
 in the page, and it is spoken there (`js/speak.js`). The browser's own
 `speechSynthesis` is the default. Phonon, the opt-in, runs `phonon-tts` in a
