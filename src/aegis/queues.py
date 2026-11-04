@@ -1,8 +1,14 @@
 """Queues of worker sessions.
 
-A task waits FIFO for a free slot in its queue (``max_parallel``), then a worker
-session is spawned from the queue's agent with the payload as its first
-prompt. The worker is an ordinary session with a tab, marked ``worker``.
+One dispatcher serves every queue, up to ``max_workers`` workers at once on
+the server (config.py). A free slot goes to the queue with the fewest running
+workers for its ``priority``, the smallest (running + 1) / priority, so a queue
+at priority 2 runs two workers for each one of a queue at priority 1; a queue
+with nothing to start leaves its share to the others. Priority 0 pauses a
+queue: its tasks are kept pending and none starts. Within a queue tasks start
+FIFO. A worker session is spawned from the queue's agent with the payload as
+its first prompt. The worker is an ordinary session with a tab, marked
+``worker``.
 
 **A turn ending is not completion.** Ending a turn is how an agent waits, so a
 task finishes only when its worker's turn has ended *and* it has no live
@@ -29,6 +35,7 @@ import json
 import logging
 import secrets
 import time
+from collections import Counter
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from collections.abc import Awaitable, Callable
@@ -49,6 +56,11 @@ if TYPE_CHECKING:
     from .session import Session
 
 log = logging.getLogger("aegis.queues")
+# A queue's priority when .aegis.yaml leaves it out.
+DEFAULT_PRIORITY = 1
+# Queue keys read and ignored: max_parallel was each queue's own bound before
+# max_workers bounded them all (#927).
+LEGACY_QUEUE_KEYS = ("max_parallel",)
 RESTARTED = "The server restarted while you were working on your task. Continue it where you left off."
 CONTINUE = "Continue your task where you left off."
 
@@ -100,24 +112,24 @@ def queue_items(running: list[str], waiting: int) -> list[Item]:
 
 def queues_from(raw: Any) -> dict[str, dict]:
     """Every queue in a parsed ``queues:`` map. A queue that does not name its
-    agent and a positive ``max_parallel`` is kept with an ``error``, so
-    enqueueing on it says what is wrong; nothing in .aegis.yaml is a default
-    (agents.py)."""
+    agent, or whose ``priority`` is not a whole number from 0 up, is kept with
+    an ``error``, so enqueueing on it says what is wrong. ``priority`` left out
+    is 1. ``max_parallel``, the per-queue bound before #927, is read and
+    ignored, so a file from then still runs; ``legacy`` names it for aegis
+    doctor."""
     if not isinstance(raw, dict):
         return {}
     out: dict[str, dict] = {}
     for name, q in raw.items():
         q = q if isinstance(q, dict) else {}
-        agent, limit = q.get("agent"), q.get("max_parallel")
-        missing = [
-            k for k, v in (("agent", agent), ("max_parallel", limit)) if v in (None, "")
-        ]
-        if missing:
-            verb = "is" if len(missing) == 1 else "are"
-            out[str(name)] = {"error": f"{', '.join(missing)} {verb} missing"}
-        elif isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+        agent, priority = q.get("agent"), q.get("priority", DEFAULT_PRIORITY)
+        if agent in (None, ""):
+            out[str(name)] = {"error": "agent is missing"}
+        elif (
+            isinstance(priority, bool) or not isinstance(priority, int) or priority < 0
+        ):
             out[str(name)] = {
-                "error": f"max_parallel {limit!r} is not a positive integer"
+                "error": f"priority {priority!r} is not a whole number from 0 up"
             }
         elif not isinstance(q.get("quiet", True), bool):
             out[str(name)] = {"error": f"quiet {q['quiet']!r} is not true or false"}
@@ -125,8 +137,9 @@ def queues_from(raw: Any) -> dict[str, dict]:
             # A worker starts with no tab: its result goes to its enqueuer (#386).
             out[str(name)] = {
                 "agent": str(agent),
-                "max_parallel": limit,
+                "priority": priority,
                 "quiet": q.get("quiet", True),
+                "legacy": [k for k in LEGACY_QUEUE_KEYS if k in q],
             }
     return out
 
@@ -238,6 +251,7 @@ class Queues:
         q = self.queues.get(t.queue)
         if t.status == "pending" and q is not None and "error" not in q:
             d["waiting_for_quota"] = self.quota_wait(t, q)
+            d["paused"] = q["priority"] == 0
         if t.worker and t.worker in self._registry.sessions:
             d["worker_handle"] = self._registry.sessions[t.worker].handle
         return d
@@ -307,16 +321,18 @@ class Queues:
             if present and t.status == "pending" and (q is None or "error" in q):
                 why = q["error"] if q else "it is no longer configured"
                 self._fail(t, f"its queue {t.queue!r} in .aegis.yaml: {why}")
-        for name, q in self.queues.items():
-            if "error" in q:
-                continue
-            while True:
-                running = sum(
-                    1
-                    for t in self.tasks.values()
-                    if t.queue == name and t.status == "running"
-                )
-                pending = sorted(
+        limit = self._config.current().max_workers
+        while True:
+            running = Counter(
+                t.queue for t in self.tasks.values() if t.status == "running"
+            )
+            if sum(running.values()) >= limit:
+                return
+            best: tuple[tuple[float, float], Task, dict] | None = None
+            for name, q in self.queues.items():
+                if "error" in q or q["priority"] < 1:
+                    continue
+                head = min(
                     (
                         t
                         for t in self.tasks.values()
@@ -325,10 +341,16 @@ class Queues:
                         and self.quota_wait(t, q) is None
                     ),
                     key=lambda t: t.created_at,
+                    default=None,
                 )
-                if not pending or running >= q["max_parallel"]:
-                    break
-                await self._start(pending[0], q)
+                if head is None:
+                    continue
+                key = ((running[name] + 1) / q["priority"], head.created_at)
+                if best is None or key < best[0]:
+                    best = (key, head, q)
+            if best is None:
+                return
+            await self._start(best[1], best[2])
 
     def quota_wait(self, t: Task, q: dict) -> str | None:
         """Why ``t``'s owner's quota gate keeps it pending, or None. A task

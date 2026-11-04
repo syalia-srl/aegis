@@ -5,6 +5,7 @@ when: handing a batch of self-contained tasks to worker sessions that run in par
 hints:
   - Hand a batch of tasks to workers and keep working; results come back as messages. #enqueue-a-task
   - Each queue task runs in a fresh worker session, a few at a time. #what-a-worker-is
+  - One worker limit for every queue, shared by priority; priority 0 pauses a queue. #priorities-and-the-worker-limit
 ---
 
 A queue runs tasks in fresh worker sessions, a few at a time. You enqueue a
@@ -31,9 +32,24 @@ other server: the task id comes back as `task-id@server`, which
 `task_status`, `task_cancel` and `task_resume` take, and the result reaches
 your inbox headed `> from queue:<queue>@<server> · task#<id>@<server>`.
 
-Tasks wait first in, first out, for a free slot. A queue runs at most
-`max_parallel:` workers at once. A pending task also waits, without failing,
-while its owner's quota policy keeps the harness it needs closed.
+## Priorities and the worker limit
+
+One dispatcher starts workers for every queue, up to `max_workers:` at once on
+the server (4 when `.aegis.yaml` leaves it out). Each free slot goes to the
+queue with the fewest running workers for its `priority:`, so with `dev` at
+priority 2 and `research` at 1, and six workers, `dev` runs four and
+`research` two. A queue with nothing waiting leaves its share to the others,
+so no slot stays empty while a task waits. Within a queue, tasks start first
+in, first out.
+
+Priority 0 pauses a queue. Enqueueing on it still works; its tasks stay
+pending, and `task_status` says `paused: true`, until the priority goes above
+0. Neither a lower priority nor a lower limit stops a worker that is already
+running: the new numbers apply to the next start. Both are read from the file
+as it changes, with no restart, and the Settings page edits them.
+
+A pending task also waits, without failing, while its owner's quota policy
+keeps the harness it needs closed.
 
 ## What a worker is
 

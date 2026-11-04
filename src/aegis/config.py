@@ -61,13 +61,13 @@ TOP_KEYS = (
     "agents", "queues", "default_agent", "recap", "btw", "context", "usage",
     "session_memory_max", "terminals", "terminal_memory_max", "park", "network",
     "host", "workflows", "harness_versions", "notices", "nudges", "multi_user",
-    "knowledge", "exit_via",
+    "knowledge", "exit_via", "max_workers",
 )  # fmt: skip
 AGENT_KEYS = (
     "harness", "provider", "model", "models", "effort", "permission", "priming",
     "keep_harness_tools", "exit",
 )  # fmt: skip
-QUEUE_KEYS = ("agent", "max_parallel", "quiet")
+QUEUE_KEYS = ("agent", "priority", "quiet")
 
 Stamp = tuple[int, int, int]
 
@@ -269,6 +269,20 @@ WORKFLOWS_DEFAULTS = {"max_agents": {"total": 4}}
 
 def _positive(v: object) -> bool:
     return isinstance(v, int) and not isinstance(v, bool) and v >= 1
+
+
+# How many queue workers run at once on this server, every queue together
+# (queues.py, #927).
+DEFAULT_MAX_WORKERS = 4
+
+
+def max_workers_from(raw: object) -> tuple[int, str | None]:
+    """``max_workers`` over its default, and why a wrong value is not in force."""
+    if raw is None:
+        return DEFAULT_MAX_WORKERS, None
+    if isinstance(raw, int) and not isinstance(raw, bool) and raw >= 1:
+        return raw, None
+    return DEFAULT_MAX_WORKERS, f"max_workers {raw!r} is not a positive integer"
 
 
 def workflows_from(raw: object) -> dict:
@@ -660,7 +674,8 @@ class QueueDoc(BaseModel):
     model_config = {"extra": "forbid"}
     name: str
     agent: str = ""
-    max_parallel: int | None = None
+    # None: the file leaves it out, which reads as 1.
+    priority: int | None = None
     # None: the file leaves it out, which reads as true.
     quiet: bool | None = None
 
@@ -698,6 +713,8 @@ class ConfigDoc(BaseModel):
     default_agent: str | None = None
     exit_via: str | None = None
     queues: list[QueueDoc] = Field(default_factory=list)
+    # None: the file leaves max_workers out, which reads as its default.
+    max_workers: int | None = None
     park: dict[str, int] = Field(default_factory=dict)
     # The workflows: block's max_agents: total and a bound per agent alias;
     # empty when the file has no block, or one the reader refuses.
@@ -739,13 +756,13 @@ def doc_from(data: dict) -> ConfigDoc:
     raw = data.get("queues")
     for name, q in (raw if isinstance(raw, dict) else {}).items():
         q = q if isinstance(q, dict) else {}
-        limit = q.get("max_parallel")
-        ok = isinstance(limit, int) and not isinstance(limit, bool)
+        priority = q.get("priority")
+        ok = isinstance(priority, int) and not isinstance(priority, bool)
         queues.append(
             QueueDoc(
                 name=str(name),
                 agent=str(q.get("agent") or ""),
-                max_parallel=limit if ok else None,
+                priority=priority if ok else None,
                 quiet=q["quiet"] if isinstance(q.get("quiet"), bool) else None,
             )
         )
@@ -759,6 +776,7 @@ def doc_from(data: dict) -> ConfigDoc:
         default_agent=str(d) if d else None,
         exit_via=_exit_via(data),
         queues=queues,
+        max_workers=mw if _positive(mw := data.get("max_workers")) else None,
         park={k: v for k, v in park_from(data.get("park")).items() if k != "error"},
         max_agents={} if w is None or "error" in pool else pool["max_agents"],
         harness_versions=HarnessVersionsDoc(
@@ -860,6 +878,8 @@ class Snapshot:
     default_agent: str | None = None
     exit_via: str | None = None
     queues: dict[str, dict] = field(default_factory=dict)
+    max_workers: int = DEFAULT_MAX_WORKERS
+    max_workers_error: str | None = None
     unknown_keys: tuple[str, ...] = ()
     doc: ConfigDoc = field(default_factory=ConfigDoc)
     context: dict = field(default_factory=lambda: dict(CONTEXT_DEFAULTS))
@@ -897,6 +917,7 @@ class Snapshot:
         network, network_error = network_from(data.get("network"))
         host, host_error = host_from(data.get("host"))
         multi_user, multi_user_error = multi_user_from(data)
+        workers, workers_error = max_workers_from(data.get("max_workers"))
         return cls(
             path=path,
             exists=True,
@@ -905,6 +926,8 @@ class Snapshot:
             default_agent=str(d) if d else None,
             exit_via=_exit_via(data),
             queues=queues_from(data.get("queues")),
+            max_workers=workers,
+            max_workers_error=workers_error,
             unknown_keys=tuple(str(k) for k in data if k not in TOP_KEYS),
             doc=doc_from(data),
             context=context_from(data.get("context")),
@@ -946,6 +969,7 @@ class Snapshot:
                 "restarts": list(RESTARTS),
             },
             "schema": fields(),
+            "max_workers_default": DEFAULT_MAX_WORKERS,
             "sections": {k: {"title": t, "note": n} for k, (t, n) in SECTIONS.items()},
         }
 
@@ -1026,8 +1050,10 @@ def validate(doc: ConfigDoc) -> list[Finding]:
                 f"{row}.agent",
                 f"no agent named {q.agent!r}" if q.agent else "agent is missing",
             )
-        if q.max_parallel is None or q.max_parallel < 1:
-            err(row, f"{row}.max_parallel", "max_parallel is not a positive integer")
+        if q.priority is not None and q.priority < 0:
+            err(row, f"{row}.priority", "priority is not a whole number from 0 up")
+    if doc.max_workers is not None and (e := max_workers_from(doc.max_workers)[1]):
+        err("max_workers", "max_workers", e)
     if doc.default_agent and doc.default_agent not in names:
         err("default_agent", "default_agent", f"no agent named {doc.default_agent!r}")
     if "error" in (p := park_from(doc.park or None)):
@@ -1198,13 +1224,20 @@ def _apply(data: CommentedMap, doc: ConfigDoc) -> None:
         queues = _entries(data, "queues", [q.name for q in doc.queues])
         for q in doc.queues:
             _put(queues[q.name], "agent", q.agent)
-            _put(queues[q.name], "max_parallel", q.max_parallel)
+            if q.priority is None:
+                queues[q.name].pop("priority", None)
+            else:
+                _put(queues[q.name], "priority", q.priority)
             if q.quiet is None:
                 queues[q.name].pop("quiet", None)
             else:
                 _put(queues[q.name], "quiet", q.quiet)
     else:
         data.pop("queues", None)
+    if doc.max_workers is None:
+        data.pop("max_workers", None)
+    else:
+        _put(data, "max_workers", doc.max_workers)
     if doc.park:
         park = _section(data, "park")
         for h in list(park):

@@ -49,6 +49,7 @@ from .harness_versions import OUTSIDE, VERSION_TIMEOUT_S, judge
 from .knowledge import embed
 from .ranking import annotate, ranking
 from .recap import load_recap
+from .queues import LEGACY_QUEUE_KEYS
 from .roots import CONFIG_FILE, Roots, legacy_state
 from .ops import OpError
 from .session import SpawnSpec
@@ -204,10 +205,10 @@ def propose(found: list[Found]) -> ConfigDoc:
     if not agents:
         return ConfigDoc()
     default = agents[0].name
-    queues = [QueueDoc(name="general", agent=default, max_parallel=3)]
+    queues = [QueueDoc(name="general", agent=default)]
     if free and default != "free":
         # Reviews and research on the free models, off the paid default.
-        queues.append(QueueDoc(name="light", agent="free", max_parallel=3))
+        queues.append(QueueDoc(name="light", agent="free"))
     return ConfigDoc(agents=agents, default_agent=default, queues=queues)
 
 
@@ -238,7 +239,7 @@ def _unknown_keys(data: dict) -> list[Finding]:
         for name, raw in (entries if isinstance(entries, dict) else {}).items():
             if not isinstance(raw, dict):
                 continue
-            keys = list(raw)
+            keys = [k for k in raw if section != "queues" or k not in LEGACY_QUEUE_KEYS]
             if section == "agents" and isinstance(raw.get("provider"), dict):
                 keys += [k for k in raw["provider"] if k != "name"]
             row = f"{section}.{name}"
@@ -343,23 +344,41 @@ def _default(name: str | None, by_name: dict[str, Agent]) -> Finding:
     return Finding("ok", row, name, row)
 
 
-def _queue(name: str, q: dict, by_name: dict[str, Agent]) -> Finding:
+def _queue(name: str, q: dict, by_name: dict[str, Agent]) -> list[Finding]:
     row = f"queues.{name}"
     if "error" in q:
-        return Finding("error", row, q["error"], row)
-    a = by_name.get(q["agent"])
-    if a is None:
-        return Finding(
-            "error",
-            f"{row}.agent",
-            f"uses the agent {q['agent']!r}, which is not defined",
+        return [Finding("error", row, q["error"], row)]
+    out = [
+        Finding(
+            "warn",
+            f"{row}.{k}",
+            f"{k} is ignored since #927: max_workers bounds every queue together,"
+            " and priority shares it among them",
             row,
         )
+        for k in q["legacy"]
+    ]
+    a = by_name.get(q["agent"])
+    if a is None:
+        return out + [
+            Finding(
+                "error",
+                f"{row}.agent",
+                f"uses the agent {q['agent']!r}, which is not defined",
+                row,
+            )
+        ]
     if a.error:
-        return Finding(
-            "error", f"{row}.agent", f"agent {a.name!r} cannot spawn: {a.error}", row
-        )
-    return Finding("ok", row, f"{a.name}, {q['max_parallel']} at a time", row)
+        return out + [
+            Finding(
+                "error",
+                f"{row}.agent",
+                f"agent {a.name!r} cannot spawn: {a.error}",
+                row,
+            )
+        ]
+    share = f"priority {q['priority']}" if q["priority"] else "paused (priority 0)"
+    return out + [Finding("ok", row, f"{a.name}, {share}", row)]
 
 
 def _recap(roots: Roots) -> list[Finding]:
@@ -740,7 +759,10 @@ async def doctor(
     for a in snap.agents:
         out += _agent(a, found.get(a.harness))
     out.append(_default(snap.default_agent, by_name))
-    out += [_queue(name, q, by_name) for name, q in snap.queues.items()]
+    for name, q in snap.queues.items():
+        out += _queue(name, q, by_name)
+    if snap.max_workers_error:
+        out.append(Finding("error", "max_workers", snap.max_workers_error))
     if snap.terminals_error:
         out.append(Finding("error", "terminals", snap.terminals_error))
     out += [_terminal(n, p, roots.config_root) for n, p in snap.terminals.items()]

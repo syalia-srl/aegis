@@ -13,7 +13,7 @@ agents:
   opus: {harness: claude-code, model: opus, effort: high, permission: full}
   pro: {harness: opencode, model: opencode-go/fake-pro, effort: high, permission: full}
 queues:
-  general: {agent: opus, max_parallel: 3}
+  general: {agent: opus, priority: 2}
 """
 
 
@@ -114,7 +114,7 @@ async def test_an_effort_the_model_does_not_take_is_a_warning(
 async def test_default_and_queue_problems_are_errors(
     tmp_path, fake_claude, fake_opencode
 ):
-    text = "agents:\n  a: {harness: claude-code, model: opus, effort: high, permission: full}\nqueues:\n  q: {agent: ghost, max_parallel: 1}\n"
+    text = "agents:\n  a: {harness: claude-code, model: opus, effort: high, permission: full}\nqueues:\n  q: {agent: ghost}\n"
     found = await run(tmp_path, text, fake_claude, fake_opencode)
     assert at(found, "default_agent")[0].level == "error"
     assert at(found, "queues.q.agent")[0].level == "error"
@@ -267,9 +267,9 @@ def test_propose_with_claude_adds_free_beside_opus_and_a_light_queue():
         ("free", "opencode", "o/a", "high", "full"),
     ]
     assert doc.default_agent == "opus"
-    assert [(q.name, q.agent, q.max_parallel) for q in doc.queues] == [
-        ("general", "opus", 3),
-        ("light", "free", 3),
+    assert [(q.name, q.agent, q.priority) for q in doc.queues] == [
+        ("general", "opus", None),
+        ("light", "free", None),
     ]
 
 
