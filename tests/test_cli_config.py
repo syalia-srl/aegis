@@ -26,8 +26,8 @@ def test_init_yes_writes_a_config_the_doctor_passes(
     assert data["default_agent"] == "opus"
     assert data["agents"]["free"]["model"] == "opencode-go/fake-flash"
     assert "fake-pro" not in (root / ".aegis.yaml").read_text(), "a paid model"
-    assert data["queues"]["general"] == {"agent": "opus", "max_parallel": 3}
-    assert data["queues"]["light"] == {"agent": "free", "max_parallel": 3}
+    assert data["queues"]["general"] == {"agent": "opus"}
+    assert data["queues"]["light"] == {"agent": "free"}
     assert "0 errors" in r.output
 
 
@@ -44,7 +44,8 @@ def test_init_asks_with_the_proposal_filled_in(tmp_path, fake_claude, fake_openc
     data = YAML(typ="safe").load((root / ".aegis.yaml").read_text())
     assert list(data["agents"]) == ["opus"]
     assert data["agents"]["opus"]["permission"] == "read"
-    assert data["queues"]["general"]["max_parallel"] == 5
+    assert data["queues"]["general"] == {"agent": "opus"}
+    assert data["max_workers"] == 5
 
 
 def test_init_asks_again_after_an_answer_it_cannot_take(
@@ -72,7 +73,7 @@ def test_init_asks_again_after_an_answer_it_cannot_take(
     assert data["agents"]["opus"]["effort"] == "high"
     assert data["agents"]["opus"]["permission"] == "read"
     assert data["default_agent"] == "opus"
-    assert data["queues"]["general"]["max_parallel"] == 5
+    assert data["max_workers"] == 5
 
 
 def test_init_refuses_an_existing_file(tmp_path, fake_claude, fake_opencode):
@@ -154,18 +155,18 @@ def test_init_asks_a_cascade_as_one_list_and_offers_its_queue():
         default_agent="opus",
         queues=[
             QueueDoc(name="general", agent="opus"),
-            QueueDoc(name="light", agent="free", max_parallel=3),
+            QueueDoc(name="light", agent="free", priority=2),
         ],
     )
     # opus: add, model, effort, permission; free: add, models (b dropped),
-    # effort, permission; default; general and its workers; light and its
-    # workers.
-    answers = "\n\n\n\n\no/c, o/a\n\n\n\ny\n\ny\n2\n"
+    # effort, permission; default; general; light; workers at a time.
+    answers = "\n\n\n\n\no/c, o/a\n\n\n\ny\ny\n2\n"
     with CliRunner().isolation(input=answers):
         got = _ask(doc, [])
     (_, asked) = got.agents
     assert (asked.model, asked.models) == ("o/c", ["o/c", "o/a"])
-    assert [(q.name, q.agent, q.max_parallel) for q in got.queues] == [
-        ("general", "opus", 3),
+    assert [(q.name, q.agent, q.priority) for q in got.queues] == [
+        ("general", "opus", None),
         ("light", "free", 2),
     ]
+    assert got.max_workers == 2

@@ -453,7 +453,7 @@ def _count(text: str, default: int, least: int = 1) -> int:
 def _ask(doc, found):
     """``doc`` as the person answers for it, each value offered as the default."""
     from .agents import EFFORTS, PERMISSION_ORDER
-    from .config import ConfigDoc, QueueDoc
+    from .config import DEFAULT_MAX_WORKERS, ConfigDoc, QueueDoc
 
     agents = []
     for a in doc.agents:
@@ -487,17 +487,22 @@ def _ask(doc, found):
     if typer.confirm(
         f"Add a queue 'general' of workers running {default}?", default=True
     ):
-        n = _count("  workers at a time", 3)
-        queues.append(QueueDoc(name="general", agent=default, max_parallel=n))
+        queues.append(QueueDoc(name="general", agent=default))
     for q in doc.queues:
         if q.name == "general" or q.agent not in names or q.agent == default:
             continue
         if typer.confirm(
             f"Add a queue {q.name!r} of workers running {q.agent}?", default=True
         ):
-            n = _count("  workers at a time", q.max_parallel or 3)
-            queues.append(QueueDoc(name=q.name, agent=q.agent, max_parallel=n))
-    return ConfigDoc(agents=agents, default_agent=default, queues=queues)
+            queues.append(QueueDoc(name=q.name, agent=q.agent, priority=q.priority))
+    workers = (
+        _count("Queue workers at a time, every queue together", DEFAULT_MAX_WORKERS)
+        if queues
+        else None
+    )
+    return ConfigDoc(
+        agents=agents, default_agent=default, queues=queues, max_workers=workers
+    )
 
 
 @app.command()

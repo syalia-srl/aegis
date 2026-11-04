@@ -201,20 +201,27 @@ def test_bad_agent_says_what_is_wrong(agents, tmp_path):
         resolve(agents, None, "broken", none(), tmp_path)
 
 
-def test_a_queue_names_its_agent_and_max_parallel(tmp_path):
+def test_a_queue_names_its_agent_and_a_priority_from_zero_up(tmp_path):
     root = write(
         tmp_path,
         "queues:\n"
-        "  ok: {agent: opus, max_parallel: 3}\n"
-        "  nolimit: {agent: opus}\n"
+        "  ok: {agent: opus, priority: 3}\n"
+        "  plain: {agent: opus}\n"
+        "  paused: {agent: opus, priority: 0}\n"
+        "  old: {agent: opus, max_parallel: 2}\n"
         "  bare: {}\n"
-        "  zero: {agent: opus, max_parallel: 0}\n",
+        "  below: {agent: opus, priority: -1}\n"
+        "  word: {agent: opus, priority: high}\n",
     )
+    ok = {"agent": "opus", "quiet": True, "legacy": []}
     assert load_queues(root) == {
-        "ok": {"agent": "opus", "max_parallel": 3, "quiet": True},
-        "nolimit": {"error": "max_parallel is missing"},
-        "bare": {"error": "agent, max_parallel are missing"},
-        "zero": {"error": "max_parallel 0 is not a positive integer"},
+        "ok": ok | {"priority": 3},
+        "plain": ok | {"priority": 1},
+        "paused": ok | {"priority": 0},
+        "old": ok | {"priority": 1, "legacy": ["max_parallel"]},
+        "bare": {"error": "agent is missing"},
+        "below": {"error": "priority -1 is not a whole number from 0 up"},
+        "word": {"error": "priority 'high' is not a whole number from 0 up"},
     }
 
 

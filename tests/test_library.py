@@ -27,10 +27,11 @@ from aegis.api.stubs import render
 
 CONFIG = """\
 default_agent: opus
+max_workers: 1
 agents:
   opus: {harness: claude-code, model: opus, effort: low, permission: full}
 queues:
-  work: {agent: opus, max_parallel: 1}
+  work: {agent: opus}
 """
 
 STUB = Path(__file__).parents[1] / "src" / "aegis" / "api" / "ops.pyi"
@@ -193,7 +194,7 @@ async def test_a_task_runs_on_a_worker_and_returns_its_result(srv: Server):
 async def test_a_pending_task_cancels(srv: Server):
     busy = await srv.queues.enqueue("work", "/busy 30")
     queued = await srv.queues.enqueue("work", "/md never")
-    assert (await queued.info()).status == "pending"  # max_parallel: 1
+    assert (await queued.info()).status == "pending"  # max_workers: 1
     assert (await queued.cancel()).status == "cancelled"
     assert (await busy.cancel()).status == "cancelled"
 

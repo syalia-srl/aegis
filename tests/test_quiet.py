@@ -139,9 +139,9 @@ def test_spawn_line_takes_quiet_as_a_bare_flag():
 def test_a_queue_is_quiet_unless_it_says_otherwise():
     qs = queues_from(
         {
-            "a": {"agent": "opus", "max_parallel": 1},
-            "b": {"agent": "opus", "max_parallel": 1, "quiet": False},
-            "c": {"agent": "opus", "max_parallel": 1, "quiet": "no"},
+            "a": {"agent": "opus"},
+            "b": {"agent": "opus", "quiet": False},
+            "c": {"agent": "opus", "quiet": "no"},
         }
     )
     assert qs["a"]["quiet"] is True and qs["b"]["quiet"] is False
