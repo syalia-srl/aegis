@@ -133,7 +133,9 @@ export class Attachments {
         if (buf.byteLength) Object.assign(it, { data: new Blob([buf]), size: buf.byteLength });
       }
       if (!it.upload_id) {
-        const r = await this.call(it.key, "attachment.begin", { name: it.name, size: it.size });
+        // A take from the held mic says how long it ran (record.js).
+        const rec = it.file.recordedMs != null ? { recorded_ms: it.file.recordedMs } : {};
+        const r = await this.call(it.key, "attachment.begin", { name: it.name, size: it.size, ...rec });
         it.upload_id = r.upload_id;
       }
       while (it.sent < it.size) {

@@ -564,6 +564,25 @@ body{background:#000}
 #a2 .mic[data-state=listening]{color:var(--on-accent);background:var(--err);border-color:transparent;box-shadow:0 0 0 calc(var(--level,0) * 6px) color-mix(in srgb,var(--err) 35%,transparent)}
 #a2 .mic[data-state=finishing]{color:var(--err);border-color:var(--err)}
 #a2 .mic:disabled{opacity:.35;cursor:default}
+/* Hold the mic to record (record.js, #932): the press must stay a press on a
+   touch screen, not a scroll, a text selection or the long-press menu. The bar
+   covers the box while a take runs; --lift (0..1) follows the slide to lock. */
+#a2 .mic.needs-net:is(#mic,#sp-mic){touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+#a2 .mic[data-rec]{color:var(--on-accent);background:var(--err);border-color:transparent}
+#a2 :is(.composer,.spawn) .box{position:relative}
+#a2 .rec-bar{position:absolute;inset:0;z-index:2;display:flex;align-items:center;gap:10px;padding:0 8px 0 14px;background:var(--surface);border-radius:inherit;font-variant-numeric:tabular-nums}
+#a2 .rec-bar[hidden]{display:none}
+#a2 .rec-dot{width:10px;height:10px;border-radius:50%;background:var(--err);animation:mic-pulse 1s ease-in-out infinite;flex:none}
+#a2 .rec-bar[data-state=starting] .rec-dot{animation:none;opacity:.4}
+#a2 .rec-time{font-weight:600;min-width:3.2em}
+#a2 .rec-hint{flex:1;color:var(--muted);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:none}
+#a2 .rec-hint svg{width:13px;height:13px;vertical-align:-2px;fill:none;stroke:currentColor;transform:translateY(calc(var(--lift,0) * -6px))}
+#a2 .rec-bar:is([data-state=held],[data-state=starting]) .rec-hint.held{display:block;opacity:calc(.6 + var(--lift,0) * .4)}
+#a2 .rec-bar[data-state=locked] .rec-hint.locked{display:block}
+#a2 .rec-bar button{display:none;align-items:center;justify-content:center;min-width:40px;min-height:36px;border-radius:6px;border:1px solid var(--rule);background:none;color:var(--ink);cursor:pointer}
+#a2 .rec-bar button svg{width:15px;height:15px}
+#a2 .rec-bar[data-state=locked] button{display:inline-flex}
+#a2 .rec-bar .rec-stop{background:var(--err);border-color:transparent;color:var(--on-accent)}
 @keyframes mic-pulse{50%{opacity:.25}}
 #a2 .composer .chips{display:flex;gap:8px;margin-top:8px;align-items:center}
 /* the command menu, drawn above the composer */

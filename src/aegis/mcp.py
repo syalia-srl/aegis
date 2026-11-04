@@ -320,6 +320,11 @@ an intermediate artifact they need to look at to discuss it (a mockup, a diagram
 a draft render). Do not send other files, such as source code you edited: they \
 see those as diffs.
 
+When the person says they will record something for you (a narration, a voice \
+take), tell them to press and hold the microphone in their message box: it \
+records audio, sliding up locks a long take, and you get the file's path and \
+duration, untranscribed, rather than them recording in another app.
+
 {browsers}Never write a password, token, API key or private key where it is kept: a \
 message, a commit, a log, a command's output. Generate it straight into a file \
 with `umask 077` and no echo, such as `openssl rand -base64 18 > /tmp/pw`, and \

@@ -116,6 +116,26 @@ Your row in the transcript shows "🎙 dictated" in place of that line. Emptying
 the box forgets the mark. A message to a session on a linked server, or one
 queued while offline, goes without the line.
 
+## Record an audio message
+
+Press and hold the mic button, in a session's box or the new-tab box, to
+record audio instead of dictating; a short tap still dictates. A bar with a
+timer covers the box while it records, and releasing sends the take with
+whatever you typed. For a long take, slide up while holding: the recording
+locks, you can lift your finger, and the bar's stop button (or a tap on the
+mic) ends it and sends it. The bar's bin, or Esc, throws the take away. With
+a mouse it works the same: hold the button down, drag up to lock.
+
+The recording is an attachment, nothing is transcribed. aegis saves it in
+the session's inbox as Ogg Opus, mono, 16 kHz, about 200 KB a minute, and the
+agent reads its path and its duration after your text. The conversion needs
+`ffmpeg` on the server; without it the file keeps the format the browser
+recorded (WebM or MP4) and the duration is the browser's own measure. A take
+under a second is not sent.
+
+An agent that needs your voice itself, a narration to cut a video to for
+example, asks you to hold the mic rather than record in another app.
+
 ## Rename it
 
 A session has a handle, two or three lowercase words joined by hyphens, unique
