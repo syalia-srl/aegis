@@ -5,6 +5,48 @@ The format follows Keep a Changelog; this project uses SemVer (0.x).
 
 ## [Unreleased]
 
+## [2.22.0] - 2026-11-04
+
+### Added
+
+- **Hold the microphone to send an audio recording.** A short tap on the
+  composer's mic still dictates; pressing and holding it records audio from
+  the browser's microphone, with a timer, and releasing sends the take with
+  the typed text. Sliding up while holding locks a long take, and stop sends
+  it. The server saves it in the session's inbox as mono 16 kHz Opus, about
+  200 KB a minute, and the agent reads its path and duration, untranscribed.
+  help: sessions#record-an-audio-message
+
+### Changed
+
+- **On a phone the header is one row, with its controls behind a menu button.** Fleet, the server and the top bar's buttons took a row of their own above the session tabs, about half of the 94 px header. They now sit in a drawer, and a red mark on the menu button says when the connection or a schedule needs you.
+  help: phone#the-header-on-a-phone
+
+- **New session is a visible button.** The header's small text + is now an
+  outlined `+ New session` button in the theme's accent, and on a phone a 40 px
+  + button, so it reads as an action and not as one more tab.
+  help: sessions
+
+- **Queues share one worker limit by priority.** `max_workers:` bounds the
+  queue workers on the server, every queue together (4 when left out), and
+  each queue's `priority:` sets its share: a queue at 2 runs two workers for
+  each one at 1, and 0 pauses it while its tasks wait. A queue's own
+  `max_parallel:` is ignored and `aegis doctor` warns about it, so the total
+  is one number instead of a sum kept in step by hand.
+  help: queues#priorities-and-the-worker-limit
+
+### Fixed
+
+- **The header keeps its shape with many tabs open.** The header icons keep their width and spacing, and the version stays on one line, however many tabs are open.
+
+- **The session switcher can be closed on a phone.** It filled the screen with nothing to tap, so with no session open, or a filter that matched none, you could not leave it. It now has a close button beside its field.
+
+- **A long "Waits on" line stays inside the monitor card.** The line that names the command a monitor follows widened the card's facts past its edge; it is now cut with an ellipsis, and a click still opens the full call.
+
+- **The OpenCode Go quota shows again on OpenCode 2.x.** OpenCode 2.x keeps its keys in the `credential` table of its `opencode.db` and no longer writes `auth.json`, the only place aegis looked, so the OpenCode Go gauges and quota notices vanished without a note. aegis now reads the key from the database, read-only, and falls back to `auth.json` for OpenCode 1.x (#921).
+
+- **A device with a wrong clock no longer shows the cache-expired notice early.** The browser measured idle time with its own clock against the server's timestamps, so a phone an hour ahead after a daylight saving change showed the notice as soon as a turn ended. Ages in the client (idle time, monitors, plan times, "new since you left") are now measured on the server's clock, which the server sends when the browser connects.
+
 ## [2.21.0] - 2026-10-31
 
 ### Added

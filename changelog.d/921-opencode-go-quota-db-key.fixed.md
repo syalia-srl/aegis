@@ -1,1 +1,0 @@
-- **The OpenCode Go quota shows again on OpenCode 2.x.** OpenCode 2.x keeps its keys in the `credential` table of its `opencode.db` and no longer writes `auth.json`, the only place aegis looked, so the OpenCode Go gauges and quota notices vanished without a note. aegis now reads the key from the database, read-only, and falls back to `auth.json` for OpenCode 1.x (#921).
