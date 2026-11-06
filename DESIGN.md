@@ -117,6 +117,18 @@ emulator; the server keeps the bytes and parses none of them, because a Python
 parser measured at under 0.4 MB/s cannot keep up with the reader
 (`docs/superpowers/specs/2026-10-14-terminals-design.html`).
 
+**A sign-in drives the harness's own login, in a terminal that stores nothing.**
+When a turn fails to sign in, `SignIns` (`signin/core.py`, #946) runs the
+harness's login command (`data/sign-in.toml`: for Claude, `claude
+setup-token`) in a terminal from `Terminals.spawn_ephemeral`: its store keeps
+only the in-memory ring, it writes no `meta.json`, and it is never archived.
+The terminal's tap sees each chunk first: raw into a `pyte` screen
+(`signin/screen.py`), where the recipe's rules name the step and capture the
+URL or the token, and through `signin/mask.py` before the ring and browsers,
+so a token never reaches the pane, a transcript or the disk. aegis runs no
+OAuth itself. The card is a `sign_in` record upserted by its id; the code the
+person types goes to the PTY only, through ops no agent is given.
+
 **A browser is a Chromium the server holds, shared by an agent and a person.**
 A browser (`browsers.py`, #564) is a headless Chromium driven through
 Playwright's persistent context, so its profile under

@@ -1,15 +1,16 @@
 ---
-title: Claude sign-in
+title: Harness sign-in
 kind: howto
-when: Claude Code sessions keep getting logged out, fail with a 401 or "Not logged in", or need a long-lived token
+when: a session fails to sign in (a 401, "Not logged in"), Claude Code sessions keep getting logged out, or a harness needs a long-lived token
 hints:
+  - A failed Claude sign-in opens a card that runs claude setup-token for you. #when-sign-in-fails
   - Give every Claude session a token that lasts a year, with no logouts. #sign-in-for-a-year
-  - A failed Claude sign-in shows a card that takes a new token. #when-sign-in-fails
 ---
 
-Claude Code sessions in aegis sign in with your Claude subscription. This page
-says how to keep them signed in, what aegis does when a session fails to sign
-in, and how the quota gauges read your usage.
+Sessions in aegis sign in with your own subscription, through each harness's
+own login. This page says what aegis does when a session fails to sign in, how
+to keep Claude Code sessions signed in for a year, and how the quota gauges
+read your usage.
 
 ## Why sessions get logged out
 
@@ -32,7 +33,7 @@ sessions, recaps and side notes.
 2. Approve access in the browser. If the browser shows a code (two parts
    joined by `#`), paste it back into that terminal; it is not the token.
 3. The terminal prints a line starting with `sk-ant-oat01-`. That is the
-   token. Paste it into the sign-in card (below), or write it to
+   token. Paste it into the sign-in card's **Paste a token instead** (below), or write it to
    `~/.config/aegis/claude-oauth-token` on the server, mode 0600.
 
 aegis reads the file each time a process starts, so a new token applies to
@@ -51,17 +52,33 @@ before the token expires, about a year after the file was written.
 
 ## When sign-in fails
 
-When a turn fails to sign in (a 401, or "Not logged in"), the session's card
-reads "Claude sign-in failed" and its transcript shows a card with the three
-steps above and a field for the token. Every browser gets a toast. Sessions
-that fail while the card is open join its list instead of opening another.
+When a turn fails to sign in (a 401, or "Not logged in"), every browser gets a
+toast and the session's transcript shows a sign-in card. aegis runs the
+harness's own login command on the server for you; for Claude that is
+`claude setup-token`. Sessions that fail while the card is open join its list
+instead of opening another.
 
-Paste the token and press Save and check. aegis refuses the browser's code
-with what to do instead, then sends one short request on haiku with the new
-token to make sure Claude Code accepts it. When it does, the token is written
-to the file, every session on the list restarts and is told to continue, and
-the card turns to renewed. The token never enters a transcript, a log or an
-agent's context, and no agent can set or read it.
+1. Press **Open sign-in page** and approve access in your browser.
+2. The page shows a code. Paste it into the card and press **Sign in**.
+
+aegis types the code into the login, reads the token it prints, and checks it
+with one short request on haiku. When Claude Code accepts it, the token is
+written to the file above, every session on the list restarts and is told to
+continue, and the card reads "Signed in".
+
+A wrong or expired code, **Cancel**, ten minutes without an answer, or a screen
+aegis does not recognise ends the card as failed with the reason and the
+login's last lines. The sessions keep waiting: **Start again** opens a new
+card for them. A server restart ends an open card the same way.
+
+**Show terminal** opens the terminal the login runs in, to see what it shows.
+That terminal keeps nothing on disk, and any token on its screen is replaced
+with `••••` before it is shown or kept. What you type on the card goes to the
+login only: never into a transcript, a log or an agent's context. An agent can
+see that a card is open but can never answer it.
+
+**Paste a token instead** takes a token you made with `claude setup-token` on
+another machine, as in the steps above.
 
 ## Quota with a long-lived token
 
