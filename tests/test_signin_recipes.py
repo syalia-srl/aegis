@@ -13,19 +13,25 @@ def screen_of(name: str, upto: str | None = None) -> str:
 
 
 def test_the_paste_prompt_matches_link_with_the_url():
-    rule, found = load_recipes()["claude"].match(screen_of("claude/setup-token.jsonl", "Paste"))
+    rule, found = load_recipes()["claude-code"].match(
+        screen_of("claude/setup-token.jsonl", "Paste")
+    )
     assert (rule.name, rule.step) == ("link", "paste")
     assert found["url"].endswith("state=" + RECORDED_STATE)
 
 
 def test_the_end_matches_token():
-    rule, found = load_recipes()["claude"].match(screen_of("claude/setup-token.jsonl"))
+    rule, found = load_recipes()["claude-code"].match(
+        screen_of("claude/setup-token.jsonl")
+    )
     assert (rule.name, rule.step) == ("token", "checking")
     assert found["token"].startswith("sk-ant-oat01-FAKE") and len(found["token"]) == 108
 
 
 def test_a_wrong_code_matches_error():
-    rule, _ = load_recipes()["claude"].match(screen_of("claude/setup-token-bad-code.jsonl"))
+    rule, _ = load_recipes()["claude-code"].match(
+        screen_of("claude/setup-token-bad-code.jsonl")
+    )
     assert (rule.name, rule.step) == ("error", "failed")
 
 

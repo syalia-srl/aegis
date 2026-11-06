@@ -8,7 +8,16 @@ from typing import Literal
 
 from aegis.signin.mask import DEFAULT_SHAPES
 
-Step = Literal["starting", "open_url", "paste", "device_code", "choose", "checking", "done", "failed"]
+Step = Literal[
+    "starting",
+    "open_url",
+    "paste",
+    "device_code",
+    "choose",
+    "checking",
+    "done",
+    "failed",
+]
 _STEPS = set(Step.__args__)
 _RECIPE_KEYS = {"cmd", "env", "unset", "cols", "timeout_s", "shapes", "rules"}
 _RULE_KEYS = {"name", "step", "all", "capture"}
@@ -59,7 +68,9 @@ def parse_recipes(text: str) -> dict[str, Recipe]:
         for r in t.get("rules", []):
             _unknown(f"[{harness}] rule {r.get('name')!r}", r, _RULE_KEYS)
             if r["step"] not in _STEPS:
-                raise ValueError(f"sign-in.toml: unknown step {r['step']!r} in [{harness}]")
+                raise ValueError(
+                    f"sign-in.toml: unknown step {r['step']!r} in [{harness}]"
+                )
             rules.append(
                 Rule(
                     r["name"],
@@ -82,4 +93,6 @@ def parse_recipes(text: str) -> dict[str, Recipe]:
 
 
 def load_recipes() -> dict[str, Recipe]:
-    return parse_recipes(resources.files("aegis").joinpath("data/sign-in.toml").read_text())
+    return parse_recipes(
+        resources.files("aegis").joinpath("data/sign-in.toml").read_text()
+    )
