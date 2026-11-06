@@ -42,6 +42,7 @@ def register_config_ops(app: App) -> None:
             "opencode": app.opencode_bin,
             "codex": app.codex_bin,
             "cursor": app.cursor_bin,
+            "pi": "pi",
         }
 
     async def checked():

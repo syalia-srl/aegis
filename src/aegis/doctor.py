@@ -61,6 +61,7 @@ LABELS = {
     "opencode": "OpenCode",
     "codex": "Codex",
     "cursor": "Cursor Agent",
+    "pi": "pi",
 }
 
 
@@ -103,7 +104,12 @@ async def _version(bin: str) -> str:
 
 async def _catalog(name: str, bins: dict[str, str], cwd: Path) -> Catalog:
     h = harness_for(
-        name, bins["claude-code"], bins["opencode"], bins["codex"], bins["cursor"]
+        name,
+        bins["claude-code"],
+        bins["opencode"],
+        bins["codex"],
+        bins["cursor"],
+        bins.get("pi", "pi"),
     )
     spec = SpawnSpec(
         agent="doctor", model="", effort="", permission="read", cwd=cwd, harness=name
@@ -124,9 +130,9 @@ async def _catalog(name: str, bins: dict[str, str], cwd: Path) -> Catalog:
 async def _find(
     name: str, bins: dict[str, str], cwd: Path, accepted: dict[str, list[str]]
 ) -> Found:
-    bin = shutil.which(bins[name])
+    bin = shutil.which(bins.get(name, name))
     if bin is None:
-        return Found(name, None, error=f"{bins[name]} is not on PATH")
+        return Found(name, None, error=f"{bins.get(name, name)} is not on PATH")
     failed = None
     try:
         version = await _version(bin)

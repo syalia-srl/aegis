@@ -47,6 +47,7 @@ from ..claude.stream import (
 from ..claude.stream import Parser as ClaudeParser
 from ..codex.stream import Parser as CodexParser
 from ..cursor.stream import Parser as CursorParser
+from ..pi.stream import Parser as PiParser
 from ..opencode.stream import Parser as OpenCodeParser
 from . import describe as d
 from .plan_clock import replan, switch
@@ -60,6 +61,7 @@ PARSERS: dict[str, Any] = {
     "opencode": OpenCodeParser,
     "codex": CodexParser,
     "cursor": CursorParser,
+    "pi": PiParser,
 }
 
 

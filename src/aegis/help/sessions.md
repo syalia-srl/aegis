@@ -234,7 +234,7 @@ aegis tells every live session when the host runs short: the disk is full,
 memory is short, the CPU is saturated or the quota runs ahead of pace. A
 notice never starts a turn, and never goes into the system prompt. It rides
 on the session's next message. During a turn, Claude Code reads it right after
-the agent's next tool call of any kind. Codex, OpenCode and Cursor read it on
+the agent's next tool call of any kind. Codex, OpenCode, Cursor and pi read it on
 the result of their next aegis tool call, and a call made with `aegis call`
 carries none, so its output still parses. An agent reads a block headed like
 an inbox message:
