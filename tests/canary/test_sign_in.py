@@ -25,6 +25,8 @@ from aegis.signin.screen import Screen
 
 from .conftest import bin_of
 
+pytestmark = pytest.mark.canary
+
 WAIT_S = 60.0
 
 
