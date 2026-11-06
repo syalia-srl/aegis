@@ -779,6 +779,25 @@ body{background:#000}
 #a2 .upd{color:var(--warn);margin-left:6px}
 #a2 .ver .ok .ic,#a2 .upd .ic{width:12px;height:12px;vertical-align:-2px}
 #a2 .tabs .ver-top{font-family:var(--font-mono);color:var(--faint);margin-left:4px;cursor:default}
+/* Updating aegis (#955): the button beside the arrow, and its steps in the version card. */
+#a2 .upd-btn{font:11px var(--font-mono);background:var(--accent);color:var(--on-accent);border:0;border-radius:4px;padding:1px 8px;margin-left:6px;cursor:pointer}
+#a2 .upd-btn:hover{filter:brightness(1.1)}
+#a2 .upd-run{color:var(--warn);margin-left:6px;white-space:nowrap}
+#a2 .tabs .ver-top:has(.upd-btn,.upd-run){display:inline-flex;align-items:center;white-space:nowrap}
+#a2 .ver-upd .how{color:var(--muted);overflow-wrap:anywhere;margin:4px 0}
+#a2 .ver-upd .acts{display:flex;justify-content:flex-end;margin-top:8px}
+#a2 .ver-upd .err-text{color:var(--err);margin-top:6px}
+#a2 .upd-steps{list-style:none;padding:0;margin:6px 0 0}
+#a2 .upd-steps li{color:var(--faint);padding:2px 0 2px 18px;position:relative}
+#a2 .upd-steps li::before{content:"";position:absolute;left:3px;top:8px;width:7px;height:7px;border-radius:50%;border:1.5px solid var(--faint)}
+#a2 .upd-steps li.doing{color:var(--strong)}
+#a2 .upd-steps li.doing::before{border-color:var(--accent);background:var(--accent-soft)}
+#a2 .upd-steps li.done{color:var(--ink)}
+#a2 .upd-steps li.done::before{border-color:var(--ok);background:var(--ok)}
+#a2 .upd-steps li.bad{color:var(--err)}
+#a2 .upd-steps li.bad::before{border-color:var(--err);background:var(--err)}
+#a2 .upd-log{margin:8px 0 0;padding:6px 8px;max-height:110px;overflow:auto;background:var(--chrome);border:1px solid var(--rule);border-radius:var(--r);font:10.5px/1.45 var(--font-mono);color:var(--ink);white-space:pre-wrap;overflow-wrap:anywhere}
+@media (pointer:coarse){#a2 .ver-upd .upd-btn{min-height:40px;padding:0 16px}}
 
 /* fleet */
 #a2 .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;padding:18px 20px}
@@ -2052,6 +2071,8 @@ body{background:#000}
   /* no hover in the drawer: a tap opens a row's card under it */
   #a2 .pcard{position:static;width:auto;max-height:none;margin:8px 0 2px;box-shadow:none;transition:none}
   #a2 .prow.open>.pcard{display:block}
+  #a2 .side .ver>.prow{flex-wrap:wrap}
+  #a2 .side .ver>.prow>.pcard{flex-basis:100%}
   #a2[data-view=session] .v-session{grid-template-columns:minmax(0,1fr)}
   /* The drawer and its dimmed page start under the header (--hdr, its height,
      kept by app.js), so ☰ and the tabs stay tappable while it is open. */

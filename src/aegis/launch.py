@@ -8,7 +8,7 @@ and drops its capabilities, and that has to happen for every process or it
 protects nothing (docs/superpowers/specs/2026-10-21-linux-users-design.html,
 section 06), so there is one place to do it.
 
-A caller picks one of five shapes and keeps its own reading and timeout
+A caller picks one of six shapes and keeps its own reading and timeout
 logic. Process signals use the shared helper below, so a server that cannot
 signal a member's process retries as that member:
 
@@ -19,6 +19,8 @@ signal a member's process retries as that member:
 - ``detach``: sync, in a session of its own, never waited for.
 - ``browser``: a URL handed to the desktop's browser through ``webbrowser``,
   which starts its own process.
+- ``replace``: the server's own process replaced by ``argv``, same pid, once
+  it has stopped: the restart after an update (self_update.py).
 
 ``child`` and ``pty`` also take ``via``, the linked server the process reaches
 the internet through (exit.py), or None for this machine's own route. It is
@@ -358,3 +360,9 @@ def browser(url: str, *, user: str | None) -> None:
     starts it itself. ``user`` is for symmetry: refused in the mode."""
     _refused("opening a browser on the server's desktop")
     webbrowser.open(url)
+
+
+def replace(argv: list[str]) -> None:
+    """The server's process becomes ``argv``: same pid, cgroup and unit, so a
+    supervisor sees nothing. Only after a clean stop: nothing runs after it."""
+    os.execv(argv[0], argv)

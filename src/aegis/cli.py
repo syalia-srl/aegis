@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import errno
 import socket
+import sys
 import threading
 import time
 from pathlib import Path
@@ -349,7 +350,17 @@ def serve(
         typer.echo(f"open {o}/?token={token}")
     if window:
         _open_when_listening(local, port, url, browser)
-    uvicorn.run(web, host=host, port=port, log_level="warning", ws=ws_protocol())
+    from . import launch, self_update
+
+    server = uvicorn.Server(
+        uvicorn.Config(web, host=host, port=port, log_level="warning", ws=ws_protocol())
+    )
+    self_update.on_stop(lambda: setattr(server, "should_exit", True))
+    server.run()
+    if (argv := self_update.pending()) is not None:
+        typer.echo("aegis restarting on the updated build")
+        sys.stdout.flush()
+        launch.replace(argv)
 
 
 def _bins(claude: str, opencode: str, codex: str, cursor: str) -> dict[str, str]:
