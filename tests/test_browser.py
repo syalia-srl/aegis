@@ -7856,6 +7856,49 @@ def test_settings_shows_a_trusted_link_on_both_servers(
         pair.stop()
 
 
+def test_a_trusted_far_server_shows_and_drives_the_near_servers_sessions(
+    tmp_path: Path, fake_claude: str, fake_opencode: str, browser, page
+):
+    """Over a trusted link the far server's page shows the near server's
+    sessions under its band and drives them (#969), at desktop and phone width."""
+    pair = Linked(tmp_path, fake_claude, fake_opencode, trusted=True).start()
+    try:
+        errors: list = []
+        pg = new_page(browser, errors)
+        pg.goto(pair.alpha.url)
+        pg.wait_for_selector("#a2[data-view=fleet]")
+        lid = spawn(pg, "from alpha")
+        pg.close()
+        page.goto(pair.beta.url)
+        page.wait_for_selector("#a2[data-view=fleet]")
+        box = "#remotes .remote[data-server=alpha]"
+        page.wait_for_selector(f"{box} .card[data-id='alpha/{lid}']", timeout=10000)
+        assert page.inner_text(f"{box} .band-server") == "alpha"
+        shots = os.environ.get("AEGIS_SHOTS")
+        if shots:
+            page.screenshot(path=f"{shots}/fleet-desktop.png")
+        page.click(f"#tablist .tab[data-id='alpha/{lid}']")
+        page.wait_for_selector("#a2[data-view=session]")
+        turns_done(page, 1)
+        page.fill("#input", "hello from beta")
+        page.press("#input", "Enter")
+        turns_done(page, 2)
+        store = pair.alpha.root / ".aegis" / "state" / "transcripts" / f"{lid}.jsonl"
+        assert "hello from beta" in store.read_text()
+        page.set_viewport_size({"width": 390, "height": 844})
+        page.goto(pair.beta.url)
+        page.wait_for_selector(f"{box} .card[data-id='alpha/{lid}']", timeout=10000)
+        if shots:
+            page.screenshot(path=f"{shots}/fleet-phone.png", full_page=True)
+        # Settings lists alpha under the servers that link here, not as a link.
+        open_settings(page, pair.beta.url)
+        page.wait_for_selector("#set-servers .set-incoming.link-alpha", timeout=10000)
+        assert page.locator("#set-servers .set-link:not(.set-incoming)").count() == 0
+        assert page.errors == [] and errors == []
+    finally:
+        pair.stop()
+
+
 def test_settings_lists_the_link_and_edits_the_far_config(linked, page):
     page.goto(linked.alpha.url)
     page.wait_for_selector("#a2[data-view=fleet]")

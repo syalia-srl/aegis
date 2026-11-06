@@ -21,7 +21,12 @@ to its admin's token while it has no member tokens, and says so in
 link, and a ``trust`` frame from the far side ends that again. The far server
 keeps a ``Backlink`` for the socket, so its agents address this server as
 ``handle@<name>`` over the socket this server opened: a laptop behind NAT is
-reached without accepting a connection.
+reached without accepting a connection. Its browsers watch this server down the
+same socket (#969): an ``rsub`` subscribes here as the link's admin, the
+snapshot and patches go back wrapped in ``rframe``, and ``runsub`` and
+``rwatch`` end one and say what a page shows. This server says ``views`` in its
+hello so the far server knows it answers them; the views end with the socket
+or the trust, and a view of this server never carries a third one's sessions.
 
 Subscriptions forwarded for browsers carry a link-unique ``sid``, and the far
 server keys a link socket's subscriptions by it, so two browsers watching one
@@ -78,7 +83,7 @@ WATCH_EVERY_S = 1.0
 ACCEPTED = ("welcome", "reply", "snapshot", "patch", "error")
 # Frames only a link the far server trusted accepts: its calls, and its word
 # that the trust ended.
-TRUSTED = ("rcall", "trust")
+TRUSTED = ("rcall", "trust", "rsub", "runsub", "rwatch")
 # What a link answers an rcall with, given the far server's name, the op and
 # its params: the reply's ``result`` or ``error``.
 Answer = Callable[[str, str, Any], Awaitable[dict]]
@@ -139,7 +144,7 @@ async def _hello(
             "token": token,
             "proto": PROTO,
             "link": {"server": own, "user": user}
-            | ({"trusted": True} if trusted else {}),
+            | ({"trusted": True, "views": True} if trusted else {}),
         }
         await ws.send(json.dumps(hello))
         first = json.loads(await asyncio.wait_for(ws.recv(), HELLO_TIMEOUT_S))
@@ -234,6 +239,11 @@ class LinkStore:
 
 
 Send = Callable[[dict], None]
+# Subscribes a trusted far server's browser here: (server, channel, since,
+# merge, send) to the function that ends it; raises OpError when it cannot.
+Serve = Callable[[str, str, int | None, bool, Send], Callable[[], None]]
+# Says which session a page there shows: (server, key, log id or None).
+Rwatch = Callable[[str, str, str | None], None]
 
 
 class Link:
@@ -249,6 +259,8 @@ class Link:
         on_change: Callable[[], None] = lambda: None,
         trusted: bool = False,
         answer: Answer | None = None,
+        serve: Serve | None = None,
+        rwatch: Rwatch | None = None,
     ) -> None:
         self.name, self.url, self.token = name, base_url(url), token
         self.own, self.user = own, user
@@ -256,6 +268,10 @@ class Link:
         # Asked for in links.json; granted by the far server's welcome, for
         # this socket only, and ended by its trust frame.
         self.trusted, self.answer = trusted, answer
+        self.serve, self.rwatch = serve, rwatch
+        # The far server's browsers watching this one: sid -> its unsubscribe.
+        self._rsubs: dict[str, Callable[[], None]] = {}
+        self._rwatches: set[str] = set()
         self.granted = False
         self.trust_error = ""
         self._answering: set[asyncio.Task] = set()
@@ -355,6 +371,7 @@ class Link:
     def _lost(self) -> None:
         """The socket went: every call fails, every subscription ends."""
         self.granted = False
+        self._unserve()
         for task in self._answering:
             task.cancel()
         self._answering.clear()
@@ -423,10 +440,14 @@ class Link:
         if msg["t"] == "trust":
             if msg.get("trusted") is not True:
                 self.granted = False
+                self._unserve()
                 why = msg.get("reason")
                 self.trust_error = why if isinstance(why, str) else "trust ended"
                 log.warning("linked server %s ended the trust: %s", self.name, why)
                 self.on_change()
+            return
+        if msg["t"] in ("rsub", "runsub", "rwatch"):
+            self._view(msg)
             return
         task = asyncio.get_running_loop().create_task(self._rcall(msg))
         self._answering.add(task)
@@ -441,6 +462,53 @@ class Link:
             reply.update(await self.answer(self.name, op, msg.get("params")))
         if self.granted:  # an answer must not outlive the trust it ran under
             self._out.put_nowait(reply)
+
+    def _view(self, msg: dict) -> None:
+        """A browser on the far server opens, ends or points a view of this one."""
+        sid = msg.get("sid")
+        if not isinstance(sid, str):
+            return
+        if msg["t"] == "rwatch":
+            if self.rwatch is not None:
+                sess = msg.get("session")
+                log_id = sess if isinstance(sess, str) and msg.get("visible") else None
+                self.rwatch(self.name, sid, log_id)
+                (self._rwatches.add if log_id else self._rwatches.discard)(sid)
+            return
+        if (end := self._rsubs.pop(sid, None)) is not None:
+            end()
+        if msg["t"] == "runsub":
+            return
+
+        def send(m: dict) -> None:
+            if self.granted:
+                self._out.put_nowait({"t": "rframe", "frame": {**m, "sid": sid}})
+
+        since = msg.get("since")
+        if not isinstance(since, int) or isinstance(since, bool):
+            since = None
+        try:
+            if self.serve is None:
+                raise OpError("not_both_ways", "this server serves no views back")
+            self._rsubs[sid] = self.serve(
+                self.name,
+                str(msg.get("channel")),
+                since,
+                msg.get("merge") is True,
+                send,
+            )
+        except OpError as e:
+            send({"t": "error", "error": {"code": e.code, "message": e.message}})
+
+    def _unserve(self) -> None:
+        """End every view the far server's browsers had of this one."""
+        for end in self._rsubs.values():
+            end()
+        self._rsubs.clear()
+        if self.rwatch is not None:
+            for sid in self._rwatches:
+                self.rwatch(self.name, sid, None)
+        self._rwatches.clear()
 
     # -- what goes out ---------------------------------------------------------
     def describe(self) -> str:
@@ -551,9 +619,11 @@ class Backlink:
     """The way back to a server that linked this one with trust: its calls go
     down the socket that server opened, as ``rcall``, and come back as
     ``rreply``. It has the face of a ``Link`` for calls, so agents and the
-    router find it by name; subscriptions are refused, since live views stay
-    one way. ``check`` says why the trust no longer holds, or None, and is
-    asked before every call: a member token minted here ends it at once."""
+    router find it by name. A browser here watches that server down the same
+    socket, as ``rsub`` and ``rframe``, when it said ``views`` in its hello
+    (#969); an older one gets ``not_both_ways``. ``check`` says why the trust
+    no longer holds, or None, and is asked before every call: a member token
+    minted here ends it at once."""
 
     url = None  # nothing to fetch files from: the far server has no route here
 
@@ -563,8 +633,11 @@ class Backlink:
         send: Send,
         check: Callable[[], str | None],
         on_end: Callable[[Backlink], None] = lambda _: None,
+        views: bool = False,
     ) -> None:
         self.name = name
+        self.views = views
+        self._subs: dict[str, Send] = {}
         self.state = "linked"
         self.since = time.time()
         self.rtt_ms: int | None = None
@@ -586,6 +659,7 @@ class Backlink:
         self.state, self.error, self.since = "ended", reason, time.time()
         self._send({"t": "trust", "trusted": False, "reason": reason})
         self._fail("trust_ended", f"the trust with {self.name} ended: {reason}")
+        self._end_subs("trust_ended", f"the trust with {self.name} ended: {reason}")
         self._on_end(self)
 
     def lost(self) -> None:
@@ -593,6 +667,24 @@ class Backlink:
         if self.state == "linked":
             self.state, self.since = "offline", time.time()
         self._fail("server_offline", f"{self.name} went offline")
+        self._end_subs("server_offline", f"{self.name} went offline")
+
+    def _end_subs(self, code: str, message: str) -> None:
+        for sid, send in list(self._subs.items()):
+            send(
+                {"t": "error", "sid": sid, "error": {"code": code, "message": message}}
+            )
+        self._subs.clear()
+
+    def deliver(self, msg: dict) -> None:
+        """A frame for one of this server's views, from the far server."""
+        frame = msg.get("frame")
+        if not isinstance(frame, dict):
+            return
+        sid = frame.get("sid")
+        send = self._subs.get(sid) if isinstance(sid, str) else None
+        if send is not None:
+            send(frame)
 
     def _fail(self, code: str, message: str) -> None:
         for fut in self._pending.values():
@@ -646,26 +738,57 @@ class Backlink:
     def sub(
         self, sid: str, channel: str, since: int | None, send: Send, merge: bool = False
     ) -> None:
-        send(
-            {
-                "t": "error",
-                "sid": sid,
-                "error": {
-                    "code": "not_both_ways",
-                    "message": f"{self.name} linked this server: its sessions "
-                    "are reached by agents and calls, not watched from here",
-                },
-            }
-        )
+        if not self.views:
+            send(
+                {
+                    "t": "error",
+                    "sid": sid,
+                    "error": {
+                        "code": "not_both_ways",
+                        "message": f"{self.name} runs an aegis that serves no views "
+                        "back: its sessions are reached by agents and calls",
+                    },
+                }
+            )
+            return
+        if self.state == "linked" and (why := self._check()) is not None:
+            self.end(why)
+        if self.state != "linked":
+            code = "trust_ended" if self.state == "ended" else "server_offline"
+            send(
+                {
+                    "t": "error",
+                    "sid": sid,
+                    "error": {"code": code, "message": self.describe()},
+                }
+            )
+            return
+        self._subs[sid] = send
+        msg: dict = {"t": "rsub", "sid": sid, "channel": channel}
+        if since is not None:
+            msg["since"] = since
+        if merge:
+            msg["merge"] = True
+        self._send(msg)
 
     def unsub(self, sid: str) -> None:
-        pass
+        if self._subs.pop(sid, None) is not None and self.state == "linked":
+            self._send({"t": "runsub", "sid": sid})
 
     def watch(self, sid: str, log_id: str | None) -> None:
-        pass
+        if self.views and self.state == "linked":
+            self._send(
+                {
+                    "t": "rwatch",
+                    "sid": sid,
+                    "session": log_id,
+                    "visible": log_id is not None,
+                }
+            )
 
     def drop(self, prefix: str) -> None:
-        pass
+        for sid in [s for s in self._subs if s.startswith(prefix)]:
+            self.unsub(sid)
 
     def wire(self) -> dict:
         return {"name": self.name, "state": self.state, "since": self.since}
@@ -689,6 +812,9 @@ class Links:
         self._back: dict[str, Backlink] = {}
         # Runs a trusted far server's call here (app.py sets it).
         self.answer: Answer | None = None
+        # Serve a trusted far server's browsers here (app.py sets them).
+        self.serve: Serve | None = None
+        self.rwatch: Rwatch | None = None
         self._entries: dict[str, dict] = {}
         self._stamp: tuple[int, int] | None = None
         self._watch: asyncio.Task | None = None
@@ -738,6 +864,8 @@ class Links:
                 self._changed,
                 trusted=e.get("trusted") is True,
                 answer=self.answer,
+                serve=self.serve,
+                rwatch=self.rwatch,
             )
             self._links[name], self._entries[name] = link, e
             link.start()
@@ -795,7 +923,11 @@ class Links:
         return [b.wire() for b in self._back.values()]
 
     def wire(self) -> list[dict]:
-        return [link.wire() for link in self._links.values()]
+        """The servers this one's browsers show: its links, and the ways back
+        that serve views, marked ``back``."""
+        return [link.wire() for link in self._links.values()] + [
+            b.wire() | {"back": True} for b in self._back.values() if b.views
+        ]
 
     def check(self, name: str, url: str) -> None:
         """Refuse a name this server cannot link under, or a URL that is not one."""
