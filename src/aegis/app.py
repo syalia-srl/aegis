@@ -60,7 +60,7 @@ from pydantic.json_schema import SkipJsonSchema
 
 from . import archive, attachments as att, commands, dictation, files, restarts, speech
 from . import pause
-from . import feedback, harness_versions, multiuser, setup
+from . import feedback, harness_versions, multiuser, self_update, setup
 from . import layout as canvas
 from . import workflow_store
 from .agent_ops import (
@@ -639,6 +639,9 @@ class App:
         reg.catalogs = self.catalogs
         reg.mcp_url = f"{base_url.rstrip('/')}{MCP_PATH}" if base_url else None
         self.versions = Versions()
+        self.updater = self_update.Updater(
+            self.versions.running["version"], self.publish
+        )
         self.recaps = Recaps(self)
         self.side_notes = SideNotes(self)
         self.sessions.side_notes = self.side_notes
@@ -1601,6 +1604,8 @@ class App:
             return self.quota.snapshot
         if name == "host":
             return self.host.snapshot
+        if name == "update":
+            return self.updater.wire
         if name == "journal":
             return self.journal.snapshot
         if name == "usage":
@@ -3227,7 +3232,24 @@ class App:
 
         @r.op("server.version")
         async def server_version(_, caller):
-            return await self.versions.wire()
+            install = await self.updater.install()
+            return await self.versions.wire() | {"install": install.wire()}
+
+        @r.op("server.update", admin=True)
+        async def server_update(_, caller):
+            """Upgrade aegis with the installer that owns it, check the new
+            build, and restart onto it (self_update.py). Progress is on the
+            update channel."""
+            if self.updater.busy():
+                raise OpError("busy", "an update is already running")
+            if not (await self.updater.install()).argv and not os.environ.get(
+                "AEGIS_UPDATE_COMMAND"
+            ):
+                raise OpError("unsupported", "aegis cannot update this install")
+            t = asyncio.create_task(self.updater.run())
+            self._background.add(t)
+            t.add_done_callback(self._background.discard)
+            return {"started": True}
 
         @r.op("net.measure")
         async def net_measure(_, caller):

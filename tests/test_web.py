@@ -629,6 +629,29 @@ def test_server_version_reports_the_running_build_and_the_latest_release(
     assert r["latest"] == "99.0.0"
     assert set(r["running"]) == {"version", "commit", "ref", "dev"}
     assert r["status"] == ("dev" if r["running"]["dev"] else "behind")
+    assert set(r["install"]) == {"by", "command", "can"}
+
+
+def test_a_failed_update_says_why_on_the_update_channel_and_the_server_stays(
+    project, fake_claude, monkeypatch
+):
+    monkeypatch.setenv("AEGIS_UPDATE_COMMAND", "sh -c 'echo offline; exit 3'")
+    with (
+        client_for(project, fake_claude) as c,
+        c.websocket_connect("/ws", headers=ORIGIN) as ws,
+    ):
+        conn = Conn(ws).hello()
+        ws.send_json({"t": "sub", "channel": "update"})
+        assert conn.call("server.update")["result"] == {"started": True}
+        done = conn.until(
+            lambda m: any(
+                o.get("set", {}).get("phase") == "failed" for o in m.get("ops", [])
+            )
+        )
+        state = next(o["set"] for o in done["ops"] if "set" in o)
+        assert state["error"] == "the install exited with 3"
+        assert "offline" in state["lines"]
+        assert "result" in conn.call("server.version")
 
 
 def test_sent_files_are_served_at_their_capability_url(project, fake_claude):
