@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from importlib import resources
 from typing import Literal
 
-from aegis.signin.mask import DEFAULT_SHAPES
+from .mask import DEFAULT_SHAPES
 
 Step = Literal[
     "starting",
