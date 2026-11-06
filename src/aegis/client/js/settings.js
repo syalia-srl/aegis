@@ -54,8 +54,12 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 const readout = (l) => `start ${l.launch === "pace" ? "on pace" : `below ${l.launch}%`} · stop at ${l.stop}%`;
 
 export class Settings {
-  constructor(conn, box, { themes, setTheme, speaker = null }) {
+  constructor(conn, box, { themes, setTheme, speaker = null, lastSession = () => null, openSession = () => {} }) {
     this.conn = conn;
+    // The session the person last looked at, and how to go to it: Sign in
+    // opens its card there (signin.start).
+    this.lastSession = lastSession;
+    this.openSession = openSession;
     this.speaker = speaker; // app.js's Speaker: the Read aloud row chooses its voice (speak.js)
     this.box = box;
     this.themes = themes;
@@ -267,6 +271,7 @@ export class Settings {
       this.fieldSection("notices"),
       this.park(),
       this.untested(),
+      this.harnesses(),
       this.workflows(),
       this.usage(),
       this.fieldSection("embeddings"),
@@ -1104,6 +1109,55 @@ export class Settings {
       : h("p", { className: "set-none", id: "set-accepted", textContent: "No version accepted for good." });
     list.dataset.key = "harness_versions.accepted";
     return h("section", { id: "set-untested" }, head, note, h("div", { className: "set-queues" }, box), list);
+  }
+
+  // Each harness aegis can sign in (signin/status.py): installed, version,
+  // and the sign-in aegis keeps. Sign in opens the card in the last session.
+  harnesses() {
+    const box = h("section", { id: "set-harnesses" }, h("div", { className: "set-section-head" }, h("h3", { textContent: "Harnesses" })));
+    const list = h("div", { className: "set-queues" }, h("p", { className: "set-none", textContent: "Reading…" }));
+    const note = h("p", { className: "set-none" });
+    box.append(list, note);
+    const server = this.server;
+    this.call("harness.status")
+      .then((rows) => {
+        if (server !== this.server) return;
+        list.replaceChildren(...rows.map((r) => this.harnessRow(r, note)));
+      })
+      .catch((e) => list.replaceChildren(h("p", { className: "set-none", textContent: e.message })));
+    return box;
+  }
+
+  harnessRow(r, note) {
+    const name = { "claude-code": "Claude Code", opencode: "OpenCode" }[r.harness] || r.harness;
+    const day = (t) => new Date(t * 1000).toISOString().slice(0, 10);
+    const state = !r.installed
+      ? "not installed"
+      : r.problem
+        ? r.problem
+        : r.signed_in
+          ? `token until ${day(r.expires)}`
+          : "its own sign-in";
+    const words = h("span", { className: "set-name", textContent: `${name}${r.version ? ` ${r.version.replace(/\s*\(.*\)$/, "")}` : ""} · ${state}` });
+    const line = h("div", { className: "set-queue-line set-harness" }, words);
+    line.dataset.harness = r.harness;
+    if (!r.installed) return line;
+    line.append(
+      button(r.signed_in ? "Sign in again" : "Sign in", null, async () => {
+        const log_id = this.lastSession();
+        if (!log_id) {
+          note.textContent = "Open a session first: the sign-in card opens in its transcript.";
+          return;
+        }
+        try {
+          await this.call("signin.start", { log_id, harness: r.harness });
+          this.openSession(log_id);
+        } catch (e) {
+          note.textContent = e.message;
+        }
+      }),
+    );
+    return line;
   }
 
   // The doctor: one line until it finds something, the full list on demand.

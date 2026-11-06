@@ -123,6 +123,9 @@ class SignIns:
         self.waiting: dict[str, list[str]] = {}
         self._background: set[asyncio.Task] = set()
 
+    def recipes(self) -> dict[str, Recipe]:
+        return self._recipes()
+
     # -- what starts a card --------------------------------------------------
     def failed(self, s: "Session", harness: str = "claude-code") -> None:
         """A turn of ``s`` failed to sign in. Members' sessions sign in with
