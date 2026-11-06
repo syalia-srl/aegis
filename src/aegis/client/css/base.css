@@ -782,7 +782,8 @@ body{background:#000}
 /* Updating aegis (#955): the button beside the arrow, and its steps in the version card. */
 #a2 .upd-btn{font:11px var(--font-mono);background:var(--accent);color:var(--on-accent);border:0;border-radius:4px;padding:1px 8px;margin-left:6px;cursor:pointer}
 #a2 .upd-btn:hover{filter:brightness(1.1)}
-#a2 .upd-run{color:var(--warn);margin-left:6px}
+#a2 .upd-run{color:var(--warn);margin-left:6px;white-space:nowrap}
+#a2 .tabs .ver-top:has(.upd-btn,.upd-run){display:inline-flex;align-items:center;white-space:nowrap}
 #a2 .ver-upd .how{color:var(--muted);overflow-wrap:anywhere;margin:4px 0}
 #a2 .ver-upd .acts{display:flex;justify-content:flex-end;margin-top:8px}
 #a2 .ver-upd .err-text{color:var(--err);margin-top:6px}
