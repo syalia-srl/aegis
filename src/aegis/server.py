@@ -32,7 +32,6 @@ if TYPE_CHECKING:
     from .api.workflows import Workflows
     from .app import App
     from .roots import Roots
-    from .users import MultiUser
 
 
 class StartError(Exception):
@@ -46,7 +45,6 @@ class StartError(Exception):
 @dataclass(frozen=True)
 class Prepared:
     roots: Roots
-    multi_user: MultiUser | None
 
 
 def prepare(start: Path, root: Path | None = None) -> Prepared:
@@ -73,13 +71,7 @@ def prepare(start: Path, root: Path | None = None) -> Prepared:
     snap = Config(roots.config_root).current()
     if snap.multi_user_error:
         raise StartError([snap.multi_user_error])
-    if snap.multi_user is not None:
-        from .users import boot_problems
-
-        if problems := boot_problems(roots.state_root, snap.multi_user):
-            raise StartError(list(problems))
-        roots.state_root.mkdir(mode=0o700, parents=True, exist_ok=True)
-    return Prepared(roots, snap.multi_user)
+    return Prepared(roots)
 
 
 def allowed_hosts(host: str, port: int) -> set[str]:
@@ -170,7 +162,6 @@ class Server:
             p.roots,
             base_url=self.base_url,
             server_name=self._name or socket.gethostname(),
-            multi_user=p.multi_user,
             claude_bin=self._bins[0],
             opencode_bin=self._bins[1],
             codex_bin=self._bins[2],

@@ -58,15 +58,14 @@ def test_only_a_private_well_formed_file_is_read():
     assert login.read_token() == GOOD and login.file_problem(token_file()) is None
 
 
-def test_the_token_reaches_the_servers_own_children_only(monkeypatch):
+def test_the_token_reaches_the_servers_children(monkeypatch):
     put(GOOD)
     monkeypatch.delenv(login.VAR, raising=False)
-    assert login.with_token({"A": "1"}, None) == {"A": "1", login.VAR: GOOD}
-    assert login.with_token({"A": "1"}, "ben") == {"A": "1"}
-    assert login.with_token({login.VAR: "pool"}, None) == {login.VAR: "pool"}
-    assert login.with_token(None, None)[login.VAR] == GOOD
+    assert login.with_token({"A": "1"}) == {"A": "1", login.VAR: GOOD}
+    assert login.with_token({login.VAR: "set"}) == {login.VAR: "set"}
+    assert login.with_token(None)[login.VAR] == GOOD
     token_file().unlink()
-    assert login.with_token(None, None) is None
+    assert login.with_token(None) is None
 
 
 def test_a_written_token_is_0600_in_a_0700_directory(tmp_path):

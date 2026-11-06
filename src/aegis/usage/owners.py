@@ -26,9 +26,7 @@ def _mtime(repo: str) -> float:
         return 0.0
 
 
-def owner_of(
-    con: sqlite3.Connection, repo: str, top: str, user: str | None, config: dict
-) -> str:
+def owner_of(con: sqlite3.Connection, repo: str, top: str, config: dict) -> str:
     """The owner of the repo whose main checkout is ``repo``; ``top`` is the
     worktree git runs in."""
     named = config.get("owners") or {}
@@ -40,7 +38,7 @@ def owner_of(
     if row and row[1] >= _mtime(repo):
         return row[0]
     # Not remote_slug: it caches per process, and a changed remote must show.
-    out = paths._git(["remote", "get-url", "origin"], top or repo, user)
+    out = paths._git(["remote", "get-url", "origin"], top or repo)
     m = paths.SLUG.search(out.strip()) if out else None
     remote = f"{m[1]}/{m[2]}" if m else None
     owner = m[1] if m else LOCAL

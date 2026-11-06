@@ -33,7 +33,6 @@ import hashlib
 import json
 import logging
 import os
-import re
 import time
 import secrets
 from collections.abc import Iterable
@@ -58,7 +57,6 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 from . import exit as exit_
 from . import files, fs_paths
 from .app import App
-from .as_user import Place
 from .channels import Sub
 from .links import PROTO, Backlink
 from .ops import Caller, OpError
@@ -91,75 +89,6 @@ def inject_point(body: bytes) -> bytes:
     if at < 0 or at < low.rfind(b"</script>"):
         return body + POINT_TAG
     return body[:at] + POINT_TAG + body[at:]
-
-
-def _open_as(place: Place, rel: str, download: bool):
-    """On ``place``'s runner: the headers for ``rel``, and its bytes when an
-    HTML preview needs the pointing script, else an open descriptor and its
-    size. Raises OpError or OSError when the file is not there to serve."""
-    path = fs_paths.resolve(place.root, place.guard, rel)
-    if not path.is_file():
-        raise OpError("not_a_file", f"{rel} is a folder")
-    headers = {**files.headers(path, download), "Cache-Control": "no-store"}
-    if not download and files.classify(path)[1] == "html":
-        return headers, inject_point(path.read_bytes()), None
-    fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC)
-    return headers, fd, os.fstat(fd).st_size
-
-
-_RANGE = re.compile(r"bytes=(\d*)-(\d*)")
-_CHUNK = 256 * 1024
-
-
-def _fd_response(request, headers: dict, body: bytes | int, size: int | None):
-    """What ``_open_as`` opened, as a response: bytes as they are, or the
-    descriptor streamed, with one byte range when the request asks for one
-    (a video seeks, a PDF reads pages), as FileResponse does for a path."""
-    headers = dict(headers)
-    media = headers.pop("Content-Type")
-    if isinstance(body, bytes):
-        return Response(body, media_type=media, headers=headers)
-    fd = body
-    assert size is not None
-    start, end, status = 0, size - 1, 200
-    m = _RANGE.fullmatch(request.headers.get("range", "").strip())
-    first, last = (
-        (int(m[1]) if m and m[1] else None),
-        (int(m[2]) if m and m[2] else None),
-    )
-    # A range whose end is before its start is invalid and ignored (RFC 9110).
-    if (
-        m
-        and (first is not None or last is not None)
-        and not (first is not None and last is not None and last < first)
-    ):
-        if first is not None:
-            start, end = first, min(size - 1 if last is None else last, size - 1)
-        else:
-            start = max(size - (last or 0), 0)
-        if start > end:
-            os.close(fd)
-            return Response(
-                status_code=416, headers={"Content-Range": f"bytes */{size}"}
-            )
-        status = 206
-        headers["Content-Range"] = f"bytes {start}-{end}/{size}"
-    headers["Accept-Ranges"] = "bytes"
-    headers["Content-Length"] = str(end - start + 1)
-
-    async def stream():
-        at = start
-        while at <= end:
-            n = min(_CHUNK, end - at + 1)
-            chunk = await asyncio.to_thread(os.pread, fd, n, at)
-            if not chunk:
-                return
-            yield chunk
-            at += len(chunk)
-
-    return _FdStream(
-        fd, stream(), status_code=status, media_type=media, headers=headers
-    )
 
 
 class _FdStream(StreamingResponse):
@@ -479,14 +408,6 @@ def build_web(
             return PlainTextResponse("Not Found", status_code=404)
         rel, place = found
         download = request.query_params.get("download") == "1"
-        if place is not None and place.user is not None:
-            # A person's file in multi-user mode: opened as them, then served
-            # from the open descriptor, which the server could not reopen.
-            try:
-                opened = await place.run(_open_as, place, rel, download)
-            except (OpError, OSError):
-                return PlainTextResponse("Not Found", status_code=404)
-            return _fd_response(request, *opened)
         try:
             path = fs_paths.resolve(app.roots.config_root, app.roots.state_root, rel)
         except OpError:

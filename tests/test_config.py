@@ -239,16 +239,12 @@ def test_the_nudges_block():
     assert "error" in nudges_from(3)
 
 
-def test_multi_user_is_a_known_key_and_parses(tmp_path):
-    from aegis.users import MultiUser
-
+def test_a_multi_user_block_is_reported_as_removed(tmp_path):
     cfg, _ = config(tmp_path, "multi_user:\n  env_file: /etc/aegis/pool.env\n")
-    snap = cfg.current()
-    assert snap.multi_user == MultiUser(Path("/etc/aegis/pool.env"))
-    assert snap.multi_user_error is None
-    assert "multi_user" not in snap.unknown_keys
+    err = cfg.current().multi_user_error
+    assert err is not None and "multi_user" in err and "removed" in err
     cfg, _ = config(tmp_path, "agents: {}\n")
-    assert cfg.current().multi_user is None
+    assert cfg.current().multi_user_error is None
 
 
 def test_the_usage_block_rides_the_snapshot(tmp_path):

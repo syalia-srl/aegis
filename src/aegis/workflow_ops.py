@@ -11,6 +11,8 @@ step's see for a person: it takes a run and a step, never a path.
 
 from __future__ import annotations
 
+import asyncio
+
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -388,14 +390,13 @@ def register_workflow_ops(app: App) -> None:
         owned(p.run, caller)
         # The step's file is in its owner's working tree: checked and read as
         # the session that owns the run now (handoffs move it on).
-        owner = wf.owner(wf.runs[p.run])
-        user = app.sessions.user_for(owner.spec) if owner is not None else None
-        run = app.runners.get(user)
         path, fragment, line = wf.see_file(p.run, p.node, check=False)
-        if not await run(path.is_file):
+        if not await asyncio.to_thread(path.is_file):
             raise OpError("no_file", f"no file {path}")
         try:
-            (rec,) = await files.store_as(app.roots.state_root, [path], run)
+            (rec,) = await asyncio.to_thread(
+                files.store_all, app.roots.state_root, [path]
+            )
         except files.FileError as e:
             raise OpError(e.code, e.message) from e
         return {"files": [_sent_file(rec)], "fragment": fragment, "line": line}

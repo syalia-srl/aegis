@@ -402,7 +402,7 @@ def register_usage_ops(app: "App") -> None:
             total = ImportReport()
             for person, user, home in sources:
                 r = import_claude_projects(
-                    con, [home / ".claude" / "projects"], known, person, user=user
+                    con, [home / ".claude" / "projects"], known, person
                 )
                 for k in ("files", "sessions", "turns", "already", "live"):
                     setattr(total, k, getattr(total, k) + getattr(r, k))

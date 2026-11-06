@@ -77,12 +77,6 @@ AEGIS: dict[str, Command] = {
             "Report a bug or ask for a feature in aegis; the agent drafts the issue",
         ),
         Command(
-            "multiuser",
-            "[text]",
-            "Set up several people on this server, each as their own Linux user; "
-            "the agent guides it",
-        ),
-        Command(
             "setup",
             "[text]",
             "Look at how you work now and move it into aegis; the agent "

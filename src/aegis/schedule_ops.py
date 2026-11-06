@@ -390,4 +390,4 @@ def register_schedule_ops(app: App) -> None:
             where = s.spec.cwd
         else:
             where = cwd(p.cwd, caller)
-        return await sch.test(clock, p.check, where, p.name, None)
+        return await sch.test(clock, p.check, where, p.name)

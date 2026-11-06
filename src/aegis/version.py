@@ -35,9 +35,7 @@ RETRY_S = 600.0
 
 def _git(cwd: Path, *args: str) -> str | None:
     try:
-        out = launch.run(
-            ["git", "-C", str(cwd), *args], text=True, timeout=2, user=None
-        )
+        out = launch.run(["git", "-C", str(cwd), *args], text=True, timeout=2)
     except (OSError, subprocess.TimeoutExpired):
         return None
     if out.returncode != 0:

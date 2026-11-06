@@ -73,10 +73,10 @@ def test_read_docs_caps_the_menu_and_skips_odd_names(tmp_path):
     r = repo(tmp_path / "r", **{f"d{i:03}": RELEASING for i in range(MAX_DOCS + 2)})
     (r / "know-how" / "bad name.md").write_text(RELEASING)
     (r / "know-how" / "notes.txt").write_text(RELEASING)
-    docs, n = read_docs(str(r), None)
+    docs, n = read_docs(str(r))
     assert n == MAX_DOCS + 2 and len(docs) == MAX_DOCS
     assert docs[0] == ("d000.md", "cutting a release")
-    assert read_docs(str(tmp_path / "none"), None) == ([], 0)
+    assert read_docs(str(tmp_path / "none")) == ([], 0)
 
 
 def test_candidates_read_path_arguments_and_shell_words():

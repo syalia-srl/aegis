@@ -34,7 +34,6 @@ import time
 from pathlib import Path
 
 from . import launch
-from .as_user import Runner
 
 _IGNORE_DIRS: frozenset[str] = frozenset(
     {
@@ -117,14 +116,13 @@ def _ignored(rel: str) -> bool:
     return any(ignore_dir(p) for p in parts[:-1]) or ignore_file(parts[-1])
 
 
-def _git_ls(repo: str, *args: str, user: str | None = None) -> list[str] | None:
+def _git_ls(repo: str, *args: str) -> list[str] | None:
     """``git ls-files -z`` in ``repo`` as ``user``, or None when git cannot
     answer."""
     try:
         out = launch.run(
             ["git", "-C", repo, "ls-files", "-z", "--exclude-standard", *args],
             timeout=60,
-            user=user,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -140,9 +138,8 @@ def _is_repo(path: str) -> bool:
 class _Walk:
     """One pass over the tree: the files it keeps, with their mtimes in ms."""
 
-    def __init__(self, state: str, user: str | None = None) -> None:
+    def __init__(self, state: str) -> None:
         self.state = state
-        self.user = user
         self.files: dict[str, int] = {}
 
     def keep(self, rel: str, full: str) -> None:
@@ -183,7 +180,7 @@ class _Walk:
         """A repository: git lists what it would track, and looks no further."""
         if full == self.state or full.startswith(self.state + "/"):
             return
-        listed = _git_ls(full, "--cached", "--others", user=self.user)
+        listed = _git_ls(full, "--cached", "--others")
         if listed is None:  # a .git git cannot read: walk it like any tree
             self.tree(full, rel, repo_ok=False)
             return
@@ -194,9 +191,7 @@ class _Walk:
                 continue
             if not _ignored(entry):
                 self.keep(rel + entry, os.path.join(full, entry))
-        for entry in (
-            _git_ls(full, "--others", "--ignored", "--directory", user=self.user) or ()
-        ):
+        for entry in _git_ls(full, "--others", "--ignored", "--directory") or ():
             if entry.endswith("/"):
                 self.search(os.path.join(full, entry).rstrip("/"), rel + entry, 1)
 
@@ -219,10 +214,10 @@ class _Walk:
                 self.search(e.path, rel + e.name + "/", depth + 1)
 
 
-def walk(root: Path, state: Path, user: str | None = None) -> dict[str, int]:
+def walk(root: Path, state: Path) -> dict[str, int]:
     """Every listed file under ``root``: relative path to mtime in ms. Runs
     with the caller's file access; git runs as ``user``."""
-    w = _Walk(str(state.resolve()), user)
+    w = _Walk(str(state.resolve()))
     try:
         w.tree(str(root.resolve()), "")
     except PermissionError:
@@ -231,17 +226,15 @@ def walk(root: Path, state: Path, user: str | None = None) -> dict[str, int]:
 
 
 class FsIndex:
-    def __init__(self, root: Path, state: Path, run: Runner | None = None) -> None:
+    def __init__(self, root: Path, state: Path) -> None:
         self.root = root
         self.state = state
-        # Who walks: a person's runner in multi-user mode (as_user.py).
-        self.run = run or Runner(None)
         self._files: dict[str, int] | None = None
         self._at = 0.0
         self._walking: asyncio.Task | None = None
 
     async def _walk(self) -> None:
-        files = await self.run(walk, self.root, self.state, self.run.user)
+        files = await asyncio.to_thread(walk, self.root, self.state)
         self._files, self._at = files, time.monotonic()
 
     async def _refresh(self) -> None:
@@ -299,7 +292,7 @@ class FsIndex:
         (a move, a restore): read on the runner, the list changed here, on
         the event loop that also reads it."""
         if self._files is not None:
-            self._apply(await self.run(self._scan, rel))
+            self._apply(await asyncio.to_thread(self._scan, rel))
 
     def touched(self, rel: str) -> None:
         """A file was written or created at ``rel``."""

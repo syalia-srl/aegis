@@ -52,7 +52,6 @@ from .ops import OpError
 from .queues import queues_from
 from .roots import CONFIG_FILE
 from .term_profiles import RESTARTS, terminals_from
-from .users import MultiUser, multi_user_from
 
 log = logging.getLogger("aegis.config")
 
@@ -900,8 +899,8 @@ class Snapshot:
     network_error: str | None = None
     host: dict = field(default_factory=lambda: host_from(None)[0])
     host_error: str | None = None
-    # The multi-user mode (users.py); read once, at boot (cli.serve).
-    multi_user: MultiUser | None = None
+    # A multi_user block, which aegis 3.0 removed (#958): the server refuses
+    # to start until it is gone.
     multi_user_error: str | None = None
     # Why the file on disk is not the one in force, when it does not parse.
     error: str | None = None
@@ -916,7 +915,12 @@ class Snapshot:
         )
         network, network_error = network_from(data.get("network"))
         host, host_error = host_from(data.get("host"))
-        multi_user, multi_user_error = multi_user_from(data)
+        multi_user_error = (
+            "multi_user in .aegis.yaml: aegis 3.0 removed the multi-user mode; "
+            "delete the block"
+            if "multi_user" in data
+            else None
+        )
         workers, workers_error = max_workers_from(data.get("max_workers"))
         return cls(
             path=path,
@@ -948,7 +952,6 @@ class Snapshot:
             network_error=network_error,
             host=host,
             host_error=host_error,
-            multi_user=multi_user,
             multi_user_error=multi_user_error,
         )
 

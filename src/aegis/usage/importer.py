@@ -22,13 +22,11 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from .. import launch
 from ..journal import paths
 from ..journal.service import _scratch
 from . import tables
@@ -81,47 +79,23 @@ def _note(known: set[str], raw: str) -> None:
             known.add(str(message["id"]))
 
 
-def _files(roots: Iterable[Path], user: str | None) -> list[tuple[str, int, float]]:
-    """(path, size, mtime) of every ``*.jsonl`` under ``roots``, listed as
-    ``user`` when one is named: a member's home may be closed to the server."""
+def _files(roots: Iterable[Path]) -> list[tuple[str, int, float]]:
+    """(path, size, mtime) of every ``*.jsonl`` under ``roots``."""
     found: list[tuple[str, int, float]] = []
     for root in roots:
-        if user is None:
-            if root.is_dir():
-                for f in root.rglob("*.jsonl"):
-                    try:
-                        st = f.stat()
-                    except OSError:
-                        continue
-                    found.append((str(f), st.st_size, st.st_mtime))
-            continue
-        try:
-            r = launch.run(
-                ["find", str(root), "-name", "*.jsonl", "-type", "f",
-                 "-printf", "%p\\t%s\\t%T@\\n"],
-                user=user, text=True, errors="replace", timeout=120,
-            )  # fmt: skip
-        except (OSError, subprocess.TimeoutExpired):
-            continue
-        for row in r.stdout.splitlines():
-            path, size, mtime = row.rsplit("\t", 2)
-            found.append((path, int(size), float(mtime)))
+        if root.is_dir():
+            for f in root.rglob("*.jsonl"):
+                try:
+                    st = f.stat()
+                except OSError:
+                    continue
+                found.append((str(f), st.st_size, st.st_mtime))
     return sorted(found)
 
 
-def _lines(path: str, user: str | None) -> list[str]:
-    """A file's lines, read as ``user``; OSError when it cannot be read."""
-    if user is None:
-        return Path(path).read_text(encoding="utf-8", errors="replace").splitlines()
-    try:
-        r = launch.run(
-            ["cat", "--", path], user=user, text=True, errors="replace", timeout=120
-        )
-    except subprocess.TimeoutExpired as e:
-        raise OSError(f"reading {path} timed out") from e
-    if r.returncode != 0:
-        raise OSError(r.stderr.strip() or f"cannot read {path}")
-    return r.stdout.splitlines()
+def _lines(path: str) -> list[str]:
+    """A file's lines; OSError when it cannot be read."""
+    return Path(path).read_text(encoding="utf-8", errors="replace").splitlines()
 
 
 def _epoch(ts: object) -> float | None:
@@ -183,12 +157,12 @@ def _records(lines: list[str], skip: set[str]) -> tuple[list[dict], set[str]]:
     return recs, ids
 
 
-def _repo_of(user: str | None) -> Callable[[str], str | None]:
+def _repo_of() -> Callable[[str], str | None]:
     cache: dict[str, str | None] = {}
 
     def repo_of(d: str) -> str | None:
         if d not in cache:
-            cache[d] = None if _scratch(d) else paths.place(d, user)[0]
+            cache[d] = None if _scratch(d) else paths.place(d)[0]
         return cache[d]
 
     return repo_of
@@ -230,21 +204,19 @@ def import_claude_projects(
     known_ids: set[str],
     person: str,
     progress: Callable[[int, int], None] = lambda done, total: None,
-    *,
-    user: str | None = None,
 ) -> ImportReport:
     """Import every ``*.jsonl`` under ``roots`` as sessions of ``person``;
     ``user`` is the Linux user the files and their repos are read as. A file
     that cannot be read is skipped and listed."""
     report = ImportReport()
-    files = _files(roots, user)
+    files = _files(roots)
     report.files = len(files)
-    repo_of = _repo_of(user)
+    repo_of = _repo_of()
     owned: set[str] = set()
     for k, (path, size, mtime) in enumerate(files):
         f = Path(path)
         try:
-            lines = _lines(path, user)
+            lines = _lines(path)
         except OSError:
             report.unreadable.append(path)
             progress(k + 1, len(files))
@@ -278,7 +250,7 @@ def import_claude_projects(
                 for repo in {p.repo for p in d.parts if p.repo} - owned:
                     owned.add(repo)
                     if os.path.isdir(repo):
-                        owner_of(con, repo, repo, user, {})
+                        owner_of(con, repo, repo, {})
             _done(con, path, size, mtime, ids)
         progress(k + 1, len(files))
     return report

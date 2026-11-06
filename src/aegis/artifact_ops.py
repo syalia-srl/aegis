@@ -143,7 +143,7 @@ def register_artifact_ops(app: App) -> None:
 
     async def land(s, a, caption: str | None):
         """Checks, snapshot, probe, record; the snapshot goes when the probe fails."""
-        run = app.place_of_session(s.log_id).run
+        run = asyncio.to_thread
         path = artifacts.draft_path(s.drafts, a.id)
         try:
             artifacts.check(await run(path.read_text, encoding="utf-8"))
@@ -152,7 +152,9 @@ def register_artifact_ops(app: App) -> None:
         except ArtifactError as e:
             raise _err(e) from e
         try:
-            (rec,) = await files.store_as(app.roots.state_root, [path], run)
+            (rec,) = await asyncio.to_thread(
+                files.store_all, app.roots.state_root, [path]
+            )
         except files.FileError as e:
             raise OpError(e.code, e.message) from e
         url = files.url(rec["file_id"], rec["name"])
@@ -211,7 +213,7 @@ def register_artifact_ops(app: App) -> None:
         if p.state is not None:
             _sized(p.state, "state")
         a = s.artifacts.create(p.title, p.caption, p.state, write=False)
-        run = app.place_of_session(s.log_id).run
+        run = asyncio.to_thread
         # Written as the session's user, in its home in multi-user mode.
         path = await run(artifacts.write_draft, s.drafts, a.id, p.title)
         return {"id": a.id, "path": str(path), "html": artifacts.skeleton(p.title)}
@@ -316,7 +318,7 @@ def register_artifact_ops(app: App) -> None:
         except ArtifactError as e:
             raise _err(e) from e
         if draft:
-            run = app.place_of_session(s.log_id).run
+            run = asyncio.to_thread
             await run(artifacts.drop_draft, s.drafts, p.id)
         return "closed"
 
@@ -392,7 +394,6 @@ def register_artifact_ops(app: App) -> None:
                 app.roots.state_root,
                 p.log_id,
                 [p.upload_id],
-                deliver=app._deliver(s),
             )
         except files.FileError as e:
             raise OpError(e.code, e.message) from e

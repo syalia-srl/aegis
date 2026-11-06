@@ -41,10 +41,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-import pwd
 from typing import Any, Literal
 
-from .as_user import Runners
 from . import attachments, cache, harness_versions, launch as launching, restarts
 from . import layout as canvas
 from .artifacts import ArtifactError, Board
@@ -129,9 +127,6 @@ class Host:
     it; the default does nothing, which is what a bare session in a test or
     the bench needs."""
 
-    # Threads that open files as a session's user (as_user.py).
-    runners = Runners()
-
     def spawn_args(
         self, session: "Session"
     ) -> tuple[tuple[str, str] | None, str | None]:
@@ -142,11 +137,6 @@ class Host:
     def cgroup(self, session: "Session") -> Path | None:
         """The cgroup a new process starts in (cgroups.py), or None."""
         return None
-
-    def user_for(self, spec: "SpawnSpec") -> str | None:
-        """The Linux user a new process runs as (launch.py); None for the
-        server's own."""
-        return spec.linux_user
 
     def released(self, session: "Session") -> None:
         """The session's process ended: empty and remove its cgroup."""
@@ -289,10 +279,6 @@ class SpawnSpec:
     # model; () otherwise. Fixed at spawn: the position in use is the index
     # of ``model`` in it.
     cascade: tuple[str, ...] = ()
-    # The Linux user its processes run as, in multi-user mode (users.py):
-    # fixed at creation, so a later change of the token's user reaches new
-    # sessions only. None runs as the server's own user.
-    linux_user: str | None = None
     # The owner's knowledge setting when it was spawned (setup.Records):
     # native starts every process of it without the harness's own skills and
     # memory, and lets a store skill take a harness command's name. Fixed at
@@ -330,8 +316,6 @@ class SpawnSpec:
             d["keep_harness_tools"] = list(self.keep_harness_tools)
         if self.cascade:
             d["cascade"] = list(self.cascade)
-        if self.linux_user:
-            d["linux_user"] = self.linux_user
         if self.knowledge_native:
             d["knowledge_native"] = True
         return d
@@ -357,7 +341,6 @@ class SpawnSpec:
             continues=d.get("continues"),
             keep_harness_tools=tuple(d.get("keep_harness_tools") or ()),
             cascade=_cascade_of(d.get("cascade")),
-            linux_user=d.get("linux_user") or None,
             knowledge_native=bool(d.get("knowledge_native")),
         )
 
@@ -821,9 +804,8 @@ class Session:
         await self._check_version()
         resume = self.resume_id
         mcp, system_prompt = self._host.spawn_args(self)
-        user = self._host.user_for(self.spec)
-        inbox = await self._host.runners.get(user)(
-            attachments.ensure_inbox, self.state_root, self.log_id, self._home()
+        inbox = await asyncio.to_thread(
+            attachments.ensure_inbox, self.state_root, self.log_id, None
         )
         self.exit_via = launching.resolve_via(self.spec.agent)
         proc = self.harness.process(
@@ -843,7 +825,6 @@ class Session:
                 read_dirs=(inbox,),
                 cgroup=self._host.cgroup(self),
                 log_id=self.log_id,
-                user=user,
                 keep_harness_tools=self.spec.keep_harness_tools,
                 knowledge_native=self.spec.knowledge_native,
             )
@@ -1059,24 +1040,12 @@ class Session:
     @property
     def inbox(self) -> Path:
         """Where the files a person attaches land (attachments.py)."""
-        return attachments.inbox(self.state_root, self.log_id, self._home())
+        return attachments.inbox(self.state_root, self.log_id, None)
 
     @property
     def drafts(self) -> Path:
         """Where this session's artifact drafts go (artifacts.draft_dir)."""
-        home = self._home()
-        return home / ".aegis" if home is not None else self.state_root
-
-    def _home(self) -> Path | None:
-        """The home of the Linux user this session runs as (Host.user_for),
-        or None for the server's own; PermissionError when that user is gone."""
-        user = self._host.user_for(self.spec)
-        if user is None:
-            return None
-        try:
-            return Path(pwd.getpwnam(user).pw_dir)
-        except KeyError:
-            raise PermissionError(f"Linux user {user} does not exist") from None
+        return self.state_root
 
     async def send(
         self,

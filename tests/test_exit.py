@@ -211,21 +211,6 @@ async def test_a_plain_link_is_no_exit(tmp_path, fake_claude, anywhere):
         await beta.stop()
 
 
-async def test_a_member_token_on_the_far_server_ends_the_exit(trusted, anywhere):  # noqa: F811
-    """Checked by the relay itself at each stream, whatever the near side
-    still believes about the trust it was granted."""
-    alpha, beta = trusted
-    out = alpha.app.exits.get("beta")
-    async with Target() as t:
-        beta.app.principals.has_members = lambda: True
-        r, w, head = await _connect(out.port, out.secret, f"127.0.0.1:{t.port}")
-        body = await _body(r, head)
-        w.close()
-        assert head.startswith("HTTP/1.1 502")
-        assert "besides its admin" in body
-        assert t.hits == 0
-
-
 async def test_a_wrong_token_is_refused_by_the_relay(trusted, anywhere):  # noqa: F811
     alpha, _ = trusted
     out = alpha.app.exits.get("beta")
@@ -467,7 +452,6 @@ async def test_a_monitor_and_a_workflow_step_get_the_exit(trusted):  # noqa: F81
     p = await launch.child(
         ["sh", "-c", "echo $HTTPS_PROXY"],
         stdout=launch.PIPE,
-        user=None,
         via=launch.resolve_via(),
     )
     out, _ = await p.communicate()
@@ -477,7 +461,7 @@ async def test_a_monitor_and_a_workflow_step_get_the_exit(trusted):  # noqa: F81
 async def test_a_direct_child_keeps_the_servers_environment(trusted, monkeypatch):  # noqa: F811
     monkeypatch.setenv("HTTPS_PROXY", "http://corp.example:3128")
     p = await launch.child(
-        ["sh", "-c", "echo $HTTPS_PROXY"], stdout=launch.PIPE, user=None, via=None
+        ["sh", "-c", "echo $HTTPS_PROXY"], stdout=launch.PIPE, via=None
     )
     out, _ = await p.communicate()
     assert out.decode().strip() == "http://corp.example:3128"
@@ -565,14 +549,12 @@ def test_doctor_flags_a_name_that_is_no_trusted_link(tmp_path):
 
     def finding(name):
         snap = Snapshot(path=tmp_path / "x", exit_via=name)
-        return doctor._exit(snap, roots, multi_user=False)
+        return doctor._exit(snap, roots)
 
-    assert doctor._exit(Snapshot(path=tmp_path / "x"), roots, multi_user=False) == []
+    assert doctor._exit(Snapshot(path=tmp_path / "x"), roots) == []
     assert finding("good")[0].level == "ok"
     for name in ("plain", "gone"):
         assert finding(name)[0].level == "error"
-    snap = Snapshot(path=tmp_path / "x", exit_via="good")
-    assert doctor._exit(snap, roots, multi_user=True)[0].level == "error"
 
 
 # -- the gaps: git over SSH and Chromium ---------------------------------------------
@@ -584,7 +566,6 @@ async def _through_helper(url: str, port: int, send: bytes) -> tuple[bytes, byte
         stdin=launch.PIPE,
         stdout=launch.PIPE,
         stderr=launch.PIPE,
-        user=None,
         via=None,
     )
     out, err = await asyncio.wait_for(p.communicate(send), 15)

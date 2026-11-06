@@ -14,6 +14,8 @@ a person may be reading that tab; the same call with the token closes it.
 
 from __future__ import annotations
 
+import asyncio
+
 import re
 import time
 from pathlib import Path
@@ -1373,7 +1375,7 @@ def register_agent_ops(app: App) -> None:
         paths = [s.spec.cwd / x if not x.is_absolute() else x for x in paths]
         # A file's key is its resolved path (layout.file_key): one path twice
         # in one send would be two versions on one card, so it is refused.
-        run = app.place_of_session(s.log_id).run
+        run = asyncio.to_thread
         sources = await run(lambda: [x.resolve() for x in paths])
         twice = sorted({str(x) for x in sources if sources.count(x) > 1})
         if twice:
@@ -1398,7 +1400,7 @@ def register_agent_ops(app: App) -> None:
             except canvas.LayoutError as e:
                 raise OpError("bad_params", str(e)) from e
         try:
-            recs = await files.store_as(app.roots.state_root, paths, run)
+            recs = await asyncio.to_thread(files.store_all, app.roots.state_root, paths)
         except files.FileError as e:
             # Agents write files after a cd in the shell, which does not carry
             # over, then send the bare name (seen in the first smoke test).
@@ -1567,7 +1569,7 @@ def register_agent_ops(app: App) -> None:
         from .mcp import primer
 
         tools = ", ".join(op.tool_name for op in r.agent_ops())
-        browsers = not reg.multi_user and available()
+        browsers = available()
         head = (
             primer(s, reg.server_name, reg.roots.config_root, browsers=browsers)
             if s

@@ -78,7 +78,6 @@ def test_a_browser_gets_output_and_on_reconnect_only_what_it_missed(
 async def world(tmp_path, fake_claude):
     (tmp_path / ".aegis.yaml").write_text(CONFIG)
     w = await World(tmp_path, fake_claude).start()
-    w.app.principals.add("ben", "member")
     yield w
     await w.stop()
 

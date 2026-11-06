@@ -48,12 +48,10 @@ import json
 import tempfile
 import logging
 import os
-import pwd
 import re
 import time
 from collections import OrderedDict
 from pathlib import Path
-from collections.abc import Callable
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -61,7 +59,7 @@ from pydantic.json_schema import SkipJsonSchema
 
 from . import archive, attachments as att, commands, dictation, files, restarts, speech
 from . import pause
-from . import feedback, harness_versions, multiuser, self_update, setup
+from . import feedback, harness_versions, self_update, setup
 from . import layout as canvas
 from . import workflow_store
 from .agent_ops import (
@@ -143,11 +141,10 @@ from .quota_gate import (
 from .btws import SideNotes
 from .recaps import Recaps
 from .ops import Caller, NoParams, OpError, Principal, Registry as Ops
-from . import as_user, launch
+from . import launch
 from .opencode import sweep as opencode_sweep
 from .tokens import TokenStore
-from .as_user import Place
-from .users import MultiUser
+from .fs_paths import Place
 from .registry import Registry
 from .roots import Roots
 from .usage.ops import register_usage_ops
@@ -468,16 +465,8 @@ class App:
         cursor_bin: str = "cursor-agent",
         dictation_dir: Path | None = None,
         user: str | None = None,
-        multi_user: MultiUser | None = None,
     ) -> None:
         self.roots = roots
-        # The multi-user mode, fixed at start (users.py); a later edit of the
-        # key is logged once per value and waits for a restart.
-        self.multi_user = multi_user
-        self._mu_told: list[MultiUser | None] = []
-        launch.configure(multi_user)
-        # Threads that open files as one person's Linux user (as_user.py).
-        self.runners = as_user.Runners()
         self.server_name = server_name
         self.claude_bin = claude_bin
         self.opencode_bin = opencode_bin
@@ -510,16 +499,12 @@ class App:
             lambda: self.config.current().terminals,
             self.publish,
             lambda: self.terminal_cgroups,
-            acts_for=lambda owner: None,
-            role_of=lambda owner: "admin",
-            multi_user=multi_user is not None,
         )
         self.browsers = Browsers(
             roots.state_root,
             self.publish,
             lambda channel: self.channels.subscribers(channel),
             self._browser_deliver,
-            multi_user=multi_user is not None,
         )
         self.tokens = Tokens()
         self.monitors = Monitors(self.sessions, roots.state_root / "monitors.json")
@@ -570,7 +555,6 @@ class App:
         self.journal = Journal(
             roots.state_root,
             self.publish,
-            user_of=self._linux_user_of_session,
             meta_of=self._meta_of_session,
             accounts=lambda: {
                 p["harness"]: f"{p['name']}:{p['account']}"
@@ -586,7 +570,7 @@ class App:
         reg.knowledge = self.knowledge
         # knowledge.know_how too.
         if self.config.current().knowledge["know_how"]:
-            reg.know_how = KnowHow(self._linux_user_of_session)
+            reg.know_how = KnowHow()
         self.skill_servers = SkillServers()
         reg.skill_servers = self.skill_servers
         reg.principal_of = lambda s: s.spec.owner or self.user
@@ -597,7 +581,6 @@ class App:
             lambda: {s.log_id: s.handle for s in self.sessions.open_sessions()},
             lambda name: self.channels.subscribers(name),
             roots.harness_cwd,
-            user_of=self._linux_user_of_session,
         )
         self.journal.on_live = self.repos.live
         self.schedules = Schedules(self)
@@ -649,14 +632,7 @@ class App:
         self.links = Links(roots.state_root, server_name, self.user, self.publish)
         self.links.answer = self.answer_link
         self.links.serve, self.links.rwatch = self.serve_link, self.watch_link
-        self.exits = Exits(
-            self.links,
-            lambda: (
-                None
-                if self.multi_user is None
-                else "an exit is off on a multi-user server"
-            ),
-        )
+        self.exits = Exits(self.links, lambda: None)
         launch.configure_exits(self.exits, self._exit_for)
         # Bytes each linked server took through this one as its exit (exit.py).
         self.exit_bytes: dict[str, int] = {}
@@ -674,11 +650,6 @@ class App:
         self.quota.history = self.journal.usual_spend
         reg.gate = self.gate
         reg.pause_hold = self.pause_hold
-        # Who each session's processes run as, in multi-user mode (users.py).
-        reg.multi_user = multi_user is not None
-        reg.acts_for = lambda name: None
-        reg.role_of = lambda name: "admin" if name else None
-        reg.runners = self.runners
         # Models that fell, and the one timer that releases held work when the
         # first of them is free again (cascade.py).
         self.cooling = Cooling()
@@ -770,7 +741,7 @@ class App:
         with tempfile.TemporaryDirectory(prefix="aegis-opencode-probe-") as scratch:
             try:
                 proc = await launch.child(
-                    argv, user=None, via=launch.resolve_via(), cwd=scratch,
+                    argv, via=launch.resolve_via(), cwd=scratch,
                     env=None, stdin=asyncio.subprocess.DEVNULL,
                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
                 )  # fmt: skip
@@ -1356,7 +1327,6 @@ class App:
         await self.repos.stop()
         await asyncio.to_thread(self.journal.stop)
         await asyncio.to_thread(self.knowledge.usage.stop)
-        self.runners.shutdown()
         restarts.stopped(self.roots.state_root, stopping_at)
 
     def _meta_of_session(self, log_id: str) -> dict:
@@ -1368,59 +1338,19 @@ class App:
             return {}
         return meta if isinstance(meta, dict) else {}
 
-    def _linux_user_of_session(self, log_id: str) -> str | None:
-        """The Linux user a session runs as (users.py): the live session's,
-        else its meta's, since the journal backfills closed sessions too."""
-        if self.multi_user is None:
-            return None
-        s = self.sessions.sessions.get(log_id)
-        if s is not None:
-            return s.spec.linux_user
-        try:
-            meta = json.loads(self.sessions.metas.path(log_id).read_text())
-        except (OSError, ValueError):
-            return None
-        return meta.get("linux_user") if isinstance(meta, dict) else None
-
-    def _deliver(self, s) -> Callable[[Path, str], Path] | None:
-        """How an upload reaches ``s``'s inbox in its user's home, as that
-        user: the server opens the staged file, the user's runner writes the
-        copy (attachments.commit). None for an inbox under the state root."""
-        user = self.sessions.user_for(s.spec)
-        if user is None:
-            return None
-        run, box = self.runners.get(user), s.inbox
-
-        def deliver(staged: Path, name: str) -> Path:
-            fd = os.open(staged, os.O_RDONLY | os.O_CLOEXEC)
-            try:
-                return run.call(att.write_into, box, name, fd)
-            finally:
-                os.close(fd)
-
-        return deliver
-
     def place_of(self, caller: Caller) -> Place:
-        """Where the files a person reaches are, and the runner that opens
-        them as their Linux user (as_user.py). Raises PermissionError for a
-        member with no user in multi-user mode."""
-        return self._place(None, False)
+        """Where the files the Files view reaches are."""
+        return self._place()
 
     def place_of_session(self, log_id: str) -> Place:
-        """The place of a session's owner, as the user its process runs as."""
-        spec = self.sessions.open(log_id).spec
-        return self._place(self.sessions.user_for(spec), False)
+        """Where a session's files are: the same place as everyone's."""
+        self.sessions.open(log_id)
+        return self._place()
 
-    def knowledge_reader(self, principal: str) -> tuple[as_user.Runner, list[str]]:
-        """What a staleness check of ``principal``'s memories reads with: the
-        runner that opens files as their Linux user (the server's own for
-        the owner, or outside multi-user mode), and the roots a quoted path
-        is looked for under, their Files root then their home. Raises
-        PermissionError for a member with no user."""
-        user = None
-        place = self._place(user, False)
-        home = pwd.getpwnam(user).pw_dir if user else str(Path.home())
-        return place.run, list(dict.fromkeys([str(place.root), home]))
+    def knowledge_roots(self) -> list[str]:
+        """The roots a quoted path in a memory is looked for under: the Files
+        root, then the server user's home."""
+        return list(dict.fromkeys([str(self.roots.config_root), str(Path.home())]))
 
     async def knowledge_check(
         self, principal: str, items: list[Item] | None = None
@@ -1428,14 +1358,12 @@ class App:
         """Flag ``principal``'s memories (knowledge/checks.py), all of them
         when ``items`` is None. A principal nothing may read for is skipped
         and logged."""
-        try:
-            run, roots = self.knowledge_reader(principal)
-        except PermissionError as e:
-            log.warning("aegis: knowledge of %s not checked: %s", principal, e)
-            return
+        roots = self.knowledge_roots()
         whole = items is None
         some = await self.knowledge.items(principal) if items is None else items
-        await self.knowledge.check(principal, some, run, roots, everything=whole)
+        await self.knowledge.check(
+            principal, some, asyncio.to_thread, roots, everything=whole
+        )
 
     async def bounded_check(self, principal: str, items: list[Item] | None) -> None:
         """knowledge_check within ``KNOWLEDGE_CHECK_TIMEOUT_S``; a timeout or
@@ -1475,17 +1403,9 @@ class App:
                 await self.bounded_check(name, None)
             await asyncio.sleep(KNOWLEDGE_CHECK_S)
 
-    def _place(self, user: str | None, member: bool) -> Place:
-        root, state = self.roots.config_root, self.roots.state_root
-        run = self.runners.get(user)
-        if user is None:
-            return Place(root, state, state, run)
-        own = Path(pwd.getpwnam(user).pw_dir) / ".aegis"
-        # A member's view is its home; an admin with a user keeps the root.
-        # Neither may write the server's state, so both trash in their home.
-        if member:
-            return Place(own.parent, own / "trash", own, run)
-        return Place(root, state, own, run)
+    def _place(self) -> Place:
+        state = self.roots.state_root
+        return Place(self.roots.config_root, state, state)
 
     def _on_config(self, snap: Snapshot) -> None:
         """Every change to .aegis.yaml, however it was made: the page and the
@@ -1493,11 +1413,6 @@ class App:
         self.channels.publish("config", [{"set": snap.wire()}])
         if hasattr(self, "doctor_watch"):
             self.doctor_watch.kick()
-        if snap.multi_user != self.multi_user and snap.multi_user not in self._mu_told:
-            self._mu_told.append(snap.multi_user)
-            log.warning(
-                "multi_user changed in .aegis.yaml; restart the server to apply it"
-            )
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -1798,12 +1713,6 @@ class App:
             await s.deliver(
                 *feedback.turn(arg, facts, feedback.issues_url(), iso_now())
             )
-            return {"status": "delivered"}
-        if name == "multiuser":
-            # The agent runs the host work from the help page multi-user with
-            # the person; only an admin may start it, since it changes the server.
-            on = self.multi_user is not None
-            await s.deliver(*multiuser.turn(arg, on, multiuser.facts(on), iso_now()))
             return {"status": "delivered"}
         if name == "setup":
             # The agent moves the person's habits into aegis from the help
@@ -2531,7 +2440,6 @@ class App:
                             self.roots.state_root,
                             p.log_id,
                             p.attachments,
-                            deliver=self._deliver(s),
                         )
                     except files.FileError as e:
                         raise OpError(e.code, e.message) from e
@@ -2944,7 +2852,7 @@ class App:
                     return {}
                 return {"root_path": r}
 
-            return await place.run(rel)
+            return await asyncio.to_thread(rel)
 
         async def peek_path(s, row, index: int, pick: str | None, caller):
             """A path a reply named, resolved now: as written when absolute,
@@ -2964,7 +2872,7 @@ class App:
                 if "absolute" in tried
                 else f" under {self.roots.config_root} or {s.spec.cwd}"
             )
-            run = self.place_of_session(s.log_id).run
+            run = asyncio.to_thread
 
             def look() -> tuple[dict[str, Path], bool]:
                 found = {k: t for k, t in tried.items() if t.is_file()}
@@ -2984,7 +2892,9 @@ class App:
             else:
                 path = next(iter(found.values()))
             try:
-                (rec,) = await files.store_as(self.roots.state_root, [path], run)
+                (rec,) = await asyncio.to_thread(
+                    files.store_all, self.roots.state_root, [path]
+                )
             except files.FileError as e:
                 raise OpError(e.code, e.message) from e
             sent = {k: v for k, v in rec.items() if k != "kind"}
@@ -3016,8 +2926,8 @@ class App:
             if not path.is_absolute():
                 path = s.spec.cwd / path
             try:
-                (rec,) = await files.store_as(
-                    self.roots.state_root, [path], self.place_of_session(s.log_id).run
+                (rec,) = await asyncio.to_thread(
+                    files.store_all, self.roots.state_root, [path]
                 )
             except files.FileError as e:
                 raise OpError(e.code, e.message) from e

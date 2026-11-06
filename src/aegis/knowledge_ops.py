@@ -782,7 +782,6 @@ def register_knowledge_ops(app: App) -> None:
                 it.name,
                 cmd,
                 tar,
-                s.spec.linux_user,
                 version,
             )
         except SkillToolError as e:
@@ -897,7 +896,6 @@ def register_knowledge_ops(app: App) -> None:
         try:
             proc = await launch.child(
                 ["bash", "-c", RUN_SH, "skill-run", p.script, *p.args],
-                user=s.spec.linux_user,
                 via=launch.resolve_via(s.spec.agent),
                 cwd="/",
                 stdin=launch.PIPE,
@@ -914,14 +912,14 @@ def register_knowledge_ops(app: App) -> None:
         )
         code: int | None = None
         timed_out = False
-        with app.skill_servers.tracking(s.log_id, proc, s.spec.linux_user):
+        with app.skill_servers.tracking(s.log_id, proc):
             try:
                 await asyncio.wait_for(asyncio.shield(io_done), p.timeout_s)
                 code = await proc.wait()
             except TimeoutError:
                 timed_out = True
                 # The whole group: python3 under the shell holds the pipes too.
-                await stop_group(proc, s.spec.linux_user)
+                await stop_group(proc)
                 try:
                     # A child that left the group may still hold them.
                     await asyncio.wait_for(io_done, PIPES_AFTER_KILL_S)
@@ -981,14 +979,8 @@ def register_knowledge_ops(app: App) -> None:
         }
 
     def reader(caller: Caller):
-        """The runner that reads an import's sources: as the session's
-        Linux user for an agent, else as the person's."""
-        try:
-            if caller.is_agent and (caller.log_id or "") in app.sessions.sessions:
-                return app.place_of_session(caller.log_id or "").run
-            return app.place_of(caller).run
-        except PermissionError as e:
-            raise OpError("not_allowed", str(e)) from None
+        """How an import's sources are read: in a thread."""
+        return asyncio.to_thread
 
     @r.op("knowledge.import", ImportItems, agent=True)
     async def knowledge_import(p: ImportItems, caller):

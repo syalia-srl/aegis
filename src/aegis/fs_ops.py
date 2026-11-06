@@ -43,8 +43,7 @@ from pydantic import BaseModel
 from . import launch
 from . import files, fs_trash
 from .fs_index import FsIndex, _is_repo, ignore_dir, ignore_file
-from .as_user import Place
-from .fs_paths import resolve
+from .fs_paths import Place, resolve
 from .ops import Caller, NoParams, OpError
 
 if TYPE_CHECKING:
@@ -229,7 +228,7 @@ def _save(path: Path, rel: str, data: bytes, base: str | None):
     return exists, _write(path, data, mode)
 
 
-def _git_ignored(top: Path, paths: list[Path], user: str | None) -> set[Path]:
+def _git_ignored(top: Path, paths: list[Path]) -> set[Path]:
     """Which of ``paths`` the repository at ``top`` ignores: one
     ``git check-ignore`` as ``user`` for the whole listing, nothing when git
     cannot say."""
@@ -241,7 +240,6 @@ def _git_ignored(top: Path, paths: list[Path], user: str | None) -> set[Path]:
             ["git", "-C", str(top), "check-ignore", "--stdin", "-z"],
             input="\0".join(rels).encode("utf-8", "surrogateescape"),
             timeout=30,
-            user=user,
         )
     except (OSError, subprocess.TimeoutExpired):
         return set()
@@ -277,9 +275,7 @@ def _holds_repo(path: Path) -> bool:
         return False
 
 
-def _list(
-    root: Path, state: Path, folder: Path, show_ignored: bool, user: str | None
-) -> list[dict]:
+def _list(root: Path, state: Path, folder: Path, show_ignored: bool) -> list[dict]:
     real_state = state.resolve()
     entries = []
     for e in os.scandir(folder):
@@ -295,7 +291,7 @@ def _list(
         entries.append((path, is_dir, st, fixed))
     top = _repo_top(folder, root)
     by_git = (
-        _git_ignored(top, [p for p, _, _, fixed in entries if not fixed], user)
+        _git_ignored(top, [p for p, _, _, fixed in entries if not fixed])
         if top
         else set()
     )
@@ -352,7 +348,7 @@ def _folder(place: Place, rel: str, show_ignored: bool) -> list[dict]:
     folder = resolve(place.root, place.guard, rel) if rel else place.root.resolve()
     if not folder.is_dir():
         raise OpError("not_a_folder", f"{rel} is a file")
-    return _list(place.root, place.guard, folder, show_ignored, place.user)
+    return _list(place.root, place.guard, folder, show_ignored)
 
 
 def _mkdir(place: Place, rel: str) -> None:
@@ -391,8 +387,7 @@ def register_fs_ops(app: App) -> tuple[FsIndex, Tickets]:
     r = app.registry
     root, state = app.roots.config_root, app.roots.state_root
     index = FsIndex(root, state)
-    indexes: dict[str, FsIndex] = {}
-    purged: set[str] = set()
+
     tickets = Tickets()
     # One save at a time, so two saves on the same base cannot both pass the
     # hash check (_save).
@@ -400,11 +395,7 @@ def register_fs_ops(app: App) -> tuple[FsIndex, Tickets]:
     log_path = state / "fs-log.jsonl"
 
     def index_of(place: Place) -> FsIndex:
-        if place.user is None:
-            return index
-        if place.user not in indexes:
-            indexes[place.user] = FsIndex(place.root, place.guard, place.run)
-        return indexes[place.user]
+        return index
 
     def log(caller: Caller, op: str, path: str, size: int, to: str | None = None):
         line = {
@@ -430,7 +421,9 @@ def register_fs_ops(app: App) -> tuple[FsIndex, Tickets]:
         """A file's kind, size, mtime and hash, its text when it is text, and
         a ticket URL for every kind a browser element draws itself."""
         place = app.place_of(caller)
-        got = await place.run(lambda: _read(resolve(place.root, place.guard, p.path)))
+        got = await asyncio.to_thread(
+            lambda: _read(resolve(place.root, place.guard, p.path))
+        )
         out = {"path": p.path, **got}
         if out["kind"] not in ("text", "markdown") or "text" not in out:
             out["url"] = tickets.issue(p.path, place)
@@ -440,16 +433,13 @@ def register_fs_ops(app: App) -> tuple[FsIndex, Tickets]:
     async def ticket(p: FsPath, caller: Caller):
         """A ticket URL for one file, such as an image a Markdown file links to."""
         place = app.place_of(caller)
-        await place.run(_file, place, p.path)
+        await asyncio.to_thread(_file, place, p.path)
         return {"url": tickets.issue(p.path, place)}
 
     @r.op("fs.open", FsPath, local=True)
     async def open_(p: FsPath, caller: Caller):
         """Open a file in the desktop's app for it, as file.open does for a
-        sent file: only from a browser on the server's desktop, and never in
-        multi-user mode, whose server has no person at its desktop."""
-        if app.multi_user is not None:
-            raise OpError("not_in_multi_user", "a shared server opens no desktop app")
+        sent file: only from a browser on the server's desktop."""
         if not caller.desktop:
             raise OpError(
                 "not_local", "only a browser on the server's desktop can do this"
@@ -464,7 +454,7 @@ def register_fs_ops(app: App) -> tuple[FsIndex, Tickets]:
     async def stat(p: FsPath, caller: Caller):
         """A file's size, mtime and kind, polled for the open file."""
         place = app.place_of(caller)
-        return await place.run(_stat, place, p.path)
+        return await asyncio.to_thread(_stat, place, p.path)
 
     @r.op("fs.write", FsWrite, local=True)
     async def write(p: FsWrite, caller: Caller):
@@ -482,7 +472,7 @@ def register_fs_ops(app: App) -> tuple[FsIndex, Tickets]:
             return _save(path, p.path, data, p.base)
 
         async with writing:
-            exists, st = await place.run(save)
+            exists, st = await asyncio.to_thread(save)
         log(caller, "write" if exists else "create", p.path, len(data))
         await index_of(place).note(p.path)
         return {"hash": hashlib.sha256(data).hexdigest(), "mtime": _mtime(st)}
@@ -492,7 +482,7 @@ def register_fs_ops(app: App) -> tuple[FsIndex, Tickets]:
         """One folder's entries, folders first, each alphabetical; ignored
         ones only when asked for, except a folder holding a repository."""
         place = app.place_of(caller)
-        entries = await place.run(_folder, place, p.dir, p.ignored)
+        entries = await asyncio.to_thread(_folder, place, p.dir, p.ignored)
         return {"dir": p.dir, "entries": entries}
 
     @r.op("fs.mkdir", FsPath, local=True)
@@ -500,7 +490,7 @@ def register_fs_ops(app: App) -> tuple[FsIndex, Tickets]:
         """Create a folder; refuses a name that exists."""
         place = app.place_of(caller)
         async with writing:
-            await place.run(_mkdir, place, p.path)
+            await asyncio.to_thread(_mkdir, place, p.path)
         log(caller, "mkdir", p.path, 0)
         return {"path": p.path}
 
@@ -509,7 +499,7 @@ def register_fs_ops(app: App) -> tuple[FsIndex, Tickets]:
         """Rename or move a file or folder; refuses a target that exists."""
         place = app.place_of(caller)
         async with writing:
-            size = await place.run(_move, place, p.path, p.to)
+            size = await asyncio.to_thread(_move, place, p.path, p.to)
         log(caller, "move", p.path, size, p.to)
         idx = index_of(place)
         idx.removed(p.path)
@@ -521,7 +511,9 @@ def register_fs_ops(app: App) -> tuple[FsIndex, Tickets]:
         """How many files and bytes a file or folder holds, every file
         counted, ignored ones included: what a delete would take."""
         place = app.place_of(caller)
-        files, size = await place.run(lambda: fs_trash.count(_entry(place, p.path)))
+        files, size = await asyncio.to_thread(
+            lambda: fs_trash.count(_entry(place, p.path))
+        )
         return {"files": files, "size": size}
 
     @r.op("fs.delete", FsPath, local=True)
@@ -530,16 +522,12 @@ def register_fs_ops(app: App) -> tuple[FsIndex, Tickets]:
         files it held."""
         place = app.place_of(caller)
         who = r.who(caller).name
-        if place.user is not None and place.user not in purged:
-            # A person's own trash is purged the first time it is used.
-            await place.run(fs_trash.purge, place.trash)
-            purged.add(place.user)
 
         def delete():
             return fs_trash.delete(place.trash, _entry(place, p.path), p.path, who)
 
         async with writing:
-            t = await place.run(delete)
+            t = await asyncio.to_thread(delete)
         log(caller, "delete", p.path, t["size"], t["id"])
         index_of(place).removed(p.path)
         return {"trash_id": t["id"], "files": t["files"]}
@@ -549,7 +537,7 @@ def register_fs_ops(app: App) -> tuple[FsIndex, Tickets]:
         """Put a deleted entry back, or ``taken`` when something new is there."""
         place = app.place_of(caller)
         async with writing:
-            rel, size = await place.run(_restore, place, p.trash_id)
+            rel, size = await asyncio.to_thread(_restore, place, p.trash_id)
         log(caller, "restore", rel, size, p.trash_id)
         await index_of(place).note(rel)
         return {"path": rel}

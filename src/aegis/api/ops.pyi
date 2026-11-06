@@ -338,7 +338,7 @@ class _fs:
     async def move(self, *, path: str, to: str) -> Any:
         """Rename or move a file or folder; refuses a target that exists."""
     async def open(self, *, path: str) -> Any:
-        """Open a file in the desktop's app for it, as file.open does for a sent file: only from a browser on the server's desktop, and never in multi-user mode, whose server has no person at its desktop."""
+        """Open a file in the desktop's app for it, as file.open does for a sent file: only from a browser on the server's desktop."""
     async def read(self, *, path: str) -> Any:
         """A file's kind, size, mtime and hash, its text when it is text, and a ticket URL for every kind a browser element draws itself."""
     async def restore(self, *, trash_id: str) -> Any:
@@ -906,19 +906,6 @@ class _term:
         """Start a terminal from a profile, in its folder or in ``cwd``; the caller owns it."""
 
 class _token:
-    async def add(
-        self,
-        *,
-        name: str,
-        role: Literal["admin", "member"] = ...,
-        linux_user: str | None = ...,
-        no_linux_user: bool = ...,
-    ) -> Any:
-        """Mint a token; the only time it is shown."""
-    async def list(self) -> Any:
-        """The tokens that may use this server, the admin's first, the policy of every member without its own, the pools a policy names, and each member's gate on each pool now."""
-    async def policy(self, *, name: str, policy: dict[str, Any] | None) -> Any:
-        """Set a member's quota policy, or with name * the default one. The gate applies it at the next reading."""
     async def revoke(self, *, name: str) -> Any:
         """End a token. The admin's is replaced, and the new one returned to whoever revoked it, so that browser can sign in again. Its devices stop hearing pushes (push.py)."""
 

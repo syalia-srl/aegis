@@ -23,10 +23,9 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from .as_user import Runners
 
 from .archive import Position, count_workers, page as archive_page
-from . import attention, cache, restarts, secret_store, users
+from . import attention, cache, restarts, secret_store
 from .cgroups import SessionCgroups
 from .config import CONTEXT_DEFAULTS
 from .harness import harness_for
@@ -172,15 +171,6 @@ class Registry(Host):
         # One cgroup per session, when the unit is delegated (cgroups.py); the
         # app sets it at boot.
         self.cgroups: SessionCgroups | None = None
-        # The multi-user mode (users.py), and who a principal is; the app sets
-        # them at boot from its tokens.
-        self.multi_user = False
-        # tokens.TokenStore.acts_for: the user a principal's processes run
-        # as, raising PermissionError when nothing may run for it.
-        self.acts_for: Callable[[str | None], str | None] = lambda name: None
-        self.role_of: Callable[[str | None], str | None] = lambda name: None
-        # Threads that open files as a session's user (as_user.py).
-        self.runners = Runners()
         # What boot decided about the turns the last run's end cut (restarts.py):
         # each continued session, and whether that end was a crash; the ones a
         # person must continue.
@@ -200,34 +190,18 @@ class Registry(Host):
             session,
             self.server_name,
             self.roots.config_root,
-            browsers=not self.multi_user and available(),
+            browsers=available(),
         )
         if priming:
             prompt += "\n\n" + priming
         return (self.mcp_url, self.tokens.mint(session.log_id)), prompt
-
-    def user_for(self, spec: SpawnSpec) -> str | None:
-        """The Linux user a session's process runs as. In multi-user mode a
-        member's session made before the mode has none, and its transcript
-        lives in the server's home: it may not start as the server instead."""
-        if not self.multi_user:
-            return None
-        if spec.linux_user is not None:
-            return spec.linux_user
-        # An owner that would run as a user now, or none at all (revoked):
-        # its session from before the mode may not start as the server.
-        if self.acts_for(spec.owner) is not None:
-            raise PermissionError(
-                "this session was created before multi-user mode; start a new one"
-            )
-        return None
 
     def cgroup(self, session: Session) -> Path | None:
         return self.cgroups.create(session.log_id) if self.cgroups else None
 
     def released(self, session: Session) -> None:
         if self.cgroups is not None:
-            self.cgroups.release(session.log_id, user=session.spec.linux_user)
+            self.cgroups.release(session.log_id)
 
     def load_changed(self, log_id: str) -> None:
         """A session's shown load changed: republish its card."""
@@ -512,8 +486,7 @@ class Registry(Host):
             self.sign_in.failed(session, session.spec.harness)
 
     def rate_limit(self, session: Session, windows: dict) -> None:
-        # A member's stream reports the member's account, not the server's.
-        if self.quota is not None and session.spec.linux_user is None:
+        if self.quota is not None:
             self.quota.observe(windows)
 
     def quota_hold(self, session: Session) -> str | None:
@@ -820,7 +793,7 @@ class Registry(Host):
             self.archived[meta["log_id"]] = meta
             return
         if not self._prev.clean and restarts.end_leftover(
-            meta.get("pid"), meta.get("pid_started"), user=meta.get("linux_user")
+            meta.get("pid"), meta.get("pid_started")
         ):
             log.warning(
                 "aegis: ended the harness a crash left behind for %s", meta["handle"]
@@ -960,16 +933,6 @@ class Registry(Host):
         launch_by: str = "agent",
     ) -> Session:
         log_id = mint_log_id()
-        if self.multi_user:
-            try:
-                spec = users.place(
-                    spec,
-                    root=self.roots.harness_cwd,
-                    role=self.role_of(spec.owner),
-                    linux_user=self.acts_for(spec.owner),
-                )
-            except PermissionError as e:
-                raise OpError("no_linux_user", str(e)) from None
         if self.knowledge_native(spec.owner):
             spec = dataclasses.replace(spec, knowledge_native=True)
         s = self._session(
