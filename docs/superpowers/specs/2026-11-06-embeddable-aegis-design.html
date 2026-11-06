@@ -155,7 +155,7 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)} pre .s{color:var(--ok)}
 <div class="chrome">
   <span>aegis</span>
   <span class="tab">spec · embeddable aegis</span>
-  <span class="st"><span class="pill acc">draft, for review</span><span class="pill">2026-11-06</span><span class="pill">aegis 3.0</span></span>
+  <span class="st"><span class="pill acc">approved</span><span class="pill">2026-11-06</span><span class="pill">aegis 3.0</span></span>
 </div>
 
 <div class="wrap">
@@ -193,7 +193,7 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)} pre .s{color:var(--ok)}
 
 <main>
 <h1>Embeddable aegis: a mountable UI, a host policy over every decision, and MCP servers as configuration</h1>
-<div class="meta"><span>docs/superpowers/specs/2026-11-06-embeddable-aegis-design.html</span><span>·</span><span>draft, not approved</span></div>
+<div class="meta"><span>docs/superpowers/specs/2026-11-06-embeddable-aegis-design.html</span><span>·</span><span>approved 2026-11-06 · nothing built</span></div>
 <p class="lede">A program that embeds aegis today gets a headless server: <code>from aegis import Server</code> runs sessions, queues and workflows, and has no interface to show them. This spec lets that program put aegis's own composer, transcript and tabs into its pages, styled as its own, and decide through one policy object who sees which sessions, which models they may open and which tools their agents get. The standalone aegis becomes the simplest host of the same parts.</p>
 
 <h2 id="delivers"><span class="n">01</span>What this delivers</h2>
@@ -214,11 +214,11 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)} pre .s{color:var(--ok)}
 <div class="stats">
   <div class="stat"><div class="v">4,935</div><div class="k">lines in client/js/app.js, wired to one page</div></div>
   <div class="stat"><div class="v">453</div><div class="k">$(id) lookups in app.js into 174 fixed ids in index.html</div></div>
-  <div class="stat"><div class="v">43</div><div class="k">role checks spread over 13 Python files</div></div>
+  <div class="stat"><div class="v">43</div><div class="k">role checks in 13 Python files, which leave with multi-user</div></div>
   <div class="stat"><div class="v">1</div><div class="k">MCP server a harness gets today: aegis's own (harness.py:63)</div></div>
   <div class="stat"><div class="v">10</div><div class="k">themes, each a set of CSS variables under [data-theme] #a2</div></div>
 </div>
-<p>Measured on <code>main</code> at f280b172. Every operation already passes through one place, <code>Registry.call</code> (<code>ops.py:161</code>), which checks agents, read permission, schedules, links, admin-only operations, hidden sessions (<code>App._hides</code>, <code>app.py:1225</code>) and ownership. That one place is what makes a single policy object possible without touching each of the 175 operations.</p>
+<p>Measured on <code>main</code> at f280b172. Every operation already passes through one place, <code>Registry.call</code> (<code>ops.py:161</code>), which checks agents, read permission, schedules, links, and, while multi-user exists, admin-only operations, hidden sessions (<code>App._hides</code>, <code>app.py:1225</code>) and ownership. That one place is what makes a single policy object possible without touching each of the 175 operations.</p>
 
 <h2 id="decisions"><span class="n">02</span>Decisions</h2>
 <p><span class="who">maintainer</span> marks a decision the maintainer made. <span class="who q">proposed</span> marks one this spec proposes and nobody has ruled on yet.</p>
@@ -226,7 +226,8 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)} pre .s{color:var(--ok)}
 <thead><tr><th>Question</th><th>Decision</th><th class="why">Why</th></tr></thead>
 <tbody>
 <tr><td>Whether to build it</td><td>Yes. Products that today carry their own composer, transcript and agent loop replace all three with embedded aegis. <span class="who">maintainer</span></td><td class="why">Each product reimplements dictation, reply pills, file cards and turn handling, and each copy drifts from the others and from aegis.</td></tr>
-<tr><td>Release</td><td>Part of aegis 3.0. <span class="who">maintainer</span></td><td class="why">3.0 is the release in which aegis becomes a tool for building other harnesses.</td></tr>
+<tr><td>Release</td><td>aegis 3.0.0 on 2026-11-19 ships the removal of multi-user, the host policy, MCP servers, the mountable client with <code>aegis.js</code>, and the first host on it. The suite's two hosts and the features from its chat follow in 3.x. <span class="who">maintainer</span></td><td class="why">3.0 is the release in which aegis becomes a tool for building other harnesses.</td></tr>
+<tr><td>Multi-user</td><td>Removed from aegis in 3.0, before the policy work, and a non-goal of open-source aegis from then on. Tokens with roles, owners, a Linux user per member and the member view all go. <span class="who">maintainer</span></td><td class="why">A commercial build on top of aegis will give several people one server, through the host policy this spec adds. The multi-user mode in aegis today is the part that breaks most.</td></tr>
 <tr><td>Iframe or script</td><td>A script, <code>aegis.js</code>, mounting on the host's own origin. <span class="who">maintainer</span></td><td class="why">The widget has to read as part of the host. An iframe keeps the host's fonts, variables and CSS out, and its height and focus fight the page around it.</td></tr>
 <tr><td>Users in aegis</td><td>None in the core. The host's policy decides everything about callers; aegis passes the host's caller object around without reading it. <span class="who">maintainer</span></td><td class="why">Each host already has its own users, roles, organizations and sharing rules. aegis would copy one model and fit the others badly.</td></tr>
 <tr><td>How far a host can reach</td><td>Every decision: which sessions are listed and readable, which agents, harnesses and models can be opened, which tools an agent gets, and any operation through a catch-all hook. <span class="who">maintainer</span></td><td class="why">The code API exists so that a host can build its own harness on aegis. A host that cannot change a decision has to fork aegis to change it.</td></tr>
@@ -243,12 +244,11 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)} pre .s{color:var(--ok)}
 <tr><td>Labels</td><td>A label table with English and Spanish shipped; a host may override any label. <span class="who q">proposed</span></td><td class="why">The client is English only, and the second host's every surface is in Spanish.</td></tr>
 <tr><td>Callers on disk</td><td>The policy turns a <code>who</code> into a string with <code>key(who)</code> and back with <code>restore(key)</code>. aegis stores only the key. <span class="who q">proposed</span></td><td class="why">Queue workers, schedules, workflow runs and restarts act for a person with nobody connected, and today's owner field (<code>session.py:324</code>) is already a string. An opaque object cannot be written to disk.</td></tr>
 <tr><td>Host data on a session</td><td>A session carries <code>tags</code>, a string map the spawn hook sets, stored in its meta and copied to sessions it starts. <span class="who q">proposed</span></td><td class="why">A host's <code>can</code> can then decide from the session alone (an organization, a document id) without a side table keyed by log id.</td></tr>
-<tr><td>What a refusal says</td><td>A session the caller cannot read is answered as missing; a session they can read but not write is answered <code>refused</code>. <span class="who q">proposed</span></td><td class="why">Today's <code>_hides</code> (<code>app.py:1225</code>) answers as missing so a member cannot learn another's session exists. The standalone app must keep that.</td></tr>
+<tr><td>What a refusal says</td><td>A session the caller cannot read is answered as missing; a session they can read but not write is answered <code>refused</code>. <span class="who q">proposed</span></td><td class="why">A host that hides sessions must not leak that they exist through a different error. Today's <code>_hides</code> (<code>app.py:1225</code>) answers the same way for members, and goes with multi-user.</td></tr>
 <tr><td>Checks that are not about people</td><td>The registry's checks on agents, read-permission sessions, <code>spawn: false</code> runs and links move into <code>HostPolicy.guard</code>, whose default keeps them. A host overrides it and calls <code>super()</code> to keep them. <span class="who q">proposed</span></td><td class="why">Every decision stays the host's to change, and a host that overrides <code>around</code> cannot drop them by accident, because <code>guard</code> is a separate method.</td></tr>
-<tr><td>Calls over a link</td><td><code>identify</code> receives a <code>Credential</code> that says whether it came from a browser, an HTTP request or a link. The default refuses links; <code>StandalonePolicy</code> accepts them as today. <span class="who q">proposed</span></td><td class="why">An embedding host does not open its sessions to other servers unless it decides to.</td></tr>
+<tr><td>Calls over a link</td><td><code>identify</code> receives a <code>Credential</code> that says whether it came from a browser, an HTTP request or a link. <code>HostPolicy</code> refuses links; <code>StandalonePolicy</code> accepts them as today. <span class="who q">proposed</span></td><td class="why">An embedding host does not open its sessions to other servers unless it decides to.</td></tr>
 <tr><td>Tokens the host mints</td><td>Signed and stateless: the key from <code>key(who)</code> and an expiry, signed with a secret kept in the Server's state directory. They survive a restart. <span class="who q">proposed</span></td><td class="why">No token table to store or expire, and an offline phone reconnects with its token until it expires, then asks the host for a new one through <code>mount</code>'s <code>token</code> function.</td></tr>
 <tr><td>Speech</td><td>Dictation stays in the browser with Whistle, as today. <code>mount</code> takes an optional <code>transcribe(audio)</code> for a host that transcribes on its server. <span class="who q">proposed</span></td><td class="why">The first host already transcribes on the phone with Whistle; the suite transcribes on its server. A browser function covers both, because the host's page can call its own server.</td></tr>
-<tr><td>The token file</td><td><code>tokens.py</code> and principals move into <code>StandalonePolicy</code>. <code>Server</code> no longer calls <code>principals.resolve</code> (<code>server.py:176</code>); it asks the policy. <span class="who q">proposed</span></td><td class="why">The core then has no notion of a person at all, which is what the maintainer asked for.</td></tr>
 </tbody>
 </table>
 
@@ -371,7 +371,7 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)} pre .s{color:var(--ok)}
 </ul>
 
 <h3 id="standalone">The standalone app's policy</h3>
-<p><code>aegis serve</code> runs with <code>StandalonePolicy</code>. With one token it allows everything, as aegis does today. With a token file it applies today's roles: an admin does anything, a member starts sessions, reads every session and writes only to its own, and a member's harness runs as that member's operating-system user. The tokens, roles and owners code (<code>tokens.py</code>, <code>App.who</code>, <code>App._hides</code> and the 43 role checks) moves behind this policy. Nothing a person using <code>aegis serve</code> sees changes; the existing multi-user suite is the test of that.</p>
+<p><code>aegis serve</code> runs with <code>StandalonePolicy</code>: one caller, the holder of the Server's token, who may do everything, and links accepted as today. Multi-user is gone by the time this lands, so there is no role, owner or member view to carry over. A host that wants several people on one server writes its own policy.</p>
 
 <h2 id="mcp"><span class="n">05</span>MCP servers</h2>
 <p>An agent's harness gets aegis's own server first, as now, then the servers its agent names, then the servers the policy adds for the session. Two servers with one name are refused when the harness starts, with both sources named.</p>
@@ -519,20 +519,21 @@ chat.on(<span class="s">"turnEnd"</span>, (turn) =&gt; reloadNotebook());</pre>
 <p>Each host has its own issue in its own repository. The aegis issues below come first, and each host's issue names the aegis issues it waits on.</p>
 
 <h2 id="delivery"><span class="n">09</span>Delivery</h2>
-<p>A meta issue in aegis, a sub-issue of the vision issue, with these sub-issues in order. Each lands as its own PR with its changelog fragment and help page.</p>
+<p>A meta issue in aegis, a sub-issue of the vision issue, with these sub-issues in order. Each lands as its own PR with its changelog fragment and help page. The first five and the first host make aegis 3.0.0 on 2026-11-19; the last step and the suite's two hosts are 3.x.</p>
 <div class="steps">
-  <div class="step"><div class="n"></div><div><h4>The host policy</h4><p><code>HostPolicy</code> and its hooks at every place in section 04, <code>StandalonePolicy</code> holding today's tokens and roles, <code>Server(policy=...)</code>. Help page: <code>library.md</code>.</p></div></div>
+  <div class="step"><div class="n"></div><div><h4>Remove multi-user</h4><p>Tokens with roles, owners, the Linux user per member, the per-user file worker, the member view, the multi-user CI suite, its help pages and <code>/multiuser</code>. AGENTS.md and the vision state that open-source aegis does not do multi-user.</p></div></div>
+  <div class="step"><div class="n"></div><div><h4>The host policy</h4><p><code>HostPolicy</code> and its hooks at every place in section 04, <code>StandalonePolicy</code>, <code>Server(policy=...)</code>. Help page: <code>library.md</code>.</p></div></div>
   <div class="step"><div class="n"></div><div><h4>MCP servers</h4><p>The <code>mcp:</code> map, an agent's <code>mcp:</code> list, <code>Server(mcp=...)</code>, <code>policy.mcp</code>, the five drivers, the Settings section and <code>aegis doctor</code>. Help page: <code>config.md</code>.</p></div></div>
   <div class="step"><div class="n"></div><div><h4>The client as mountable parts</h4><p>The split in section 06, the <code>.aegis</code> root, one shared connection, labels in English and Spanish.</p></div></div>
   <div class="step"><div class="n"></div><div><h4>aegis.js and serving</h4><p><code>mount()</code> with its options, events and calls, renderers, <code>srv.asgi</code>, <code>prefix</code>, <code>srv.token_for</code>, the manifest. A new help page, <code>embedding.md</code>.</p></div></div>
-  <div class="step"><div class="n"></div><div><h4>Features from the suite</h4><p>One issue each: macros as slash commands, <code>@agent</code>, the committee recipe, KaTeX and citations, attachments from a host's MCP server.</p></div></div>
+  <div class="step"><div class="n"></div><div><h4>Features from the suite (3.x)</h4><p>One issue each: macros as slash commands, <code>@agent</code>, the committee recipe, KaTeX and citations, attachments from a host's MCP server.</p></div></div>
 </div>
 
 <h2 id="testing"><span class="n">10</span>Testing</h2>
 <ul>
 <li><b>Every operation asks the policy.</b> A test walks the registry's 175 operations with a policy that refuses everything and expects <code>refused</code> from each one that names a session or starts work. A new operation that skips the policy fails it.</li>
 <li><b>A hidden session stays hidden.</b> With a policy that hides one session from one caller: it is absent from the sessions channel, <code>session_list</code>, the archive, search, the journal and file serving, and subscribing to its transcript is refused.</li>
-<li><b>The standalone app is unchanged.</b> The fast suite and the multi-user suite pass with no edit to their assertions.</li>
+<li><b>The standalone app is unchanged.</b> The fast suite passes with no edit to its assertions.</li>
 <li><b>MCP per driver.</b> For each driver, a unit test that a list with an HTTP and a stdio server becomes the expected config, and that an unsupported transport refuses the start by name. A live test spawns a session with a stdio server and has the agent call its tool.</li>
 <li><b>The client in a foreign page.</b> A browser test mounts each layout into a fixture page that already uses ids such as <code>composer</code> and <code>tabs</code>, sets a host theme and hides tool calls with host CSS, at 1280 and 390 px. No JS errors, nothing outside the mount changes, and the host's CSS wins where the contract says it may.</li>
 <li><b>The full client.</b> The existing browser suite runs against <code>layout: "full"</code> through every step of the split.</li>
