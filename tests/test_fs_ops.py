@@ -15,7 +15,7 @@ from aegis.ops import Caller, OpError, Principal
 from aegis.roots import make_roots
 
 CONFIG = "default_agent: opus\nagents:\n  opus: {harness: claude-code, model: opus, effort: high, permission: full}\n"
-MEMBER = Caller("user", principal=Principal("bea", "member"))
+MEMBER = Caller("user", principal=Principal("bea"))
 
 
 @pytest.fixture

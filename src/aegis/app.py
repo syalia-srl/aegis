@@ -147,7 +147,6 @@ from . import as_user, launch
 from .opencode import sweep as opencode_sweep
 from .tokens import TokenStore
 from .as_user import Place
-from .member_view import MemberView
 from .users import MultiUser
 from .registry import Registry
 from .roots import Roots
@@ -691,7 +690,6 @@ class App:
         self.registry = Ops()
         self.registry.who = self.who
         self.registry.owner_of = self.owner_of
-        self.registry.hides = self._hides
         self.registry.permission_of = lambda log_id: (
             s.spec.permission if (s := self.sessions.sessions.get(log_id)) else None
         )
@@ -835,9 +833,7 @@ class App:
         """Run a call a trusted linked server sent back down its link: as this
         server's admin acting through that link, the same caller a link socket
         is on the far server, so every op keeps one rule for linked calls."""
-        caller = Caller(
-            "user", link=server, principal=Principal(self.principals.owner, "admin")
-        )
+        caller = Caller("user", link=server, principal=Principal(self.principals.owner))
         log.info("call %s from linked server %s", op, server)
         try:
             return {"result": await self.registry.call(op, params, caller)}
@@ -910,7 +906,7 @@ class App:
         if caller.is_agent:
             name = self.owner_of(caller.log_id or "") or self.user
             return Principal(name)
-        return Principal(self.user, "admin")  # the server's own calls
+        return Principal(self.user)  # the server's own calls
 
     def gate(self, owner: str | None, harness: str, model: str | None) -> Gate:
         """Whether ``owner`` may start a harness on that pool now. A session
@@ -1168,31 +1164,6 @@ class App:
     def _live(self, s) -> bool:
         return not s.archived and self.sessions.sessions.get(s.log_id) is s
 
-    def sees(self, who: Principal, owner: str | None) -> bool:
-        """Whether ``who`` may know of a thing ``owner`` owns: always outside
-        multi-user mode and for an admin; in it, a member sees its own only
-        (the spec's section 08). A thing from before owners is the admin's."""
-        if self.multi_user is None or who.is_admin:
-            return True
-        return (owner or self.user) == who.name
-
-    def view_of(self, caller: Caller) -> MemberView | None:
-        """What ``caller``'s next channel subscription may see: None for
-        everything, which is everyone outside multi-user mode and an admin."""
-        who = self.who(caller)
-        if self.multi_user is None or who.is_admin:
-            return None
-        return MemberView(self, who)
-
-    def own_log_ids(self, who: Principal) -> set[str] | None:
-        """The log ids of every session ``who`` may see, open or archived;
-        None for all of them (``sees``)."""
-        if self.multi_user is None or who.is_admin:
-            return None
-        metas = [s.meta() for s in self.sessions.sessions.values()]
-        metas += list(self.sessions.archived.values())
-        return {m["log_id"] for m in metas if self.sees(who, m.get("owner"))}
-
     def owner_of_handle(self, handle: str) -> str | None:
         """The owner of the session a handle or a log id names, open or
         archived; None when it names none here (or a session on another
@@ -1206,50 +1177,6 @@ class App:
         for log_id, m in self.sessions.archived.items():
             if local in (m.get("handle"), log_id):
                 return m.get("owner") or self.user
-        return None
-
-    def _hides(self, who: Principal, op: str, params) -> OpError | None:
-        """The not-found error an op gives for a thing ``who`` may not see,
-        named in its params; None when it names nothing hidden. A member
-        asking about another's thing gets the answer for no such thing."""
-        if self.multi_user is None or who.is_admin:
-            return None
-        log_id = getattr(params, "log_id", None)
-        if isinstance(log_id, str):
-            if log_id.startswith("t-"):
-                if (o := self.terminals.owner_of(log_id)) and not self.sees(who, o):
-                    return OpError("no_terminal", f"no open terminal {log_id}")
-            elif (o := self.owner_of(log_id)) is not None and not self.sees(who, o):
-                return OpError("no_session", f"no session {log_id!r}")
-        if op.startswith("term.") and isinstance(
-            tid := getattr(params, "id", None), str
-        ):
-            if (o := self.terminals.owner_of(tid)) and not self.sees(who, o):
-                return OpError("no_terminal", f"no open terminal {tid}")
-        field = HANDLE_FIELDS.get(op)
-        named = getattr(params, field, None) if field else None
-        for h in named if isinstance(named, list) else [named]:
-            if isinstance(h, str) and (o := self.owner_of_handle(h)) is not None:
-                if not self.sees(who, o):
-                    return OpError("no_session", f"no open session {h!r}")
-        fire = getattr(params, "fire", None)
-        target = getattr(fire, "session", None) if op.startswith("schedule.") else None
-        if isinstance(target, str) and (o := self.owner_of_handle(target)) is not None:
-            if not self.sees(who, o):
-                return OpError("no_session", f"no open session {target!r}")
-        run = getattr(params, "run", None)
-        if isinstance(run, str) and (st := self.workflows.runs.get(run)) is not None:
-            if not self.sees(who, self.owner_of(st.owner)):
-                return OpError("no_run", f"no workflow run {run!r}")
-        task_id = getattr(params, "task_id", None)
-        if isinstance(task_id, str) and (t := self.queues.tasks.get(task_id)):
-            if not self.sees(who, t.owner):
-                return OpError("no_task", f"no task {task_id!r}")
-        if op.startswith("schedule.") and op != "schedule.create":
-            name = getattr(params, "name", None)
-            if isinstance(name, str) and (s := self.schedules.items.get(name)):
-                if not self.sees(who, s.owner.get("principal")):
-                    return OpError("no_schedule", f"no schedule {name!r}")
         return None
 
     def owner_of(self, log_id: str) -> str | None:
@@ -1688,9 +1615,6 @@ class App:
         src = self.sessions.sessions.get(from_session or "")
         if src is None or caller.is_agent:
             return None
-        who = self.who(caller)
-        if not who.is_admin and src.spec.owner != who.name:
-            return None
         return src.group_key()
 
     def _resolve_cwd(self, raw: str | None, base: Path | None = None) -> Path:
@@ -1878,10 +1802,6 @@ class App:
         if name == "multiuser":
             # The agent runs the host work from the help page multi-user with
             # the person; only an admin may start it, since it changes the server.
-            if not self.who(caller).is_admin:
-                raise OpError(
-                    "not_for_members", "/multiuser is for an admin of this server"
-                )
             on = self.multi_user is not None
             await s.deliver(*multiuser.turn(arg, on, multiuser.facts(on), iso_now()))
             return {"status": "delivered"}
@@ -2029,7 +1949,7 @@ class App:
             return None  # a missing binary fails the launch as harness_not_found
         if s is not None and s.checked_version == (v.version or "?"):
             return None  # started once on this version already
-        may = self.who(caller).is_admin and v.version is not None
+        may = v.version is not None
         if untested is None:
             raise OpError(
                 "harness_untested", v.message(), data=v.wire() | {"may_always": may}
@@ -2038,8 +1958,6 @@ class App:
             return None
         if v.version is None:
             return "a version that could not be read cannot be allowed for good"
-        if not self.who(caller).is_admin:
-            return "only an admin can allow a version for good; it started this once"
         try:
             accept_version(self.config.path, v.harness, v.version)
         except OpError as e:
@@ -2079,11 +1997,6 @@ class App:
             return {**r, "server": self.server_name}
         if caller.link is not None:
             raise OpError("not_relayed", "a link is not relayed to another server")
-        if not self.who(caller).is_admin:
-            raise OpError(
-                "not_for_members",
-                "spawning on a linked server is for an admin of this one",
-            )
         link = self.links.get(far)
         if link is None:
             raise OpError("unknown_server", f"this server links no server named {far}")
@@ -2132,11 +2045,6 @@ class App:
         ``_spawn_far`` checks the rest when it starts."""
         if caller.link is not None:
             raise OpError("not_relayed", "a link is not relayed to another server")
-        if not self.who(caller).is_admin:
-            raise OpError(
-                "not_for_members",
-                "handing off to a linked server is for an admin of this one",
-            )
         link = self.links.get(far)
         if link is None:
             raise OpError("unknown_server", f"this server links no server named {far}")
@@ -2262,11 +2170,6 @@ class App:
         The far session's permission is at most the agent's, the far agent's
         preset read first. Nothing the far server wrote reaches the agent: its
         handle and log id are checked, its errors worded here (agent_ops)."""
-        if not self.who(caller).is_admin:
-            raise OpError(
-                "not_for_members",
-                "spawning on a linked server is for an admin's agents",
-            )
         link = self.links.get(far)
         if link is None:
             raise OpError("unknown_server", f"this server links no server named {far}")
@@ -2368,20 +2271,15 @@ class App:
         """Each server an archive listing reads, with how to fetch a page. A
         member in multi-user mode reads its own sessions here, and no linked
         server's: links are the admin's."""
-        member = self.multi_user is not None and not who.is_admin
-
-        def keep(m: dict) -> bool:
-            return self.sees(who, m.get("owner"))
 
         async def local(query, limit, after, workers):
-            k = keep if member else None
-            items, total, last = self.sessions.archive(query, limit, after, workers, k)
-            return items, total, self.sessions.archived_workers(query, k), last
+            items, total, last = self.sessions.archive(
+                query, limit, after, workers, None
+            )
+            return items, total, self.sessions.archived_workers(query, None), last
 
         if only in (None, self.server_name):
             yield self.server_name, local
-        if member:
-            return
         # Links this server opened: a way back is reached by calls, and its
         # archive rows could not be read from here (links.Backlink).
         for link in self.links.links():
@@ -2653,7 +2551,7 @@ class App:
             except (BrokenPipeError, ConnectionResetError) as e:
                 raise _dead(e) from e
 
-        @r.op("session.handoff", HandoffParams, agent=True, owned="log_id")
+        @r.op("session.handoff", HandoffParams, agent=True)
         async def handoff(p: HandoffParams, caller):
             """Continue your work in a new session and end this one: from this
             call nobody can write to it. The new session starts when your turn
@@ -2715,7 +2613,7 @@ class App:
                 old, p, capped=caller.is_agent, caller=caller
             )
 
-        @r.op("session.send", SendParams, owned="log_id")
+        @r.op("session.send", SendParams)
         async def send(p: SendParams, caller):
             # A page that got no answer in time sends again with the same nonce,
             # and a stalled socket can flush every copy at once (#350): each
@@ -2738,7 +2636,7 @@ class App:
                 first.add_done_callback(forget)
             return await asyncio.shield(first)
 
-        @r.op("attachment.begin", AttachBegin, owned="log_id")
+        @r.op("attachment.begin", AttachBegin)
         async def attachment_begin(p: AttachBegin, caller):
             """Start uploading a file to a session: its upload id. The file
             waits, staged, until a session.send names it (attachments.py)."""
@@ -2751,7 +2649,7 @@ class App:
                 raise OpError(e.code, e.message) from e
             return {"upload_id": uid}
 
-        @r.op("attachment.put", AttachPut, owned="log_id")
+        @r.op("attachment.put", AttachPut)
         async def attachment_put(p: AttachPut, caller):
             """One base64 chunk of an upload at ``offset``: the bytes now
             staged. No await between reading the staged size and appending,
@@ -2773,7 +2671,7 @@ class App:
                 raise OpError(e.code, e.message) from e
             return {"size": size}
 
-        @r.op("attachment.drop", AttachDrop, owned="log_id")
+        @r.op("attachment.drop", AttachDrop)
         async def attachment_drop(p: AttachDrop, caller):
             """Forget an upload the person removed before sending."""
             reg.open(p.log_id)
@@ -2789,12 +2687,12 @@ class App:
             n = s.read(p.ids)
             return {"read": n, "unread": len(s.unread)}
 
-        @r.op("recap.request", RecapParams, owned="log_id")
+        @r.op("recap.request", RecapParams)
         async def recap_request(p: RecapParams, caller):
             """A recap of where the session stands, for a person landing on its tab."""
             return await self.recaps.request(reg.open(p.log_id), p.force)
 
-        @r.op("btw.cancel", BtwCancelParams, owned="log_id")
+        @r.op("btw.cancel", BtwCancelParams)
         async def btw_cancel(p: BtwCancelParams, caller):
             """Cancel a running side note; its block keeps the question, folded."""
             return self.side_notes.cancel(reg.open(p.log_id), p.id)
@@ -2828,7 +2726,7 @@ class App:
                 raise OpError("speech_unavailable", str(e)) from e
             return {"base": f"/speech/{self.speech.id}/"}
 
-        @r.op("session.configure", ConfigureParams, owned="log_id")
+        @r.op("session.configure", ConfigureParams)
         async def configure(p: ConfigureParams, caller):
             s = reg.open(p.log_id)
             s.check_lock()
@@ -2867,7 +2765,7 @@ class App:
                 log.exception("aegis: the saved workflows could not be listed")
                 saved = []
             # /doctor only for an admin while the doctor finds a problem.
-            doctor = bool(self.doctor_watch.problems()) and self.who(caller).is_admin
+            doctor = bool(self.doctor_watch.problems())
             # A harness command keeps its name beside a skill of that name
             # unless the session is native (SpawnSpec.knowledge_native).
             taken = (
@@ -2920,7 +2818,7 @@ class App:
                 raise OpError("no_output", f"no output for {p.id!r}")
             return {"text": text}
 
-        @r.op("session.interrupt", LogParams, owned="log_id")
+        @r.op("session.interrupt", LogParams)
         async def interrupt(p: LogParams, caller):
             s = reg.open(p.log_id)
             try:
@@ -2928,18 +2826,18 @@ class App:
             except (BrokenPipeError, ConnectionResetError) as e:
                 raise _dead(e) from e
 
-        @r.op("session.stop", LogParams, owned="log_id")
+        @r.op("session.stop", LogParams)
         async def stop(p: LogParams, caller):
             s = reg.open(p.log_id)
             s.check_lock()
             await s.stop()
 
-        @r.op("session.restart", RestartParams, owned="log_id")
+        @r.op("session.restart", RestartParams)
         async def restart(p: RestartParams, caller):
             s = reg.open(p.log_id)
             return await self._launch(s, caller, p.untested, s.restart)
 
-        @r.op("session.warm", WarmParams, owned="log_id")
+        @r.op("session.warm", WarmParams)
         async def warm(p: WarmParams, caller):
             # A person's Wake (wake: true) is refused like a send that would
             # start the session (#479). Without it, someone started typing to
@@ -2955,7 +2853,7 @@ class App:
                 await s.ensure_running()
             return None
 
-        @r.op("session.kills", LogParams, owned="log_id")
+        @r.op("session.kills", LogParams)
         async def sleep_kills(p: LogParams, caller):
             """What Sleep would end with the process, one plain line each: what
             a park waits for, the stray processes included (park.kills). Asked
@@ -2969,7 +2867,7 @@ class App:
             )
             return park.kills(len(s.open_tasks), frozenset(s.timers), len(found))
 
-        @r.op("session.unquiet", LogParams, owned="log_id")
+        @r.op("session.unquiet", LogParams)
         async def unquiet(p: LogParams, caller):
             # A workflow's node has no tab while its run lives (spec §05):
             # the person reads it from the run's card or the Fleet.
@@ -2978,15 +2876,15 @@ class App:
             return reg.set_quiet(p.log_id, False)
 
         # The person's, never an agent's: autoclose is their word to close (#691).
-        @r.op("session.autoclose", AutocloseParams, owned="log_id")
+        @r.op("session.autoclose", AutocloseParams)
         async def autoclose(p: AutocloseParams, caller):
             return reg.set_autoclose(p.log_id, p.on)
 
-        @r.op("session.reopen", LogParams, owned="log_id")
+        @r.op("session.reopen", LogParams)
         async def reopen(p: LogParams, caller):
             return reg.reopen(p.log_id).wire()
 
-        @r.op("session.rename", RenameParams, agent=True, read=True, owned="log_id")
+        @r.op("session.rename", RenameParams, agent=True, read=True)
         async def rename(p: RenameParams, caller):
             """Rename your session: a handle (2 or 3 lowercase segments joined by
             hyphens) and a title, both saying what it works on. Set both in
@@ -3154,7 +3052,7 @@ class App:
             """The servers this one links, with their state; never their tokens."""
             return [link.wire() for link in self.links.links()]
 
-        @r.op("link.add", LinkAdd, admin=True)
+        @r.op("link.add", LinkAdd)
         async def link_add(p: LinkAdd, caller):
             """Link another aegis server: connect once with its token, take the
             name it gives itself, and keep the link in links.json."""
@@ -3172,11 +3070,11 @@ class App:
             self.links.add(name, p.url, p.token, p.trusted)
             return {"name": name}
 
-        @r.op("link.remove", LinkName, admin=True)
+        @r.op("link.remove", LinkName)
         async def link_remove(p: LinkName, caller):
             self.links.remove(p.name)
 
-        @r.op("link.trust", LinkTrust, admin=True)
+        @r.op("link.trust", LinkTrust)
         async def link_trust(p: LinkTrust, caller):
             """Ask a link for trust (both ways, agents unrestricted), or stop
             asking. The link reconnects; the far server decides."""
@@ -3191,7 +3089,7 @@ class App:
                 for row in self.links.incoming()
             ]
 
-        @r.op("link.exit", LinkExit, admin=True)
+        @r.op("link.exit", LinkExit)
         async def link_exit(p: LinkExit, caller):
             """Make a link this server's exit, or stop exiting: what aegis
             starts from now on reaches the internet from there (exit.py)."""
@@ -3203,12 +3101,12 @@ class App:
                 raise OpError("bad_config", problems[0].message)
             return {"exit_via": p.name}
 
-        @r.op("server.paused", admin=True)
+        @r.op("server.paused")
         async def server_paused(p, caller):
             """The pause in force (pause.py), or null."""
             return {"paused": self.paused}
 
-        @r.op("server.pause", admin=True)
+        @r.op("server.pause")
         async def server_pause(p, caller):
             """Pause every session: end their processes, hold all new work."""
             ended = await self.pause_all(
@@ -3216,13 +3114,13 @@ class App:
             )
             return {"paused": self.paused, "ended": ended}
 
-        @r.op("server.resume", admin=True)
+        @r.op("server.resume")
         async def server_resume(p, caller):
             """Resume every session the pause held, and the work it held."""
             await self.resume_all()
             return {"paused": None}
 
-        @r.op("token.revoke", TokenName, admin=True)
+        @r.op("token.revoke", TokenName)
         async def token_revoke(p: TokenName, caller):
             """End a token. The admin's is replaced, and the new one returned
             to whoever revoked it, so that browser can sign in again. Its
@@ -3236,7 +3134,7 @@ class App:
             install = await self.updater.install()
             return await self.versions.wire() | {"install": install.wire()}
 
-        @r.op("server.update", admin=True)
+        @r.op("server.update")
         async def server_update(_, caller):
             """Upgrade aegis with the installer that owns it, check the new
             build, and restart onto it (self_update.py). Progress is on the

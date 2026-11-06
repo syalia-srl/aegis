@@ -8,10 +8,10 @@ import signal
 import time
 
 from .knowledge_samples import skill
-from .test_acts_for import BEN, recorded  # noqa: F401
+from .one_person import BEN, recorded  # noqa: F401
 from .test_agents import mcp, turn
 from .test_agents import world as agents_world  # noqa: F401
-from .test_member_view import homes, spawn, world  # noqa: F401
+from .one_person import homes, spawn, world  # noqa: F401
 
 SCRIPT = b"""import os, sys
 print("args", sys.argv[1:], "cwd-is-temp", os.getcwd() != "/")
@@ -100,16 +100,6 @@ async def test_run_returns_output_and_exit_code(agents_world):
     got = ok(await turn(s, mcp("skill_run", skill="release", script="big.py")))
     assert got["exit"] == 0
     assert got["stdout"] == "x" * 20000 + "\n[cut at 20000 characters]"
-
-
-async def test_a_members_run_asks_the_launcher_for_the_member(world, recorded):
-    app = world.app
-    await save_release(app, "ben")
-    ben = app.sessions.sessions[await spawn(world, BEN)]
-    ok(await turn(ben, mcp("skill_read", name="release")))
-    got = ok(await turn(ben, mcp("skill_run", skill="release", script="bump.py")))
-    assert got["exit"] == 3
-    assert recorded.of("skill-run") == {"ben"}
 
 
 async def test_a_write_session_may_not_run_a_script(agents_world):

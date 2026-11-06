@@ -67,7 +67,7 @@ def until_ts(text: str, now: float) -> float:
 def register_notice_ops(app: App) -> None:
     r = app.registry
 
-    @r.op("notice.announce", Announce, agent=True, admin=True)
+    @r.op("notice.announce", Announce, agent=True)
     async def notice_announce(p: Announce, caller):
         """Tell every agent on this server something once, on its next
         message or aegis tool result, such as a restart or a freeze. With

@@ -1236,7 +1236,7 @@ def register_knowledge_ops(app: App) -> None:
                 "again since; nothing was undone.",
             )
 
-    @r.op("knowledge.card.approve", CardRef, owned="log_id")
+    @r.op("knowledge.card.approve", CardRef)
     async def card_approve(p: CardRef, caller):
         s, e, owner = pending_card(p, ("new",), caller)
         d = e["detail"]
@@ -1272,7 +1272,7 @@ def register_knowledge_ops(app: App) -> None:
             )
         return "ok"
 
-    @r.op("knowledge.card.discard", CardRef, owned="log_id")
+    @r.op("knowledge.card.discard", CardRef)
     async def card_discard(p: CardRef, caller):
         s, e, owner = pending_card(p, ("new",), caller)
         d = e["detail"]
@@ -1302,7 +1302,7 @@ def register_knowledge_ops(app: App) -> None:
             )
         return "ok"
 
-    @r.op("knowledge.card.undo", CardRef, owned="log_id")
+    @r.op("knowledge.card.undo", CardRef)
     async def card_undo(p: CardRef, caller):
         s, e, owner = pending_card(p, ("changed", "deleted", "saved"), caller)
         d = e["detail"]
@@ -1330,7 +1330,7 @@ def register_knowledge_ops(app: App) -> None:
             )
         return "ok"
 
-    @r.op("knowledge.card.unimport", CardItem, owned="log_id")
+    @r.op("knowledge.card.unimport", CardItem)
     async def card_unimport(p: CardItem, caller):
         """Undo one item of an import card: its import commit is reverted,
         so it leaves aegis. Its original is wherever it then was."""

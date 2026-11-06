@@ -204,11 +204,6 @@ def register_schedule_ops(app: App) -> None:
             raise OpError(
                 "not_yours", "agents can change only the schedules they created"
             )
-        who = app.who(caller)
-        if not who.is_admin and o.get("principal") != who.name:
-            raise OpError(
-                "not_owner", f"{name} belongs to {o.get('principal')}; you can read it"
-            )
         return s
 
     def person_only(name: str, agent: bool, what: str) -> None:
@@ -240,13 +235,8 @@ def register_schedule_ops(app: App) -> None:
         """Every schedule on this server: its clock, layers and owner, its next
         tick, its live runs, and whether it is paused. An agent also gets each
         server's linked with trust, named `name@server` and with `server`."""
-        who = app.who(caller)
-        out = [
-            w
-            for w in sch.wire_all()
-            if app.sees(who, sch.items[w["name"]].owner.get("principal"))
-        ]
-        if caller.is_agent and who.is_admin:
+        out = [w for w in sch.wire_all()]
+        if caller.is_agent:
             out += await far_schedules()
         return out
 

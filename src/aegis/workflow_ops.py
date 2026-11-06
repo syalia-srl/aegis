@@ -190,9 +190,6 @@ def register_workflow_ops(app: App) -> None:
         st = wf.runs.get(run)
         if st is None:
             raise OpError("no_run", f"no workflow run {run!r}")
-        who = app.who(caller)
-        if not who.is_admin and app.owner_of(st.owner) != who.name:
-            raise OpError("not_owner", f"{run} belongs to {app.owner_of(st.owner)}")
         if caller.is_agent and not wf.owns(caller.log_id, st):
             raise OpError(
                 "not_yours", "only the session that armed a workflow can stop it"
@@ -291,14 +288,9 @@ def register_workflow_ops(app: App) -> None:
         """The saved workflows a person can run with /workflow <id> <text>:
         built in and the project's, each with its title, args schema,
         version, who saved it, and what is wrong with it if it does not lint."""
-        rows = app.saved.listing(wf._agents())
-        who = app.who(caller)
-        for row in rows:
-            if "saved_by" in row and not app.sees(who, saver(row["saved_by"])):
-                del row["saved_by"], row["saved_at"]
-        return rows
+        return app.saved.listing(wf._agents())
 
-    @r.op("workflow.read", WorkflowId, admin=True)
+    @r.op("workflow.read", WorkflowId)
     async def workflow_read(p: WorkflowId, caller):
         """A saved workflow for Settings → Workflows: its file's text, to
         export, and its steps as the card draws them. A person's: an agent
@@ -315,12 +307,7 @@ def register_workflow_ops(app: App) -> None:
     async def workflow_delete(p: WorkflowId, caller):
         """Delete a saved workflow from the project. A built-in one cannot be
         deleted. A schedule that fires it pauses."""
-        last = app.saved.last_save(p.id)
-        if last is not None and not app.sees(app.who(caller), saver(last["by"])):
-            raise OpError(
-                "no_workflow",
-                f"no saved workflow {p.id!r}; /workflow alone lists them",
-            )
+        app.saved.last_save(p.id)
         app.saved.delete(p.id, by(caller))
         app.schedules.workflow_changed(p.id)
         return {"deleted": p.id}

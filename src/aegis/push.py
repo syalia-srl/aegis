@@ -46,7 +46,7 @@ import httpx
 from pydantic import BaseModel, Field, field_validator
 
 from . import webpush
-from .ops import Caller, OpError, Principal
+from .ops import Caller, OpError
 
 if TYPE_CHECKING:
     from .app import App
@@ -370,13 +370,8 @@ class Sender:
         if not self._running:
             return  # not started, or stopped
         now = time.monotonic()
-        app = self.app
-        about = app.owner_of(payload["key"])
         for row in self.push.subscriptions.list():
             if source not in row.get("sources", ()):
-                continue
-            # In multi-user mode a member's devices hear of its own only.
-            if not app.sees(Principal(row["owner"]), about):
                 continue
             sid = row["id"]
             self._pending.setdefault(sid, deque()).append((payload, now))
@@ -548,9 +543,6 @@ def register_push_ops(app: App) -> Push:
         row = push.subscriptions.get(id)
         if row is None:
             raise OpError("unknown_subscription", f"no push subscription {id}")
-        who = app.who(caller)
-        if not who.is_admin and row["owner"] != who.name:
-            raise OpError("not_owner", f"{id} belongs to {row['owner']}")
         return row
 
     @r.op("push.key")
@@ -608,11 +600,9 @@ def register_push_ops(app: App) -> Push:
     @r.op("push.list")
     async def push_list(_, caller):
         """The caller's subscriptions, every one for an admin, without keys."""
-        who = app.who(caller)
         rows = [
             {k: v for k, v in row.items() if k != "keys"}
             for row in push.subscriptions.list()
-            if who.is_admin or row["owner"] == who.name
         ]
         return {"subscriptions": rows}
 

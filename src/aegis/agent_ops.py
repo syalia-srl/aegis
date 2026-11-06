@@ -708,10 +708,6 @@ def across(app: App, server: str, caller: Caller):
         raise OpError("not_relayed", "a link is not relayed to another server")
     if not app.links.trusted(server):
         raise OpError("not_across_links", f"{server} is another server; {ACROSS}")
-    if not app.who(caller).is_admin:
-        raise OpError(
-            "not_for_members", "acting across a link is for an admin's agents"
-        )
     link = app.links.get(server)
     assert link is not None
     return link
@@ -768,12 +764,6 @@ def register_agent_ops(app: App) -> None:
     def mine(t, caller: Caller):
         if caller.is_agent and t.enqueuer != caller.log_id:
             raise OpError("not_yours", "agents can change only the tasks they enqueued")
-        # A member changes only its own tasks; one from before owners is the admin's.
-        who = app.who(caller)
-        if not who.is_admin and (t.owner or app.user) != who.name:
-            raise OpError(
-                "not_owner", f"{t.id} belongs to {t.owner or app.user}; you can read it"
-            )
 
     def roster(owner: str, but: str | None = None) -> list[dict]:
         return [
@@ -870,12 +860,6 @@ def register_agent_ops(app: App) -> None:
             raise OpError("no_monitor", f"no live monitor {p.monitor_id!r}")
         if caller.is_agent and m.owner != caller.log_id:
             raise OpError("not_yours", "agents can cancel only their own monitors")
-        # A monitor wakes its session: a member stops only its own sessions' ones.
-        who, owner = app.who(caller), app.owner_of(m.owner)
-        if not who.is_admin and owner not in (None, who.name):
-            raise OpError(
-                "not_owner", f"{m.id} watches {owner}'s session; you can read it"
-            )
         app.monitors.cancel(m.id)
         return {"cancelled": m.id, "remaining": roster(m.owner)}
 
@@ -1026,28 +1010,15 @@ def register_agent_ops(app: App) -> None:
         if p.urgent and p.interrupt:
             raise OpError("bad_params", URGENT_AND_INTERRUPT)
         handle, server = split_address(p.target, app.server_name)
-        who = app.who(caller)
         if server is not None:
             if caller.link is not None:
                 raise OpError("not_relayed", "a link is not relayed to another server")
             # The link delivers as its own token on the far server (web.py).
-            if not who.is_admin:
-                raise OpError(
-                    "not_for_members",
-                    f"handing off to {server} through this server's link is for "
-                    "an admin here",
-                )
             return await far_handoff(handle, server, p, caller)
         to = target(p.target)
         to.check_lock()  # before an interrupt reaches it
         # A prompt or an interrupt changes the session: a member's reaches only
         # its own (tokens.py).
-        owner = app.owner_of(to.log_id)
-        if not who.is_admin and owner != who.name:
-            raise OpError(
-                "not_owner",
-                f"{to.handle} belongs to {owner}; you can read it, not prompt it",
-            )
         sender = (
             f"agent:{reg.sessions[caller.log_id].handle}"
             if caller.is_agent and caller.log_id in reg.sessions
@@ -1114,14 +1085,6 @@ def register_agent_ops(app: App) -> None:
                 "bad_sender", "a sender is a handle and a user name, one line each"
             )
         to = target(p.target)
-        # The link is the token it presented: a member link prompts only the
-        # sessions it owns here, like any member (tokens.py).
-        principal, owner = app.who(caller), app.owner_of(to.log_id)
-        if not principal.is_admin and owner != principal.name:
-            raise OpError(
-                "not_owner",
-                f"{to.handle} belongs to {owner}; a handoff cannot reach it",
-            )
         if p.urgent and p.interrupt:
             raise OpError("bad_params", URGENT_AND_INTERRUPT)
         if p.interrupt and to.status == "working":
@@ -1182,11 +1145,7 @@ def register_agent_ops(app: App) -> None:
         peer_handoff. A server linked with trust lists its sessions in full,
         with `server`."""
         out = []
-        who = app.who(caller)
-        member = app.multi_user is not None and not who.is_admin
         for s in reg.open_sessions():
-            if not app.sees(who, app.owner_of(s.log_id)):
-                continue
             w = s.wire()
             out.append(
                 {
@@ -1208,7 +1167,7 @@ def register_agent_ops(app: App) -> None:
                 }
             )
         # A link asking is not relayed further; links are the admin's.
-        if caller.link is None and not member:
+        if caller.link is None:
             out += await far_sessions()
         return out
 
@@ -1263,7 +1222,7 @@ def register_agent_ops(app: App) -> None:
         t = app.queues.tasks.get(s.worker["task_id"]) if s.worker else None
         return t is not None and t.enqueuer == me.log_id
 
-    @r.op("session.close", Close, agent=True, owned="log_id")
+    @r.op("session.close", Close, agent=True)
     async def session_close(p: Close, caller):
         """Close a session: its tab goes away and it stays in the archive. A
         session you spawned, or whose queue task you enqueued, closes at once
@@ -1381,7 +1340,7 @@ def register_agent_ops(app: App) -> None:
             "the archive"
         )
 
-    @r.op("session.quiet", Quiet, agent=True, owned="log_id")
+    @r.op("session.quiet", Quiet, agent=True)
     async def session_quiet(p: Quiet, caller):
         """Hide a session's tab while it works: it stays in the Fleet, dimmed,
         and its tab comes back by itself when its turn ends done, review,

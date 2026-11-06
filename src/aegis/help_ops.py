@@ -281,7 +281,7 @@ def register_help_ops(app: App) -> None:
     def doctor_state(caller) -> dict | None:
         """The doctor row: an admin's, and only while there is a problem."""
         problems = app.doctor_watch.problems()
-        if not problems or not app.who(caller).is_admin:
+        if not problems:
             return None
         errors = sum(f.level == "error" for f in problems)
         return {
@@ -335,8 +335,6 @@ def register_help_ops(app: App) -> None:
                 )
                 prompt, title = f"{head}\n{body}", "Feedback"
             else:
-                if not app.who(caller).is_admin:
-                    raise OpError("not_for_members", "/doctor is for an admin")
                 await app.doctor_watch.refresh()
                 problems = app.doctor_watch.problems()
                 if not problems:

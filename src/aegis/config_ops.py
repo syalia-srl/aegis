@@ -65,7 +65,7 @@ def register_config_ops(app: App) -> None:
         the error when the file on disk does not parse."""
         return app.config.current().wire()
 
-    @r.op("config.write", WriteParams, admin=True)
+    @r.op("config.write", WriteParams)
     async def config_write(p: WriteParams, caller):
         """Write the Settings form to .aegis.yaml. Refused when the file changed
         since `stamp`; nothing is written when the document has a problem."""
@@ -88,7 +88,7 @@ def register_config_ops(app: App) -> None:
         wrong."""
         return [f.wire() for f in await doctor(app.roots, bins())]
 
-    @r.op("config.propose", admin=True)
+    @r.op("config.propose")
     async def config_propose(_, caller):
         """The first configuration `aegis init` would write here."""
         return propose(await detected()).model_dump()

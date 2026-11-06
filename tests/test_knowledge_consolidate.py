@@ -5,7 +5,6 @@ knowledge_stats) and the turn it delivers."""
 from __future__ import annotations
 
 import json
-import threading
 from pathlib import Path
 
 import pytest
@@ -17,11 +16,11 @@ from aegis.ops import OpError
 
 from .conftest import until
 from .knowledge_samples import fixture_items, mem, skill
-from .test_acts_for import BEN, recorded  # noqa: F401
+from .one_person import BEN, recorded  # noqa: F401
 from .test_agents import mcp, turn, world  # noqa: F401  (fixture)
 from .test_commands import send
-from .test_member_view import ADMIN, homes, spawn  # noqa: F401
-from .test_member_view import world as members  # noqa: F401
+from .one_person import ADMIN, homes, spawn  # noqa: F401
+from .one_person import world as members  # noqa: F401
 
 
 def ok(said: str) -> dict:
@@ -45,36 +44,6 @@ def test_a_duplicate_is_never_across_kinds():
         type(items[0])("skill", "deploy-bot", items[0].description, "b", {}, None)
     )
     assert checks.duplicates(Index(items), items, 0.1) == []
-
-
-async def test_stats_lists_duplicates_off_the_loop_per_principal(
-    members, homes, monkeypatch
-):
-    app = members.app
-    st = app.knowledge.store
-    for it in fixture_items():
-        if it.kind == "memory":
-            await st.save(app.user, it, "t")
-    await st.save("ben", mem("ben-fact", "ben's only fact"), "t")
-    threads = []
-    real = checks.duplicates
-
-    def watched(*a):
-        threads.append(threading.current_thread())
-        return real(*a)
-
-    monkeypatch.setattr(checks, "duplicates", watched)
-    admin = app.sessions.sessions[await spawn(members, ADMIN)]
-    got = ok(await turn(admin, mcp("knowledge_stats", duplicates=True)))
-    assert [[d["a"], d["b"]] for d in got["duplicates"]] == [
-        ["no-force-push", "shared-branch-history"]
-    ]
-    assert threads and threading.main_thread() not in threads
-    ben = app.sessions.sessions[await spawn(members, BEN)]
-    assert (
-        ok(await turn(ben, mcp("knowledge_stats", duplicates=True)))["duplicates"] == []
-    )
-    assert "duplicates" not in ok(await turn(admin, mcp("knowledge_stats")))
 
 
 async def test_never_recalled_needs_ten_hints_and_no_read(world):
@@ -164,12 +133,3 @@ async def test_skill_delete_leaves_an_undo_card_that_restores_the_folder(world):
     )
     assert st.get(app.user, "bump-version") is not None
     assert (folder / "bump.py").read_bytes() == b"print('bumped')\n"
-
-
-async def test_a_member_cannot_delete_the_admins_skill(members, homes):
-    app = members.app
-    await app.knowledge.store.save(app.user, skill("admin-skill"), "t")
-    ben = app.sessions.sessions[await spawn(members, BEN)]
-    said = await turn(ben, mcp("skill_delete", name="admin-skill"))
-    assert said.startswith("mcp error: not_found"), said
-    assert app.knowledge.store.get(app.user, "admin-skill") is not None

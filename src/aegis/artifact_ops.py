@@ -329,7 +329,7 @@ def register_artifact_ops(app: App) -> None:
             raise _err(e) from e
         return s
 
-    @r.op("artifact.state", PageState, owned="log_id")
+    @r.op("artifact.state", PageState)
     async def state(p: PageState, caller):
         s = page(p)
         _sized(p.state, "state")
@@ -339,7 +339,7 @@ def register_artifact_ops(app: App) -> None:
             raise _err(e) from e
         return "ok"
 
-    @r.op("artifact.emit", PageEmit, owned="log_id")
+    @r.op("artifact.emit", PageEmit)
     async def emit(p: PageEmit, caller):
         s = page(p)
         s.check_lock()  # a person does not steer a workflow's node
@@ -355,7 +355,7 @@ def register_artifact_ops(app: App) -> None:
         )
         return "ok"
 
-    @r.op("artifact.submit", PageSubmit, owned="log_id")
+    @r.op("artifact.submit", PageSubmit)
     async def submit(p: PageSubmit, caller):
         s = page(p)
         s.check_lock()  # a person does not steer a workflow's node
@@ -374,7 +374,7 @@ def register_artifact_ops(app: App) -> None:
         )
         return "ok"
 
-    @r.op("artifact.upload", PageUpload, owned="log_id")
+    @r.op("artifact.upload", PageUpload)
     async def upload(p: PageUpload, caller):
         """Move a file the page uploaded (attachment.begin and .put) into the
         session's inbox and wake the agent with its path. It counts as an
@@ -408,7 +408,7 @@ def register_artifact_ops(app: App) -> None:
         )
         return sent
 
-    @r.op("artifact.error", PageError, owned="log_id")
+    @r.op("artifact.error", PageError)
     async def error(p: PageError, caller):
         s = page(p)
         s.check_lock()  # a person does not steer a workflow's node
@@ -420,7 +420,7 @@ def register_artifact_ops(app: App) -> None:
         )
         return "ok"
 
-    @r.op("artifact.probed", Probed, owned="log_id")
+    @r.op("artifact.probed", Probed)
     async def probed(p: Probed, caller):
         s = reg.open(p.log_id)
         return (

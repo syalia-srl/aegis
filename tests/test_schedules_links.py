@@ -6,7 +6,6 @@ import json
 
 import pytest
 
-from aegis.ops import Caller, Principal
 
 from .conftest import until
 from .test_links import Node, mcp, turn
@@ -379,26 +378,6 @@ async def test_a_plain_link_refuses_every_schedule_tool(plain):
     assert list(beta.app.schedules.items) == ["beta-own"]
     assert not cards(here)
     assert ok(await turn(here, mcp("schedule_list"))) == []
-
-
-async def test_a_members_agent_is_refused_and_lists_no_far_schedule(trusted):  # noqa: F811
-    alpha, beta = trusted
-    create(beta, "beta-own", "x")
-    alpha.app.principals.add("ben", "member")
-    alpha.app.principals.set_default_policy(
-        {"claude": {"mode": "open"}, "opencode-go": {"mode": "open"}}
-    )
-    r = await alpha.app.registry.call(
-        "session.spawn",
-        {"agent": "opus"},
-        Caller("user", principal=Principal("ben", "member")),
-    )
-    here = alpha.app.sessions.sessions[r["log_id"]]
-    for call in TOOLS:
-        said = await turn(here, call)
-        assert "not_for_members" in said, (call, said)
-    assert ok(await turn(here, mcp("schedule_list"))) == []
-    assert list(beta.app.schedules.items) == ["beta-own"]
 
 
 async def test_nothing_relays_to_a_third_server(trusted, tmp_path, fake_claude):  # noqa: F811
