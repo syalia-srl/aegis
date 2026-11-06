@@ -729,6 +729,8 @@ class _server:
         """The pause in force (pause.py), or null."""
     async def resume(self) -> Any:
         """Resume every session the pause held, and the work it held."""
+    async def update(self) -> Any:
+        """Upgrade aegis with the installer that owns it, check the new build, and restart onto it (self_update.py). Progress is on the update channel."""
     async def version(self) -> Any:
         """server.version"""
 
