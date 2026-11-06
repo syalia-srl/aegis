@@ -1258,7 +1258,8 @@ class App:
         self.repos.start()
         self.sessions.boot(restarts.started(self.roots.state_root))
         await self.terminals.boot()
-        self.sessions.sign_in.boot()
+        if self.sessions.sign_in is not None:
+            self.sessions.sign_in.boot()
         await self.browsers.boot()
         # No browser's upload survives a restart (attachments.py).
         att.clear_staged(self.roots.state_root)
@@ -1370,7 +1371,8 @@ class App:
         await self.net.stop()
         await self.monitors.shutdown()
         await self.recaps.shutdown()
-        await self.sessions.sign_in.shutdown()
+        if self.sessions.sign_in is not None:
+            await self.sessions.sign_in.shutdown()
         await self.terminals.shutdown()
         await self.browsers.shutdown()
         await self.side_notes.shutdown()
