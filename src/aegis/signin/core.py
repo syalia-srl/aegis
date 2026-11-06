@@ -250,7 +250,7 @@ class SignIns:
                 await self._fail(card, f"{recipe.cmd[0]} exited")
 
     def _on_screen(self, card: Card, recipe: Recipe) -> None:
-        if card.step not in OPEN:
+        if card.step not in OPEN or card.screen is None:
             return
         found = recipe.match(card.screen.text())
         if found is None:
@@ -331,7 +331,11 @@ class SignIns:
             self._spawn(self._terminals.close(card.term.id))
 
     def _tail(self, card: Card, recipe: Recipe) -> str:
-        rows = [r for r in card.screen.rows() if r.strip()][-TAIL_ROWS:]
+        rows = (
+            [r for r in card.screen.rows() if r.strip()][-TAIL_ROWS:]
+            if card.screen
+            else []
+        )
         m = Masker(recipe.shapes)
         return (m.feed("\n".join(rows)) + m.flush()).strip()
 
