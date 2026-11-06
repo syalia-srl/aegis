@@ -55,6 +55,14 @@ export function attach(root, provider, opts = {}) {
     // A touch long press fires contextmenu too, late: the timer already
     // opened the menu, or the bar took its place (bar's check).
     if (swallow) return;
+    // Android fires it early instead, before LONG_PRESS, and cancels the
+    // pointer right after, which stops the timer (#951). The press is still
+    // held, so the menu is a touch's: a word it selected gets the bar.
+    if (timer) {
+      stop();
+      swallow = show(ev.target, ev, ev.clientX, ev.clientY, true);
+      return;
+    }
     show(ev.target, ev, ev.clientX, ev.clientY);
   };
   const onDown = (ev) => {
