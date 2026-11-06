@@ -16,7 +16,7 @@ import { copyRow, installCopy, rowText } from "./copy.js";
 import { Find } from "./find.js";
 import * as artifacts from "./artifacts.js";
 import { TabOrder, patchTab, renderTabs, stepMove } from "./tabs.js";
-import { linesOf, mine, ownerOf, setWho } from "./me.js";
+import { linesOf, mine, ownerOf, setWho, who } from "./me.js";
 import { ago, byNeed, modelLine, money, patchCard, renderArchive, renderBand, renderBandQuota, renderCards, tickPlan, card as fleetCard } from "./fleet.js";
 import { age, countdown, diskRows, elapsed, hostRow, hostSeverity, mbps, netRows, providerFor, quotaSideRow, quotaTile, tile } from "./gauges.js";
 import { closeCard, initSide, restState, toggleCollapsed } from "./side.js";
@@ -2507,14 +2507,130 @@ async function loadVersion() {
 
   const top = $("ver-top");
   top.replaceChildren(span("", shown), ...(dev ? [span("tag", "dev")] : behind ? [span("upd", "", "arrow-up")] : []));
+  verInfo = v;
+  const how = v.install?.command;
   top.title = behind
-    ? `aegis ${run.version}; ${v.latest} is out: uv tool upgrade aegis-harness`
+    ? `aegis ${run.version}; ${v.latest} is out${how ? `: ${how}` : ""}`
     : dev
       ? `aegis built from ${run.commit || "a source tree"}${ref ? ` (${ref})` : ""}, based on ${run.version}; latest release ${v.latest || "unknown"}`
       : `aegis ${run.version}; latest release ${v.latest || "unknown"}`;
   top.hidden = false;
+  drawUpdate();
 }
 setInterval(() => conn.open && loadVersion(), 3600 * 1000);
+
+// -- updating aegis (self_update.py, #955) --------------------------------------
+// An admin gets an Update button beside the arrow when the server knows the
+// installer that owns it. The update channel carries its steps; once the
+// server restarts, the reconnect finds a new build and reloads the page.
+let verInfo = null; // the last server.version
+let upd = { phase: "idle", lines: [], error: null, version: null };
+const UPD_STEPS = ["installing", "checking", "restarting"];
+const updRunning = () => UPD_STEPS.includes(upd.phase);
+const mayUpdate = () => verInfo?.status === "behind" && verInfo.install?.can && who.role !== "member";
+
+function updButton(label) {
+  const b = document.createElement("button");
+  b.className = "upd-btn";
+  b.textContent = label;
+  b.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    startUpdate();
+  });
+  return b;
+}
+
+async function startUpdate() {
+  const n = [...sessions.values()].filter((m) => m.server === null && m.state === "working").length;
+  const busy = n ? ` ${n} session${n > 1 ? "s are" : " is"} working: their turns stop for the restart and continue on the new version.` : "";
+  if (!(await ask(`Update aegis to ${verInfo.latest} and restart the server?${busy}`, { ok: "Update and restart" }))) return;
+  try {
+    await conn.call("server.update");
+  } catch (e) {
+    upd = { ...upd, phase: "failed", error: e.message };
+    drawUpdate();
+  }
+}
+
+function drawUpdate() {
+  const sec = $("ver-upd");
+  const top = $("ver-top");
+  top.querySelector(".upd-btn")?.remove();
+  top.querySelector(".upd-run")?.remove();
+  const behind = verInfo?.status === "behind";
+  sec.hidden = !behind && upd.phase === "idle";
+  if (sec.hidden) return;
+  const inst = verInfo?.install;
+  const rows = [];
+  const kv = (k, v) => {
+    const d = document.createElement("div");
+    d.className = "kv";
+    d.append(span("", k), span("", v));
+    return d;
+  };
+  const line = (cls, text) => {
+    const d = document.createElement("div");
+    d.className = cls;
+    d.textContent = text;
+    return d;
+  };
+  if (inst) rows.push(kv("installed by", inst.by));
+  if (upd.phase === "idle") {
+    if (mayUpdate()) {
+      rows.push(line("how", inst.command));
+      const acts = line("acts", "");
+      acts.append(updButton("Update"));
+      rows.push(acts);
+      top.append(updButton("Update"));
+    } else if (inst?.can) {
+      rows.push(line("how", "An admin can update this server."), line("how", inst.command));
+    } else {
+      rows.push(line("how", inst?.command ? `Update in a shell: ${inst.command}` : "Pull and reinstall in a shell."));
+    }
+  } else {
+    const ul = document.createElement("ul");
+    ul.className = "upd-steps";
+    const at = upd.phase === "failed" ? -1 : UPD_STEPS.indexOf(upd.phase);
+    const failedAt = UPD_STEPS.indexOf(upd.failed_at);
+    UPD_STEPS.forEach((step, i) => {
+      const li = document.createElement("li");
+      li.textContent = step;
+      if (at >= 0) li.className = i < at ? "done" : i === at ? "doing" : "";
+      else li.className = i < failedAt ? "done" : i === failedAt ? "bad" : "";
+      ul.append(li);
+    });
+    rows.push(ul);
+    if (upd.lines.length) {
+      const pre = document.createElement("pre");
+      pre.className = "upd-log";
+      pre.textContent = upd.lines.slice(-8).join("\n");
+      rows.push(pre);
+    }
+    if (upd.phase === "failed") {
+      rows.push(line("err-text", `${upd.error}. aegis ${verInfo?.running.version || ""} is still running.`));
+      if (mayUpdate()) {
+        const acts = line("acts", "");
+        acts.append(updButton("Try again"));
+        rows.push(acts);
+      }
+    } else {
+      const run = line("upd-run", upd.phase === "restarting" ? "restarting" : "updating");
+      top.append(run);
+    }
+  }
+  sec.replaceChildren(...rows);
+}
+conn.subscribe(
+  "update",
+  (snap) => {
+    upd = snap;
+    drawUpdate();
+  },
+  (ops) => {
+    for (const op of ops) if ("set" in op) upd = op.set;
+    drawUpdate();
+  },
+);
 
 // -- the recap -----------------------------------------------------------------
 // Asked on landing and by the sparkle or the row's refresh. The entry arrives on
