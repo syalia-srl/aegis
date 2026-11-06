@@ -58,6 +58,8 @@ class Card:
     matched_at: float = 0.0
     started_at: float = 0.0
     task: asyncio.Task | None = None
+    rule: str = ""  # the recipe rule the screen last matched
+    menu: tuple[list[str], int] = ([], 0)  # a choose step's rows and the marked one
 
 
 class Tap:
@@ -173,7 +175,11 @@ class SignIns:
         options = card.fields.get("options") or []
         if card.step != "choose" or option not in options or card.term is None:
             raise ValueError("this sign-in is not offering that choice")
-        card.term.input(option + "\r")
+        rows, current = card.menu
+        moves = rows.index(option) - current
+        card.term.input(("\x1b[B" if moves > 0 else "\x1b[A") * abs(moves))
+        await asyncio.sleep(0.2)
+        card.term.input("\r")
         self._set(card, "checking")
 
     async def cancel(self, card_id: str) -> None:
@@ -264,15 +270,31 @@ class SignIns:
             self._spawn(
                 self._fail(card, "the sign-in was refused", self._tail(card, recipe))
             )
-        elif rule.step == "checking" and "token" in captures:
-            if card.fields.get("checking") is None:
-                card.fields["checking"] = True
-                self._spawn(self._check(card, captures["token"]))
-        elif rule.step != card.step and card.step != "checking":
-            card.fields.update({k: v for k, v in captures.items() if k != "token"})
-            self._set(card, rule.step)
+            return
+        if card.fields.get("checking"):
+            return
+        if rule.step == "checking":
+            # A token on screen (Claude), or the login saying it is connected
+            # (OpenCode): either way the harness's check decides.
+            card.fields["checking"] = True
+            self._spawn(self._check(card, captures.get("token")))
+            return
+        shown = {k: captures[k] for k in ("url", "code", "options") if k in captures}
+        if rule.prompt:
+            shown["prompt"] = rule.prompt
+        if rule.name == card.rule and all(
+            card.fields.get(k) == v for k, v in shown.items()
+        ):
+            return
+        card.rule = rule.name
+        for k in ("url", "code", "options", "prompt"):
+            card.fields.pop(k, None)
+        card.fields.update(shown)
+        if rule.step == "choose":
+            card.menu = (captures["rows"], captures["current"])
+        self._set(card, rule.step)
 
-    async def _check(self, card: Card, token: str) -> None:
+    async def _check(self, card: Card, token: str | None) -> None:
         self._set(card, "checking")
         why = await self._checks[card.harness]({"token": token})
         if why:

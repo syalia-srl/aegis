@@ -1,0 +1,111 @@
+{"t": 0.245, "data": "\u001b[90m\u250c\u001b[39m  Connect an integration\r\n"}
+{"t": 5.77, "data": "\u001b[?25l\u001b[90m\u2502\u001b[39m\r\n\u001b[36m\u25c6\u001b[39m  Select integration\r\n\u001b[36m\u2502\u001b[39m  \u001b[2mSearch:\u001b[22m \u001b[7m\u001b[8m_\u001b[28m\u001b[27m\r\n\u001b[36m\u2502\u001b[39m\r\n\u001b[36m\u2502\u001b[39m  \u001b[1mPopular\u001b[22m\r\n\u001b[36m\u2502\u001b[39m  \u001b[32m\u25cf\u001b[39m OpenCode Go \u001b[32m\u2713\u001b[39m\r\n\u001b[36m\u2502\u001b[39m  \u001b[2m\u25cb\u001b[22m \u001b[2mOpenCode Console\u001b[22m\r\n\u001b[36m\u2502\u001b[39m  \u001b[2m\u25cb\u001b[22m \u001b[2mOpenAI\u001b[22m\r\n\u001b[36m\u2502\u001b[39m  \u001b[2m\u25cb\u001b[22m \u001b[2mGitHub Copilot\u001b[22m\r\n\u001b[36m\u2502\u001b[39m  \u001b[2m\u25cb\u001b[22m \u001b[2mAnthropic\u001b[22m\r\n\u001b[36m\u2502\u001b[39m  \u001b[2m\u25cb\u001b[22m \u001b[2mGoogle\u001b[22m\r\n\u001b[36m\u2502\u001b[39m\r\n\u001b[36m\u2502\u001b[39m  \u001b[1mServices\u001b[22m\r\n\u001b[36m\u2502\u001b[39m  \u001b[2m\u25cb\u001b[22m \u001b[2m302.AI\u001b[22m\r\n\u001b[36m\u2502\u001b[39m  \u001b[2m\u25cb\u001b[22m \u001b[2mAbacus\u001b[22m"}
+{"t": 5.772, "data": "\r\n\u001b[36m\u2502\u001b[39m  \u001b[2m\u2026\u001b[22m\r\n\u001b[36m\u2502\u001b[39m  \u001b[2m\u2191/\u2193 to select \u2022 Enter: confirm \u2022 Type: to search\u001b[22m\r\n\u001b[36m\u2514\u001b[39m"}
+{"t": 6.181, "data": "\u001b[999D\u001b[17A\u001b[2B"}
+{"t": 6.181, "data": "\u001b[J"}
+{"t": 6.181, "data": "\u001b[36m\u2502\u001b[39m  \u001b[2mSearch:\u001b[22m O\u2588"}
+{"t": 6.181, "data": "\r\n"}
+{"t": 6.181, "data": "\u001b[36m\u2502\u001b[39m"}
+{"t": 6.181, "data": "\r\n"}
+{"t": 6.181, "data": "\u001b[36m\u2502\u001b[39m  \u001b[1mPopular\u001b[22m"}
+{"t": 6.181, "data": "\r\n"}
+{"t": 6.181, "data": "\u001b[36m\u2502\u001b[39m  \u001b[32m\u25cf\u001b[39m OpenCode Go \u001b[32m\u2713\u001b[39m"}
+{"t": 6.181, "data": "\r\n"}
+{"t": 6.181, "data": "\u001b[36m\u2502\u001b[39m  \u001b[2m\u25cb\u001b[22m \u001b[2mOpenCode Console\u001b[22m"}
+{"t": 6.181, "data": "\r\n"}
+{"t": 6.181, "data": "\u001b[36m\u2502\u001b[39m  \u001b[2m\u25cb\u001b[22m \u001b[2mOpenAI\u001b[22m"}
+{"t": 6.185, "data": "\r\n"}
+{"t": 6.185, "data": "\u001b[36m\u2502\u001b[39m  \u001b[2m\u25cb\u001b[22m \u001b[2mGitHub Copilot\u001b[22m"}
+{"t": 6.186, "data": "\r\n"}
+{"t": 6.186, "data": "\u001b[36m\u2502\u001b[39m  \u001b[2m\u25cb\u001b[22m \u001b[2mAnthropic\u001b[22m"}
+{"t": 6.188, "data": "\r\n\u001b[36m\u2502\u001b[39m  \u001b[2m\u25cb\u001b[22m \u001b[2mGoogle\u001b[22m\r\n\u001b[36m\u2502\u001b[39m\r\n\u001b[36m\u2502\u001b[39m  \u001b[1mServices\u001b[22m\r\n\u001b[36m\u2502\u001b[39m  \u001b[2m\u25cb\u001b[22m \u001b[2mabliteration.ai\u001b[22m\r\n\u001b[36m\u2502\u001b[39m  \u001b[2m\u25cb\u001b[22m \u001b[2mabove.dev\u001b[22m\r\n\u001b[36m\u2502\u001b[39m  \u001b[2m\u2026\u001b[22m\r\n\u001b[36m\u2502\u001b[39m  \u001b[2m\u2191/\u2193 to select \u2022 Enter: confirm \u2022 Type: to search\u001b[22m\r\n\u001b[36m\u2514\u001b[39m"}
+{"t": 6.198, "data": "\u001b[999D\u001b[17A\u001b[2B\u001b[J\u001b[36m\u2502\u001b[39m  \u001b[2mSearch:\u001b[22m Op\u2588\r\n\u001b[36m\u2502\u001b[39m\r\n\u001b[36m\u2502\u001b[39m  \u001b[1mPopular\u001b[22m\r\n\u001b[36m\u2502\u001b[39m  \u001b[32m\u25cf\u001b[39m OpenCode Go \u001b[32m\u2713\u001b[39m\r\n\u001b[36m\u2502\u001b[39m  \u001b[2m\u25cb\u001b[22m \u001b[2mOpenCode Console\u001b[22m\r\n\u001b[36m\u2502\u001b[39m  \u001b[2m\u25cb\u001b[22m \u001b[2mOpenAI\u001b[22m\r\n\u001b[36m\u2502\u001b[39m  \u001b[2m\u25cb\u001b[22m \u001b[2mGitHub Copilot\u001b[22m\r\n\u001b[36m\u2502\u001b[39m  \u001b[2m\u25cb\u001b[22m \u001b[2mAnthropic\u001b[22m\r\n\u001b[36m\u2502\u001b[39m  \u001b[2m\u25cb\u001b[22m \u001b[2mGoogle\u001b[22m\r\n\u001b[36m\u2502\u001b[39m\r\n\u001b[36m\u2502\u001b[39m  \u001b[1mServices\u001b[22m\r\n\u001b[36m\u2502\u001b[39m  \u001b[2m\u25cb\u001b[22m \u001b[2mHopper\u001b[22m\r\n\u001b[36m\u2502\u001b[39m  \u001b[2m\u25cb\u001b[22m \u001b[2mModelScope\u001b[22m\r\n\u001b[36m\u2502\u001b[39m  \u001b[2m\u2026\u001b[22m\r\n\u001b[36m\u2502\u001b[39m  \u001b[2m\u2191/\u2193 to select \u2022 Enter: confirm \u2022 Type: to search\u001b[22m\r\n\u001b[36m\u2514\u001b[39m"}
+{"t": 6.203, "data": "\u001b[999D\u001b[17A"}
+{"t": 6.207, "data": "\u001b[2B\u001b[J\u001b[36m\u2502\u001b[39m  \u001b[2mSearch:\u001b[22m Ope\u2588\r\n\u001b[36m\u2502\u001b[39m\r\n\u001b[36m\u2502\u001b[39m  \u001b[1mPopular\u001b[22m\r\n\u001b[36m\u2502\u001b[39m  \u001b[32m\u25cf\u001b[39m OpenCode Go \u001b[32m\u2713\u001b[39m\r\n\u001b[36m\u2502\u001b[39m  \u001b[2m\u25cb\u001b[22m \u001b[2mOpenCode Console\u001b[22m\r\n\u001b[36m\u2502\u001b[39m  \u001b[2m\u25cb\u001b[22m \u001b[2mOpenAI\u001b[22m\r\n\u001b[36m\u2502\u001b[39m\r\n\u001b[36m\u2502\u001b[39m  \u001b[1mServices\u001b[22m\r\n\u001b[36m\u2502\u001b[39m  \u001b[2m\u25cb\u001b[22m \u001b[2mModelScope\u001b[22m\r\n\u001b[36m\u2502\u001b[39m  \u001b[2m\u25cb\u001b[22m \u001b[2mOpenReason\u001b[22m\r\n\u001b[36m\u2502\u001b[39m  \u001b[2m\u25cb\u001b[22m \u001b[2mOpenRouter\u001b[22m\r\n"}
+{"t": 6.209, "data": "\u001b[36m\u2502\u001b[39m  \u001b[2m\u25cb\u001b[22m \u001b[2mXiaomi Token Plan (Europe)\u001b[22m\r\n\u001b[36m\u2502\u001b[39m  \u001b[2m\u2191/\u2193 to select \u2022 Enter: confirm \u2022 Type: to search\u001b[22m\r\n\u001b[36m\u2514\u001b[39m"}
+{"t": 6.217, "data": "\u001b[999D\u001b[15A"}
+{"t": 6.219, "data": "\u001b[2B"}
+{"t": 6.219, "data": "\u001b[J"}
+{"t": 6.219, "data": "\u001b[36m\u2502\u001b[39m  \u001b[2mSearch:\u001b[22m Open\u2588"}
+{"t": 6.219, "data": "\r\n"}
+{"t": 6.219, "data": "\u001b[36m\u2502\u001b[39m"}
+{"t": 6.219, "data": "\r\n"}
+{"t": 6.219, "data": "\u001b[36m\u2502\u001b[39m  \u001b[1mPopular\u001b[22m"}
+{"t": 6.219, "data": "\r\n"}
+{"t": 6.219, "data": "\u001b[36m\u2502\u001b[39m  \u001b[32m\u25cf\u001b[39m OpenCode Go \u001b[32m\u2713\u001b[39m"}
+{"t": 6.219, "data": "\r\n"}
+{"t": 6.219, "data": "\u001b[36m\u2502\u001b[39m  \u001b[2m\u25cb\u001b[22m \u001b[2mOpenCode Console\u001b[22m"}
+{"t": 6.219, "data": "\r\n"}
+{"t": 6.219, "data": "\u001b[36m\u2502\u001b[39m  \u001b[2m\u25cb\u001b[22m \u001b[2mOpenAI\u001b[22m"}
+{"t": 6.219, "data": "\r\n"}
+{"t": 6.219, "data": "\u001b[36m\u2502\u001b[39m"}
+{"t": 6.219, "data": "\r\n"}
+{"t": 6.219, "data": "\u001b[36m\u2502\u001b[39m  \u001b[1mServices\u001b[22m"}
+{"t": 6.219, "data": "\r\n"}
+{"t": 6.219, "data": "\u001b[36m\u2502\u001b[39m  \u001b[2m\u25cb\u001b[22m \u001b[2mOpenReason\u001b[22m"}
+{"t": 6.222, "data": "\r\n"}
+{"t": 6.222, "data": "\u001b[36m\u2502\u001b[39m  \u001b[2m\u25cb\u001b[22m \u001b[2mOpenRouter\u001b[22m"}
+{"t": 6.222, "data": "\r\n"}
+{"t": 6.222, "data": "\u001b[36m\u2502\u001b[39m  \u001b[2m\u2191/\u2193 to select \u2022 Enter: confirm \u2022 Type: to search\u001b[22m"}
+{"t": 6.222, "data": "\r\n"}
+{"t": 6.222, "data": "\u001b[36m\u2514\u001b[39m"}
+{"t": 6.233, "data": "\u001b[999D\u001b[13A"}
+{"t": 6.235, "data": "\u001b[2B"}
+{"t": 6.241, "data": "\u001b[J\u001b[36m\u2502\u001b[39m  \u001b[2mSearch:\u001b[22m OpenC\u2588\r\n\u001b[36m\u2502\u001b[39m\r\n\u001b[36m\u2502\u001b[39m  \u001b[1mPopular\u001b[22m\r\n\u001b[36m\u2502\u001b[39m  \u001b[32m\u25cf\u001b[39m OpenCode Go \u001b[32m\u2713\u001b[39m\r\n\u001b[36m\u2502\u001b[39m  \u001b[2m\u25cb\u001b[22m \u001b[2mOpenCode Console\u001b[22m\r\n\u001b[36m\u2502\u001b[39m  \u001b[2m\u2191/\u2193 to select \u2022 Enter: confirm \u2022 Type: to search\u001b[22m\r\n\u001b[36m\u2514\u001b[39m"}
+{"t": 6.241, "data": "\u001b[999D\u001b[8A"}
+{"t": 6.241, "data": "\u001b[2B"}
+{"t": 6.242, "data": "\u001b[2K\u001b[G"}
+{"t": 6.242, "data": "\u001b[36m\u2502\u001b[39m  \u001b[2mSearch:\u001b[22m OpenCo\u2588"}
+{"t": 6.244, "data": "\u001b[6B"}
+{"t": 6.255, "data": "\u001b[999D\u001b[8A\u001b[2B\u001b[2K\u001b[G\u001b[36m\u2502\u001b[39m  \u001b[2mSearch:\u001b[22m OpenCod\u2588\u001b[6B"}
+{"t": 6.257, "data": "\u001b[999D\u001b[8A\u001b[2B\u001b[2K\u001b[G\u001b[36m\u2502\u001b[39m  \u001b[2mSearch:\u001b[22m OpenCode\u2588\u001b[6B"}
+{"t": 6.259, "data": "\u001b[999D\u001b[8A\u001b[2B\u001b[2K\u001b[G\u001b[36m\u2502\u001b[39m  \u001b[2mSearch:\u001b[22m OpenCode \u2588\u001b[6B\u001b[999D\u001b[8A"}
+{"t": 6.261, "data": "\u001b[2B\u001b[J\u001b[36m\u2502\u001b[39m  \u001b[2mSearch:\u001b[22m OpenCode C\u2588\r\n\u001b[36m\u2502\u001b[39m\r\n\u001b[36m\u2502\u001b[39m  \u001b[1mPopular\u001b[22m\r\n\u001b[36m\u2502\u001b[39m  \u001b[32m\u25cf\u001b[39m OpenCode Console\r\n\u001b[36m\u2502\u001b[39m  \u001b[2m\u2191/\u2193 to select \u2022 Enter: confirm \u2022 Type: to search\u001b[22m\r\n\u001b[36m\u2514\u001b[39m"}
+{"t": 6.263, "data": "\u001b[999D\u001b[7A"}
+{"t": 6.265, "data": "\u001b[2B\u001b[2K\u001b[G\u001b[36m\u2502\u001b[39m  \u001b[2mSearch:\u001b[22m OpenCode Co\u2588\u001b[5B\u001b[999D\u001b[7A"}
+{"t": 6.266, "data": "\u001b[2B"}
+{"t": 6.266, "data": "\u001b[2K\u001b[G"}
+{"t": 6.266, "data": "\u001b[36m\u2502\u001b[39m  \u001b[2mSearch:\u001b[22m OpenCode Con\u2588"}
+{"t": 6.266, "data": "\u001b[5B"}
+{"t": 6.267, "data": "\u001b[999D\u001b[7A"}
+{"t": 6.267, "data": "\u001b[2B"}
+{"t": 6.268, "data": "\u001b[2K\u001b[G"}
+{"t": 6.268, "data": "\u001b[36m\u2502\u001b[39m  \u001b[2mSearch:\u001b[22m OpenCode Cons\u2588"}
+{"t": 6.268, "data": "\u001b[5B"}
+{"t": 6.269, "data": "\u001b[999D\u001b[7A"}
+{"t": 6.27, "data": "\u001b[2B"}
+{"t": 6.27, "data": "\u001b[2K\u001b[G"}
+{"t": 6.27, "data": "\u001b[36m\u2502\u001b[39m  \u001b[2mSearch:\u001b[22m OpenCode Conso\u2588"}
+{"t": 6.27, "data": "\u001b[5B"}
+{"t": 6.272, "data": "\u001b[999D\u001b[7A\u001b[2B\u001b[2K\u001b[G\u001b[36m\u2502\u001b[39m  \u001b[2mSearch:\u001b[22m OpenCode Consol\u2588\u001b[5B"}
+{"t": 6.277, "data": "\u001b[999D\u001b[7A"}
+{"t": 6.278, "data": "\u001b[2B"}
+{"t": 6.278, "data": "\u001b[2K\u001b[G"}
+{"t": 6.278, "data": "\u001b[36m\u2502\u001b[39m  \u001b[2mSearch:\u001b[22m OpenCode Console\u2588"}
+{"t": 6.278, "data": "\u001b[5B"}
+{"t": 6.951, "data": "\u001b[999D\u001b[7A\u001b[1B\u001b[J\u001b[32m\u25c7\u001b[39m  Select integration\r\n\u001b[90m\u2502\u001b[39m  \u001b[2mOpenCode Console\u001b[22m\r\n\u001b[?25h"}
+{"t": 6.958, "data": "\u001b[?25l"}
+{"t": 6.958, "data": "\u001b[90m\u2502\u001b[39m"}
+{"t": 6.958, "data": "\r\n"}
+{"t": 6.958, "data": "\u001b[36m\u25c6\u001b[39m  Select login method"}
+{"t": 6.958, "data": "\r\n"}
+{"t": 6.958, "data": "\u001b[36m\u2502\u001b[39m  \u001b[32m\u25cf\u001b[39m OpenCode Console account"}
+{"t": 6.958, "data": "\r\n"}
+{"t": 6.958, "data": "\u001b[36m\u2502\u001b[39m  \u001b[2m\u25cb\u001b[22m \u001b[2mAPI key (service account)\u001b[22m"}
+{"t": 6.958, "data": "\r\n"}
+{"t": 6.958, "data": "\u001b[36m\u2514\u001b[39m"}
+{"t": 6.958, "data": "\r\n"}
+{"t": 18.292, "data": "\u001b[999D\u001b[5A"}
+{"t": 18.292, "data": "\u001b[1B"}
+{"t": 18.292, "data": "\u001b[J"}
+{"t": 18.292, "data": "\u001b[32m\u25c7\u001b[39m  Select login method"}
+{"t": 18.293, "data": "\r\n\u001b[90m\u2502\u001b[39m  \u001b[2mOpenCode Console account\u001b[22m\r\n"}
+{"t": 18.295, "data": "\u001b[?25h"}
+{"t": 18.298, "data": "\u001b[?25l\u001b[90m\u2502\u001b[39m\r\n"}
+{"t": 18.378, "data": "\u001b[35m\u25d2\u001b[39m  Starting authorization"}
+{"t": 18.458, "data": "\u001b[999D\u001b[J\u001b[35m\u25d0\u001b[39m  Starting authorization"}
+{"t": 18.531, "data": "\u001b[999D\u001b[J\u001b[32m\u25c7\u001b[39m  Authorization started\r\n"}
+{"t": 18.531, "data": "\u001b[?25h"}
+{"t": 18.532, "data": "\u001b[90m\u2502\u001b[39m\r\n\u001b[34m\u25cf\u001b[39m  Enter code: ABCD-EFGH\r\n"}
+{"t": 18.532, "data": "\u001b[90m\u2502\u001b[39m\r\n\u001b[34m\u25cf\u001b[39m  https://opencode.ai/console/device?user_code=ABCD-EFGH&client_id=opencode-cli\r\n"}
+{"t": 18.541, "data": "\u001b[90m\u2502\u001b[39m\r\n\u001b[32m\u25c7\u001b[39m  Waiting for authorization...\r\n"}

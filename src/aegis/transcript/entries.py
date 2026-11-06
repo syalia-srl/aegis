@@ -1595,7 +1595,7 @@ class Fold:
             error = ""
             if ev.is_error and not interrupted:
                 error = (
-                    "Claude sign-in failed"
+                    "Sign-in failed"
                     if ev.auth_failed
                     else f"turn failed ({ev.subtype or 'error'})"
                 )

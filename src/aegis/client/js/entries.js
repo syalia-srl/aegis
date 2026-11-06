@@ -531,12 +531,14 @@ function fillSignIn(card, e) {
   if (live) acts.append(act("Cancel", "signin.cancel", {}));
   if (step === "starting") body.append(el("div", "prompt", `Starting the ${label} login…`));
   if (step === "paste" || step === "open_url" || step === "device_code") {
-    const open = el("a", "btn primary", "Open sign-in page");
-    Object.assign(open, { href: d.url || "#", target: "_blank", rel: "noopener noreferrer" });
     const steps = el("ol", "steps");
-    const li = el("li", null, "");
-    li.append(open);
-    steps.append(li);
+    if (d.url) {
+      const open = el("a", "btn primary", "Open sign-in page");
+      Object.assign(open, { href: d.url, target: "_blank", rel: "noopener noreferrer" });
+      const li = el("li", null, "");
+      li.append(open);
+      steps.append(li);
+    }
     if (step === "device_code" && d.code) {
       const c = el("li", null, "Enter this code there: ");
       c.append(el("code", null, d.code));
@@ -544,10 +546,10 @@ function fillSignIn(card, e) {
     }
     body.append(steps);
     if (step === "paste") {
-      steps.append(el("li", null, "Approve, then paste the code the page shows."));
+      steps.append(el("li", null, d.prompt || "Approve, then paste the code the page shows."));
       const form = el("form", "sform");
       const input = el("input");
-      Object.assign(input, { type: "password", autocomplete: "off", placeholder: "code from the page", required: true });
+      Object.assign(input, { type: "password", autocomplete: "off", placeholder: d.url ? "code from the page" : "paste here", required: true });
       input.setAttribute("aria-label", "sign-in code");
       input.dataset.lpignore = "true";
       const go = el("button", "btn primary", "Sign in");

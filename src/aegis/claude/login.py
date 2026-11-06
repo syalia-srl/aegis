@@ -44,7 +44,6 @@ LIFE_S = 365 * 86400
 WARN_S = 14 * 86400
 PROBE_TIMEOUT_S = 60.0
 PROBE_MODEL = "haiku"
-FAILED_LINE = "Claude sign-in failed"
 
 
 def token_path() -> Path:

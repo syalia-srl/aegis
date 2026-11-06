@@ -286,7 +286,9 @@ class Parser:
             self.turn_start = obj["created"]
         return []
 
-    def _end(self, d: dict, obj: dict, error: str | None) -> list[Event]:
+    def _end(
+        self, d: dict, obj: dict, error: str | None, auth_failed: bool = False
+    ) -> list[Event]:
         ok, parent = self._belongs(d)
         if not ok or parent is not None:
             return []
@@ -304,6 +306,7 @@ class Parser:
             stop_reason=None,
             context_window=None,
             error_text=error,
+            auth_failed=auth_failed,
         )
         self.end_turn()
         return [result]
@@ -312,7 +315,11 @@ class Parser:
         return self._end(d, obj, None)
 
     def _session_execution_failed(self, d: dict, obj: dict) -> list[Event]:
-        return self._end(d, obj, _error(d.get("error")))
+        err = _dict(d.get("error"))
+        # The provider refused the credential (a wrong or revoked key): the
+        # sign-in card can renew it (signin/core.py, #946).
+        auth = err.get("type") == "provider.auth" or err.get("status") == 401
+        return self._end(d, obj, _error(err), auth_failed=auth)
 
     def _session_execution_interrupted(self, d: dict, obj: dict) -> list[Event]:
         return self._end(d, obj, "interrupted")

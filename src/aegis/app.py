@@ -45,6 +45,7 @@ import contextlib
 import dataclasses
 import getpass
 import json
+import tempfile
 import logging
 import os
 import pwd
@@ -585,7 +586,7 @@ class App:
             self.terminals,
             self._sign_in_recipes,
             lambda text, s: self.toast(text, "error", source=s),
-            {"claude-code": self._check_claude_token},
+            {"claude-code": self._check_claude_token, "opencode": self._check_opencode},
         )
         self.journal = Journal(
             roots.state_root,
@@ -745,11 +746,16 @@ class App:
         )
 
     def _sign_in_recipes(self) -> dict:
-        """The login recipes (signin/recipes.py), Claude's run with the server's
-        Claude Code binary."""
+        """The login recipes (signin/recipes.py), each run with the server's
+        own binary of its harness."""
         recipes = load_recipes()
-        if (c := recipes.get("claude-code")) is not None and c.cmd[0] == "claude":
-            c.cmd = [self.claude_bin, *c.cmd[1:]]
+        bins = {
+            "claude-code": ("claude", self.claude_bin),
+            "opencode": ("opencode", self.opencode_bin),
+        }
+        for harness, (name, binary) in bins.items():
+            if (r := recipes.get(harness)) is not None and r.cmd[0] == name:
+                r.cmd = [binary, *r.cmd[1:]]
         return recipes
 
     async def _check_claude_token(self, found: dict) -> str | None:
@@ -761,6 +767,59 @@ class App:
         if why := await claude_login.probe(self.claude_bin, token):
             return f"Claude Code refused it: {why}"
         await asyncio.to_thread(claude_login.write_token, token)
+        return None
+
+    async def _check_opencode(self, found: dict) -> str | None:
+        """OpenCode stores a key without trying it: one short standalone turn
+        (never the shared service, #897) on the first OpenCode agent's model
+        says whether the provider takes it. With no such agent, nothing to try."""
+        model = next(
+            (
+                a.model
+                for a in self.config.current().agents
+                if a.harness == "opencode" and a.model
+            ),
+            None,
+        )
+        if model is None:
+            return None
+        argv = [
+            self.opencode_bin,
+            "run",
+            "--standalone",
+            "-m",
+            model,
+            "--format",
+            "json",
+            "Reply with ok",
+        ]
+        with tempfile.TemporaryDirectory(prefix="aegis-opencode-probe-") as scratch:
+            try:
+                proc = await launch.child(
+                    argv, user=None, via=launch.resolve_via(), cwd=scratch,
+                    env=None, stdin=asyncio.subprocess.DEVNULL,
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+                )  # fmt: skip
+            except OSError as e:
+                return f"could not run {self.opencode_bin}: {e.strerror}"
+            try:
+                out, _ = await asyncio.wait_for(proc.communicate(), 90)
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.wait()
+                return "OpenCode did not answer in 90s"
+        for line in out.decode("utf-8", "replace").splitlines():
+            try:
+                ev = json.loads(line)
+            except ValueError:
+                continue
+            err = ev.get("error") if isinstance(ev, dict) else None
+            if isinstance(err, dict) and (
+                err.get("type") == "provider.auth" or err.get("status") == 401
+            ):
+                return (
+                    f"OpenCode refused it: {err.get('message') or 'invalid credential'}"
+                )
         return None
 
     def trust_refusal(self, principal: Principal, server: str) -> str | None:
