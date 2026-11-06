@@ -128,7 +128,7 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)} pre .s{color:var(--ok)}
 <div class="chrome">
   <span>aegis</span>
   <span class="tab">spec · one ACP driver for every ACP agent</span>
-  <span class="st"><span class="pill acc">proposed</span><span class="pill">2026-11-05</span><span class="pill">#939 · #721</span></span>
+  <span class="st"><span class="pill acc">approved</span><span class="pill">2026-11-05</span><span class="pill">#939 · #721</span></span>
 </div>
 
 <div class="wrap">
@@ -150,7 +150,7 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)} pre .s{color:var(--ok)}
 
 <main>
 <h1>One ACP driver for every ACP agent, with Cursor as its first profile</h1>
-<div class="meta"><span>docs/superpowers/specs/2026-11-05-generic-acp-harness-design.html</span><span>·</span><span>proposed</span><span>·</span><span>issue #939, under #721</span></div>
+<div class="meta"><span>docs/superpowers/specs/2026-11-05-generic-acp-harness-design.html</span><span>·</span><span>approved 2026-11-05</span><span>·</span><span>issue #939, under #721</span></div>
 <p class="lede">aegis already drives Cursor over the Agent Client Protocol, but that code knows only Cursor. This spec moves it into a generic driver and describes each ACP agent as a profile: a command line, a label and a handful of measured quirks. Kiro, Kimi Code and Copilot CLI then become a profile each, and any agent in the ACP registry can be declared in <code>.aegis.yaml</code> without a code change.</p>
 
 <h2 id="delivers"><span class="n">01</span>What this delivers</h2>
@@ -167,21 +167,21 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)} pre .s{color:var(--ok)}
 </ul>
 
 <h2 id="decisions"><span class="n">02</span>Decisions</h2>
-<p><span class="who">maintainer</span> marks a decision the maintainer made. <span class="who q">proposed</span> marks one this spec proposes and nobody has ruled on yet.</p>
+<p><span class="who">maintainer</span> marks a decision the maintainer made or approved in review.</p>
 <table class="tbl">
 <thead><tr><th>Question</th><th>Decision</th><th>Why</th></tr></thead>
 <tbody>
 <tr><td>Order of work</td><td>The generic driver first; which CLIs get a profile is decided after</td><td class="why"><span class="who">maintainer</span> Every candidate except Muse Code speaks ACP, so one driver serves them all.</td></tr>
 <tr><td>Antigravity</td><td>Not among the first profiles (#116 stays open)</td><td class="why"><span class="who">maintainer</span> Google restricts it by the country of the Google account, which a VPN does not change.</td></tr>
-<tr><td>Where the driver comes from</td><td>Cursor's driver moves to <code>aegis/acp/</code>; Cursor becomes its first profile</td><td class="why"><span class="who q">proposed</span> The JSON-RPC loop, permission answers, mid-turn queue and resume already work and are tested. Cursor's tests and fixture then guard the move.</td></tr>
-<tr><td>What a profile is</td><td>Data: a frozen dataclass. No subclass per agent</td><td class="why"><span class="who q">proposed</span> The differences measured so far are values (an argv, a mode map, whether cancel exists). A declared profile has to be data anyway.</td></tr>
-<tr><td>Naming</td><td>Each profile is its own harness name: <code>kiro</code>, <code>kimi</code>, a declared <code>goose</code></td><td class="why"><span class="who q">proposed</span> The transcript's <code>src</code> tag, the version range, the doctor row and the agent's <code>harness:</code> are all keyed by harness name already.</td></tr>
-<tr><td>Installing agents</td><td>aegis downloads nothing and reads the registry at no point while running</td><td class="why"><span class="who q">proposed</span> aegis installs no harness today (harness_versions.py prints an install command). Antigravity's archive alone is 322 MB.</td></tr>
-<tr><td>aegis's tools</td><td>Passed as an HTTP entry in <code>mcpServers</code>; a start fails with a clear line when <code>initialize</code> says <code>mcpCapabilities.http</code> is false</td><td class="why"><span class="who q">proposed</span> That is what Cursor does. An agent without tools is not an aegis session; a stdio bridge waits until a profile needs one.</td></tr>
-<tr><td>Permission requests</td><td>Cursor's rule for every profile: <code>allow_once</code> by permission level, never <code>allow_always</code></td><td class="why"><span class="who q">proposed</span> <code>allow_always</code> outlives the session in the agent's own config.</td></tr>
-<tr><td>Client identity</td><td><code>clientInfo.name</code> is always <code>aegis</code></td><td class="why"><span class="who q">proposed</span> Antigravity offers some models only to allowlisted clients. Another ACP client sends <code>zed</code> to get them; aegis does not pose as another product.</td></tr>
-<tr><td>Usage and quota</td><td>Not in this spec</td><td class="why"><span class="who q">proposed</span> ACP v1 carries no token counts (measured on Cursor). Vendor quota readers come per profile, later.</td></tr>
-<tr><td>When a built-in profile ships</td><td>Only with a fixture recorded from the real agent</td><td class="why"><span class="who q">proposed</span> Every quirk in Cursor's driver was found by measuring, none by reading docs.</td></tr>
+<tr><td>Where the driver comes from</td><td>Cursor's driver moves to <code>aegis/acp/</code>; Cursor becomes its first profile</td><td class="why"><span class="who">maintainer</span> The JSON-RPC loop, permission answers, mid-turn queue and resume already work and are tested. Cursor's tests and fixture then guard the move.</td></tr>
+<tr><td>What a profile is</td><td>Data: a frozen dataclass. No subclass per agent</td><td class="why"><span class="who">maintainer</span> The differences measured so far are values (an argv, a mode map, whether cancel exists). A declared profile has to be data anyway.</td></tr>
+<tr><td>Naming</td><td>Each profile is its own harness name: <code>kiro</code>, <code>kimi</code>, a declared <code>goose</code></td><td class="why"><span class="who">maintainer</span> The transcript's <code>src</code> tag, the version range, the doctor row and the agent's <code>harness:</code> are all keyed by harness name already.</td></tr>
+<tr><td>Installing agents</td><td>aegis downloads nothing and reads the registry at no point while running</td><td class="why"><span class="who">maintainer</span> aegis installs no harness today (harness_versions.py prints an install command). Antigravity's archive alone is 322 MB.</td></tr>
+<tr><td>aegis's tools</td><td>Passed as an HTTP entry in <code>mcpServers</code>; a start fails with a clear line when <code>initialize</code> says <code>mcpCapabilities.http</code> is false</td><td class="why"><span class="who">maintainer</span> That is what Cursor does. An agent without tools is not an aegis session; a stdio bridge waits until a profile needs one.</td></tr>
+<tr><td>Permission requests</td><td>Cursor's rule for every profile: <code>allow_once</code> by permission level, never <code>allow_always</code></td><td class="why"><span class="who">maintainer</span> <code>allow_always</code> outlives the session in the agent's own config.</td></tr>
+<tr><td>Client identity</td><td><code>clientInfo.name</code> is always <code>aegis</code></td><td class="why"><span class="who">maintainer</span> Antigravity offers some models only to allowlisted clients. Another ACP client sends <code>zed</code> to get them; aegis does not pose as another product.</td></tr>
+<tr><td>Usage and quota</td><td>Not in this spec</td><td class="why"><span class="who">maintainer</span> ACP v1 carries no token counts (measured on Cursor). Vendor quota readers come per profile, later.</td></tr>
+<tr><td>When a built-in profile ships</td><td>Only with a fixture recorded from the real agent</td><td class="why"><span class="who">maintainer</span> Every quirk in Cursor's driver was found by measuring, none by reading docs.</td></tr>
 </tbody>
 </table>
 
