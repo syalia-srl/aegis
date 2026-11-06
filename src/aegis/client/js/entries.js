@@ -528,7 +528,7 @@ function fillSignIn(card, e) {
     show.href = `#t=${d.term_id}`;
     acts.append(show);
   }
-  if (live) acts.append(act("Cancel", "sign_in.cancel", {}));
+  if (live) acts.append(act("Cancel", "signin.cancel", {}));
   if (step === "starting") body.append(el("div", "prompt", `Starting the ${label} login…`));
   if (step === "paste" || step === "open_url" || step === "device_code") {
     const open = el("a", "btn primary", "Open sign-in page");
@@ -559,7 +559,7 @@ function fillSignIn(card, e) {
         const value = input.value;
         input.value = "";
         try {
-          await secretCall("sign_in.answer", { id: e.id, secret: value });
+          await secretCall("signin.answer", { id: e.id, secret: value });
         } catch (err) {
           go.disabled = false;
           fail(err);
@@ -572,7 +572,7 @@ function fillSignIn(card, e) {
   if (step === "choose") {
     body.append(el("div", "prompt", d.prompt || "Pick one:"));
     const row = el("div", "sform");
-    for (const o of d.options || []) row.append(act(o, "sign_in.choose", { option: o }));
+    for (const o of d.options || []) row.append(act(o, "signin.choose", { option: o }));
     body.append(row);
   }
   if (step === "checking") body.append(el("div", "prompt", "Checking the sign-in…"));
@@ -589,7 +589,7 @@ function fillSignIn(card, e) {
     again.onclick = async () => {
       again.disabled = true;
       try {
-        await secretCall("sign_in.start", { harness: d.harness });
+        await secretCall("signin.start", { harness: d.harness });
       } catch (err) {
         again.disabled = false;
         fail(err);

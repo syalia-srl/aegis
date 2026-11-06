@@ -283,7 +283,7 @@ def register_secret_ops(app: App) -> ss.SecretStore:
             raise OpError("off", "this server runs no sign-ins")
         return reg.sign_in
 
-    @r.op("sign_in.answer", SecretProvide, owned="log_id")
+    @r.op("signin.answer", SecretProvide, owned="log_id")
     async def sign_in_answer(p: SecretProvide, caller):
         """Type the code the sign-in page gave into the waiting login."""
         reg.open(p.log_id)
@@ -293,7 +293,7 @@ def register_secret_ops(app: App) -> ss.SecretStore:
             raise OpError("refused", str(e)) from None
         return "ok"
 
-    @r.op("sign_in.choose", SignInChoose, owned="log_id")
+    @r.op("signin.choose", SignInChoose, owned="log_id")
     async def sign_in_choose(p: SignInChoose, caller):
         """Pick one of the login's offered options."""
         reg.open(p.log_id)
@@ -303,7 +303,7 @@ def register_secret_ops(app: App) -> ss.SecretStore:
             raise OpError("refused", str(e)) from None
         return "ok"
 
-    @r.op("sign_in.cancel", SecretRef, owned="log_id")
+    @r.op("signin.cancel", SecretRef, owned="log_id")
     async def sign_in_cancel(p: SecretRef, caller):
         """Stop the login; the sessions keep waiting."""
         reg.open(p.log_id)
@@ -313,7 +313,7 @@ def register_secret_ops(app: App) -> ss.SecretStore:
             raise OpError("refused", str(e)) from None
         return "ok"
 
-    @r.op("sign_in.start", SignInStart, owned="log_id")
+    @r.op("signin.start", SignInStart, owned="log_id")
     async def sign_in_start(p: SignInStart, caller):
         """Open a sign-in card in this session's transcript, or name the one open."""
         s = reg.open(p.log_id)
