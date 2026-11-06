@@ -8,13 +8,10 @@ there is no race. aegis keeps one in ``token_path()`` and gives it to every
 Claude Code process it starts as the server's own user, as
 ``CLAUDE_CODE_OAUTH_TOKEN``, which Claude Code ranks above the stored sign-in.
 
-When a turn fails to sign in (``stream.Result.auth_failed``), ``SignIn`` puts
-one card in that session's transcript: the steps to get a token and a field
-for it. Other sessions that fail while it is open join its list. The token the
-person pastes is checked for its shape, then by one ``claude -p`` request in a
-scratch config directory, written here at mode 0600, and every session on the
-list restarts and is told to go on. aegis never runs any step of the OAuth
-flow itself: the person runs ``claude setup-token``, which is Anthropic's.
+When a turn fails to sign in (``stream.Result.auth_failed``), ``SignIns``
+(signin/core.py) runs ``claude setup-token`` for the person, checks the token it
+prints with ``probe`` and keeps it with ``write_token``. aegis never runs any
+step of the OAuth flow itself: ``claude setup-token`` is Anthropic's.
 
 Spec: docs/superpowers/specs/2026-10-23-claude-token-login-design.html.
 """
@@ -26,18 +23,16 @@ import json
 import logging
 import os
 import re
-import secrets
 import stat
 import tempfile
-import time
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .. import launch
 
 if TYPE_CHECKING:
-    from ..session import Session
+    pass
 
 log = logging.getLogger("aegis.claude.login")
 
@@ -205,77 +200,3 @@ async def probe(
     if res.get("is_error"):
         return str(res.get("result") or "Claude Code could not sign in")
     return None
-
-
-class SignIn:
-    """One open card at a time, and the sessions waiting on it.
-
-    ``sessions`` maps a log id to its session; ``binary`` is Claude Code's;
-    ``toast`` shows the person a line. All state is in memory: after a server
-    restart the card still takes a token, and only the list is empty."""
-
-    def __init__(
-        self,
-        sessions: Mapping[str, "Session"],
-        binary: Callable[[], str],
-        toast: Callable[[str, "Session"], object],
-    ) -> None:
-        self._sessions = sessions
-        self._binary = binary
-        self._toast = toast
-        self.card: tuple[str, str] | None = None  # (log id, card id)
-        self.waiting: list[str] = []
-
-    def failed(self, s: "Session") -> None:
-        """A turn of ``s`` failed to sign in. Members' sessions sign in with
-        their own account, which this server's token must not replace."""
-        if s.spec.linux_user is not None or s.log_id in self.waiting:
-            return
-        self.waiting.append(s.log_id)
-        if self.card is None or self.card[0] not in self._sessions:
-            self.card = (s.log_id, f"login-{secrets.token_hex(4)}")
-            self._toast(f"{FAILED_LINE}: {s.handle} needs a new token", s)
-        holder = self._sessions[self.card[0]]
-        holder.record_card(
-            {
-                "kind": "claude_login",
-                "card_id": self.card[1],
-                "handles": [
-                    self._sessions[k].handle
-                    for k in self.waiting
-                    if k in self._sessions
-                ],
-                "path": str(token_path()),
-            }
-        )
-
-    async def provide(self, holder: "Session", card_id: str, token: str) -> dict:
-        """Check ``token``, keep it, restart the waiting sessions. Raises
-        ``ValueError`` with the person's words when it is refused."""
-        token = token.strip()
-        if why := shape_error(token):
-            raise ValueError(why)
-        if why := await probe(self._binary(), token):
-            raise ValueError(f"Claude Code refused it: {why}")
-        await asyncio.to_thread(write_token, token)
-        waiting, self.waiting = self.waiting, []
-        if self.card is not None and self.card[1] == card_id:
-            self.card = None
-        restarted = []
-        for key in waiting:
-            s = self._sessions.get(key)
-            if s is None or s.archived:
-                continue
-            try:
-                await s.restart()
-                await s.deliver(
-                    f"> from aegis:login · renewed · {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}",
-                    "The Claude sign-in was renewed. Continue where you stopped.",
-                )
-                restarted.append(s.handle)
-            except Exception as e:  # one session must not keep the others down
-                log.warning("%s: restart after a new sign-in failed: %s", s.handle, e)
-        holder.record_card(
-            {"kind": "claude_login_done", "card_id": card_id, "restarted": restarted}
-        )
-        return {"restarted": restarted}

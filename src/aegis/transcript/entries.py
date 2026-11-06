@@ -1060,6 +1060,32 @@ class Fold:
             return self._upsert(
                 {**e, "status": "renewed", "summary": "renewed", "detail": det}
             )
+        if kind == "sign_in":
+            # A harness sign-in card (signin/core.py): each record is the whole
+            # card at its current step, upserted by its id.
+            cid = str(rec.get("card_id"))
+            prev = self._entries.get(cid)
+            det = {k: v for k, v in rec.items() if k not in ("kind", "ts")}
+            det.setdefault("restarted", prev["detail"].get("restarted") if prev else None)
+            step = str(rec.get("step"))
+            return self._upsert(
+                _entry(
+                    cid,
+                    "sign_in",
+                    step,
+                    prev["ts"] if prev else ts,
+                    d.ERROR_GLYPH,
+                    title=f"{rec.get('label') or rec.get('harness')} sign-in",
+                    summary=step,
+                    detail=det,
+                )
+            )
+        if kind == "sign_in_done":
+            e = self._entries.get(str(rec.get("card_id")))
+            if e is None:
+                return []
+            det = {**e["detail"], "restarted": list(rec.get("restarted") or [])}
+            return self._upsert({**e, "detail": det})
         if kind in ("secret_gone", "secret_provided"):
             e = self._entries.get(str(rec.get("secret_id")))
             if e is None:

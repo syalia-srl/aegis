@@ -83,6 +83,9 @@ class Terminal:
         self._writing = False
         self._waiter: asyncio.Task | None = None
         self._starting = asyncio.Lock()
+        # Sees each chunk of output first and returns what may be kept and
+        # shown: a sign-in's masks tokens (#946). feed(text) -> str, flush() -> str.
+        self.tap = None
 
     @property
     def id(self) -> str:
@@ -258,7 +261,10 @@ class Terminal:
 
     def _take(self, data: bytes) -> None:
         self.bytes_read += len(data)
-        if text := self._decoder.decode(data):
+        text = self._decoder.decode(data)
+        if text and self.tap is not None:
+            text = self.tap.feed(text)
+        if text:
             self._pending.append({"rev": self.store.output(text), "o": text})
 
     def _schedule(self) -> None:
@@ -332,7 +338,10 @@ class Terminal:
         if self._tick is not None:
             self._tick.cancel()
             self._tick = None
-        if rest := self._decoder.decode(b"", final=True):
+        rest = self._decoder.decode(b"", final=True)
+        if self.tap is not None:
+            rest = (self.tap.feed(rest) if rest else "") + self.tap.flush()
+        if rest:
             self._pending.append({"rev": self.store.output(rest), "o": rest})
         self.store.marker(f"exit {code}")
         self._flush()

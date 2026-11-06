@@ -24,7 +24,11 @@ class Masker:
     def _hold_from(self, text: str) -> int:
         """Where the tail that could still grow into a token starts, or len(text)."""
         i = text.rfind("sk-")
-        if i >= 0 and len(text) - i <= _CARRY_MAX and all(_TOKEN_CHAR.match(c) for c in text[i:]):
+        if (
+            i >= 0
+            and len(text) - i <= _CARRY_MAX
+            and all(_TOKEN_CHAR.match(c) for c in text[i:])
+        ):
             return i
         for end in ("sk", "s"):
             if text.endswith(end):
