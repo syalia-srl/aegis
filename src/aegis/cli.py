@@ -358,6 +358,7 @@ def _bins(claude: str, opencode: str, codex: str, cursor: str) -> dict[str, str]
         "opencode": opencode,
         "codex": codex,
         "cursor": cursor,
+        "pi": "pi",
     }
 
 

@@ -1210,6 +1210,7 @@ class App:
             "opencode": self.opencode_bin,
             "codex": self.codex_bin,
             "cursor": self.cursor_bin,
+            "pi": "pi",
         }.get(harness, self.claude_bin)
 
     async def boot(self) -> None:

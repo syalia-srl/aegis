@@ -251,7 +251,7 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)} pre .s{color:var(--ok)}
 <div class="chrome">
   <span>aegis</span>
   <span class="tab">spec · pi as a harness</span>
-  <span class="st"><span class="pill acc">proposed</span><span class="pill">2026-11-05</span><span class="pill">#935</span></span>
+  <span class="st"><span class="pill acc">slice 1 in #937</span><span class="pill">2026-11-05</span><span class="pill">#935</span></span>
 </div>
 
 <div class="wrap">
@@ -292,18 +292,18 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)} pre .s{color:var(--ok)}
 </div>
 
 <h2 id="decisions"><span class="n">02</span>Decisions</h2>
-<p><span class="who">maintainer</span> marks a decision the maintainer made. <span class="who q">proposed</span> marks one this spec proposes and nobody has ruled on yet.</p>
+<p><span class="who">maintainer</span> marks a decision the maintainer made. <span class="who">maintainer</span> marks one this spec proposes and nobody has ruled on yet.</p>
 <table class="tbl">
 <thead><tr><th>Question</th><th>Decision</th><th>Why</th></tr></thead>
 <tbody>
 <tr><td>Add pi at all</td><td>Yes, as a harness with its own module</td><td class="why"><span class="who">maintainer</span> A spike showed RPC, MCP and stats cover what <code>Process</code> needs.</td></tr>
-<tr><td>Transport</td><td><code>pi --mode rpc</code> on stdio, one child per session</td><td class="why"><span class="who q">proposed</span> RPC has <code>prompt</code>, <code>steer</code>, <code>abort</code>, <code>set_model</code>, <code>set_thinking_level</code>. pi also ships an ACP adapter (<code>pi-acp</code>), but it is a third-party package and RPC is pi's own.</td></tr>
-<tr><td>Package</td><td><code>@earendil-works/pi-coding-agent</code>, 1.5.0 or later</td><td class="why"><span class="who q">proposed</span> The older <code>@mariozechner/pi-coding-agent</code> stopped at 0.73.1 (May 2026), has no MCP, and some providers reject its requests.</td></tr>
-<tr><td>How tools reach pi</td><td>pi's native MCP client, configured by aegis</td><td class="why"><span class="who q">proposed</span> Measured: <code>mcp__aegis__meta</code> called directly, deferred tools loaded by <code>tool_search</code>. <code>aegis call</code> from bash also works and stays the fallback.</td></tr>
-<tr><td>Where the MCP config lives</td><td>An aegis-owned agent directory passed as <code>PI_CODING_AGENT_DIR</code></td><td class="why"><span class="who q">proposed</span> pi has no flag for an MCP config. A project <code>.pi/mcp.json</code> would write into the user's repo and needs project trust. The user's <code>~/.pi/agent/mcp.json</code> would break plain pi outside aegis.</td></tr>
-<tr><td>Token in the config</td><td>Header values from the environment: <code>${AEGIS_SESSION_TOKEN}</code></td><td class="why"><span class="who q">proposed</span> pi expands <code>${VAR}</code> in headers, and <code>session_env</code> already exports the URL and token. One file serves every session and holds no secret.</td></tr>
-<tr><td>Permissions</td><td>By tool allowlist (<code>--tools</code>); <code>auto</code> and <code>full</code> are the same</td><td class="why"><span class="who q">proposed</span> pi has no approval system by design. Its allowlist removes tools; it cannot fence paths, so there is no outside-the-cwd rule.</td></tr>
-<tr><td>Mid-turn messages</td><td><code>steers_mid_turn = True</code>, sent as <code>steer</code></td><td class="why"><span class="who q">proposed</span> Measured: a steer sent during a tool call changed the final answer of the same turn.</td></tr>
+<tr><td>Transport</td><td><code>pi --mode rpc</code> on stdio, one child per session</td><td class="why"><span class="who">maintainer</span> RPC has <code>prompt</code>, <code>steer</code>, <code>abort</code>, <code>set_model</code>, <code>set_thinking_level</code>. pi also ships an ACP adapter (<code>pi-acp</code>), but it is a third-party package and RPC is pi's own.</td></tr>
+<tr><td>Package</td><td><code>@earendil-works/pi-coding-agent</code>, 1.5.0 or later</td><td class="why"><span class="who">maintainer</span> The older <code>@mariozechner/pi-coding-agent</code> stopped at 0.73.1 (May 2026), has no MCP, and some providers reject its requests.</td></tr>
+<tr><td>How tools reach pi</td><td>pi's native MCP client, configured by aegis</td><td class="why"><span class="who">maintainer</span> Measured: <code>mcp__aegis__meta</code> called directly, deferred tools loaded by <code>tool_search</code>. <code>aegis call</code> from bash also works and stays the fallback.</td></tr>
+<tr><td>Where the MCP config lives</td><td>An aegis-owned agent directory passed as <code>PI_CODING_AGENT_DIR</code></td><td class="why"><span class="who">maintainer</span> pi has no flag for an MCP config. A project <code>.pi/mcp.json</code> would write into the user's repo and needs project trust. The user's <code>~/.pi/agent/mcp.json</code> would break plain pi outside aegis.</td></tr>
+<tr><td>Token in the config</td><td>Header values from the environment: <code>${AEGIS_SESSION_TOKEN}</code>; the URL written literally</td><td class="why"><span class="who">maintainer</span> pi expands <code>${VAR}</code> in headers but not in <code>url</code> (measured: <code>url must be an http or https URL</code>, and the tools silently missing). One file serves every session of a server and holds no secret.</td></tr>
+<tr><td>Permissions</td><td>By tool allowlist (<code>--tools</code>); <code>auto</code> and <code>full</code> are the same</td><td class="why"><span class="who">maintainer</span> pi has no approval system by design. Its allowlist removes tools; it cannot fence paths, so there is no outside-the-cwd rule.</td></tr>
+<tr><td>Mid-turn messages</td><td><code>steers_mid_turn = True</code>, sent as <code>steer</code></td><td class="why"><span class="who">maintainer</span> Measured: a steer sent during a tool call changed the final answer of the same turn.</td></tr>
 </tbody>
 </table>
 
@@ -345,7 +345,7 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)} pre .s{color:var(--ok)}
    [--no-skills]                      # when knowledge is native</pre>
 <p>The environment is <code>session_env(launch)</code> plus <code>PI_CODING_AGENT_DIR=&lt;aegis data&gt;/pi/agent</code>. That directory holds aegis's <code>mcp.json</code> and symlinks to the user's <code>auth.json</code>, <code>settings.json</code> and <code>models.json</code> in <code>~/.pi/agent</code> when they exist, so provider sign-ins and custom models carry over. In multi-user mode the links point into the session owner's home.</p>
 <pre>{"mcpServers": {"aegis": {
-  "url": "${AEGIS_MCP_URL}",
+  "url": "http://127.0.0.1:8899/mcp",
   "headers": {"X-Aegis-Session": "${AEGIS_SESSION_TOKEN}"},
   "exposure": "deferred",
   "toolExposure": {"meta": "direct", "turn_end": "direct", "plan_update": "direct"}
@@ -367,7 +367,7 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)} pre .s{color:var(--ok)}
 <tr><td><code>start()</code></td><td>spawn, then <code>get_state</code></td><td class="why">The answer gives the session id and file, the model and its context window. It becomes the transcript's first line.</td></tr>
 <tr><td><code>send(text)</code>, idle</td><td><code>prompt</code></td><td class="why">The response arrives at once; the turn runs until <code>agent_end</code>.</td></tr>
 <tr><td><code>send(text)</code>, mid-turn</td><td><code>steer</code></td><td class="why">Delivered after the current tool call, inside the same turn (measured).</td></tr>
-<tr><td><code>interrupt()</code></td><td><code>abort</code></td><td class="why">pi documents it as a stop of the running turn; the spike did not exercise it. Slice 1 measures it and records the result in the module docstring.</td></tr>
+<tr><td><code>interrupt()</code></td><td><code>abort</code></td><td class="why">Measured: it stops the turn and kills a running bash command (<code>Command aborted</code>); the turn ends with <code>stopReason: error</code>, which aegis shows as interrupted.</td></tr>
 <tr><td><code>set("model", v)</code></td><td><code>set_model {provider, modelId}</code></td><td class="why">Split on the first <code>/</code>.</td></tr>
 <tr><td><code>set("effort", v)</code></td><td><code>set_thinking_level</code></td><td class="why">Levels: <code>off</code>, <code>minimal</code>, <code>low</code>, <code>medium</code>, <code>high</code>, <code>xhigh</code>, and <code>max</code> where the model has it.</td></tr>
 <tr><td><code>set("permission", v)</code></td><td>restart with the new <code>--tools</code></td><td class="why">The allowlist is a start flag. The restart resumes the same session file, so nothing is lost.</td></tr>
@@ -439,7 +439,6 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)} pre .s{color:var(--ok)}
 <h2 id="nongoals"><span class="n">12</span>Non-goals and open questions</h2>
 <ul>
 <li>Not in scope: pi's interactive TUI, its extensions and packages, its <code>codemode</code> scripting, and the Extension UI side of the RPC protocol.</li>
-<li>Open: does <code>abort</code> stop a running bash command, or only the model call? Slice 1 measures it.</li>
 <li>Open: should the agent directory be per server or per owner? Per owner is simpler in multi-user mode, since the links point into one home.</li>
 <li>Open: pi supports <code>max</code> thinking on some models. aegis's effort list may need a per-harness set.</li>
 </ul>

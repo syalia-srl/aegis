@@ -41,12 +41,14 @@ park: {claude-code: 1200}
 To add an agent to `.aegis.yaml`, map its name under `agents:` to a preset.
 Each one has:
 
-- `harness:` one of claude-code, opencode, codex or cursor. Each aegis release
+- `harness:` one of claude-code, opencode, codex, cursor or pi. Each aegis release
   is tested with a range of versions of each harness; for OpenCode that is
-  OpenCode 2 (`npm install -g @opencode/cli`). A version outside the range is
-  named, with the command that installs a tested one (below);
+  OpenCode 2 (`npm install -g @opencode/cli`), and for pi
+  `npm install -g @earendil-works/pi-coding-agent` (the older
+  `@mariozechner/pi-coding-agent` is the stale old name). A version outside
+  the range is named, with the command that installs a tested one (below);
 - `model:` the model to run, such as opus or haiku for Claude Code. OpenCode
-  and Codex models are written provider/model, Cursor models by their
+  Codex and pi models are written provider/model, Cursor models by their
   catalog's plain id (an id's own bracketed overrides — effort, context,
   flags — come with it when it is set). `models:` instead names an
   ordered list, a cascade (below);
@@ -54,7 +56,10 @@ Each one has:
   inside its id, so a change while it runs is accepted only when it is that
   same effort, and any other is refused;
 - `permission:` read, write, auto or full (the sessions page says what each
-  allows);
+  allows). pi asks before nothing and fences no path, so it applies a level as
+  the tools it may use: read keeps read, grep, find and ls, write adds edit
+  and write, and auto is the same as full. A change takes effect between
+  turns, when aegis restarts pi on the same conversation;
 - `priming:` (optional) a system prompt every session from this agent gets;
 - `keep_harness_tools:` (optional, Claude Code) a list of Claude Code tools
   this agent keeps although aegis replaces them (below).

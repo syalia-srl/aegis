@@ -44,6 +44,7 @@ composer's chips and the Fleet card.
 | `g-h-opencode` | The harness is OpenCode | session panel, model chip, Fleet cards |
 | `g-h-codex` | The harness is Codex | session panel, model chip, Fleet cards |
 | `g-h-cursor` | The harness is Cursor | session panel, model chip, Fleet cards |
+| `g-h-pi` | The harness is pi | session panel, model chip, Fleet cards |
 | `g-e-low` | Effort low: one bar of five | session panel, effort chip |
 | `g-e-medium` | Effort medium: two bars of five | session panel, effort chip |
 | `g-e-high` | Effort high: three bars of five | session panel, effort chip |

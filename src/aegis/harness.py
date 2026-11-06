@@ -1,4 +1,5 @@
-"""A harness is the agent CLI a session runs: Claude Code, OpenCode or Codex.
+"""A harness is the agent CLI a session runs: Claude Code, OpenCode, Codex,
+Cursor or pi.
 
 ``Session`` keeps the store, the fold, the status, the inbox and the card.
 Everything it asks of the agent's process goes through ``Process``, and the
@@ -158,6 +159,7 @@ def harness_for(
     opencode_bin: str,
     codex_bin: str = "codex",
     cursor_bin: str = "cursor-agent",
+    pi_bin: str = "pi",
 ) -> Harness:
     if name == "claude-code":
         from .claude.harness import ClaudeCode
@@ -175,4 +177,8 @@ def harness_for(
         from .cursor.harness import Cursor
 
         return Cursor(cursor_bin)
+    if name == "pi":
+        from .pi.harness import Pi
+
+        return Pi(pi_bin)
     raise ValueError(f"no harness named {name!r}")
