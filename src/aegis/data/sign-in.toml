@@ -1,0 +1,26 @@
+# How aegis signs each harness in by driving its own login command (#946).
+# Rules are tried in file order: the first whose `all` patterns all match the
+# screen gives the step, so a later screen wins over a link still visible above it.
+
+[claude]
+cmd = ["claude", "setup-token"]
+unset = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"]
+cols = 600
+timeout_s = 600
+
+[[claude.rules]]
+name = "error"
+step = "failed"
+all = ['(?i)oauth error|invalid code']
+
+[[claude.rules]]
+name = "token"
+step = "checking"
+all = ['sk-ant-oat01-']
+capture = { token = '(sk-ant-oat01-[A-Za-z0-9_-]{20,400})' }
+
+[[claude.rules]]
+name = "link"
+step = "paste"
+all = ['https://claude\.com/cai/oauth/authorize\?', 'Paste code here if prompted']
+capture = { url = '(https://claude\.com/cai/oauth/authorize\?\S+)' }
