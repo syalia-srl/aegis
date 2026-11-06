@@ -670,7 +670,6 @@ def build_web(
                 "native": desktop,
                 "me": {
                     "name": principal.name,
-                    "policy": None,
                 },
                 # Whose a session with no owner is: the admin's (tokens.py).
                 "owner": app.principals.owner,

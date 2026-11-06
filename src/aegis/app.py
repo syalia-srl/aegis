@@ -134,8 +134,6 @@ from .quota import Quota
 from .quota_gate import (
     Gate,
     continued,
-    decide,
-    pool_for,
     refusal,
 )
 from .btws import SideNotes
@@ -648,7 +646,6 @@ class App:
         self.quota.listeners.append(self.on_quota)
         self.quota.listeners.append(self.journal.quota)
         self.quota.history = self.journal.usual_spend
-        reg.gate = self.gate
         reg.pause_hold = self.pause_hold
         # Models that fell, and the one timer that releases held work when the
         # first of them is free again (cascade.py).
@@ -880,14 +877,10 @@ class App:
         return Principal(self.user)  # the server's own calls
 
     def gate(self, owner: str | None, harness: str, model: str | None) -> Gate:
-        """Whether ``owner`` may start a harness on that pool now. A session
-        from before owners is the admin's."""
-        return decide(
-            None,
-            pool_for(harness, model),
-            self.quota.snapshot(),
-            time.time(),
-        )
+        """Whether a harness may start on that pool now: always, since quota
+        lines per token left with multi-user mode (#958). A cascade's cooling
+        and the person's pause hold work on their own (start_spec)."""
+        return Gate("open")
 
     def start_spec(self, spec: SpawnSpec) -> tuple[SpawnSpec, Gate]:
         """The spec a start runs and the gate it passes. A cascade starts on
@@ -952,27 +945,18 @@ class App:
         self._arm_cooling()
 
     def on_quota(self, snapshot: dict) -> None:
-        """After every reading, and every minute because pace moves with the
-        clock: pause each member's working session whose gate says stopped,
-        and continue each paused or holding one whose gate is open. Only open
-        continues, so a gauge between the lines leaves a paused session
-        paused and a stopped token cannot flap. Level-triggered, so a reading
+        """After every reading, and every minute: continue each session a
+        quota line paused or held before aegis 3.0 removed the lines (#958),
+        and wake what a cooling cascade held. Level-triggered, so a reading
         missed or a restart in between changes nothing."""
-        now = time.time()
         for s in list(self.sessions.sessions.values()):
             # A turn the restart guard declined waits for a person (restarts.py).
             if s.log_id in self._quota_busy or s.log_id in self.sessions.declined:
                 continue
             if self.pause_hold(s) is not None:
-                continue  # the person's pause outranks the gate (pause.py)
-            policy = None
-            if policy is None:
-                continue
-            g = decide(policy, pool_for(s.spec.harness, s.spec.model), snapshot, now)
+                continue  # the person's pause outranks it (pause.py)
             holding = any(m.get("held_for") == "quota" for m in s.held)
-            if g.state == "stopped" and s.status == "working" and not s.quota_paused:
-                self._quota_task(s, self._pause(s, g))
-            elif g.state == "open" and (s.quota_paused or holding):
+            if s.quota_paused or holding:
                 self._quota_task(s, self._continue(s))
         self._release_held()
 
@@ -1002,16 +986,6 @@ class App:
                 )
 
         t.add_done_callback(done)
-
-    async def _pause(self, s, g: Gate) -> None:
-        """Interrupt a turn the owner's stop line cut; held until it opens."""
-        if not self._live(s) or s.status != "working":
-            return  # closed, or the turn ended since the reading
-        s.report({"kind": "quota_paused", "why": g.why})
-        s.quota_paused = g.why
-        self.sessions.metas.write(s.meta())
-        await s.interrupt(through_lock=True)  # the gate holds a node too
-        s._publish_now()
 
     async def _continue(self, s) -> None:
         """The gate is open again: one message saying so ahead of what the
