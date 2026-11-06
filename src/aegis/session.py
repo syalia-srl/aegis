@@ -540,6 +540,9 @@ class Session:
         # row's counter (#938). Input leaves out cache reads: each call rereads
         # the whole context, so counting them would count it again per call.
         self.turn_tokens = [0, 0]
+        # The output counted for the message streaming now: Claude's assistant
+        # lines carry its count at message_start, its message_delta the final.
+        self._last_out = 0
         # The session a handoff started from this one (#354): "starting" while
         # it spawns, its log id after, None when the archive was called off.
         self.continued_by = continued_by
@@ -1418,9 +1421,16 @@ class Session:
         if events and all(isinstance(ev, Delta) for ev in events):
             # Never stored: the part's closing update carries the whole text.
             self._publish(self.channel, self._out(fold.live(events)))
+            out = max(ev.output for ev in events if isinstance(ev, Delta))
+            more: dict[str, object] = {}
+            if out > self._last_out:
+                inp, done = self.turn_tokens
+                more["turn_tokens"] = [inp, done + out - self._last_out]
+                self._last_out = out
             self._set(
                 activity=fold.activity(),
                 **({"status": "working"} if self.status == "idle" else {}),
+                **more,
             )
             return
         self._record({"src": self.harness.src, "line": line}, events)
@@ -1451,6 +1461,7 @@ class Session:
                         turn[1] + usage.output,
                     ]
                     changes["turn_tokens"] = turn
+                    self._last_out = usage.output
             if isinstance(ev, ToolCall) and ev.parent is None:
                 tools += 1
                 changes["tool_calls"] = tools
