@@ -13,6 +13,18 @@ your messages, the agent's replies and thinking, a row for each tool call with
 its result, the messages other sessions and monitors sent it, and the files
 and pages it sent you. Select a row with j and k, or the arrow keys.
 
+## While the agent works
+
+While a turn runs, the last row of the transcript shows that the agent is
+working. Its verb types out, and a thin cursor blinks after it. Then it erases
+the verb and types the next one. Beside it are the seconds since the turn
+started and two token counts for this turn: ↑ counts the new input fed to the
+model (your message, tool results, files read), and ↓ counts what the model
+wrote. ↑ leaves out the cached context that the model rereads on every call.
+Both counts start at zero with each turn and flash when a call adds to them.
+Esc interrupts the turn. With reduced motion set in your system, the row keeps
+one verb and stops moving.
+
 ## Tool rows
 
 A tool row starts folded. Click its line, or select it and press Enter, to
