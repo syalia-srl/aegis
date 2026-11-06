@@ -106,6 +106,9 @@ class Delta:
     key: str
     kind: str
     text: str
+    # A message's final output count, from its message_delta; the assistant
+    # lines before it carry the count at message_start (#938).
+    output: int = 0
 
 
 @dataclass(frozen=True)
@@ -513,6 +516,10 @@ class Parser:
         if ev.get("type") == "message_start":
             msg = ev.get("message")
             self.message = _str(msg.get("id")) if isinstance(msg, dict) else None
+        if ev.get("type") == "message_delta":
+            u = ev.get("usage")
+            out = u.get("output_tokens") if isinstance(u, dict) else None
+            return Delta(key="", kind="", text="", output=int(out or 0))
         d = ev.get("delta")
         if ev.get("type") != "content_block_delta" or not isinstance(d, dict):
             return Delta(key="", kind="", text="")

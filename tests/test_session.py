@@ -557,3 +557,23 @@ async def test_turn_tokens_count_new_input_and_output_and_restart_each_turn(h):
     assert s.turn_tokens == [0, 0]
     s._on_line(line("m3", 3, 100, 9300, 60))
     assert s.turn_tokens == [103, 60]
+
+
+async def test_turn_output_takes_the_final_count_from_message_delta(h):
+    """Claude's assistant lines carry the output count at message_start; the
+    message_delta that ends the message carries the real one (#938)."""
+    usage = {"input_tokens": 2, "cache_creation_input_tokens": 50, "output_tokens": 4}
+    msg = {
+        "id": "m1",
+        "role": "assistant",
+        "content": [{"type": "text", "text": "x"}],
+        "usage": usage,
+    }
+    delta = {"type": "message_delta", "delta": {}, "usage": {"output_tokens": 84}}
+    s = h.session
+    s._on_line(json.dumps({"type": "assistant", "message": msg}))
+    assert s.turn_tokens == [52, 4]
+    s._on_line(json.dumps({"type": "stream_event", "event": delta}))
+    assert s.turn_tokens == [52, 84]
+    s._on_line(json.dumps({"type": "stream_event", "event": delta}))
+    assert s.turn_tokens == [52, 84]
