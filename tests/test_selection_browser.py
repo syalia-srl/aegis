@@ -272,6 +272,49 @@ def test_on_a_phone_the_bar_sits_under_the_selection_with_icons_only(browser, se
         ctx.close()
 
 
+def test_an_android_long_press_gets_the_bar_not_the_rows_menu(browser, server):  # noqa: F811
+    # Android Chrome's order, recorded on a phone (#951): pointerdown, then
+    # contextmenu about 400 ms in (before LONG_PRESS), the word selected, and
+    # pointercancel, which stops the long-press timer.
+    ctx = browser.new_context(
+        viewport={"width": 390, "height": 844}, has_touch=True, is_mobile=True
+    )
+    pg = ctx.new_page()
+    try:
+        pg.goto(server.url)
+        spawn(pg, "/md alpha kiwi beta gamma")
+        pg.fill("#input", "later")
+        pg.wait_for_selector(f"{REPLY}:has-text('kiwi')")
+        pg.evaluate(
+            """(sel) => {
+              const body = [...document.querySelectorAll(sel)].at(-1);
+              const b = body.getBoundingClientRect();
+              const at = { bubbles: true, cancelable: true, clientX: b.x + 4, clientY: b.y + 4 };
+              body.dispatchEvent(new PointerEvent("pointerdown", { ...at, pointerType: "touch" }));
+              body.dispatchEvent(new PointerEvent("contextmenu", { ...at, pointerType: "touch" }));
+            }""",
+            REPLY,
+        )
+        select(pg, REPLY, "kiwi")
+        pg.evaluate(
+            """(sel) => [...document.querySelectorAll(sel)].at(-1).dispatchEvent(
+              new PointerEvent("pointercancel", { bubbles: true, pointerType: "touch" }))""",
+            REPLY,
+        )
+        pg.wait_for_selector(".sbar")
+        assert pg.locator(".cmenu").count() == 0
+        # A handle dragged: the bar follows the selection it quotes.
+        select(pg, REPLY, "kiwi beta")
+        pg.wait_for_function(
+            "document.querySelector('.sbar') && getSelection().toString() === 'kiwi beta'"
+        )
+        pg.wait_for_timeout(300)
+        pg.tap(".sbar [data-id=ask]")
+        assert pg.input_value("#input") == "> kiwi beta\n\nlater"
+    finally:
+        ctx.close()
+
+
 def menu_ids(pg) -> list[str]:
     pg.wait_for_selector(".cmenu")
     return pg.locator(".cmenu [role=menuitem]").evaluate_all(
