@@ -1431,6 +1431,7 @@ class Session:
             self.tool_calls,
             self.compactions,
         )
+        turn: list[int] = self.turn_tokens
         falling = False
         for ev in events:
             if isinstance(ev, TURN_BEARING) and self.status == "idle":
@@ -1443,15 +1444,13 @@ class Session:
                     self._last_usage = usage
                     recent = cache.push(recent, usage, time.time())
                     changes["cache_recent"] = recent
-                    inp, out = (
-                        [0, 0]
-                        if starting
-                        else changes.get("turn_tokens", self.turn_tokens)
-                    )
-                    changes["turn_tokens"] = [
-                        inp + usage.input + usage.cache_creation,
-                        out + usage.output,
+                    if starting:
+                        turn = [0, 0]
+                    turn = [
+                        turn[0] + usage.input + usage.cache_creation,
+                        turn[1] + usage.output,
                     ]
+                    changes["turn_tokens"] = turn
             if isinstance(ev, ToolCall) and ev.parent is None:
                 tools += 1
                 changes["tool_calls"] = tools
