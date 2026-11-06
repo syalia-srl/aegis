@@ -73,7 +73,9 @@ from .agent_ops import (
 from .artifact_ops import register_artifact_ops
 from .config_suggest import register_config_suggest
 from .secret_ops import register_secret_ops
-from .claude.login import SignIn
+from .claude import login as claude_login
+from .signin.core import SignIns
+from .signin.recipes import load_recipes
 from .agents import (
     EFFORTS,
     HARNESSES,
@@ -578,10 +580,12 @@ class App:
         reg.context = lambda: self.config.current().context
         reg.version_policy = lambda: self.config.current().harness_versions
         reg.quota = self.quota
-        reg.sign_in = SignIn(
+        reg.sign_in = SignIns(
             reg.sessions,
-            lambda: self.claude_bin,
+            self.terminals,
+            self._sign_in_recipes,
             lambda text, s: self.toast(text, "error", source=s),
+            {"claude-code": self._check_claude_token},
         )
         self.journal = Journal(
             roots.state_root,
@@ -739,6 +743,25 @@ class App:
         self.mcp_server, self.mcp_app = build_mcp(
             self.registry, self.tokens, self.sessions
         )
+
+    def _sign_in_recipes(self) -> dict:
+        """The login recipes (signin/recipes.py), Claude's run with the server's
+        Claude Code binary."""
+        recipes = load_recipes()
+        if (c := recipes.get("claude-code")) is not None and c.cmd[0] == "claude":
+            c.cmd = [self.claude_bin, *c.cmd[1:]]
+        return recipes
+
+    async def _check_claude_token(self, found: dict) -> str | None:
+        """A Claude setup-token, from the login's screen or pasted: its shape,
+        then one request with it; kept at mode 0600 when it signs in."""
+        token = found["token"].strip()
+        if why := claude_login.shape_error(token):
+            return why
+        if why := await claude_login.probe(self.claude_bin, token):
+            return f"Claude Code refused it: {why}"
+        await asyncio.to_thread(claude_login.write_token, token)
+        return None
 
     def trust_refusal(self, principal: Principal, server: str) -> str | None:
         """Why this server will not trust ``server``'s link, or None: trust is
@@ -1235,6 +1258,8 @@ class App:
         self.repos.start()
         self.sessions.boot(restarts.started(self.roots.state_root))
         await self.terminals.boot()
+        if self.sessions.sign_in is not None:
+            self.sessions.sign_in.boot()
         await self.browsers.boot()
         # No browser's upload survives a restart (attachments.py).
         att.clear_staged(self.roots.state_root)
@@ -1346,6 +1371,8 @@ class App:
         await self.net.stop()
         await self.monitors.shutdown()
         await self.recaps.shutdown()
+        if self.sessions.sign_in is not None:
+            await self.sessions.sign_in.shutdown()
         await self.terminals.shutdown()
         await self.browsers.shutdown()
         await self.side_notes.shutdown()
