@@ -656,7 +656,13 @@ document.addEventListener("visibilitychange", () => {
   conn.retryNow();
   if (conn.open) checkPush(); // otherwise the connect does
 });
-const settings = new Settings(conn, $("settings"), { themes: THEMES, setTheme, speaker });
+const settings = new Settings(conn, $("settings"), {
+  themes: THEMES,
+  setTheme,
+  speaker,
+  lastSession: () => lastShown,
+  openSession: (id) => openSession(id),
+});
 let landEntry = null; // {key, id}: reveal this entry once its transcript lands
 const journal = new Journal(conn, $("journal"), {
   onOpen: (r) => {

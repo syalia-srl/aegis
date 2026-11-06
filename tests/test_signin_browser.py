@@ -8,7 +8,14 @@ from pathlib import Path
 
 import pytest
 
-from .test_browser import browser, online, page, server  # noqa: F401
+from .test_browser import (  # noqa: F401
+    browser,
+    online,
+    page,
+    server,
+    settings_server,
+    spawn,
+)
 
 pytestmark = [pytest.mark.browser, pytest.mark.slow]
 
@@ -73,4 +80,24 @@ def test_show_terminal_opens_the_masked_login(server, page):
         "() => /Paste code here/.test(document.querySelector('#a2').innerText)",
         timeout=10000,
     )
+    assert page.errors == []
+
+
+def test_sign_in_in_settings_opens_the_card_in_the_last_session(settings_server, page):
+    page.goto(settings_server.url)
+    page.wait_for_selector("#a2[data-view=fleet]")
+    sid = spawn(page)
+    page.keyboard.press("Alt+KeyS")
+    page.wait_for_selector("#a2[data-view=settings]")
+    row = '#set-harnesses .set-harness[data-harness="claude-code"]'
+    page.wait_for_selector(f"{row} button:has-text('Sign in')")
+    assert "its own sign-in" in page.inner_text(row)
+    page.set_viewport_size({"width": 390, "height": 800})
+    width = page.evaluate("document.documentElement.scrollWidth")
+    assert width <= 390, width
+    page.set_viewport_size({"width": 1280, "height": 900})
+    page.click(f"{row} button:has-text('Sign in')")
+    page.wait_for_selector("#a2[data-view=session]")
+    assert page.evaluate("location.hash.slice(3)") == sid
+    page.wait_for_selector(f"{CARD} a:has-text('Open sign-in page')", timeout=15000)
     assert page.errors == []
