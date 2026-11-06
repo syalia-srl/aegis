@@ -46,7 +46,7 @@
 
 import { browserCard } from "./browserview.js";
 import { drawArtifact, drawFile } from "./viewer.js";
-import { DOCKED, entryFiles, fileUrl, fillWorkflow, hold, inWindow, popButton, workflowTitle } from "./entries.js";
+import { DOCKED, entryFiles, fileUrl, fillWorkflow, hold, inWindow, paneFile, popButton, workflowTitle } from "./entries.js";
 import { icon, iconText } from "./glyphs.js";
 import * as menu from "./menu.js";
 
@@ -524,9 +524,10 @@ export class Canvas {
       fillWorkflow(card);
       return;
     } else {
-      const f = e || this.latestFile(id);
-      if (!f) return this.loading(node, bar, acts, "Loading the file…");
-      drawFile(f, { remote: false, glyph: "file", bar, body, acts, isCurrent: () => node._drawn === drawn });
+      const found = e || this.latestFile(id);
+      if (!found) return this.loading(node, bar, acts, "Loading the file…");
+      const { file: f, remote } = paneFile(found);
+      drawFile(f, { remote, glyph: "file", bar, body, acts, isCurrent: () => node._drawn === drawn });
       // A pane can be narrow: its bar keeps the name and the version, and the
       // size and type move to the bar's tooltip.
       bar.querySelector(".fs")?.remove();
