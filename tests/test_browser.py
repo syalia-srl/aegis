@@ -9871,3 +9871,29 @@ def test_esc_throws_a_locked_take_away(server, mic_page):
     assert pg.locator("#atts .chip").count() == 0
     assert sends_of(server, lid) == []
     assert pg.errors == []
+
+
+def test_the_working_row_types_its_verb_and_counts_the_turns_tokens(server, page):
+    """#938: while a turn runs the verb types out letter by letter and the
+    counters show the turn's new input and output tokens; they start at zero
+    on the next turn."""
+    page.goto(server.url)
+    spawn(page, "hello")
+    page.fill("#input", "/busy 4")
+    page.press("#input", "Enter")
+    page.wait_for_selector("#working", state="visible")
+    seen = set()
+    for _ in range(25):
+        seen.add(page.text_content("#working-verb"))
+        time.sleep(0.04)
+    assert len(seen) > 3, seen  # it types, not one word drawn at once
+    page.wait_for_function(
+        "document.getElementById('working-out').textContent === '20'"
+    )
+    assert page.text_content("#working-in") == "10"
+    shots = os.environ.get("AEGIS_SHOTS")
+    if shots:
+        page.locator("#working").screenshot(path=f"{shots}/working-desktop.png")
+        page.set_viewport_size({"width": 390, "height": 844})
+        time.sleep(0.5)
+        page.screenshot(path=f"{shots}/working-phone.png")

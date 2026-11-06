@@ -125,6 +125,10 @@ let warmed = null; // the parked (asleep, idle) session whose first keystroke as
 let landUnread = null; // the tab Alt+J opened, whose transcript lands on its first unread
 let unsubTranscript = null;
 let workingSince = null;
+// The turn's new input and output tokens (session.turn_tokens), which the
+// working row's counters ease toward (#938).
+let workingTokens = [0, 0];
+let workingShown = [0, 0];
 let booted = false;
 const transcript = new Transcript($("tr"), $("entries"), $("jump"), {
   // A failed report is retried by the next tick: the ids stay unread in the view.
@@ -2316,7 +2320,11 @@ function renderMeta(s) {
   $("autoclose-session").setAttribute("aria-pressed", String(!!s.autoclose));
   $("interrupt").disabled = theirs || held;
   $("close").disabled = theirs || held;
-  if (working && workingSince == null) workingSince = Date.now();
+  if (working && workingSince == null) {
+    workingSince = Date.now();
+    workingShown = [0, 0];
+  }
+  workingTokens = s.turn_tokens || [0, 0];
   if (!working) workingSince = null;
   // A linked server that is down: the transcript stays readable, nothing sends.
   const down = s.off ? linkOf(s.server) : null;
@@ -2383,9 +2391,54 @@ function drawComposerHint(s) {
   }
 }
 
+// The working row (#938): a verb types out, the cursor blinks on it, it
+// backspaces and the next one types; the counters ease toward the turn's
+// tokens and flash when a call adds to them. Reduced motion keeps one verb.
+const VERBS = ["Working", "Thinking", "Weaving", "Brewing", "Forging", "Pondering", "Tinkering", "Conjuring", "Untangling", "Crafting"];
+const stillMotion = matchMedia("(prefers-reduced-motion: reduce)");
+const typer = { verb: 0, at: 0, phase: "type", wait: 0 };
+function drawVerb(text) {
+  $("working-verb").replaceChildren(
+    ...[...text].map((c, i) => {
+      const ch = span("", c);
+      ch.style.animationDelay = `${i * 0.07}s`;
+      return ch;
+    }),
+  );
+}
+function tokenCount(n) {
+  return n < 1000 ? String(Math.round(n)) : `${(n / 1000).toFixed(1)}k`;
+}
+function tickWorking() {
+  if (workingSince == null) return;
+  $("working-s").textContent = Math.round((Date.now() - workingSince) / 1000);
+  ["working-in", "working-out"].forEach((id, k) => {
+    const gap = workingTokens[k] - workingShown[k];
+    if (gap > workingShown[k] * 0.02 + 1 && !$(id).classList.contains("flash")) {
+      $(id).classList.add("flash");
+      setTimeout(() => $(id).classList.remove("flash"), 350);
+    }
+    workingShown[k] = Math.abs(gap) < 1 ? workingTokens[k] : workingShown[k] + gap * 0.15;
+    $(id).textContent = tokenCount(workingShown[k]);
+  });
+  const word = `${VERBS[typer.verb]}…`;
+  if (stillMotion.matches) {
+    if ($("working-verb").textContent !== "Working…") drawVerb("Working…");
+    return;
+  }
+  if (typer.wait > 0) typer.wait -= 1;
+  else if (typer.phase === "type") {
+    typer.at += 1;
+    if (typer.at >= word.length) Object.assign(typer, { phase: "erase", wait: 50 });
+  } else if (typer.at > 0) typer.at -= 1;
+  else Object.assign(typer, { phase: "type", verb: (typer.verb + 1) % VERBS.length, wait: 4 });
+  const text = `${VERBS[typer.verb]}…`.slice(0, typer.at);
+  if ($("working-verb").textContent !== text) drawVerb(text);
+}
+setInterval(tickWorking, 60);
+
 setInterval(() => {
   tickMonitors();
-  if (workingSince != null) $("working-meta").textContent = `${Math.round((Date.now() - workingSince) / 1000)}s, Esc interrupts`;
   if (root.dataset.view === "fleet" && local().some((m) => m.stale)) drawBand();
   if (root.dataset.view === "fleet") for (const c of document.querySelectorAll(".card")) {
     const m = sessions.get(c.dataset.id);
