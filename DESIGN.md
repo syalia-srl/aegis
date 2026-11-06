@@ -187,6 +187,14 @@ in `/proc`, so two processes never resume one session. Under systemd's default
 SIGTERM that cut a turn within 30 s of a clean stop counts as that stop's, and a
 worker's task waits out those 30 s before such an exit fails it (restarts.py).
 
+**An update restarts in place.** `server.update` (admin only) upgrades aegis with the
+installer that owns the running install, read from `sys.prefix` and the dist-info's
+`INSTALLER`, then runs the new entry point's `--version` and goes on only for a new
+number. It stops uvicorn through its exit flag rather than a SIGTERM, which uvicorn would
+raise again after the lifespan shutdown, and `cli.serve` then `execv`s the same entry point
+and arguments (`launch.replace`): same pid, cgroup and unit, and the clean stop's
+`server.json` makes the next boot continue what it cut (self_update.py).
+
 **Its own state, never mixed with the legacy tree's.** aegis keeps its state in
 `.aegis/state/` under the config root, where the legacy tree kept its own in
 another format. `aegis serve` refuses to start on a state directory holding the

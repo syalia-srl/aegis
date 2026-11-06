@@ -2612,6 +2612,7 @@ function drawUpdate() {
         const acts = line("acts", "");
         acts.append(updButton("Try again"));
         rows.push(acts);
+        top.append(updButton("Update"));
       }
     } else {
       const run = line("upd-run", upd.phase === "restarting" ? "restarting" : "updating");

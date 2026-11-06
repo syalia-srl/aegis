@@ -149,7 +149,7 @@ pre{font-family:var(--font-mono);font-size:12px;line-height:1.55;background:var(
 <div class="chrome">
   <span>aegis</span>
   <span class="tab">spec · update aegis from the browser</span>
-  <span class="st"><span class="pill acc">draft</span><span class="pill">2026-11-06</span><span class="pill">#955</span></span>
+  <span class="st"><span class="pill acc">built on branch self-update-955</span><span class="pill">2026-11-06</span><span class="pill">#955</span></span>
 </div>
 
 <div class="wrap">
@@ -183,7 +183,7 @@ pre{font-family:var(--font-mono);font-size:12px;line-height:1.55;background:var(
 <tr><td>which installer</td><td>The one that owns the running install, read from the running process</td><td class="why"><span class="who">maintainer</span> The issue asks for "depending on how it is installed". Upgrading through a different tool would leave two copies and a stale entry point.</td></tr>
 <tr><td>when no installer fits</td><td>No button. The tooltip and card show the command, as today</td><td class="why">A dev build, a <code>uvx</code> run or a system Python have no safe upgrade aegis can run on its own.</td></tr>
 <tr><td>who may press it</td><td>An admin token only. Members see the arrow and no button</td><td class="why">It restarts everyone's sessions. Admin is the existing role for server-wide acts (<code>app.py</code> <code>role</code>).</td></tr>
-<tr><td>restart</td><td>Clean stop, then <code>os.execv</code> of the same entry point and arguments</td><td class="why">Same PID, so systemd sees nothing and its <code>Restart=</code> setting does not matter, and it works without a unit too. Exiting and letting systemd restart was rejected: without a unit nothing comes back.</td></tr>
+<tr><td>restart</td><td>Clean stop through uvicorn's exit flag, then <code>os.execv</code> of the same entry point and arguments</td><td class="why">Same PID, so systemd sees nothing and its <code>Restart=</code> setting does not matter, and it works without a unit too. Exiting and letting systemd restart was rejected: without a unit nothing comes back.</td></tr>
 <tr><td>gate before restart</td><td>The new entry point must answer <code>--version</code> with the new number</td><td class="why">A broken install is caught while the old server still runs. The old process keeps serving and the card shows the error.</td></tr>
 <tr><td>agents</td><td>No MCP tool</td><td class="why">Restarting the server is the person's call. An agent can still tell them the button is there.</td></tr>
 </tbody>
@@ -268,7 +268,7 @@ pre{font-family:var(--font-mono);font-size:12px;line-height:1.55;background:var(
 <li><code>server.update</code> refuses a member token, a build with no installer, and a second update while one runs.</li>
 <li>It runs the command with <code>launch.run</code>, as the server's own user, with a 5-minute timeout, and sends each output line to admin tabs.</li>
 <li>It runs <code>&lt;entry point&gt; --version</code>, the entry point being <code>sys.argv[0]</code> resolved at boot. If the number did not change, or the command fails, it stops here and reports. The running server was never touched.</li>
-<li>It writes a re-exec flag and sends itself SIGTERM, which takes the path a <code>systemctl stop</code> takes: sessions shut down and <code>server.json</code> records a clean stop.</li>
+<li>It records the argv to start and sets uvicorn's exit flag, the one its SIGTERM handler sets, so the stop takes the path a <code>systemctl stop</code> takes: sessions shut down and <code>server.json</code> records a clean stop. A real SIGTERM was tried and rejected: uvicorn raises it again after its shutdown, which killed the process before it could re-exec.</li>
 <li>When <code>uvicorn.run</code> returns in <code>cli.serve</code> and the flag is set, it calls <code>os.execv</code> with the same entry point and arguments. The PID, the cgroup and the unit stay the same.</li>
 <li>The new server boots, finds a clean stop and continues the interrupted turns (<code>restarts.py</code>). Tabs reconnect, see a newer server and reload (#499).</li>
 </ol>
@@ -291,8 +291,8 @@ pre{font-family:var(--font-mono);font-size:12px;line-height:1.55;background:var(
 </ul>
 <h3>Open questions</h3>
 <ul>
-<li><span class="who q">open</span> The fair release (#768) adds nothing new until 3.0.0 on 2026-11-19. Should this PR wait and merge after that tag?</li>
-<li><span class="who q">open</span> Should the button also show for a dev build, running <code>git pull</code> plus a reinstall? This spec says no.</li>
+<li><span class="who">maintainer</span> Merge when CI is green, without waiting for the 3.0.0 tag.</li>
+<li><span class="who">maintainer</span> A dev build gets no button.</li>
 </ul>
 </main>
 </div>
