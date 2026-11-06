@@ -53,6 +53,13 @@ from __future__ import annotations
 
 import sys
 
+if sys.argv[1:3] == ["auth", "login"]:
+    # The sign-in card's login (#946): the recorded screens, from fake_login.py.
+    import os
+
+    login = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fake_login.py")
+    os.execv(sys.executable, [sys.executable, login, "opencode"])
+
 if sys.argv[1:2] == ["--version"]:
     # First, before the imports below: aegis reads this before every launch
     # on a new binary (harness_versions.py), and the whole module costs

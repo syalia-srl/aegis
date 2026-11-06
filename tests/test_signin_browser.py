@@ -101,3 +101,23 @@ def test_sign_in_in_settings_opens_the_card_in_the_last_session(settings_server,
     assert page.evaluate("location.hash.slice(3)") == sid
     page.wait_for_selector(f"{CARD} a:has-text('Open sign-in page')", timeout=15000)
     assert page.errors == []
+
+
+def test_opencode_go_is_picked_on_the_card_and_its_key_signs_in(settings_server, page):
+    page.goto(settings_server.url)
+    page.wait_for_selector("#a2[data-view=fleet]")
+    spawn(page)
+    page.keyboard.press("Alt+KeyS")
+    row = '#set-harnesses .set-harness[data-harness="opencode"]'
+    page.wait_for_selector(f"{row} button:has-text('Sign in')")
+    page.click(f"{row} button:has-text('Sign in')")
+    page.wait_for_selector(f"{CARD} button:has-text('OpenCode Console')", timeout=15000)
+    assert "Which OpenCode subscription" in page.inner_text(CARD)
+    page.click(f"{CARD} button:has-text('OpenCode Go')")
+    page.wait_for_selector(f"{CARD}:has-text('Paste your OpenCode Go API key')")
+    assert page.query_selector(f"{CARD} a:has-text('Open sign-in page')") is None
+    page.fill(f"{CARD} input[aria-label='sign-in code']", "sk-FAKEKEY")
+    page.click(f"{CARD} button:has-text('Sign in')")
+    page.wait_for_selector(f"{CARD}.gone:has-text('Signed in')", timeout=20000)
+    assert "sk-FAKEKEY" not in page.content()
+    assert page.errors == []
