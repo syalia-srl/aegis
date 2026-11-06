@@ -22,6 +22,17 @@ others fail with a 401. The stored sign-in can end up revoked, so every
 session fails until someone signs in again. An aegis server runs many
 sessions at once, so it meets this often.
 
+## Renew from Settings or by an agent
+
+**Settings → Harnesses** lists each harness aegis can sign in: whether it is
+installed, its version, and, when aegis keeps a token for it, until when.
+**Sign in** opens the same card in the session you last looked at, without
+waiting for a turn to fail.
+
+An agent can open the card with the `signin_open` tool, for example to renew
+before the token expires. Only you can answer the card; the agent is woken
+with `from aegis:login · renewed` when the sign-in is done.
+
 ## Sign in for a year
 
 A token from Claude Code's setup-token command lasts a year and is never

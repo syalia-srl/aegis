@@ -34,6 +34,8 @@ class Ops:
     @property
     def fs(self) -> _fs: ...
     @property
+    def harness(self) -> _harness: ...
+    @property
     def help(self) -> _help: ...
     @property
     def journal(self) -> _journal: ...
@@ -347,6 +349,10 @@ class _fs:
         """A ticket URL for one file, such as an image a Markdown file links to."""
     async def write(self, *, path: str, content: str, base: str | None) -> Any:
         """Save a text file, only if it still has the hash ``base``; a null base creates it and refuses a file that exists."""
+
+class _harness:
+    async def status(self) -> Any:
+        """Each harness with a sign-in: installed, its version, signed in and until when."""
 
 class _help:
     async def dismiss(self, *, what: Literal["tutorial", "whats_new"]) -> Any:
@@ -832,6 +838,8 @@ class _signin:
         """Stop the login; the sessions keep waiting."""
     async def choose(self, *, log_id: str, id: str, option: str) -> Any:
         """Pick one of the login's offered options."""
+    async def open(self, *, harness: str = ...) -> Any:
+        """Open a sign-in card for a harness in your transcript, to renew its sign-in before it expires or when the person asks. aegis runs the harness's own login; the person answers the card, never you. Returns the card's id at once; when the sign-in is done you are woken with `> from aegis:login · renewed`. Only claude-code has a sign-in today."""
     async def start(self, *, log_id: str, harness: str) -> Any:
         """Open a sign-in card in this session's transcript, or name the one open."""
 
