@@ -156,6 +156,12 @@ function viaFile(f) {
   f.download = ok ? `${f.url}?download=1` : "about:blank";
   return f;
 }
+// A stored file as a docked pane draws it: on a linked server's transcript, a
+// copy with its links rebuilt under /via, and remote (#970).
+export function paneFile(f) {
+  const remote = fileBase !== "";
+  return { file: remote ? viaFile({ ...f }) : f, remote };
+}
 function fileCard(files, glyph) {
   const sent = files.map((f) => ({ ...f }));
   const remote = fileBase !== "";
