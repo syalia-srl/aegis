@@ -106,6 +106,7 @@ _SOON = (
     "tool_calls",
     "cache_recent",
     "compactions",
+    "turn_tokens",
 )
 PUBLISH_EVERY_S = 0.25
 
@@ -535,6 +536,10 @@ class Session:
         self.compactions = compactions
         # The last usage counted: one call written as several lines repeats it.
         self._last_usage = None
+        # New input and output tokens since the turn started, for the working
+        # row's counter (#938). Input leaves out cache reads: each call rereads
+        # the whole context, so counting them would count it again per call.
+        self.turn_tokens = [0, 0]
         # The session a handoff started from this one (#354): "starting" while
         # it spawns, its log id after, None when the archive was called off.
         self.continued_by = continued_by
@@ -661,6 +666,7 @@ class Session:
         m["untested_version"] = self.untested_version
         m["cache_hit"] = cache.hit_rate(self.cache_recent)
         m["cache_alarm"] = cache.alarm(self.cache_recent, self.spec.harness)
+        m["turn_tokens"] = self.turn_tokens
         m.update(self._host.card(self))
         return m
 
@@ -1364,6 +1370,9 @@ class Session:
         changes = {k: v for k, v in changes.items() if getattr(self, k) != v}
         if not changes:
             return
+        if changes.get("status") == "working" and "turn_tokens" not in changes:
+            changes["turn_tokens"] = [0, 0]
+            self._last_usage = None
         for k, v in changes.items():
             setattr(self, k, v)
         if "status" in changes:
@@ -1422,6 +1431,7 @@ class Session:
             self.tool_calls,
             self.compactions,
         )
+        turn: list[int] = self.turn_tokens
         falling = False
         for ev in events:
             if isinstance(ev, TURN_BEARING) and self.status == "idle":
@@ -1429,10 +1439,18 @@ class Session:
             usage = getattr(ev, "usage", None)
             if usage is not None and getattr(ev, "parent", None) is None:
                 changes["context_tokens"] = usage.context
-                if usage != self._last_usage:
+                starting = changes.get("status") == "working"
+                if usage != self._last_usage or starting:
                     self._last_usage = usage
                     recent = cache.push(recent, usage, time.time())
                     changes["cache_recent"] = recent
+                    if starting:
+                        turn = [0, 0]
+                    turn = [
+                        turn[0] + usage.input + usage.cache_creation,
+                        turn[1] + usage.output,
+                    ]
+                    changes["turn_tokens"] = turn
             if isinstance(ev, ToolCall) and ev.parent is None:
                 tools += 1
                 changes["tool_calls"] = tools
