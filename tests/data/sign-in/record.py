@@ -52,7 +52,10 @@ def main() -> int:
                 if not data:
                     break
                 text = data.decode("utf-8", "replace")
-                out.write(json.dumps({"t": round(time.monotonic() - start, 3), "data": text}) + "\n")
+                out.write(
+                    json.dumps({"t": round(time.monotonic() - start, 3), "data": text})
+                    + "\n"
+                )
                 out.flush()
     _, status = os.waitpid(pid, 0)
     return os.waitstatus_to_exitcode(status)

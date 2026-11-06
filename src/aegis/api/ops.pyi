@@ -80,6 +80,8 @@ class Ops:
     @property
     def setup(self) -> _setup: ...
     @property
+    def signin(self) -> _signin: ...
+    @property
     def skill(self) -> _skill: ...
     @property
     def speech(self) -> _speech: ...
@@ -269,7 +271,7 @@ class _btw:
 
 class _claude:
     async def token(self, *, log_id: str, id: str, secret: str) -> Any:
-        """The sign-in card's field (claude/login.py): check a setup-token, keep it, restart the sessions that failed to sign in."""
+        """The sign-in card's paste-a-token field (signin/core.py): check a setup-token, keep it, restart the sessions that failed to sign in."""
 
 class _commands:
     async def list(self, *, log_id: str) -> Any:
@@ -822,6 +824,16 @@ class _setup:
         knowledge: Literal["native", "side-by-side"] | None = ...,
     ) -> Any:
         """Save what this /setup run applied and declined, for the person whose session this is, so their next run proposes only what is new. Call it once, at the end of a run (help_read setup record)."""
+
+class _signin:
+    async def answer(self, *, log_id: str, id: str, secret: str) -> Any:
+        """Type the code the sign-in page gave into the waiting login."""
+    async def cancel(self, *, log_id: str, id: str) -> Any:
+        """Stop the login; the sessions keep waiting."""
+    async def choose(self, *, log_id: str, id: str, option: str) -> Any:
+        """Pick one of the login's offered options."""
+    async def start(self, *, log_id: str, harness: str) -> Any:
+        """Open a sign-in card in this session's transcript, or name the one open."""
 
 class _skill:
     async def delete(self, *, name: str) -> Any:

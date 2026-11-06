@@ -1066,7 +1066,9 @@ class Fold:
             cid = str(rec.get("card_id"))
             prev = self._entries.get(cid)
             det = {k: v for k, v in rec.items() if k not in ("kind", "ts")}
-            det.setdefault("restarted", prev["detail"].get("restarted") if prev else None)
+            det.setdefault(
+                "restarted", prev["detail"].get("restarted") if prev else None
+            )
             step = str(rec.get("step"))
             return self._upsert(
                 _entry(
