@@ -202,3 +202,30 @@ async def test_a_members_session_opens_no_card(world):
     w.sessions[member.log_id] = member
     w.sign_ins.failed(member, "claude-code")
     assert member.records == [] and w.spawns == []
+
+
+async def test_opencode_go_is_chosen_then_its_key_is_checked(world):
+    w = world
+    checked: list = []
+
+    async def oc_check(found: dict) -> str | None:
+        checked.append(found)
+        return None
+
+    w.recipes["opencode"].cmd = [sys.executable, str(FAKE), "opencode"]
+    w.sign_ins._checks["opencode"] = oc_check
+    w.a.spec.harness = "opencode"
+    w.sign_ins.failed(w.a, "opencode")
+    card = await until_step(w.a, "choose")
+    assert card["options"] == ["OpenCode Go", "OpenCode Console"]
+    with pytest.raises(ValueError):
+        await w.sign_ins.choose(card["card_id"], "Anthropic")
+    await w.sign_ins.choose(card["card_id"], "OpenCode Go")
+    card = await until_step(w.a, "paste")
+    assert card["prompt"] == "Paste your OpenCode Go API key." and "url" not in card
+    await w.sign_ins.answer(card["card_id"], "sk-FAKEKEY")
+    await until(
+        lambda: any(r["kind"] == "sign_in_done" for r in w.a.records), timeout=8
+    )
+    assert checked == [{"token": None}]
+    assert w.a.card()["step"] == "done" and w.a.restarts == 1

@@ -36,6 +36,21 @@ if sys.stdin.isatty():
     attrs[3] &= ~termios.ECHO
     termios.tcsetattr(0, termios.TCSANOW, attrs)
 
+if sys.argv[1:2] == ["opencode"]:
+    # opencode auth login, OpenCode Go: the menu, a choice, the key prompt, a key.
+    go = [
+        json.loads(line)["data"]
+        for line in (DATA.parent / "opencode" / "go.jsonl").read_text().splitlines()
+    ]
+    menu = next(i for i, c in enumerate(go) if "Ctrl" in c or "to select" in c) + 1
+    play(go[:menu])
+    sys.stdin.readline()
+    key = next(i for i, c in enumerate(go) if "API key" in c) + 1
+    play(go[menu:key])
+    sys.stdin.readline()
+    play(go[key:])
+    sys.exit(0)
+
 good = chunks("setup-token.jsonl")
 cut = next(i for i, c in enumerate(good) if "Paste" in c) + 1
 play(good[:cut])
