@@ -1491,7 +1491,10 @@ in the tab that draws its window while every other place holds a line, as the
 viewer's hold does. Panes are placed by numbers inside one container and never
 moved in the DOM, because moving an iframe reloads its page. A file sent again
 from the same path is a new version of one file (`layout.file_key`), and its
-pane follows the newest.
+pane follows the newest. A layout names its panes by the ids the session's own
+server knows, so on a linked server's tab the client resolves them against
+that server: a docked file is drawn through `/via` like its card, and a docked
+browser is found and streamed on that server (#970).
 
 **Audio never leaves the browser.** Dictation transcribes in the page, with
 Cactus Whistle's WebAssembly build in two workers (`js/dictation.js`). The client
