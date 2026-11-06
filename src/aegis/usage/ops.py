@@ -14,7 +14,6 @@ import asyncio
 import copy
 import json
 import logging
-import pwd
 import re
 import time
 from dataclasses import asdict
@@ -359,17 +358,9 @@ def import_sources(app: "App", people: list[str] | None) -> list[tuple]:
     the import reads: the server's own user's, and each member's read as its
     Linux user. A token without a user of its own acts as the server."""
     out = []
-    for row in app.principals.rows():
-        name, user = str(row["name"]), row["linux_user"]
-        if people is not None and name not in people:
-            continue
-        if row["owner"]:
-            out.append((name, None, Path.home()))
-        elif user:
-            try:
-                out.append((name, user, Path(pwd.getpwnam(user).pw_dir)))
-            except KeyError:
-                continue  # aegis warns at boot
+    name = app.principals.owner
+    if people is None or name in people:
+        out.append((name, None, Path.home()))
     return out
 
 

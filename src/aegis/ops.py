@@ -32,11 +32,12 @@ class OpError(Exception):
 
 @dataclass(frozen=True)
 class Principal:
-    """Who a token is (tokens.py): a person, a linked server or a job. The
-    role decides what it may change; a session's owner is a principal's name."""
+    """Who a token is (tokens.py): the server's owner, whose name a session
+    records as its owner. The role is always admin since multi-user mode left
+    (#958); it goes with the checks that read it."""
 
     name: str
-    role: str  # "admin" | "member"
+    role: str = "admin"
 
     @property
     def is_admin(self) -> bool:

@@ -756,8 +756,7 @@ def build_web(
                 "me": {
                     "name": principal.name,
                     "role": principal.role,
-                    # Its quota lines, drawn on its gauges (quota_gate.py).
-                    "policy": app.principals.policy_of(principal.name),
+                    "policy": None,
                 },
                 # Whose a session with no owner is: the admin's (tokens.py).
                 "owner": app.principals.owner,

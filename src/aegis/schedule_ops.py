@@ -400,8 +400,4 @@ def register_schedule_ops(app: App) -> None:
             where = s.spec.cwd
         else:
             where = cwd(p.cwd, caller)
-        try:
-            user = app.principals.acts_for(app.who(caller).name)
-        except PermissionError as e:
-            raise OpError("no_linux_user", str(e)) from None
-        return await sch.test(clock, p.check, where, p.name, user)
+        return await sch.test(clock, p.check, where, p.name, None)

@@ -134,12 +134,10 @@ from .workflow_ops import register_workflow_ops
 from .workflows import Workflows
 from .quota import Quota
 from .quota_gate import (
-    POOLS,
     Gate,
     continued,
     decide,
     pool_for,
-    pools_wire,
     refusal,
 )
 from .btws import SideNotes
@@ -432,26 +430,8 @@ class LinkName(_Strict):
     name: str
 
 
-class TokenAdd(_Strict):
-    name: str = Field(description="Who the token is: lowercase, e.g. ben or laptop")
-    role: Literal["admin", "member"] = "member"
-    linux_user: str | None = Field(
-        None, description="The Linux user it runs as, in multi-user mode; default: name"
-    )
-    no_linux_user: bool = Field(
-        False, description="An admin that runs as the server's own user"
-    )
-
-
 class TokenName(_Strict):
     name: str
-
-
-class TokenPolicy(_Strict):
-    name: str = Field(description="Whose policy; * sets the default for members.")
-    policy: dict | None = Field(
-        description="Pool -> {mode, lines} (quota_gate.py); null: use the default."
-    )
 
 
 class ArchiveParams(_Strict):
@@ -531,8 +511,8 @@ class App:
             lambda: self.config.current().terminals,
             self.publish,
             lambda: self.terminal_cgroups,
-            acts_for=lambda owner: self.principals.acts_for(owner),
-            role_of=lambda owner: self.principals.role_of(owner),
+            acts_for=lambda owner: None,
+            role_of=lambda owner: "admin",
             multi_user=multi_user is not None,
         )
         self.browsers = Browsers(
@@ -666,15 +646,7 @@ class App:
         # user per server for now: whoever started it (links.py).
         self.user = user or getpass.getuser()
         # The tokens that may use this server, the admin's first (tokens.py).
-        self.principals = TokenStore(
-            roots.state_root, self.user, multi_user=multi_user is not None
-        )
-        for name, linux_user in self.principals.missing_users():
-            log.warning(
-                "aegis: token %s names Linux user %s, which does not exist",
-                name,
-                linux_user,
-            )
+        self.principals = TokenStore(roots.state_root, self.user)
         self.links = Links(roots.state_root, server_name, self.user, self.publish)
         self.links.answer = self.answer_link
         self.links.serve, self.links.rwatch = self.serve_link, self.watch_link
@@ -705,8 +677,8 @@ class App:
         reg.pause_hold = self.pause_hold
         # Who each session's processes run as, in multi-user mode (users.py).
         reg.multi_user = multi_user is not None
-        reg.acts_for = lambda name: self.principals.acts_for(name)
-        reg.role_of = lambda name: self.principals.role_of(name) if name else None
+        reg.acts_for = lambda name: None
+        reg.role_of = lambda name: "admin" if name else None
         reg.runners = self.runners
         # Models that fell, and the one timer that releases held work when the
         # first of them is free again (cascade.py).
@@ -831,13 +803,8 @@ class App:
         for two servers one person alone uses, so the link must hold the
         admin's own token and nobody else may hold one (links.py, #684)."""
         me = self.server_name
-        if principal.name != self.principals.owner or not principal.is_admin:
+        if principal.name != self.principals.owner:
             return f"the link does not hold {me}'s admin token"
-        if self.principals.has_members():
-            return (
-                f"{me} has tokens besides its admin's; a trusted link needs "
-                "a server only its admin uses"
-            )
         if self.links.outbound(server) is not None:
             return (
                 f"{me} links a server named {server} itself; remove that "
@@ -942,14 +909,14 @@ class App:
             return caller.principal
         if caller.is_agent:
             name = self.owner_of(caller.log_id or "") or self.user
-            return Principal(name, self.principals.role_of(name) or "member")
+            return Principal(name)
         return Principal(self.user, "admin")  # the server's own calls
 
     def gate(self, owner: str | None, harness: str, model: str | None) -> Gate:
         """Whether ``owner`` may start a harness on that pool now. A session
         from before owners is the admin's."""
         return decide(
-            self.principals.policy_of(owner or self.user),
+            None,
             pool_for(harness, model),
             self.quota.snapshot(),
             time.time(),
@@ -1031,7 +998,7 @@ class App:
                 continue
             if self.pause_hold(s) is not None:
                 continue  # the person's pause outranks the gate (pause.py)
-            policy = self.principals.policy_of(s.spec.owner or self.user)
+            policy = None
             if policy is None:
                 continue
             g = decide(policy, pool_for(s.spec.harness, s.spec.model), snapshot, now)
@@ -1510,14 +1477,12 @@ class App:
         """Where the files a person reaches are, and the runner that opens
         them as their Linux user (as_user.py). Raises PermissionError for a
         member with no user in multi-user mode."""
-        who = self.who(caller)
-        return self._place(self.principals.acts_for(who.name), who.role == "member")
+        return self._place(None, False)
 
     def place_of_session(self, log_id: str) -> Place:
         """The place of a session's owner, as the user its process runs as."""
         spec = self.sessions.open(log_id).spec
-        member = self.principals.role_of(spec.owner or self.user) != "admin"
-        return self._place(self.sessions.user_for(spec), member)
+        return self._place(self.sessions.user_for(spec), False)
 
     def knowledge_reader(self, principal: str) -> tuple[as_user.Runner, list[str]]:
         """What a staleness check of ``principal``'s memories reads with: the
@@ -1525,8 +1490,8 @@ class App:
         the owner, or outside multi-user mode), and the roots a quoted path
         is looked for under, their Files root then their home. Raises
         PermissionError for a member with no user."""
-        user = self.principals.acts_for(principal)
-        place = self._place(user, self.principals.role_of(principal) != "admin")
+        user = None
+        place = self._place(user, False)
         home = pwd.getpwnam(user).pw_dir if user else str(Path.home())
         return place.run, list(dict.fromkeys([str(place.root), home]))
 
@@ -3257,36 +3222,6 @@ class App:
             await self.resume_all()
             return {"paused": None}
 
-        @r.op("token.list", admin=True)
-        async def token_list(_, caller):
-            """The tokens that may use this server, the admin's first, the
-            policy of every member without its own, the pools a policy names,
-            and each member's gate on each pool now."""
-            snap, now = self.quota.snapshot(), time.time()
-
-            def gates(policy: dict | None) -> dict | None:
-                if policy is None:
-                    return None
-                return {pool: decide(policy, pool, snap, now).state for pool in POOLS}
-
-            rows = self.principals.rows()
-            for row in rows:
-                row["gates"] = gates(self.principals.policy_of(row["name"]))
-            default = self.principals.default_policy()
-            return {
-                "tokens": rows,
-                "default_policy": default,
-                "default_gates": gates(default or {}),
-                "pools": pools_wire(),
-                "multi_user": self.multi_user is not None,
-            }
-
-        @r.op("token.add", TokenAdd, admin=True)
-        async def token_add(p: TokenAdd, caller):
-            """Mint a token; the only time it is shown."""
-            token = self.principals.add(p.name, p.role, p.linux_user, p.no_linux_user)
-            return {"name": p.name, "role": p.role, "token": token}
-
         @r.op("token.revoke", TokenName, admin=True)
         async def token_revoke(p: TokenName, caller):
             """End a token. The admin's is replaced, and the new one returned
@@ -3295,15 +3230,6 @@ class App:
             token = self.principals.revoke(p.name)
             self.push.subscriptions.remove_owner(p.name)
             return {"token": token}
-
-        @r.op("token.policy", TokenPolicy, admin=True)
-        async def token_policy(p: TokenPolicy, caller):
-            """Set a member's quota policy, or with name * the default one.
-            The gate applies it at the next reading."""
-            if p.name == "*":
-                self.principals.set_default_policy(p.policy)
-            else:
-                self.principals.set_policy(p.name, p.policy)
 
         @r.op("server.version")
         async def server_version(_, caller):

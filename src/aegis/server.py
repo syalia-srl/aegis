@@ -64,6 +64,12 @@ def prepare(start: Path, root: Path | None = None) -> Prepared:
                 f"  mv {roots.state_root} {roots.state_root.parent / 'legacy-state'}",
             ]
         )
+    from .tokens import OldStateError, refuse_old_state
+
+    try:
+        refuse_old_state(roots.state_root)
+    except OldStateError as e:
+        raise StartError([str(e)]) from None
     snap = Config(roots.config_root).current()
     if snap.multi_user_error:
         raise StartError([snap.multi_user_error])

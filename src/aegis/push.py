@@ -376,8 +376,7 @@ class Sender:
             if source not in row.get("sources", ()):
                 continue
             # In multi-user mode a member's devices hear of its own only.
-            role = app.principals.role_of(row["owner"]) or "member"
-            if not app.sees(Principal(row["owner"], role), about):
+            if not app.sees(Principal(row["owner"]), about):
                 continue
             sid = row["id"]
             self._pending.setdefault(sid, deque()).append((payload, now))
