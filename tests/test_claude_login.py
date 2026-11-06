@@ -143,7 +143,7 @@ def toasts(world, monkeypatch):
 
 
 def cards(s) -> list[dict]:
-    return [e for e in s.entries() if e["kind"] == "claude_login"]
+    return [e for e in s.entries() if e["kind"] == "sign_in"]
 
 
 async def test_a_failed_sign_in_raises_one_card_and_a_new_token_restarts_both(
@@ -182,7 +182,7 @@ async def test_a_failed_sign_in_raises_one_card_and_a_new_token_restarts_both(
     assert sorted(got["restarted"]) == sorted([a.handle, b.handle])
     assert login.read_token() == GOOD
     assert stat.S_IMODE(token_file().stat().st_mode) == 0o600
-    assert cards(a)[0]["status"] == "renewed"
+    assert cards(a)[0]["status"] == "done"
     for s in (a, b):
         await until(lambda s=s: inbox(s), timeout=8, what="the renewed message")
         assert "aegis:login · renewed" in json.dumps(inbox(s), ensure_ascii=False)

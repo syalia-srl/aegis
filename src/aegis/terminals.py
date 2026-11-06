@@ -146,6 +146,38 @@ class Terminals:
             raise
         return t
 
+    async def spawn_ephemeral(
+        self,
+        name: str,
+        cmd: list[str],
+        env: dict[str, str],
+        unset: list[str],
+        cols: int,
+        owner: str,
+        tap,
+    ) -> Terminal:
+        """A terminal that leaves nothing on disk, for a sign-in (#946): no
+        cast, no meta.json, never archived. ``tap`` sees each chunk first
+        and returns what the ring and the browser get."""
+        spec = {"cmd": " ".join(cmd), "argv": cmd, "cwd": ".", "restart": "no",
+                "env": env, "unset": unset, "access": {}}  # fmt: skip
+        tid = mint_term_id()
+        meta = {"id": tid, "name": self._name(name), "profile": name, "spec": spec,
+                "title": " ".join(cmd), "cwd": str(self.config_root), "owner": owner,
+                "linux_user": None, "started_by": "aegis", "cols": cols, "rows": ROWS,
+                "state": "running", "code": None, "reason": None,
+                "created": time.time(), "archived": False, "ephemeral": True}  # fmt: skip
+        t = Terminal(meta, CastStore(self.dir / tid, persist=False),
+                     self._on_output, self._on_exit)  # fmt: skip
+        t.tap = tap
+        self.open[tid] = t
+        try:
+            await self._start(t)
+        except OpError:
+            del self.open[tid]
+            raise
+        return t
+
     def _user(self, t: Terminal) -> str | None:
         """The Linux user a terminal runs as: the one recorded when it was
         opened, in multi-user mode. One opened before the mode for an owner
@@ -186,7 +218,8 @@ class Terminals:
             state="ended", reason="closed", archived=True, closed_at=time.time()
         )
         del self.open[tid]
-        self.archived[tid] = t.meta
+        if not t.meta.get("ephemeral"):
+            self.archived[tid] = t.meta
         self._save(t)
         self._publish("sessions", [{"remove": tid}])
         if t.running:
@@ -315,11 +348,13 @@ class Terminals:
         spec = t.meta["spec"]
         env = {**os.environ, **spec["env"],
                "TERM": "xterm-256color", "AEGIS_TERMINAL": t.meta["name"]}  # fmt: skip
+        for key in spec.get("unset", ()):
+            env.pop(key, None)
         cg = self._cgroups()
         cgroup = cg.create(t.id) if cg is not None else None
         try:
             user = self._user(t)
-            cmd = argv(spec)
+            cmd = spec.get("argv") or argv(spec)
             if user and spec["cmd"] is None:
                 cmd = [_passwd(user).pw_shell or "/bin/sh", "-l"]
             # A profile that names a proxy of its own keeps it.
@@ -360,6 +395,8 @@ class Terminals:
         return name
 
     def _save(self, t: Terminal) -> None:
+        if t.meta.get("ephemeral"):
+            return
         d = self.dir / t.id
         d.mkdir(parents=True, exist_ok=True)
         tmp = d / "meta.json.tmp"

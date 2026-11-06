@@ -488,6 +488,155 @@ function fillLogin(card, e) {
   card.replaceChildren(bar, body);
 }
 
+// A harness sign-in card (signin/core.py): aegis runs the harness's own login
+// in a terminal and the card shows its current step. What the person types
+// goes to that login only; it is sent and cleared, never kept here.
+const SIGN_IN_OPEN = new Set(["starting", "open_url", "paste", "device_code", "choose", "checking"]);
+
+function fillSignIn(card, e) {
+  const d = e.detail || {};
+  const label = d.label || d.harness || "harness";
+  const step = d.step || e.status;
+  const n = (d.handles || []).length;
+  const live = SIGN_IN_OPEN.has(step);
+  card.classList.toggle("gone", !live);
+  const waiting = n ? `${n} ${n === 1 ? "session" : "sessions"} waiting` : "no session waiting";
+  const head = live && d.expires ? `${waiting} · ${until(d.expires * 1000)}` : step === "done" ? "signed in" : live ? waiting : "failed";
+  const { bar, acts } = secretBar(e, `${label} sign-in`, head);
+  const body = el("div", "sbody");
+  const hint = el("span", "hint");
+  const fail = (err) => {
+    hint.textContent = String(err?.message || err);
+    hint.classList.add("err");
+  };
+  const act = (text, op, params, cls = "btn") => {
+    const b = el("button", cls, text);
+    b.type = "button";
+    b.onclick = async () => {
+      b.disabled = true;
+      try {
+        await secretCall(op, { id: e.id, ...params });
+      } catch (err) {
+        b.disabled = false;
+        fail(err);
+      }
+    };
+    return b;
+  };
+  if (live && d.term_id) {
+    const show = el("a", "btn", "Show terminal");
+    show.href = `#t=${d.term_id}`;
+    acts.append(show);
+  }
+  if (live) acts.append(act("Cancel", "signin.cancel", {}));
+  if (step === "starting") body.append(el("div", "prompt", `Starting the ${label} login…`));
+  if (step === "paste" || step === "open_url" || step === "device_code") {
+    const open = el("a", "btn primary", "Open sign-in page");
+    Object.assign(open, { href: d.url || "#", target: "_blank", rel: "noopener noreferrer" });
+    const steps = el("ol", "steps");
+    const li = el("li", null, "");
+    li.append(open);
+    steps.append(li);
+    if (step === "device_code" && d.code) {
+      const c = el("li", null, "Enter this code there: ");
+      c.append(el("code", null, d.code));
+      steps.append(c);
+    }
+    body.append(steps);
+    if (step === "paste") {
+      steps.append(el("li", null, "Approve, then paste the code the page shows."));
+      const form = el("form", "sform");
+      const input = el("input");
+      Object.assign(input, { type: "password", autocomplete: "off", placeholder: "code from the page", required: true });
+      input.setAttribute("aria-label", "sign-in code");
+      input.dataset.lpignore = "true";
+      const go = el("button", "btn primary", "Sign in");
+      go.type = "submit";
+      form.onsubmit = async (ev) => {
+        ev.preventDefault();
+        if (!input.value) return;
+        go.disabled = true;
+        const value = input.value;
+        input.value = "";
+        try {
+          await secretCall("signin.answer", { id: e.id, secret: value });
+        } catch (err) {
+          go.disabled = false;
+          fail(err);
+        }
+      };
+      form.append(input, go);
+      body.append(form);
+    }
+  }
+  if (step === "choose") {
+    body.append(el("div", "prompt", d.prompt || "Pick one:"));
+    const row = el("div", "sform");
+    for (const o of d.options || []) row.append(act(o, "signin.choose", { option: o }));
+    body.append(row);
+  }
+  if (step === "checking") body.append(el("div", "prompt", "Checking the sign-in…"));
+  if (step === "done") {
+    const r = d.restarted || [];
+    body.append(el("div", "dim", `Signed in. ${r.length ? `Restarted ${r.join(", ")}.` : "No session was waiting."}`));
+  }
+  if (step === "failed") {
+    body.append(el("div", "prompt", d.error || "The sign-in failed."));
+    if (d.tail) body.append(el("pre", "tail", d.tail));
+    if (n) body.append(el("div", "dim", `Still waiting: ${d.handles.join(", ")}.`));
+    const again = el("button", "btn primary", "Start again");
+    again.type = "button";
+    again.onclick = async () => {
+      again.disabled = true;
+      try {
+        await secretCall("signin.start", { harness: d.harness });
+      } catch (err) {
+        again.disabled = false;
+        fail(err);
+      }
+    };
+    const againRow = el("div", "sform");
+    againRow.append(again);
+    body.append(againRow);
+  }
+  if (live && d.harness === "claude-code") body.append(pasteToken(e));
+  body.append(hint);
+  card.replaceChildren(bar, body);
+}
+
+// Claude's other way in: a setup-token made elsewhere, pasted whole.
+function pasteToken(e) {
+  const more = el("details", "more");
+  more.append(el("summary", null, "Paste a token instead"));
+  const form = el("form", "sform");
+  const input = el("input");
+  Object.assign(input, { type: "password", autocomplete: "off", placeholder: "sk-ant-oat01-…", required: true });
+  input.setAttribute("aria-label", "Claude token");
+  input.dataset.lpignore = "true";
+  const go = el("button", "btn", "Save and check");
+  go.type = "submit";
+  const hint = el("span", "hint", "From claude setup-token run on any machine. It lasts a year.");
+  form.onsubmit = async (ev) => {
+    ev.preventDefault();
+    if (!input.value) return;
+    go.disabled = true;
+    const value = input.value;
+    input.value = "";
+    hint.classList.remove("err");
+    hint.textContent = "Checking with one request on haiku…";
+    try {
+      await secretCall("claude.token", { id: e.id, secret: value });
+    } catch (err) {
+      go.disabled = false;
+      hint.textContent = String(err?.message || err);
+      hint.classList.add("err");
+    }
+  };
+  form.append(input, go);
+  more.append(form, hint);
+  return more;
+}
+
 // A config change an agent suggested (config_suggest.py): the diff, and for
 // an admin Apply and Not now. The outcome comes back as the folded entry.
 const CONFIG_DONE = {
@@ -1859,6 +2008,15 @@ const RENDERERS = {
     fillConfig(card, e);
     body.append(card);
     return row(e, "config", body);
+  },
+
+  sign_in(e) {
+    // A harness sign-in driven by aegis (fillSignIn).
+    const body = el("div", "body");
+    const card = el("div", "fcard scard lcard");
+    fillSignIn(card, e);
+    body.append(card);
+    return row(e, "sign_in", body);
   },
 
   claude_login(e) {

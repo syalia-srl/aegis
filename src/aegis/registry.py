@@ -135,7 +135,7 @@ class Registry(Host):
         self.browsers = None  # browsers.py, set by the app: docked browser panes
         self.quota = None
         self.notices = None  # notices.Notices, set by App
-        self.sign_in = None  # claude.login.SignIn, set by App
+        self.sign_in = None  # signin.core.SignIns, set by App
         self.load = None  # load.LoadSampler, set by App
         # knowledge.Knowledge, and whose knowledge a session's sends are
         # hinted from (its owner, else the admin); both set by App.
@@ -509,7 +509,7 @@ class Registry(Host):
 
     def sign_in_failed(self, session: Session) -> None:
         if self.sign_in is not None:
-            self.sign_in.failed(session)
+            self.sign_in.failed(session, session.spec.harness)
 
     def rate_limit(self, session: Session, windows: dict) -> None:
         # A member's stream reports the member's account, not the server's.
