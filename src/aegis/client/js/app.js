@@ -118,6 +118,9 @@ const withKey = (m, server = null) => ({ ...lifecycle(m), server, key: keyOf(ser
 const order = new TabOrder();
 let ordered = []; // metas in this browser's tab order
 let shown = null; // the key of the session whose transcript is subscribed
+// A docked browser's key: its pane holds the id the browser's own server
+// knows it by, and the canvas is the shown session's, on that server (#970).
+const paneKey = (id) => keyOf(forKey(shown || "").server, id);
 // The last session shown in this browser tab, where Files' quotes go; a
 // reload of the Files view keeps it.
 let lastShown = sessionStorage.getItem("aegis.lastShown");
@@ -212,7 +215,10 @@ const canvas = new Canvas($("canvas"), {
   refuse: (message) => toast(message, { kind: "error" }),
   openWindow: (n, tab) => openWindow(shown, n, tab),
   // A browser the session drives, docked: its own view of the stream.
-  mountBrowser: (host, id) => (sessions.has(id) ? mountBrowser(host, id, termCard(id), { conn }) : null),
+  mountBrowser: (host, id) => {
+    const key = paneKey(id);
+    return sessions.has(key) ? mountBrowser(host, id, termCard(key), { conn, server: forKey(key).server }) : null;
+  },
 });
 // Dock on a card or the viewer's bar. The viewer lets go of what it docks.
 // The viewer lets go of what it docks or pops out.
@@ -1152,7 +1158,7 @@ const hashOf = (key) => ({ term: `#t=${key}`, browser: `#b=${key}` })[sessions.g
 const tabFocus = (r) => (r.view === "session" || r.view === "term" || r.view === "browser" ? r.id : null);
 // Where a browser's views find its card and the sessions it can be given to.
 browserSources({
-  card: (id) => (sessions.has(id) ? termCard(id) : null),
+  card: (id) => (sessions.has(paneKey(id)) ? termCard(paneKey(id)) : null),
   sessions: () => local().filter((m) => !isTool(m) && m.state !== "asleep" && mine(m)),
 });
 // The open terminal's card, with the log id and server it is reached by.
