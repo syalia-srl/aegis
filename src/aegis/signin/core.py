@@ -232,7 +232,7 @@ class SignIns:
         try:
             card.term = await self._terminals.spawn_ephemeral(
                 f"sign-in-{card.harness}", recipe.cmd, recipe.env, recipe.unset,
-                recipe.cols, "aegis", tap,
+                recipe.cols, self._owner(card), tap,
             )  # fmt: skip
         except Exception as e:
             await self._fail(card, f"could not start {recipe.cmd[0]}: {e}")
@@ -307,6 +307,11 @@ class SignIns:
         self._close(card)
 
     # -- helpers ---------------------------------------------------------------
+    def _owner(self, card: Card) -> str:
+        """Who may open the terminal: the owner of the session holding the card."""
+        holder = self._sessions.get(card.holder)
+        return (getattr(holder.spec, "owner", None) if holder else None) or "aegis"
+
     def _card_for(self, harness: str) -> Card | None:
         cid = self._open.get(harness)
         return self.cards.get(cid) if cid else None
