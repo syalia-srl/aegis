@@ -10,7 +10,7 @@ two copies and a stale entry point, so an install none of the rows recognise
 An update installs, then asks the new entry point for ``--version``; only a
 new number goes on to restart, so a broken or pinned install is caught while
 the old server still runs. The restart is the clean stop a ``systemctl stop``
-takes (SIGTERM to itself, ``server.json`` written by restarts.py), then
+takes (uvicorn's exit flag, ``server.json`` written by restarts.py), then
 ``cli.serve`` replaces the process with the same entry point and arguments:
 same pid, so a unit sees nothing and its ``Restart=`` does not matter.
 
@@ -141,8 +141,23 @@ def pending() -> list[str] | None:
     return _pending
 
 
+# How to stop the server cleanly, set by cli.serve: uvicorn's should_exit, the
+# flag its SIGTERM handler sets. A real SIGTERM would do the same stop, but
+# uvicorn raises it again once it has stopped, which kills the process before
+# it can replace itself.
+_stopper: Callable[[], None] | None = None
+
+
+def on_stop(fn: Callable[[], None]) -> None:
+    global _stopper
+    _stopper = fn
+
+
 def _stop() -> None:
-    signal.raise_signal(signal.SIGTERM)
+    if _stopper is not None:
+        _stopper()
+    else:
+        signal.raise_signal(signal.SIGTERM)
 
 
 class Updater:
