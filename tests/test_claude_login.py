@@ -161,7 +161,7 @@ async def test_a_failed_sign_in_raises_one_card_and_a_new_token_restarts_both(
         lambda: len(cards(a)[0]["detail"]["handles"]) == 2, what="b joins the card"
     )
     assert cards(a)[0]["detail"]["handles"] == [a.handle, b.handle]
-    assert world.app.sessions.card(a)["attention_line"] == "Claude sign-in failed"
+    assert world.app.sessions.card(a)["attention_line"] == "Sign-in failed"
 
     call = world.app.registry.call
     with pytest.raises(OpError) as err:
