@@ -677,6 +677,7 @@ class App:
             )
         self.links = Links(roots.state_root, server_name, self.user, self.publish)
         self.links.answer = self.answer_link
+        self.links.serve, self.links.rwatch = self.serve_link, self.watch_link
         self.exits = Exits(
             self.links,
             lambda: (
@@ -883,6 +884,21 @@ class App:
             return {
                 "error": {"code": "internal", "message": f"{type(e).__name__}: {e}"}
             }
+
+    def serve_link(self, server: str, channel: str, since, merge: bool, send):
+        """Subscribe a trusted linked server's browser here, down its link
+        (#969), as the same caller as ``answer_link``; the function that ends it."""
+        caller = Caller(
+            "user", link=server, principal=Principal(self.principals.owner, "admin")
+        )
+        sub = self.channels.subscribe(
+            channel, send, since, merge=merge, view=self.view_of(caller)
+        )
+        return lambda: self.channels.unsubscribe(sub)
+
+    def watch_link(self, server: str, key: str, log_id: str | None) -> None:
+        """Which session a page on a trusted linked server shows (park.py)."""
+        self.watchers.watch(f"link:{server}:{key}", log_id)
 
     async def _far_callback(self, t, outcome: str, body: str) -> None:
         """A task an agent on a server linked with trust enqueued here
@@ -3171,7 +3187,7 @@ class App:
         @r.op("link.list")
         async def link_list(_, caller):
             """The servers this one links, with their state; never their tokens."""
-            return self.links.wire()
+            return [link.wire() for link in self.links.links()]
 
         @r.op("link.add", LinkAdd, admin=True)
         async def link_add(p: LinkAdd, caller):

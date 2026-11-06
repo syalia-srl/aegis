@@ -96,6 +96,8 @@ export class Settings {
   }
 
   onLinks(links, home) {
+    // A way back (links.py, Backlink) is listed under "links here", not as a link.
+    links = links.filter((l) => !l.back);
     this.links = links;
     this.home = home;
     this.incoming = undefined; // a way back opened or went: read it again

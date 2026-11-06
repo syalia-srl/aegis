@@ -920,8 +920,13 @@ link socket is on the far side, so every op keeps one rule for linked calls;
 and the far server keeps a `links.Backlink` for the socket, which agents and the
 router find by name like any link. The far server checks the rule again before
 every call back and ends the trust with a `trust` frame when it fails. A way
-back carries calls only: subscriptions are refused (`not_both_ways`), nothing is
-relayed to a third server, and the archive merges outbound links alone. On a
+back also carries live views (#969) when the near server said `views` in its
+hello: the far server lists it on `links` marked `back`, and a browser there
+subscribes down it as `rsub`, `runsub` and `rwatch`; the near server serves them
+as the `answer_link` caller (`App.serve_link`) and sends each frame back as
+`rframe`. An older near server's way back refuses them (`not_both_ways`).
+Nothing is relayed to a third server, and the archive and files merge outbound
+links alone. On a
 plain link an `rcall` is dropped like any unknown frame. Text does travel over
 a trusted link: `session_list` passes the other server's entries whole,
 `peer_read` reads across it, and `agent_ops.far_error` passes its errors

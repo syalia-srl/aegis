@@ -5,6 +5,7 @@ Alpha links beta with trust, as in test_links.py. Beta grants it while only its
 admin holds a token, and its agents then reach alpha as ``handle@alpha``.
 """
 
+import asyncio
 import json
 import re
 
@@ -50,8 +51,10 @@ async def test_a_trusted_link_is_granted_and_opens_the_way_back(trusted):
     assert alpha.app.links.trusted("beta") and beta.app.links.trusted("alpha")
     incoming = await beta.app.registry.call("link.incoming", {})
     assert [(i["name"], i["state"]) for i in incoming] == [("alpha", "linked")]
-    # The way back is not a link beta holds: its browsers do not list it.
-    assert beta.app.links.wire() == []
+    # The way back is listed for beta's browsers, marked as one (#969).
+    assert [(w["name"], w.get("back")) for w in beta.app.links.wire()] == [
+        ("alpha", True)
+    ]
 
 
 async def test_a_plain_link_opens_no_way_back(tmp_path, fake_claude):
@@ -182,20 +185,83 @@ async def test_an_agent_on_beta_lists_alphas_sessions(trusted):
     assert entry["handle"] == here.handle and entry["state"] == here.status
 
 
-async def test_a_person_on_beta_calls_alpha_but_cannot_watch_it(trusted):
+async def test_a_person_on_beta_watches_alphas_sessions(trusted):
+    """Live views go both ways (#969): a browser on beta subscribes to alpha's
+    sessions down the socket alpha opened, as a browser on alpha does to beta's."""
     alpha, beta = trusted
     async with Browser(beta) as b:
         r = await b.call("agents.list", server="alpha")
         assert "result" in r and r["result"]["agents"]
         await b.send(t="sub", channel="sessions", server="alpha")
+        await until(lambda: b.of("sessions", "alpha"), what="alpha's snapshot")
+        assert b.of("sessions", "alpha")[0]["t"] == "snapshot"
+        r = await b.call("session.spawn", server="alpha", agent="opus")
+        lid = r["result"]["log_id"]
+        assert lid in alpha.app.sessions.sessions
+        assert lid not in beta.app.sessions.sessions
+        await until(
+            lambda: any(
+                op.get("upsert", {}).get("log_id") == lid
+                for f in b.of("sessions", "alpha")
+                if f["t"] == "patch"
+                for op in f["ops"]
+            ),
+            what="the upsert from alpha",
+        )
+        assert all("sid" not in f for f in b.frames)
+        assert not any(f.get("t") == "error" for f in b.frames)
+
+
+async def test_an_unsubscribed_view_back_gets_nothing_more(trusted):
+    alpha, beta = trusted
+    async with Browser(beta) as b:
+        await b.send(t="sub", channel="sessions", server="alpha")
+        await until(lambda: b.of("sessions", "alpha"), what="alpha's snapshot")
+        await until(lambda: alpha.app.links.get("beta")._rsubs, what="the view served")
+        await b.send(t="unsub", channel="sessions", server="alpha")
+        await until(
+            lambda: not alpha.app.links.get("beta")._rsubs, what="the view ended"
+        )
+        n = len(b.frames)
+        await alpha.spawn()
+        await asyncio.sleep(0.3)
+        assert not [f for f in b.frames[n:] if f.get("server") == "alpha"]
+
+
+async def test_a_view_back_ends_when_the_browser_goes(trusted):
+    alpha, beta = trusted
+    async with Browser(beta) as b:
+        await b.send(t="sub", channel="sessions", server="alpha")
+        await until(lambda: b.of("sessions", "alpha"), what="alpha's snapshot")
+    await until(
+        lambda: not alpha.app.links.get("beta")._rsubs, what="alpha stops serving"
+    )
+
+
+async def test_a_view_back_fails_when_the_link_drops(trusted):
+    alpha, beta = trusted
+    async with Browser(beta) as b:
+        await b.send(t="sub", channel="sessions", server="alpha")
+        await until(lambda: b.of("sessions", "alpha"), what="alpha's snapshot")
+        alpha.app.links.remove("beta")
         await until(
             lambda: any(
                 f.get("t") == "error" and f.get("server") == "alpha" for f in b.frames
             ),
-            what="the refusal",
+            what="the subscription failing",
         )
         (err,) = [f for f in b.frames if f.get("t") == "error"]
-        assert err["error"]["code"] == "not_both_ways"
+        assert err["error"]["code"] == "server_offline"
+
+
+def test_a_way_back_from_an_older_server_is_still_not_watched():
+    """A near server from before #969 does not say ``views`` in its hello: it
+    would answer an rsub as a bad call, so the far server refuses the view."""
+    sent: list[dict] = []
+    back = links.Backlink("alpha", sent.append, lambda: None, views=False)
+    got: list[dict] = []
+    back.sub("s1", "sessions", None, got.append)
+    assert got[0]["error"]["code"] == "not_both_ways" and not sent
 
 
 async def test_a_call_back_is_not_relayed_to_a_third_server(

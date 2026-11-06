@@ -666,7 +666,13 @@ def build_web(
                     return "the link's token was revoked"
                 return app.trust_refusal(principal, str(via))
 
-            back = Backlink(str(via), out.put_nowait, still, app.links.detach)
+            back = Backlink(
+                str(via),
+                out.put_nowait,
+                still,
+                app.links.detach,
+                views=isinstance(link, dict) and link.get("views") is True,
+            )
 
         async def writer() -> None:
             while True:
@@ -793,6 +799,8 @@ def build_web(
                     task.add_done_callback(calls.discard)
                 elif t == "rreply" and back is not None:
                     back.resolve(msg)
+                elif t == "rframe" and back is not None:
+                    back.deliver(msg)
                 elif t in ("sub", "unsub"):
                     ch = str(msg.get("channel"))
                     server = msg.get("server")
