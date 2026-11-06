@@ -498,6 +498,19 @@ body{background:#000}
 #a2 .runline:hover .rs{color:var(--muted)}
 #a2 .runline.running .rs{color:var(--accent)}
 #a2 .row.working,#a2 .row.working .g{color:var(--accent)}
+/* The working row (#938): the asterisk grows from a dot and turns, a light
+   runs over the verb letter by letter, a thin cursor blinks after it, and a
+   counter flashes when a call adds tokens. */
+#a2 #working-g svg{animation:a2star 1.2s steps(1) infinite;transform-origin:50% 50%}
+@keyframes a2star{0%{transform:scale(.25)}10%{transform:scale(.5) rotate(10deg)}20%{transform:scale(.75) rotate(20deg)}30%{transform:scale(.95) rotate(30deg)}40%{transform:scale(1.1) rotate(40deg)}50%{transform:scale(1.2) rotate(50deg);filter:drop-shadow(0 0 3px var(--accent))}60%{transform:scale(1.1) rotate(60deg)}70%{transform:scale(.95) rotate(70deg)}80%{transform:scale(.75) rotate(80deg)}90%{transform:scale(.5) rotate(90deg)}}
+#a2 .wverb{display:inline-block;min-width:12ch;white-space:pre}
+#a2 #working-verb span{animation:a2shine 1.8s ease-in-out infinite}
+@keyframes a2shine{0%,70%,100%{color:var(--accent)}35%{color:var(--ink);text-shadow:0 0 5px var(--accent)}}
+#a2 .wcur{display:inline-block;width:2px;height:1.05em;vertical-align:-.18em;margin-left:1px;background:var(--accent);animation:a2cur .9s steps(1) infinite}
+@keyframes a2cur{50%{opacity:0}}
+#a2 .wtok{transition:color .4s,text-shadow .4s}
+#a2 .wtok.flash{color:var(--ink);text-shadow:0 0 6px var(--accent)}
+@media (prefers-reduced-motion:reduce){#a2 #working-g svg,#a2 #working-verb span,#a2 .wcur{animation:none}#a2 .wtok{transition:none}}
 #a2 .meta{color:var(--faint);margin-left:10px}
 #a2 .steps{color:var(--faint);margin-left:8px}
 /* the divider and the navigator */

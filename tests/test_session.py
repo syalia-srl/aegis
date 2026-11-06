@@ -1,3 +1,4 @@
+import json
 import errno
 import os
 from pathlib import Path
@@ -525,3 +526,34 @@ async def test_a_tab_holding_a_rev_from_before_a_send_gets_the_folded_recap(h):
     (recap,) = [e for e in delta["entries"] if e["kind"] == "recap"]
     assert recap["id"] == live["id"] and recap["detail"]["folded"] is True
     assert held["rev"] < recap["rev"] <= delta["rev"]
+
+
+async def test_turn_tokens_count_new_input_and_output_and_restart_each_turn(h):
+    """The working row's counter (#938): cache reads are left out, a call
+    written as several lines counts once, and a new turn starts from zero."""
+
+    def line(mid: str, inp: int, created: int, read: int, out: int) -> str:
+        usage = {
+            "input_tokens": inp,
+            "cache_creation_input_tokens": created,
+            "cache_read_input_tokens": read,
+            "output_tokens": out,
+        }
+        msg = {
+            "id": mid,
+            "role": "assistant",
+            "content": [{"type": "text", "text": "x"}],
+            "usage": usage,
+        }
+        return json.dumps({"type": "assistant", "message": msg})
+
+    s = h.session
+    s._on_line(line("m1", 2, 300, 9000, 40))
+    s._on_line(line("m1", 2, 300, 9000, 40))
+    s._on_line(line("m2", 3, 100, 9300, 60))
+    assert s.status == "working" and s.wire()["turn_tokens"] == [405, 100]
+    s._set(status="idle")
+    s._set(status="working")
+    assert s.turn_tokens == [0, 0]
+    s._on_line(line("m3", 3, 100, 9300, 60))
+    assert s.turn_tokens == [103, 60]

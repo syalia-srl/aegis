@@ -250,7 +250,9 @@ context and cost change on nearly every line of a turn and are coalesced for
 250 ms. Publishing them per line doubled the server's cost per line. The
 cache counters (`tool_calls`, `cache_recent`, `compactions`) are coalesced the
 same way. They count only the main thread's events, like `context_tokens`,
-and one usage repeated across the lines of one call counts once (`cache.py`).
+and one usage repeated across the lines of one call counts once (`cache.py`). `turn_tokens`,
+the working row's new input and output for the turn, is coalesced with
+them and starts from zero each time the session turns working.
 
 **A session's attention is decided in Python, from facts and the agent's own
 reports.** Working, error and waiting are facts the server holds: the turn, the
