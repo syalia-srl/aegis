@@ -204,3 +204,29 @@ async def test_a_turns_rate_limit_event_moves_the_claude_gauges(world, monkeypat
         return None
 
     await until(lambda: session_percent() == 37.0, what="the gauge")
+
+
+async def test_an_agent_opens_a_sign_in_card_but_cannot_answer_it(world):
+    from aegis.ops import Caller
+
+    a = await world.spawn()
+    reg = world.app.registry
+    got = await reg.call("signin.open", {}, Caller("agent", log_id=a.log_id))
+    await until(lambda: cards(a), what="the card")
+    assert cards(a)[0]["id"] == got["card_id"]
+    tools = {op.name for op in reg.agent_ops()}
+    assert "signin.open" in tools
+    assert not tools & {
+        "signin.answer",
+        "signin.choose",
+        "signin.cancel",
+        "signin.start",
+        "claude.token",
+    }
+    with pytest.raises(OpError) as err:
+        await reg.call(
+            "signin.answer",
+            {"log_id": a.log_id, "id": got["card_id"], "secret": "x"},
+            Caller("agent", log_id=a.log_id),
+        )
+    assert err.value.code == "not_for_agents"

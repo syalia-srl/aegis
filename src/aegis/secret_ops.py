@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 from . import secret_store as ss
 from .monitors import iso_now
 from .ops import Caller, OpError
+from .signin.status import harness_status
 
 if TYPE_CHECKING:
     from .app import App
@@ -86,6 +87,10 @@ class SignInChoose(SecretRef):
 class SignInStart(_Strict):
     log_id: str
     harness: str = Field(min_length=1, max_length=40)
+
+
+class SignInOpen(_Strict):
+    harness: str = Field(default="claude-code", min_length=1, max_length=40)
 
 
 def _err(e: ss.SecretError) -> OpError:
@@ -312,6 +317,24 @@ def register_secret_ops(app: App) -> ss.SecretStore:
         except ValueError as e:
             raise OpError("refused", str(e)) from None
         return "ok"
+
+    @r.op("signin.open", SignInOpen, agent=True)
+    async def signin_open(p: SignInOpen, caller):
+        """Open a sign-in card for a harness in your transcript, to renew its
+        sign-in before it expires or when the person asks. aegis runs the
+        harness's own login; the person answers the card, never you. Returns
+        the card's id at once; when the sign-in is done you are woken with
+        `> from aegis:login · renewed`. Only claude-code has a sign-in today."""
+        s = own(caller)
+        try:
+            return {"card_id": await _sign_ins().start(p.harness, s, s.handle)}
+        except ValueError as e:
+            raise OpError("refused", str(e)) from None
+
+    @r.op("harness.status", read=True)
+    async def harness_status_op(p, caller):
+        """Each harness with a sign-in: installed, its version, signed in and until when."""
+        return await harness_status(_sign_ins().recipes())
 
     @r.op("signin.start", SignInStart, owned="log_id")
     async def sign_in_start(p: SignInStart, caller):
