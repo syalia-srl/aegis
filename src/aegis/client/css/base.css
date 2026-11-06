@@ -2071,6 +2071,8 @@ body{background:#000}
   /* no hover in the drawer: a tap opens a row's card under it */
   #a2 .pcard{position:static;width:auto;max-height:none;margin:8px 0 2px;box-shadow:none;transition:none}
   #a2 .prow.open>.pcard{display:block}
+  #a2 .side .ver>.prow{flex-wrap:wrap}
+  #a2 .side .ver>.prow>.pcard{flex-basis:100%}
   #a2[data-view=session] .v-session{grid-template-columns:minmax(0,1fr)}
   /* The drawer and its dimmed page start under the header (--hdr, its height,
      kept by app.js), so ☰ and the tabs stay tappable while it is open. */
