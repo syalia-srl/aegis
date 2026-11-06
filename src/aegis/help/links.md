@@ -105,9 +105,13 @@ inbox), `task_status`, `task_cancel` and `task_resume` with `task-id@server`,
 it is done and any other on a second call with the token, as at home. Every
 `schedule_*` tool takes `name@server` too: the schedule lives and ticks on that
 server, and it [waits for a person](schedules#an-agent-s-schedule-waits-for-you) as at home.
-A person in the far server's browser can call this server too, with
-`/spawn agent@<this server>`, but its Fleet and tabs do not show this
-server's sessions: live views still go one way. Nothing is relayed: a call
+A person in the far server's browser sees this server's sessions in its tab bar
+and Fleet, with this server's name beside the handle, and reads, prompts,
+interrupts, stops, closes and spawns there (`/spawn agent@<this server>`) as
+through a link of its own, while the link is up. Files sent there and its
+archive are not shown from the far side: those still go one way. Both servers
+need aegis 2.23.0 or newer for this; an older near server is reached by
+calls alone. Nothing is relayed: a call
 that came over a link never goes on to a third server. The far server's
 Settings lists this server under Links here.
 
