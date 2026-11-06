@@ -24,3 +24,47 @@ name = "link"
 step = "paste"
 all = ['https://claude\.com/cai/oauth/authorize\?', 'Paste code here if prompted']
 capture = { url = '(https://claude\.com/cai/oauth/authorize\?\S+)' }
+
+# opencode 2.1.2's auth login: a searchable menu of integrations, then for
+# OpenCode Go a key prompt (stored without a check; the check runs a turn) and
+# for OpenCode Console a login-method menu and a device code. The active
+# prompt is marked ◆; answered ones turn to ◇.
+[opencode]
+cmd = ["opencode", "auth", "login", "--standalone"]
+cols = 600
+timeout_s = 600
+
+[[opencode.rules]]
+name = "error"
+step = "failed"
+all = ['(?i)\berror\b|denied|expired']
+
+[[opencode.rules]]
+name = "connected"
+step = "checking"
+all = ['Connected to OpenCode']
+
+[[opencode.rules]]
+name = "device"
+step = "device_code"
+all = ['Enter code: ', 'https://opencode\.ai/console/device\?']
+capture = { code = 'Enter code: ([A-Z0-9]{4}-[A-Z0-9]{4})', url = '(https://opencode\.ai/console/device\?\S+)' }
+
+[[opencode.rules]]
+name = "key"
+step = "paste"
+all = ['◆  Enter your OpenCode Go API key']
+prompt = "Paste your OpenCode Go API key."
+
+[[opencode.rules]]
+name = "method"
+step = "choose"
+all = ['◆  Select login method']
+prompt = "How to sign in to OpenCode Console:"
+
+[[opencode.rules]]
+name = "integration"
+step = "choose"
+all = ['◆  Select integration']
+prompt = "Which OpenCode subscription:"
+options = '^OpenCode (Go|Console)$'
