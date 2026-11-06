@@ -165,6 +165,9 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)} pre .s{color:var(--ok)}
   <a href="#fits">How it fits</a>
   <a href="#policy">The host policy</a>
   <a class="sub" href="#hooks">The hooks</a>
+  <a class="sub" href="#seen">Sessions as hooks see them</a>
+  <a class="sub" href="#refusals">What a refusal says</a>
+  <a class="sub" href="#stored">Callers with nobody connected</a>
   <a class="sub" href="#chokepoints">Where aegis asks</a>
   <a class="sub" href="#standalone">The standalone app's policy</a>
   <a href="#mcp">MCP servers</a>
@@ -238,6 +241,14 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)} pre .s{color:var(--ok)}
 <tr><td>Mounts per page</td><td>Any number, sharing one connection. <span class="who q">proposed</span></td><td class="why">Moving off fixed ids is needed anyway so the widget cannot collide with the host's ids. A second mount then costs nothing.</td></tr>
 <tr><td>Serving</td><td>The host mounts aegis's ASGI app under a prefix of its own web app (<code>srv.asgi</code>), or proxies a prefix to the loopback listener. <span class="who q">proposed</span></td><td class="why">Either way the widget's files and websocket are on the host's origin, so cookies, CSP and the service worker belong to the host.</td></tr>
 <tr><td>Labels</td><td>A label table with English and Spanish shipped; a host may override any label. <span class="who q">proposed</span></td><td class="why">The client is English only, and the second host's every surface is in Spanish.</td></tr>
+<tr><td>Callers on disk</td><td>The policy turns a <code>who</code> into a string with <code>key(who)</code> and back with <code>restore(key)</code>. aegis stores only the key. <span class="who q">proposed</span></td><td class="why">Queue workers, schedules, workflow runs and restarts act for a person with nobody connected, and today's owner field (<code>session.py:324</code>) is already a string. An opaque object cannot be written to disk.</td></tr>
+<tr><td>Host data on a session</td><td>A session carries <code>tags</code>, a string map the spawn hook sets, stored in its meta and copied to sessions it starts. <span class="who q">proposed</span></td><td class="why">A host's <code>can</code> can then decide from the session alone (an organization, a document id) without a side table keyed by log id.</td></tr>
+<tr><td>What a refusal says</td><td>A session the caller cannot read is answered as missing; a session they can read but not write is answered <code>refused</code>. <span class="who q">proposed</span></td><td class="why">Today's <code>_hides</code> (<code>app.py:1225</code>) answers as missing so a member cannot learn another's session exists. The standalone app must keep that.</td></tr>
+<tr><td>Checks that are not about people</td><td>The registry's checks on agents, read-permission sessions, <code>spawn: false</code> runs and links move into <code>HostPolicy.guard</code>, whose default keeps them. A host overrides it and calls <code>super()</code> to keep them. <span class="who q">proposed</span></td><td class="why">Every decision stays the host's to change, and a host that overrides <code>around</code> cannot drop them by accident, because <code>guard</code> is a separate method.</td></tr>
+<tr><td>Calls over a link</td><td><code>identify</code> receives a <code>Credential</code> that says whether it came from a browser, an HTTP request or a link. The default refuses links; <code>StandalonePolicy</code> accepts them as today. <span class="who q">proposed</span></td><td class="why">An embedding host does not open its sessions to other servers unless it decides to.</td></tr>
+<tr><td>Tokens the host mints</td><td>Signed and stateless: the key from <code>key(who)</code> and an expiry, signed with a secret kept in the Server's state directory. They survive a restart. <span class="who q">proposed</span></td><td class="why">No token table to store or expire, and an offline phone reconnects with its token until it expires, then asks the host for a new one through <code>mount</code>'s <code>token</code> function.</td></tr>
+<tr><td>Speech</td><td>Dictation stays in the browser with Whistle, as today. <code>mount</code> takes an optional <code>transcribe(audio)</code> for a host that transcribes on its server. <span class="who q">proposed</span></td><td class="why">The first host already transcribes on the phone with Whistle; the suite transcribes on its server. A browser function covers both, because the host's page can call its own server.</td></tr>
+<tr><td>The token file</td><td><code>tokens.py</code> and principals move into <code>StandalonePolicy</code>. <code>Server</code> no longer calls <code>principals.resolve</code> (<code>server.py:176</code>); it asks the policy. <span class="who q">proposed</span></td><td class="why">The core then has no notion of a person at all, which is what the maintainer asked for.</td></tr>
 </tbody>
 </table>
 
@@ -299,8 +310,14 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)} pre .s{color:var(--ok)}
 <pre><span class="k">from</span> aegis <span class="k">import</span> Server, HostPolicy, SpawnRequest, Refused, McpServer
 
 <span class="k">class</span> SuitePolicy(HostPolicy):
-    <span class="k">async def</span> identify(self, token):            <span class="c"># a token the host minted, or None</span>
-        <span class="k">return</span> await suite_auth.lookup(token)     <span class="c"># any object; aegis keeps it opaque</span>
+    <span class="k">async def</span> identify(self, cred):             <span class="c"># a raw token from a browser, a request or a link</span>
+        <span class="k">return</span> await suite_auth.lookup(cred.token)
+
+    <span class="k">def</span> key(self, who) -> str:                <span class="c"># what aegis stores as the owner</span>
+        <span class="k">return</span> who.id
+
+    <span class="k">async def</span> restore(self, key):              <span class="c"># the owner back, with nobody connected</span>
+        <span class="k">return</span> await suite_auth.user(key)        <span class="c"># any object; aegis keeps it opaque</span>
 
     <span class="k">def</span> can(self, who, action, session):       <span class="c"># action: "list" | "read" | "write"</span>
         <span class="k">return</span> session.owner == who.id <span class="k">or</span> who.role == <span class="s">"super"</span>
@@ -322,7 +339,9 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)} pre .s{color:var(--ok)}
 <table class="tbl">
 <thead><tr><th>Method</th><th>When aegis calls it</th><th class="why">Default in HostPolicy</th></tr></thead>
 <tbody>
-<tr><td>identify(token)</td><td>On a websocket <code>hello</code> and on each HTTP request to the Server. Returns a <code>who</code>, or raises <code>Refused</code>.</td><td class="why">One caller for every connection that carries the Server's own token.</td></tr>
+<tr><td>identify(cred)</td><td>On a websocket <code>hello</code>, on each HTTP request to the Server, and on a link's <code>hello</code>. <code>cred</code> is a <code>Credential</code> with the token and where it came from (<code>browser</code>, <code>http</code>, <code>link</code>). Returns a <code>who</code>, or raises <code>Refused</code>. A token minted by <code>srv.token_for</code> is verified before this hook and arrives as the <code>who</code> it was minted for.</td><td class="why">One caller for the Server's own token; links refused.</td></tr>
+<tr><td>key(who), restore(key)</td><td>Whenever aegis stores who owns something (a session, a schedule, a queue task, a workflow run) and whenever it needs that owner back with nobody connected.</td><td class="why">One fixed key, <code>"owner"</code>.</td></tr>
+<tr><td>guard(op, who, caller)</td><td>Before any operation, ahead of the hooks below. Holds today's checks that are not about people: operations closed to agents, read-permission sessions, <code>spawn: false</code> runs, operations closed to links.</td><td class="why">Today's checks, unchanged.</td></tr>
 <tr><td>can(who, action, session)</td><td>Before a session appears in a list (the tab bar, the sidebar, <code>session_list</code>, the archive, search and the journal), before its transcript is read or subscribed to, and before anything is sent to it or changed on it.</td><td class="why">True.</td></tr>
 <tr><td>catalog(who)</td><td>When the client builds its pickers: agents, harnesses, models, efforts, permissions, folders. The client only offers what the catalog holds.</td><td class="why">Everything configured and installed.</td></tr>
 <tr><td>spawn(who, req)</td><td>Before any session starts: <code>session.spawn</code>, a handoff, a queue worker, a schedule or workflow run, a <code>@agent</code> in the composer. It returns the request to run, possibly rewritten, or raises <code>Refused</code>. The request covers agent, harness, model, effort, permission, folder, the operating-system user to run as, environment, and an extra system prompt.</td><td class="why">The request unchanged.</td></tr>
@@ -332,7 +351,14 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)} pre .s{color:var(--ok)}
 <tr><td>on_event(who, event)</td><td>After a session starts, a turn ends, an entry is written, a session stops or closes, a file is sent. It cannot change what happened; it is for audit logs, metering and notifications.</td><td class="why">Nothing.</td></tr>
 </tbody>
 </table>
-<p>A refusal is <code>Refused(message)</code>. aegis turns it into the same <code>OpError</code> the client and the agents already handle, with code <code>refused</code> and the host's message, so a person or an agent reads why.</p>
+<h3 id="seen">Sessions as the hooks see them</h3>
+<p>The <code>session</code> the hooks receive is a frozen <code>SessionView</code>: <code>log_id</code>, <code>owner</code> (the stored key, so <code>restore(session.owner)</code> gives the <code>who</code>), <code>agent</code>, <code>harness</code>, <code>model</code>, <code>cwd</code>, <code>spawned_from</code>, <code>archived</code> and <code>tags</code>. <code>tags</code> is a map of strings the <code>spawn</code> hook sets through <code>req.replace(tags=...)</code>. aegis stores it in the session's meta, shows it to no one, and copies it to every session that session starts by handoff, spawn or queue, so a worker started by a person's agent stays in that person's organization.</p>
+
+<h3 id="refusals">What a refusal says</h3>
+<p>A refusal is <code>Refused(message)</code>. aegis turns it into the same <code>OpError</code> the client and the agents already handle, with code <code>refused</code> and the host's message, so a person or an agent reads why. One exception keeps sessions private: when <code>can(who, "read", s)</code> is false, every operation that names <code>s</code> answers as if it did not exist (<code>no_session</code>, <code>no_task</code>, <code>no_run</code>, as <code>_hides</code> does today), so a caller cannot learn that a session they may not see exists. A session the caller can read but not write answers <code>refused</code>.</p>
+
+<h3 id="stored">Callers with nobody connected</h3>
+<p>A queue worker, a schedule run, a workflow step, a message that wakes a stopped session, and an agent's tool call after a restart all act for a person who may not be on any page. aegis stores <code>key(who)</code> wherever it stores an owner today, and calls <code>restore(key)</code> when it needs the <code>who</code> again. A host whose <code>restore</code> raises <code>Refused</code> (the person was deleted, say) stops that work with the host's message in the session's transcript.</p>
 
 <h3 id="chokepoints">Where aegis asks</h3>
 <p>The hooks are only as good as the places that call them. These are the places, and each one gets a test that a refusing policy refuses there (section 10):</p>
@@ -407,6 +433,7 @@ chat.on(<span class="s">"turnEnd"</span>, (turn) =&gt; reloadNotebook());</pre>
 <tr><td>layout</td><td><code>chat</code>: one session, no tab strip. <code>tabs</code>: the sessions the policy lists for this caller, as tabs, with a new-chat button. <code>full</code>: the standalone client.</td></tr>
 <tr><td>session, agent</td><td>Which session a <code>chat</code> layout shows, or which agent starts one on the first message. A host that keeps one session per document passes the id it stored.</td></tr>
 <tr><td>sidebar, composer, dictation, commands, attachments</td><td>Switch parts off. <code>composer: false</code> is a transcript only, as for an answer pane.</td></tr>
+<tr><td>transcribe</td><td>Optional <code>async (audio) =&gt; text</code>, 16 kHz mono. Without it, dictation runs Whistle in the browser as today.</td></tr>
 <tr><td>theme, lang, labels</td><td>Section <a href="#styling">Styling</a> and <a href="#labels">Labels</a>.</td></tr>
 <tr><td>renderers</td><td>Section <a href="#renderers">Tool renderers</a>.</td></tr>
 </tbody>
@@ -523,8 +550,6 @@ chat.on(<span class="s">"turnEnd"</span>, (turn) =&gt; reloadNotebook());</pre>
 <h3>Open questions</h3>
 <ul>
 <li>Which MCP transports the pi, cursor and codex harnesses accept, measured against their current versions.</li>
-<li>Whether a host's speech service plugs in on the Server (a Python hook that turns audio into text) or in the browser (a function passed to <code>mount</code>). The first host transcribes on the phone, the suite on its server.</li>
-<li>Whether the standalone app's token file stays in core as a convenience or lives entirely inside <code>StandalonePolicy</code>.</li>
 </ul>
 </main>
 </div>
