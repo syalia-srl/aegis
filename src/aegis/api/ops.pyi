@@ -931,7 +931,7 @@ class _turn:
 
 class _usage:
     async def import_(self, *, people: builtins.list[str] | None = ...) -> Any:
-        """Count once the sessions Claude Code ran outside aegis: each person's ~/.claude/projects, read as their Linux user, as mode outside. Messages aegis already counts are skipped, and a file already imported is not read again. Claude Code purges its files after 30 days, so run it soon after upgrading, on each server."""
+        """Count once the sessions Claude Code ran outside aegis: each person's ~/.claude/projects, as mode outside. Messages aegis already counts are skipped, and a file already imported is not read again. Claude Code purges its files after 30 days, so run it soon after upgrading, on each server."""
     async def page(
         self,
         *,
