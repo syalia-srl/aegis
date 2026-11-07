@@ -3,12 +3,16 @@ and what each start gets."""
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 import pytest
 from ruamel.yaml import YAML
 
 from aegis.app import App
 from aegis.claude.harness import ClaudeCode
 from aegis.config import AgentDoc, ConfigDoc, doc_from, stamp_of, validate, write
+from aegis.doctor import doctor
 from aegis.mcp_servers import by_ref, expand, parse
 from aegis.ops import OpError
 from aegis.policy import McpServer, StandalonePolicy
@@ -258,3 +262,65 @@ async def test_an_edited_entry_applies_at_the_next_start(tmp_path, fake_claude):
         assert launches[0].extra_mcp[0].url == "http://new/mcp"
     finally:
         await app.shutdown()
+
+
+# -- the Settings test button and doctor (task 4) --------------------------------
+
+ECHO = Path(__file__).parent / "fixtures" / "mcp_echo.py"
+ECHO_ENTRY = {"name": "echo", "command": sys.executable, "args": [str(ECHO)]}
+
+
+async def test_the_test_button_lists_a_stdio_servers_tools(tmp_path):
+    app = App(make_roots(tmp_path, None))
+    try:
+        got = await app.registry.call("mcp.test", {"entry": ECHO_ENTRY})
+        assert got == {"tools": ["ping"]}
+    finally:
+        await app.shutdown()
+
+
+async def test_the_test_button_names_the_entry_that_fails(tmp_path):
+    app = App(make_roots(tmp_path, None))
+    try:
+        with pytest.raises(OpError) as e:
+            await app.registry.call(
+                "mcp.test", {"entry": {"name": "dead", "url": "http://127.0.0.1:9/mcp"}}
+            )
+        assert e.value.code == "mcp_test" and e.value.message.startswith("dead: ")
+        with pytest.raises(OpError) as e:
+            await app.registry.call("mcp.test", {"entry": {"name": "x"}})
+        assert e.value.code == "mcp_test" and "a url or a command" in e.value.message
+    finally:
+        await app.shutdown()
+
+
+async def test_doctor_checks_each_entry(tmp_path, monkeypatch):
+    monkeypatch.delenv("GHOST_TOKEN", raising=False)
+    (tmp_path / ".aegis.yaml").write_text(f"""\
+mcp:
+  echo: {{command: {sys.executable}, args: [{ECHO}]}}
+  gone: {{command: /no/such/binary}}
+  dead: {{url: "http://127.0.0.1:9/mcp"}}
+  later: {{url: "http://127.0.0.1:9/mcp", headers: {{A: "${{GHOST_TOKEN}}"}}}}
+  both: {{url: "http://x", command: y}}
+agents:
+  clerk: {{harness: claude-code, model: opus, effort: low, permission: read, mcp: [echo, ghost]}}
+""")  # fmt: skip
+    found = {f.where: f for f in await doctor(make_roots(tmp_path, None), {})}
+    assert found["mcp.echo"].level == "ok"
+    assert found["mcp.gone"].level == "error"
+    assert found["mcp.dead"].level == "error"
+    assert (
+        found["mcp.later"].level == "warn"
+        and "GHOST_TOKEN" in found["mcp.later"].message
+    )
+    assert found["mcp.both"].level == "error"
+    clerk = [
+        f
+        for f in await doctor(make_roots(tmp_path, None), {})
+        if f.where == "agents.clerk"
+    ]
+    assert any(
+        f.level == "error" and "ghost" in f.message and "echo" not in f.message
+        for f in clerk
+    )

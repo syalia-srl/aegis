@@ -134,3 +134,37 @@ def by_ref(
             refs[field] = held
         out.append(replace(s, **refs))
     return tuple(out), env
+
+
+async def tools_of(s: McpServer, timeout: float = 10.0) -> list[str]:
+    """Connect to ``s``, values expanded, and name its tools (Settings' Test)."""
+    import asyncio
+
+    from fastmcp import Client
+    from fastmcp.client.transports import StdioTransport, StreamableHttpTransport
+
+    if s.transport == "http":
+        transport = StreamableHttpTransport(str(s.url), headers=dict(s.headers))
+    else:
+        transport = StdioTransport(str(s.command), list(s.args), env=dict(s.env))
+    async with asyncio.timeout(timeout):
+        async with Client(transport) as client:
+            return [t.name for t in await client.list_tools()]
+
+
+async def unreachable(url: str, timeout: float = 5.0) -> str | None:
+    """Why ``url`` gives no HTTP answer within ``timeout``; None when it gives
+    one, whatever its status (aegis doctor)."""
+    import asyncio
+
+    import httpx
+
+    try:
+        # httpx's timeout is per operation; the whole request gets ``timeout``.
+        async with asyncio.timeout(timeout), httpx.AsyncClient() as client:
+            await client.get(url)
+    except TimeoutError:
+        return f"{url} did not answer within {timeout:g} s"
+    except (httpx.HTTPError, OSError) as e:
+        return f"{url} does not answer: {str(e) or type(e).__name__}"
+    return None

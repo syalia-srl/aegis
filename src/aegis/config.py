@@ -1540,12 +1540,14 @@ def _apply_harness_versions(data: CommentedMap, hv: HarnessVersionsDoc) -> None:
         node.pop("accepted", None)
 
 
-def write(path: Path, doc: ConfigDoc, expected: Stamp | None) -> list[Finding]:
+def write(
+    path: Path, doc: ConfigDoc, expected: Stamp | None, extra_mcp: Iterable[str] = ()
+) -> list[Finding]:
     """Write ``doc`` to ``path``. Returns the problems that stopped it; an
-    empty list means it was written."""
+    empty list means it was written. ``extra_mcp``: as validate's."""
     if stamp_of(path) != expected:
         raise OpError("stale", f"{path} changed on disk since it was read; reload it")
-    if problems := validate(doc):
+    if problems := validate(doc, extra_mcp):
         return problems
     if expected is not None and (error := load(path)[1]):
         # The writer refuses what the reader refuses: a list at the top, a tag
