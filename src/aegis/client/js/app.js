@@ -1542,7 +1542,8 @@ function measureNet(server) {
 
 // The line beside a linked server's name in its band.
 function linkLine(l) {
-  const host = l.url.replace(/^https?:\/\//, "");
+  // A way back (links.py, Backlink) has no URL: that server links this one.
+  const host = l.back ? "links here" : l.url.replace(/^https?:\/\//, "");
   if (l.state === "linked") return `${host} · linked${l.rtt_ms != null ? ` · ${l.rtt_ms} ms` : ""}`;
   const since = new Date(l.since * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   if (l.state === "offline") return `${host} · offline since ${since} · retrying`;
