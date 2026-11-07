@@ -143,8 +143,7 @@ def server(tmp_path: Path, fake_claude: str, fake_opencode: str):
 class Linked:
     """Two servers, alpha linked to beta through `aegis link add`."""
 
-    def __init__(self, root: Path, claude: str, opencode: str, trusted: bool = False):
-        self.trusted = trusted
+    def __init__(self, root: Path, claude: str, opencode: str):
         self.beta = Server(root / "beta", claude, opencode)
         self.alpha = Server(root / "alpha", claude, opencode)
         for s, name in ((self.beta, "beta"), (self.alpha, "alpha")):
@@ -158,8 +157,7 @@ class Linked:
         base = f"http://127.0.0.1:{self.beta.port}"
         link = subprocess.run(
             [sys.executable, "-m", "aegis", "link", "add", "beta", base,
-             "--root", str(self.alpha.root), "--as", "alpha",
-             *(["--trusted"] if self.trusted else [])],
+             "--root", str(self.alpha.root), "--as", "alpha"],
             input=token + "\n", capture_output=True, text=True, timeout=30,
         )  # fmt: skip
         assert link.returncode == 0, link.stdout + link.stderr
@@ -7832,7 +7830,7 @@ def test_settings_shows_a_trusted_link_on_both_servers(
 ):
     """A trusted link says so on the server that holds it, and the far server
     lists it under the servers that link it, at desktop and phone width."""
-    pair = Linked(tmp_path, fake_claude, fake_opencode, trusted=True).start()
+    pair = Linked(tmp_path, fake_claude, fake_opencode).start()
     try:
         open_settings(page, pair.alpha.url)
         page.wait_for_function(
@@ -7861,7 +7859,7 @@ def test_a_trusted_far_server_shows_and_drives_the_near_servers_sessions(
 ):
     """Over a trusted link the far server's page shows the near server's
     sessions under its band and drives them (#969), at desktop and phone width."""
-    pair = Linked(tmp_path, fake_claude, fake_opencode, trusted=True).start()
+    pair = Linked(tmp_path, fake_claude, fake_opencode).start()
     try:
         errors: list = []
         pg = new_page(browser, errors)

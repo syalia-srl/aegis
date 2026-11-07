@@ -2332,10 +2332,9 @@ class App:
         self, p: SpawnParams, name: str, far: str, parent, caller: Caller
     ) -> dict:
         """An agent here spawns on a linked server, through the link, as the
-        token the link presents there; that server's policy for it decides.
+        token the link presents there; that server's quota gate decides.
         The far session's permission is at most the agent's, the far agent's
-        preset read first. Nothing the far server wrote reaches the agent: its
-        handle and log id are checked, its errors worded here (agent_ops)."""
+        preset read first."""
         link = self.links.get(far)
         if link is None:
             raise OpError("unknown_server", f"this server links no server named {far}")
@@ -2347,7 +2346,7 @@ class App:
         try:
             listed = await link.call("agents.list", {})
         except OpError as e:
-            raise far_error(e, far, trusted=self.links.joined(far)) from None
+            raise far_error(e, far) from None
         # What the far server says of its agents only lowers the permission.
         presets = listed.get("agents") if isinstance(listed, dict) else None
         agent = name or (listed.get("default") if isinstance(listed, dict) else None)
@@ -2385,7 +2384,7 @@ class App:
                 "session.spawn", {k: v for k, v in params.items() if v is not None}
             )
         except OpError as e:
-            raise far_error(e, far, trusted=self.links.joined(far)) from None
+            raise far_error(e, far) from None
         if not isinstance(r, dict):
             raise OpError("far_error", f"{far} answered the spawn with something else")
         handle, log_id = r.get("handle"), r.get("log_id")
@@ -2519,7 +2518,7 @@ class App:
             id and handle. It does not report back: read it with peer_read,
             message it with peer_handoff. With agent@server it starts on that
             linked server, as this server's link there, and that server's quota
-            policy for the link decides; you can hand off to it, not read it."""
+            gate decides."""
             parent = reg.sessions.get(caller.log_id) if caller.is_agent else None
             if p.agent and "@" in p.agent:
                 name, _, server = p.agent.rpartition("@")

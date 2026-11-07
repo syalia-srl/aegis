@@ -177,7 +177,7 @@ async def test_closing_yourself_needs_the_token(world):
 async def test_a_session_on_a_linked_server_is_refused(world):
     a = await world.spawn()
     said = await turn(a, mcp("session_close", handle="knuth-review@far"))
-    assert said.startswith("mcp error: not_across_links"), said
+    assert said.startswith("mcp error: unknown_server"), said
 
 
 async def test_a_worker_you_enqueued_counts_as_yours(world):

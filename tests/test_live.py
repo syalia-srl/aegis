@@ -1528,7 +1528,7 @@ async def test_a_real_agent_reaches_back_over_a_trusted_link(
     )
     await beta.start()
     try:
-        alpha.app.links.add("beta", beta.base, beta.token, trusted=True)
+        alpha.app.links.add("beta", beta.base, beta.token)
         await until(
             lambda: beta.app.links.get("alpha") is not None,
             timeout=10,

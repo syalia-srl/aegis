@@ -29,7 +29,7 @@ from .confirm import TTL_S
 from .monitors import find_source, iso_now
 from .names import SPAWN_HEAD, SPAWN_TASK, valid_handle
 from .ops import Caller, OpError
-from .session import ASLEEP_WHY, Archived, asleep_from
+from .session import Archived
 from .transcript.entries import CONTENT_KINDS
 
 if TYPE_CHECKING:
@@ -98,7 +98,7 @@ class MonitorSessions(_Strict):
         min_length=1,
         max_length=20,
         description="Handles of open sessions from session_list: on this "
-        "server, or handle@server on one linked with trust.",
+        "server, or handle@server on a linked one.",
     )
     interval_s: float = Field(10, ge=1, le=3600)
     # Other sessions' work runs longer than a build.
@@ -110,7 +110,7 @@ class MonitorId(_Strict):
 
 
 class FarAgent(_Strict):
-    """An agent on a server linked with trust, as that server's link names it."""
+    """An agent on a linked server, as that server's link names it."""
 
     handle: str
     server: str
@@ -124,7 +124,7 @@ class Enqueue(_Strict):
     callback: bool = Field(
         True, description="Deliver the worker's result to your inbox."
     )
-    # Set only by a trusted link, for the agent there that enqueued: the
+    # Set only by a link, for the agent there that enqueued: the
     # result goes back to it over the link (queue.deliver).
     from_agent: SkipJsonSchema[FarAgent | None] = Field(None, exclude=True)
 
@@ -497,68 +497,9 @@ def spawn_opening(source, prompt: str, home: str | None) -> str:
     )
 
 
-ACROSS = (
-    "an agent on this server reaches a linked server by spawning there "
-    "(session_spawn with agent@server, gated by that server's quota policy for "
-    "the link) and by handing off to a session there (peer_handoff to "
-    "handle@server); reading, sending to and enqueueing on another server are "
-    "for people, unless the link is trusted (help: links#trusted-links)"
-)
-
-
-# What an agent here may learn of a linked server, all of it composed here from
-# values checked here: the far server may be hostile, so none of its text is
-# passed on (DESIGN.md, "A link is a client").
-# A server older than #479 says stopped or parked for asleep.
-FAR_STATES = frozenset({"idle", "working", "error", "asleep", "stopped", "parked"})
-FAR_ERRORS = {
-    "no_session": "no open session {handle}@{server}",
-    "archived": "{handle}@{server} is archived",
-    "server_offline": "{server} is not linked right now",
-    "timeout": "{server} did not answer in time",
-    "not_owner": "{handle}@{server} is not this server's link's to prompt there",
-    "quota_closed": "the quota gate on {server} for this server's link is closed: "
-    "nothing was started; a person here can see why with /spawn",
-    "not_allowed": "{server} refused the permission asked for",
-    "unknown_agent": "{server} has no such agent",
-    "trust_ended": "the trusted link with {server} no longer holds; a person "
-    "can see why under Settings, Servers",
-}
-
-
-def far_entry(e: dict, server: str) -> dict | None:
-    """One linked server's session as an agent here may see it: a valid handle
-    and a known state, or nothing. An older server's stopped and parked read as
-    asleep with their reason; a reason that is not one of ours is dropped."""
-    if not isinstance(e, dict):
-        return None
-    handle, state = e.get("handle"), e.get("state")
-    if (
-        not (isinstance(handle, str) and valid_handle(handle))
-        or state not in FAR_STATES
-    ):
-        return None
-    if state not in ("stopped", "parked", "asleep"):
-        return {"handle": handle, "server": server, "state": state}
-    why = e.get("asleep_why")
-    if state != "asleep":
-        why = asleep_from(state, None)[1]
-    elif why not in ASLEEP_WHY:
-        why = None
-    return {"handle": handle, "server": server, "state": "asleep", "asleep_why": why}
-
-
-def far_error(
-    e: OpError, server: str, handle: str = "", trusted: bool = False
-) -> OpError:
-    """A linked server's refusal as this server words it: the code if it is
-    on the allowlist, never the far server's text. Over a trusted link the
-    far server is this person's own, and its words pass through."""
-    if trusted:
-        return OpError(e.code, f"{server}: {e.message}")
-    if e.code in FAR_ERRORS:
-        return OpError(e.code, FAR_ERRORS[e.code].format(handle=handle, server=server))
-    return OpError("far_error", f"{server} refused the call")
+def far_error(e: OpError, server: str) -> OpError:
+    """A linked server's refusal, in its own words, naming the server."""
+    return OpError(e.code, f"{server}: {e.message}")
 
 
 USER = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
@@ -707,27 +648,26 @@ def split_address(target: str, own: str) -> tuple[str, str | None]:
 
 
 def across(app: App, server: str, caller: Caller):
-    """The link for an agent's call to ``server``, which only a link both
-    servers trust carries (links.py, #684); the refusal otherwise."""
+    """The link for an agent's call to ``server``; the refusal when a link
+    asks (nothing is relayed) or ``server`` is not linked now."""
     if caller.link is not None:
         raise OpError("not_relayed", "a link is not relayed to another server")
-    if not app.links.joined(server):
-        raise OpError("not_across_links", f"{server} is another server; {ACROSS}")
     link = app.links.get(server)
-    assert link is not None
+    if link is None:
+        raise OpError("unknown_server", f"this server links no server named {server}")
+    if link.state != "linked":
+        raise OpError("server_offline", f"{server} is not linked right now")
     return link
 
 
-def from_trusted(app: App, caller: Caller, sender: FarAgent) -> str:
-    """A trusted link speaking for one of its own agents: its address."""
+def from_link(app: App, caller: Caller, sender: FarAgent) -> str:
+    """A link speaking for one of its own server's agents: its address."""
     if (
         caller.link is None
         or sender.server != caller.link
         or not app.links.joined(caller.link)
     ):
-        raise OpError(
-            "not_a_link", "only a trusted link, for its own server, says this"
-        )
+        raise OpError("not_a_link", "only a link, for its own server, says this")
     if not valid_handle(sender.handle):
         raise OpError("bad_sender", "a sender is a handle")
     return f"{sender.handle}@{sender.server}"
@@ -747,7 +687,9 @@ def register_agent_ops(app: App) -> None:
         handle, server = split_address(target, app.server_name)
         if server is not None:
             raise OpError(
-                "not_across_links", f"{target} is on another server; {ACROSS}"
+                "not_across_links",
+                f"{target} is on another server; this call acts on this "
+                "server's sessions only",
             )
         return handle
 
@@ -829,7 +771,7 @@ def register_agent_ops(app: App) -> None:
                 try:
                     listed = await link.call("session.list")
                 except OpError as e:
-                    raise far_error(e, server, h, True) from None
+                    raise far_error(e, server) from None
                 if not any(
                     isinstance(e, dict) and e.get("handle") == h for e in listed or []
                 ):
@@ -897,7 +839,7 @@ def register_agent_ops(app: App) -> None:
         """Hand a self-contained task to a fresh worker on a queue. Returns at once
         with the task id; the worker's final message reaches your inbox when it
         finishes (with callback). Keep working meanwhile. `queue@server`
-        enqueues on a server linked with trust; the result still reaches your
+        enqueues on a linked server; the result still reaches your
         inbox, and the task id comes back as `task-id@server`."""
         name, server = split_address(p.queue, app.server_name)
         if server is not None:
@@ -914,11 +856,11 @@ def register_agent_ops(app: App) -> None:
                     },
                 )
             except OpError as e:
-                raise far_error(e, server, trusted=True) from None
+                raise far_error(e, server) from None
             return {**r, "task_id": f"{r['task_id']}@{server}"}
         far = None
         if p.from_agent is not None:
-            from_trusted(app, caller, p.from_agent)
+            from_link(app, caller, p.from_agent)
             far = p.from_agent.model_dump()
         if name not in app.queues.queues:
             known = ", ".join(sorted(app.queues.queues)) or "none configured"
@@ -947,11 +889,11 @@ def register_agent_ops(app: App) -> None:
         ),
     )
     async def queue_deliver(p: QueueDeliver, caller):
-        """A task's result from a server linked with trust, for the agent here
+        """A task's result from a linked server, for the agent here
         that enqueued it. Only that link may call it; the header is composed
         here from values checked here."""
         if caller.link is None or not app.links.joined(caller.link):
-            raise OpError("not_a_link", "only a trusted link delivers a task's result")
+            raise OpError("not_a_link", "only a link delivers a task's result")
         if not (QUEUE_NAME.match(p.queue) and TASK_ID.match(p.task_id)):
             raise OpError("bad_sender", "a queue and a task id, one word each")
         to = target(p.target)
@@ -964,7 +906,7 @@ def register_agent_ops(app: App) -> None:
         )
 
     async def far_task(op: str, p: TaskId, caller):
-        """A task on a server linked with trust, ``task-id@server``: the call
+        """A task on a linked server, ``task-id@server``: the call
         goes there, or None when the task is here."""
         task_id, server = split_address(p.task_id, app.server_name)
         if server is None:
@@ -973,10 +915,10 @@ def register_agent_ops(app: App) -> None:
         try:
             return {"result": await link.call(op, {"task_id": task_id})}
         except OpError as e:
-            raise far_error(e, server, trusted=True) from None
+            raise far_error(e, server) from None
 
     def far_mine(t, caller: Caller) -> None:
-        """A trusted link changes only the tasks its own server enqueued."""
+        """A link changes only the tasks its own server enqueued."""
         if (
             caller.link is not None
             and (t.far_enqueuer or {}).get("server") != caller.link
@@ -993,7 +935,7 @@ def register_agent_ops(app: App) -> None:
     )
     async def task_status(p: TaskId, caller):
         """A task's status, its worker, and its result once finished.
-        `task-id@server` reads one on a server linked with trust."""
+        `task-id@server` reads one on a linked server."""
         if (far := await far_task("task.status", p, caller)) is not None:
             return far["result"]
         return app.queues.status(task(p.task_id))
@@ -1031,8 +973,7 @@ def register_agent_ops(app: App) -> None:
         headed `> from agent:<you>`. A busy target gets it when its turn ends, and
         is told meanwhile who waits; urgent reaches it inside the turn instead, at
         its next tool step, and interrupt cuts that turn first. `handle@server`
-        reaches a session on a server this one links; nothing there can reach you
-        back, unless the link is trusted."""
+        reaches a session on a server this one links."""
         if p.urgent and p.interrupt:
             raise OpError("bad_params", URGENT_AND_INTERRUPT)
         handle, server = split_address(p.target, app.server_name)
@@ -1061,11 +1002,7 @@ def register_agent_ops(app: App) -> None:
         )
 
     async def far_handoff(handle: str, server: str, p: Handoff, caller: Caller):
-        link = app.links.get(server)
-        if link is None:
-            raise OpError(
-                "unknown_server", f"this server links no server named {server}"
-            )
+        link = across(app, server, caller)
         me = reg.sessions.get(caller.log_id) if caller.log_id else None
         sender = {
             "handle": me.handle if me else "user",
@@ -1086,9 +1023,7 @@ def register_agent_ops(app: App) -> None:
                 },
             )
         except OpError as e:
-            if e.code in FAR_ERRORS or app.links.joined(server):
-                raise far_error(e, server, handle, app.links.joined(server)) from None
-            raise OpError("far_error", f"{server} refused the handoff") from None
+            raise far_error(e, server) from None
         r = r if isinstance(r, dict) else {}
         did = "steered" if r.get("steered") else "held" if r.get("held") else "sent"
         return handoff_reply(did, f"{handle}@{server}", r.get("cannot_steer") is True)
@@ -1148,18 +1083,16 @@ def register_agent_ops(app: App) -> None:
     )
     async def peer_read(p: Read, caller):
         """The last entries of another session's transcript, one line each.
-        `handle@server` reads a session on a server this one links with
-        trust."""
+        `handle@server` reads a session on a server this one links."""
         handle, server = split_address(p.target, app.server_name)
-        if server is not None and caller.link is None and app.links.joined(server):
-            link = app.links.get(server)
-            assert link is not None  # trusted() found it
+        if server is not None:
+            link = across(app, server, caller)
             try:
                 return await link.call(
                     "peer.read", {"target": handle, "last": p.last, "tools": p.tools}
                 )
             except OpError as e:
-                raise far_error(e, server, handle, True) from None
+                raise far_error(e, server) from None
         entries = readable(p.target, caller)
         lines = [x for e in entries[-p.last * 3 :] if (x := _render(e, p.tools))]
         return "\n".join(lines[-p.last :]) or "(nothing yet)"
@@ -1171,10 +1104,8 @@ def register_agent_ops(app: App) -> None:
         doing now, its model (`model` as configured, `model_id` as the harness
         resolved it, null until it has), spend, and `load`: the CPU in cores
         over the last minute and the RAM in GB of it and everything it started,
-        null while it has no process; then each linked server's by
-        handle and state alone, as `handle@server`: reach one with
-        peer_handoff. A server linked with trust lists its sessions in full,
-        with `server`."""
+        null while it has no process; then each linked server's sessions in
+        full, with `server`: reach one as `handle@server`."""
         out = []
         me = app.who(caller)
         for s in reg.open_sessions():
@@ -1200,31 +1131,24 @@ def register_agent_ops(app: App) -> None:
                     ),
                 }
             )
-        # A link asking is not relayed further; links are the admin's.
+        # A link asking is not relayed further.
         if caller.link is None:
             out += await far_sessions()
         return out
 
     async def far_sessions() -> list[dict]:
-        """Every linked server's open sessions, cut to handle and state: a title
-        is text an agent over there wrote, and nothing written there reaches an
-        agent here (links.py). A server linked with trust is this person's
-        own, and its entries come whole."""
+        """Every linked server's open sessions, whole, each with its server."""
         out = []
         for link in app.links.up():
             try:
                 listed = await link.call("session.list")
             except OpError:
                 continue
-            trusted = app.links.joined(link.name)
             for e in listed if isinstance(listed, list) else []:
                 if not isinstance(e, dict) or "server" in e:
                     continue
-                if trusted:
-                    e = {k: v for k, v in e.items() if k != "you"}
-                    out.append({**e, "server": link.name})
-                elif (entry := far_entry(e, link.name)) is not None:
-                    out.append(entry)
+                e = {k: v for k, v in e.items() if k != "you"}
+                out.append({**e, "server": link.name})
         return out
 
     def origin(s, me) -> tuple[str, str | None]:
@@ -1294,7 +1218,7 @@ def register_agent_ops(app: App) -> None:
                     },
                 )
             except OpError as e:
-                raise far_error(e, server, h, True) from None
+                raise far_error(e, server) from None
         s = target(p.handle)
         s.check_lock()
         card = s.wire()
@@ -1343,10 +1267,10 @@ def register_agent_ops(app: App) -> None:
 
     @r.op("peer.close", PeerClose, names=(("target", "session"),))
     async def peer_close(p: PeerClose, caller):
-        """session_close from an agent on a server linked with trust, under
+        """session_close from an agent on a linked server, under
         the same rule as here: a session it started closes at once when done,
         any other on a second call with the token it was given."""
-        key = from_trusted(app, caller, p.sender)
+        key = from_link(app, caller, p.sender)
         s = target(p.target)
         s.check_lock()
         card = s.wire()
