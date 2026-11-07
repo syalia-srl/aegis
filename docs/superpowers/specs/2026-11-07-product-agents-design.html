@@ -110,7 +110,7 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)} pre .s{color:var(--ok)}
 <div class="chrome">
   <span>aegis</span>
   <span class="tab">spec · product agents</span>
-  <span class="st"><span class="pill acc">draft, awaiting approval</span><span class="pill">2026-11-07</span><span class="pill">#983 · #960 · #982</span></span>
+  <span class="st"><span class="pill acc">approved</span><span class="pill">2026-11-07</span><span class="pill">#983 · #960 · #982</span></span>
 </div>
 
 <div class="wrap">
@@ -133,7 +133,7 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)} pre .s{color:var(--ok)}
 
 <main>
 <h1>Product agents: a harness that sees only what the host gives it</h1>
-<div class="meta"><span>docs/superpowers/specs/2026-11-07-product-agents-design.html</span><span>·</span><span>draft</span><span>·</span><span>issue #983</span></div>
+<div class="meta"><span>docs/superpowers/specs/2026-11-07-product-agents-design.html</span><span>·</span><span>approved 2026-11-07</span><span>·</span><span>issue #983</span></div>
 <p class="lede">A program that embeds aegis can already choose which of aegis's tools a session gets (<code>HostPolicy.tools</code>, #959) and which MCP servers it adds (<code>HostPolicy.mcp</code>, #960). The harness under the session still brings its own shell, file tools, skills, project config and coding prompt, and aegis still talks to the agent about plans and disks. This spec adds four switches per session, so a product agent sees only the host's MCP servers, reads only the host's prompt, and hears nothing from aegis.</p>
 
 <h2 id="delivers"><span class="n">01</span>What this delivers</h2>
@@ -162,7 +162,8 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)} pre .s{color:var(--ok)}
 <tr><td>A switch a harness cannot keep</td><td>The start is refused with <code>unsupported</code> and the harness's name.</td><td class="why">The host relies on the guarantee for containment. Starting a session that still has its shell would be worse than not starting it.</td></tr>
 <tr><td>Ownership of the recipe</td><td>aegis keeps the per-harness flags and one live test per harness. <span class="who">maintainer</span></td><td class="why">The flags change with harness releases; the test that proves them belongs next to the driver that passes them. A sandbox project links the test instead of measuring again.</td></tr>
 <tr><td>Measuring OpenCode</td><td>Through aegis's own driver (<code>opencode serve</code>), as the live test, on a host with a working provider key. <span class="who">maintainer</span></td><td class="why"><code>opencode run --standalone</code> stalls at start with any <code>OPENCODE_CONFIG_*</code> variable set, for reasons not understood; aegis never uses that path, and its <code>serve</code> path works.</td></tr>
-<tr><td>Restart continuation with notices off</td><td>Kept.</td><td class="why">A turn the server's restart cut is continued so the host's user gets an answer. It is the session's own turn, not news from aegis. See open questions.</td></tr>
+<tr><td>Restart continuation with notices off</td><td>Kept, with a neutral header that does not name aegis. <span class="who">maintainer</span></td><td class="why">A turn the server's restart cut is continued so the host's user gets an answer. It is the session's own turn, not news from aegis.</td></tr>
+<tr><td>The harness's base prompt</td><td>Untouched: <code>primer: false</code> only drops aegis's primer. <span class="who">maintainer</span></td><td class="why">Measure first what the harness's coding prompt costs a product agent; a fifth switch can follow.</td></tr>
 </tbody>
 </table>
 
@@ -298,10 +299,10 @@ agents:
 <li>Sandboxing the harness process itself (namespaces, seccomp). With its own tools off the harness runs no commands; containment of what MCP servers do is the host's.</li>
 <li>A switch for the person's UI: these sessions show in the client like any other.</li>
 </ul>
-<h3>Open questions</h3>
+<h3>Settled at approval</h3>
 <ul>
-<li><span class="who q">question</span> Should <code>primer: false</code> also replace the harness's own base prompt (Claude's <code>--system-prompt</code> instead of <code>--append-system-prompt</code>)? That prompt describes a coding assistant and its tools, which a product agent with its tools off lacks. Recommendation: not in this spec; measure what Claude's base prompt costs a product agent first, and add a fifth switch if it matters.</li>
-<li><span class="who q">question</span> The restart continuation's text names aegis (<code>&gt; from aegis:restart</code>). With notices off, should it be a neutral "continue" instead? Recommendation: yes, a one-line change in PR 1 if approved.</li>
+<li><span class="who">maintainer: not now</span> Should <code>primer: false</code> also replace the harness's own base prompt (Claude's <code>--system-prompt</code> instead of <code>--append-system-prompt</code>)? That prompt describes a coding assistant and its tools, which a product agent with its tools off lacks. Recommendation: not in this spec; measure what Claude's base prompt costs a product agent first, and add a fifth switch if it matters.</li>
+<li><span class="who">maintainer: yes</span> The restart continuation's text names aegis (<code>&gt; from aegis:restart</code>). With notices off, should it be a neutral "continue" instead? Recommendation: yes, a one-line change in PR 1 if approved.</li>
 </ul>
 
 </main>
