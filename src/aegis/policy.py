@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from .ops import OpError
+from .ops import OpError, default_guard
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -180,7 +180,11 @@ class HostPolicy:
         return key
 
     def guard(self, op: Operation, who: Any, caller: CallerInfo) -> None:
-        """The checks that are not about people; raise OpError to refuse."""
+        """The checks that are not about people; raise OpError to refuse. The
+        default keeps aegis's own: operations closed to agents, read-permission
+        sessions, schedule runs with spawn: false, operations closed to links.
+        Call ``super().guard(...)`` to keep them."""
+        default_guard(op, caller)
 
     def can(self, who: Any, action: Action, session: SessionView) -> bool:
         return True
