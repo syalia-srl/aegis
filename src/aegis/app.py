@@ -886,7 +886,13 @@ class App:
         caller otherwise."""
         if caller.principal is not None:
             return caller.principal
-        if caller.is_agent and caller.log_id:
+        if (
+            caller.is_agent
+            and caller.log_id
+            and not isinstance(self.policy, StandalonePolicy)
+        ):
+            # Standalone, every agent acts as the server's one person, whoever
+            # a session from before aegis 3.0 names as its owner (#958).
             key = self.owner_of(caller.log_id)
             if key is not None and key != self.user:
                 return Principal(key, self.whos.get(key))
@@ -895,6 +901,8 @@ class App:
     async def ensure_who(self, caller: Caller) -> None:
         """Restore the who behind an agent's call when no one has met it yet
         (after a restart): Registry.call awaits this before anything else."""
+        if isinstance(self.policy, StandalonePolicy):
+            return
         if caller.is_agent and caller.principal is None and caller.log_id:
             key = self.owner_of(caller.log_id)
             if key is not None and key != self.user and key not in self.whos:
