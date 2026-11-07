@@ -9897,3 +9897,26 @@ def test_the_working_row_types_its_verb_and_counts_the_turns_tokens(server, page
         page.set_viewport_size({"width": 390, "height": 844})
         time.sleep(0.5)
         page.screenshot(path=f"{shots}/working-phone.png")
+
+
+def test_the_working_row_names_esc_only_where_there_is_a_keyboard(server, browser):
+    """#974: a phone has no Esc, so the working row leaves the hint out there;
+    a desktop still shows it."""
+    for touch, shown in ((False, True), (True, False)):
+        ctx = browser.new_context(
+            viewport={"width": 390 if touch else 1280, "height": 844},
+            has_touch=touch,
+            is_mobile=touch,
+        )
+        pg = ctx.new_page()
+        pg.goto(server.url)
+        spawn(pg, "hello")
+        pg.fill("#input", "/busy 4")
+        pg.click("#send")  # Enter is a newline on a phone
+        pg.wait_for_selector("#working", state="visible")
+        assert pg.is_visible("#working .wesc") is shown
+        shots = os.environ.get("AEGIS_SHOTS")
+        if shots:
+            name = "phone" if touch else "desktop"
+            pg.screenshot(path=f"{shots}/esc-hint-{name}.png")
+        ctx.close()
