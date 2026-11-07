@@ -51,7 +51,7 @@ import httpx
 from ..claude.control import Catalog
 from .. import launch
 from ..harness import Launch, session_env
-from .config import catalog_from, child_config, split_model
+from .config import catalog_from, child_config, isolated_env, split_model
 from .sweep import OWNER, owner_tag
 from .stream import DELTAS, STORED, TURN_ENDS, _dict
 
@@ -199,10 +199,12 @@ class OpenCodeProcess:
                     self._launch.read_dirs,
                     self._launch.knowledge_native,
                     self._launch.extra_mcp,
+                    self._launch.harness_tools,
                 )
             ),
             "OPENCODE_SERVER_PASSWORD": password,
             OWNER: owner_tag(),
+            **(isolated_env(self._launch.home) if self._launch.home else {}),
         }
         self._launch.stderr_path.parent.mkdir(parents=True, exist_ok=True)
         self._proc = await launch.child(

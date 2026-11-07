@@ -139,6 +139,18 @@ def child_config(
     return cfg
 
 
+def isolated_env(home: Path) -> dict[str, str]:
+    """An isolated session's environment (#983): ``home`` as the config root,
+    so OpenCode reads no global ``AGENTS.md``, config or skills of the
+    person's, and neither project config nor Claude Code's files. The login
+    lives in the data dir, which stays."""
+    return {
+        "XDG_CONFIG_HOME": str(home),
+        "OPENCODE_DISABLE_PROJECT_CONFIG": "1",
+        "OPENCODE_DISABLE_CLAUDE_CODE": "1",
+    }
+
+
 def split_model(model: str) -> dict[str, str]:
     provider, _, model_id = model.partition("/")
     return {"providerID": provider, "id": model_id}
