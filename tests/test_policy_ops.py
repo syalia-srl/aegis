@@ -23,11 +23,11 @@ async def test_around_sees_the_op_and_can_change_the_result(tmp_path):
         async def around(self, op, who, params, call):
             seen.append(op)
             out = await call(params)
-            return {"wrapped": out} if op == "server.version" else out
+            return {"wrapped": out} if op == "archive.list" else out
 
     app = app_with(tmp_path, P())
-    assert "wrapped" in await app.registry.call("server.version", {})
-    assert seen == ["server.version"]
+    assert "wrapped" in await app.registry.call("archive.list", {})
+    assert seen == ["archive.list"]
 
 
 async def test_around_gets_validated_params(tmp_path):
@@ -73,8 +73,8 @@ async def test_a_guard_that_drops_super_drops_todays_checks(tmp_path, monkeypatc
             return None
 
     app = app_with(tmp_path, Open())
-    # server.version is closed to agents only by the default guard.
-    assert await app.registry.call("server.version", {}, Caller("agent", "s1"))
+    # archive.list is closed to agents only by the default guard.
+    assert await app.registry.call("archive.list", {}, Caller("agent", "s1"))
 
 
 async def test_around_refusing_term_spawn_refuses_it_from_the_client(tmp_path):
