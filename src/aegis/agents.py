@@ -71,6 +71,8 @@ class Agent:
     keep_harness_tools: tuple[str, ...] = ()
     # A linked server to exit through, or "off"; blank: the server's exit_via.
     exit: str = ""
+    # The MCP servers the agent attaches, by name, from the mcp: map (#960).
+    mcp: tuple[str, ...] = ()
     # Why this agent cannot be spawned as written; None when it can.
     error: str | None = None
     # The cascade, head first; (model,) for a one-model agent.
@@ -131,13 +133,19 @@ def _agent(name: str, raw: Any) -> Agent:
     error = models_error or error
     priming = d.get("priming")
     keep, keep_error = _keep(d.get("keep_harness_tools"))
+    mcp = d.get("mcp")
+    mcp_ok = mcp is None or (
+        isinstance(mcp, list) and all(isinstance(n, str) and n for n in mcp)
+    )
+    mcp_error = None if mcp_ok else "mcp must be a list of MCP server names"
     return Agent(
         name=str(name),
         **values,
         priming=str(priming) if priming else None,
         keep_harness_tools=keep,
         exit=str(d.get("exit") or ""),
-        error=error or keep_error,
+        mcp=tuple(mcp) if mcp_ok and mcp else (),
+        error=error or keep_error or mcp_error,
         models=models or ((values["model"],) if values["model"] else ()),
         repeated=repeated,
     )

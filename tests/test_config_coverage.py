@@ -13,6 +13,7 @@ from ruamel.yaml import YAML
 
 from aegis import config
 from aegis.config import doc_from, validate, write
+from aegis.mcp_servers import HTTP_KEYS, STDIO_KEYS
 from aegis.net.config import KEYS as NET_KEYS
 from aegis.term_profiles import PROFILE_KEYS
 
@@ -29,7 +30,7 @@ FULL = """\
 default_agent: opus
 exit_via: far
 agents:
-  opus: {exit: "off", harness: claude-code, model: opus, effort: high, permission: full, priming: Be brief., keep_harness_tools: [Agent]}
+  opus: {exit: "off", harness: claude-code, model: opus, effort: high, permission: full, priming: Be brief., keep_harness_tools: [Agent], mcp: [notes, phone]}
   quick: {harness: claude-code, models: [haiku, sonnet], effort: low, permission: read}
 queues:
   general: {agent: opus, priority: 3, quiet: false}
@@ -41,6 +42,9 @@ session_memory_max: 3G
 terminal_memory_max: 1G
 terminals:
   api: {cmd: uvicorn app:app, cwd: app, restart: on-failure, env: {PORT: "8000"}, access: {ops: read}}
+mcp:
+  notes: {url: "http://notes/mcp", headers: {Authorization: "Bearer ${NOTES_TOKEN}"}}
+  phone: {command: uv, args: [run, phone], env: {PHONE_STATE: /var/phone}}
 park: {claude-code: 1200, opencode: 600, codex: 900}
 network:
   enabled: false
@@ -85,6 +89,7 @@ def reader_keys() -> list[str]:
         "agents": [f"*.{k}" for k in config.AGENT_KEYS],
         "queues": [f"*.{k}" for k in config.QUEUE_KEYS],
         "terminals": [f"*.{k}" for k in PROFILE_KEYS],
+        "mcp": [f"*.{k}" for k in HTTP_KEYS + STDIO_KEYS],
         "park": ["*"],  # a harness's name
         "workflows": ["max_agents"],
         "usage": list(config.USAGE_DEFAULTS),
@@ -122,7 +127,7 @@ def paths(node: object, prefix: str = "") -> set[str]:
         return {prefix}
     out = set()
     for k, v in node.items():
-        named = prefix in ("agents", "queues", "terminals", "park")
+        named = prefix in ("agents", "queues", "terminals", "park", "mcp")
         p = f"{prefix}.{'*' if named else k}" if prefix else str(k)
         leaf = p in (
             "workflows.max_agents",
@@ -130,7 +135,7 @@ def paths(node: object, prefix: str = "") -> set[str]:
             "usage.owners",
             "usage.owner_names",
             "usage.subscriptions",
-        ) or (p.startswith("terminals.*.") and p.count(".") == 2)
+        ) or (p.startswith(("terminals.*.", "mcp.*.")) and p.count(".") == 2)
         out |= {p} if leaf else paths(v, p)
     return out
 

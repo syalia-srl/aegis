@@ -31,7 +31,7 @@ import contextlib
 import logging
 import os
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field, replace
 from io import StringIO
 from pathlib import Path
@@ -54,6 +54,7 @@ from . import notice_sources
 from .cgroups import DEFAULT_MEMORY_MAX, parse_size
 from .net.config import KEYS as NET_KEYS
 from .host import host_from
+from .mcp_servers import parse as mcp_from
 from .net.config import NetConfig, network_from
 from .ops import OpError
 from .queues import queues_from
@@ -67,14 +68,14 @@ TOP_KEYS = (
     "agents", "queues", "default_agent", "recap", "btw", "context", "usage",
     "session_memory_max", "terminals", "terminal_memory_max", "park", "network",
     "host", "workflows", "harness_versions", "notices", "nudges",
-    "knowledge", "exit_via", "max_workers", "hosts",
+    "knowledge", "exit_via", "max_workers", "hosts", "mcp",
 )  # fmt: skip
 # Read once at boot, before the server knows its name (cli.serve), so a host's
 # block cannot set them.
 NOT_PER_HOST = ("hosts",)
 AGENT_KEYS = (
     "harness", "provider", "model", "models", "effort", "permission", "priming",
-    "keep_harness_tools", "exit",
+    "keep_harness_tools", "exit", "mcp",
 )  # fmt: skip
 QUEUE_KEYS = ("agent", "priority", "quiet")
 
@@ -712,6 +713,7 @@ class AgentDoc(BaseModel):
     keep_harness_tools: list[str] = Field(default_factory=list)
     # A linked server to exit through, or "off"; blank: the server's exit_via.
     exit: str = ""
+    mcp: list[str] = Field(default_factory=list)
 
 
 class QueueDoc(BaseModel):
@@ -732,6 +734,16 @@ class TerminalDoc(BaseModel):
     restart: str = ""  # blank: left out, which reads as no
     env: dict[str, str] = Field(default_factory=dict)
     access: dict[str, str] = Field(default_factory=dict)
+
+
+class McpDoc(BaseModel):
+    model_config = {"extra": "forbid"}
+    name: str
+    url: str = ""
+    headers: dict[str, str] = Field(default_factory=dict)
+    command: str = ""
+    args: list[str] = Field(default_factory=list)
+    env: dict[str, str] = Field(default_factory=dict)
 
 
 class HarnessVersionsDoc(BaseModel):
@@ -767,6 +779,7 @@ class ConfigDoc(BaseModel):
     # one the reader refuses.
     harness_versions: HarnessVersionsDoc = Field(default_factory=HarnessVersionsDoc)
     terminals: list[TerminalDoc] = Field(default_factory=list)
+    mcp: list[McpDoc] = Field(default_factory=list)
     # The usage: block; empty when the file has none, or one the reader refuses.
     usage: UsageDoc = Field(default_factory=UsageDoc)
     # Each key of fields() the file sets, by its dotted path; a switch only
@@ -793,6 +806,7 @@ def doc_from(data: dict) -> ConfigDoc:
             priming=a.priming,
             keep_harness_tools=_keep_raw(data, a.name),
             exit=a.exit,
+            mcp=_mcp_raw(data, a.name),
         )
         for a in agents_from(data)
     ]
@@ -827,6 +841,7 @@ def doc_from(data: dict) -> ConfigDoc:
             **{k: v for k, v in hv.items() if k != "error"}
         ),
         terminals=_terminals_doc(data.get("terminals")),
+        mcp=_mcp_doc(data.get("mcp")),
         usage=UsageDoc() if "error" in usage else UsageDoc(**usage),
         settings=_settings_doc(data),
     )
@@ -842,6 +857,47 @@ def _keep_raw(data: dict, name: str) -> list[str]:
     if isinstance(provider, dict) and "keep_harness_tools" in provider:
         raw = provider["keep_harness_tools"]
     return [str(t) for t in raw] if isinstance(raw, list) else []
+
+
+def _mcp_raw(data: dict, name: str) -> list[str]:
+    """The agent's mcp list as the file has it, kept like keep_harness_tools."""
+    node = (data.get("agents") or {}).get(name)
+    raw = node.get("mcp") if isinstance(node, dict) else None
+    return [str(n) for n in raw] if isinstance(raw, list) else []
+
+
+def _mcp_doc(raw: object) -> list[McpDoc]:
+    """Every entry of the mcp: map as the form edits it, a broken one too, so
+    a save keeps it on its row with its error."""
+    out = []
+    for name, entry in (raw if isinstance(raw, dict) else {}).items():
+        e = {str(k): v for k, v in entry.items()} if isinstance(entry, dict) else {}
+
+        def strs(k: str) -> dict[str, str]:
+            m = e.get(k)
+            return {str(a): str(b) for a, b in m.items()} if isinstance(m, dict) else {}
+
+        args = e.get("args")
+        out.append(
+            McpDoc(
+                name=str(name),
+                url=str(e.get("url") or ""),
+                headers=strs("headers"),
+                command=str(e.get("command") or ""),
+                args=[str(a) for a in args] if isinstance(args, list) else [],
+                env=strs("env"),
+            )
+        )
+    return out
+
+
+def mcp_raw(m: McpDoc) -> dict:
+    """``m`` as the file holds it: only the fields it sets."""
+    raw: dict = {}
+    for k in ("url", "headers", "command", "args", "env"):
+        if v := getattr(m, k):
+            raw[k] = v
+    return raw
 
 
 def _terminals_doc(raw: object) -> list[TerminalDoc]:
@@ -938,6 +994,9 @@ class Snapshot:
     session_memory_error: str | None = None
     terminals: dict[str, dict] = field(default_factory=dict)
     terminals_error: str | None = None
+    # The mcp: map's servers, and the error of each entry that has one (#960).
+    mcp: dict = field(default_factory=dict)
+    mcp_errors: dict[str, str] = field(default_factory=dict)
     terminal_memory_max: object = DEFAULT_MEMORY_MAX
     terminal_memory_error: str | None = None
     network: NetConfig = field(default_factory=NetConfig)
@@ -970,6 +1029,7 @@ class Snapshot:
             else None
         )
         workers, workers_error = max_workers_from(data.get("max_workers"))
+        mcp, mcp_errors = mcp_from(data.get("mcp"))
         return cls(
             path=path,
             exists=True,
@@ -994,6 +1054,8 @@ class Snapshot:
             session_memory_error=mem_error,
             terminals=terms,
             terminals_error=terms_error,
+            mcp=mcp,
+            mcp_errors=mcp_errors,
             terminal_memory_max=tmem,
             terminal_memory_error=tmem_error,
             network=network,
@@ -1062,17 +1124,21 @@ class Config:
                 log.exception("reading %s", self.path)
 
 
-def validate(doc: ConfigDoc) -> list[Finding]:
-    """What stops ``doc`` being written: each a Finding on its Settings row."""
+def validate(doc: ConfigDoc, extra_mcp: Iterable[str] = ()) -> list[Finding]:
+    """What stops ``doc`` being written: each a Finding on its Settings row.
+    ``extra_mcp``: the names a program passes as ``Server(mcp=...)``, which an
+    agent may attach as it attaches the file's."""
     out: list[Finding] = []
 
     def err(row: str, where: str, message: str) -> None:
         out.append(Finding("error", where, message, row))
 
     _validate_terminals(doc, err)
+    _validate_mcp(doc, err)
     _validate_settings(doc, err)
 
     names = [a.name for a in doc.agents]
+    servers = {m.name for m in doc.mcp} | set(extra_mcp)
     for a in doc.agents:
         row = f"agents.{a.name}"
         if not a.name.strip():
@@ -1090,6 +1156,12 @@ def validate(doc: ConfigDoc) -> list[Finding]:
         (agent,) = agents_from({"agents": {a.name: raw}})
         if agent.error:
             err(row, row, agent.error)
+        elif unknown := [n for n in a.mcp if n not in servers]:
+            err(
+                row,
+                f"{row}.mcp",
+                f"mcp names {', '.join(unknown)}, which the mcp: map does not define",
+            )
     queues = [q.name for q in doc.queues]
     for q in doc.queues:
         row = f"queues.{q.name}"
@@ -1145,6 +1217,18 @@ def _validate_terminals(doc: ConfigDoc, err: Callable[[str, str, str], None]) ->
         elif names.count(t.name) > 1:
             err(row, row, f"two terminal profiles are named {t.name!r}")
         elif error := terminals_from({t.name: _profile_raw(t)})[0][t.name].get("error"):
+            err(row, row, error)
+
+
+def _validate_mcp(doc: ConfigDoc, err: Callable[[str, str, str], None]) -> None:
+    names = [m.name for m in doc.mcp]
+    for m in doc.mcp:
+        row = f"mcp.{m.name}"
+        if not m.name.strip():
+            err(row, row, "an MCP server needs a name")
+        elif names.count(m.name) > 1:
+            err(row, row, f"two MCP servers are named {m.name!r}")
+        elif error := mcp_from({m.name: mcp_raw(m)})[1].get(m.name):
             err(row, row, error)
 
 
@@ -1256,6 +1340,10 @@ def _set_agent(node: CommentedMap, a: AgentDoc) -> None:
         _put(node, "exit", a.exit)
     else:
         node.pop("exit", None)
+    if a.mcp:
+        _put(node, "mcp", list(a.mcp))
+    else:
+        node.pop("mcp", None)
 
 
 def _apply(data: CommentedMap, doc: ConfigDoc) -> None:
@@ -1311,6 +1399,7 @@ def _apply(data: CommentedMap, doc: ConfigDoc) -> None:
     _apply_harness_versions(data, doc.harness_versions)
     _apply_usage(data, doc.usage)
     _apply_terminals(data, doc.terminals)
+    _apply_mcp(data, doc.mcp)
     _apply_settings(data, doc.settings)
 
 
@@ -1333,6 +1422,32 @@ def _apply_terminals(data: CommentedMap, terminals: list[TerminalDoc]) -> None:
                 node.pop(k, None)
             elif dict(node.get(k) or {}) != want:
                 node[k] = dict(want)
+
+
+def _apply_mcp(data: CommentedMap, servers: list[McpDoc]) -> None:
+    if not servers:
+        data.pop("mcp", None)
+        return
+    section = _entries(data, "mcp", [m.name for m in servers])
+    for m in servers:
+        node, want = section[m.name], mcp_raw(m)
+        for k in [k for k in node if k not in want]:
+            del node[k]
+        for k, v in want.items():
+            held = node.get(k)
+            if isinstance(v, dict) and isinstance(held, dict):
+                # In place, so the map keeps its flow style and comments.
+                for name in [n for n in held if n not in v]:
+                    del held[name]
+                for name, x in v.items():
+                    _put(held, name, x)
+            elif isinstance(v, list):
+                if list(held or ()) != v:
+                    node[k] = list(v)
+            elif isinstance(v, dict):
+                node[k] = dict(v)
+            else:
+                _put(node, k, v)
 
 
 def _apply_settings(data: CommentedMap, settings: dict) -> None:
