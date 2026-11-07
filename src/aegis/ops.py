@@ -120,6 +120,8 @@ def default_guard(op: Operation, caller: CallerInfo) -> None:
     agent = caller.kind == "agent"
     if agent and not op.agent:
         raise OpError("not_for_agents", f"{op.name} is not open to agents")
+    if agent and caller.tools is not None and op.tool_name not in caller.tools:
+        raise OpError("not_for_agents", f"{op.tool_name} is not open to this session")
     if agent and not op.read and caller.permission == "read":
         raise OpError(
             "read_only",
@@ -164,6 +166,8 @@ class Registry:
         # a session as the policy sees it; both set by the app.
         self.session_of: Callable[[str, str], str | None] = lambda kind, value: None
         self.view_of: Callable[[str], SessionView | None] = lambda log_id: None
+        # The aegis tools the policy gave a session's process; None is all.
+        self.tools_of: Callable[[str], frozenset[str] | None] = lambda log_id: None
 
     def op(
         self,
@@ -235,6 +239,7 @@ class Registry:
             permission=self.permission_of(log_id) if log_id else None,
             schedule=self.schedule_of(log_id) if log_id else None,
             read_tools=self._read_tools(),
+            tools=self.tools_of(log_id) if log_id else None,
         )
 
     def _read_tools(self) -> tuple[str, ...]:
