@@ -654,6 +654,7 @@ class App:
         self.registry = Ops()
         self.registry.who = self.who
         self.registry.ensure_who = self.ensure_who
+        self.registry.policy = self.policy
         self.registry.owner_of = self.owner_of
         self.registry.permission_of = lambda log_id: (
             s.spec.permission if (s := self.sessions.sessions.get(log_id)) else None

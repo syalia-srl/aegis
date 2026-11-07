@@ -76,5 +76,6 @@ def test_no_operation_or_principal_carries_a_role_or_an_owner_check():
 
     fields = {f.name for f in dataclasses.fields(Operation)}
     assert "admin" not in fields and "owned" not in fields
-    assert {f.name for f in dataclasses.fields(Principal)} == {"name"}
+    # The host policy's who rides along (#959); a role never comes back.
+    assert {f.name for f in dataclasses.fields(Principal)} == {"name", "who"}
     assert not hasattr(Registry(), "hides")

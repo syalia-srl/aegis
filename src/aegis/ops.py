@@ -15,9 +15,12 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ValidationError
+
+if TYPE_CHECKING:
+    from .policy import CallerInfo, HostPolicy
 
 
 class OpError(Exception):
@@ -96,6 +99,31 @@ class NoParams(BaseModel):
     model_config = {"extra": "forbid"}
 
 
+def default_guard(op: Operation, caller: CallerInfo) -> None:
+    """The checks that are not about people (HostPolicy.guard's default):
+    operations closed to agents, a read-permission session, a schedule run
+    with spawn: false, and operations closed to linked servers."""
+    agent = caller.kind == "agent"
+    if agent and not op.agent:
+        raise OpError("not_for_agents", f"{op.name} is not open to agents")
+    if agent and not op.read and caller.permission == "read":
+        raise OpError(
+            "read_only",
+            f"{op.tool_name} is not open to a session with read permission; "
+            "it can call " + ", ".join(caller.read_tools),
+        )
+    if agent and op.name in NO_SPAWN:
+        run = caller.schedule
+        if run is not None and not run.get("spawn"):
+            raise OpError(
+                "spawn_off",
+                f"run {run['run']} of {run['name']} may not start other work "
+                "(spawn: false)",
+            )
+    if op.local and caller.link:
+        raise OpError("not_across_links", f"{op.name} is not open to a linked server")
+
+
 async def _nothing(caller: Caller) -> None:
     return None
 
@@ -103,6 +131,7 @@ async def _nothing(caller: Caller) -> None:
 class Registry:
     def __init__(self) -> None:
         self._ops: dict[str, Operation] = {}
+        self._read: tuple[str, ...] | None = None  # read_tools, cached
         # A session's current permission by log id; set by the app.
         self.permission_of: Callable[[str], str | None] = lambda log_id: None
         # The principal a caller acts as, and a session's owner by log id; both
@@ -114,6 +143,9 @@ class Registry:
         # Makes sure the who behind a caller is known before the call runs
         # (App.ensure_who); set by the app.
         self.ensure_who: Callable[[Caller], Awaitable[None]] = _nothing
+        # The host policy (policy.py); set by the app. Without one, the
+        # default guard runs and nothing wraps a handler.
+        self.policy: HostPolicy | None = None
 
     def op(
         self,
@@ -128,6 +160,7 @@ class Registry:
         def register(handler: Handler) -> Handler:
             if name in self._ops:
                 raise ValueError(f"operation {name!r} registered twice")
+            self._read = None
             self._ops[name] = Operation(
                 name,
                 params,
@@ -144,6 +177,24 @@ class Registry:
     def names(self) -> list[str]:
         return sorted(self._ops)
 
+    def caller_info(self, caller: Caller) -> CallerInfo:
+        from .policy import CallerInfo
+
+        log_id = caller.log_id if caller.is_agent else None
+        return CallerInfo(
+            kind=caller.kind,
+            log_id=caller.log_id,
+            link=caller.link,
+            permission=self.permission_of(log_id) if log_id else None,
+            schedule=self.schedule_of(log_id) if log_id else None,
+            read_tools=self._read_tools(),
+        )
+
+    def _read_tools(self) -> tuple[str, ...]:
+        if self._read is None:
+            self._read = tuple(o.tool_name for o in self.agent_ops() if o.read)
+        return self._read
+
     def agent_ops(self) -> list[Operation]:
         return [op for _, op in sorted(self._ops.items()) if op.agent]
 
@@ -152,35 +203,22 @@ class Registry:
         if op is None:
             raise OpError("unknown_op", f"no operation named {name!r}")
         await self.ensure_who(caller)
-        if caller.is_agent and not op.agent:
-            raise OpError("not_for_agents", f"{name} is not open to agents")
-        if (
-            caller.is_agent
-            and not op.read
-            and self.permission_of(caller.log_id or "") == "read"
-        ):
-            raise OpError(
-                "read_only",
-                f"{op.tool_name} is not open to a session with read permission; "
-                "it can call "
-                + ", ".join(o.tool_name for o in self.agent_ops() if o.read),
-            )
-        if caller.is_agent and name in NO_SPAWN:
-            run = self.schedule_of(caller.log_id or "")
-            if run is not None and not run.get("spawn"):
-                raise OpError(
-                    "spawn_off",
-                    f"run {run['run']} of {run['name']} may not start other work "
-                    "(spawn: false)",
-                )
-        if op.local and caller.link:
-            raise OpError("not_across_links", f"{name} is not open to a linked server")
+        info = self.caller_info(caller)
+        who = self.who(caller).who
+        if self.policy is not None:
+            self.policy.guard(op, who, info)
+        else:
+            default_guard(op, info)
         try:
             params = op.params.model_validate(raw if raw is not None else {})
         except ValidationError as e:
             raise OpError("bad_params", str(e)) from e
         try:
-            return await op.handler(params, caller)
+            if self.policy is None:
+                return await op.handler(params, caller)
+            return await self.policy.around(
+                name, who, params, lambda p: op.handler(p, caller)
+            )
         except PermissionError as e:
             # A refused file or process action: say so rather than as an
             # internal error.
