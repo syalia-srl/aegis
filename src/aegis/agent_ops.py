@@ -14,6 +14,7 @@ a person may be reading that tab; the same call with the token closes it.
 
 from __future__ import annotations
 
+import asyncio
 import re
 import time
 from pathlib import Path
@@ -42,6 +43,11 @@ TOAST_WINDOW_S = 60.0
 
 # What turn_end answers a session that still has the handle or the title aegis
 # gave it (#586): agents often set the handle and keep the drawn title.
+LEFT_LINE = (
+    "Accepted: you can end done. This is still pending in the repos this "
+    "session worked in:\n{items}\nIf it is not part of your work, ignore it. "
+    "If it is, resolve it and call turn_end with done again when it is ready."
+)
 RENAME_LINE = (
     "This session still has the handle or title aegis gave it. Once the "
     "task is clear, call session_rename with both a handle and a title that say "
@@ -1555,6 +1561,13 @@ def register_agent_ops(app: App) -> None:
         if p.close:
             rec["close"] = True
         s.report(rec)
+        # Done is accepted either way; what the session left in its repos rides
+        # on the reply, for the agent to finish or ignore (#977).
+        left = ""
+        if p.attention == "done":
+            items = await asyncio.to_thread(app.repos.pending, s.log_id)
+            if items:
+                left = "\n" + LEFT_LINE.format(items="\n".join(f"- {i}" for i in items))
         if p.close:
             n = len(reg.descendants(s.log_id))
             tree = (
@@ -1564,6 +1577,7 @@ def register_agent_ops(app: App) -> None:
                 f"noted. aegis archives this session{tree} when this turn ends; "
                 "your final message is the last thing in its tab. "
                 + seen_line(s.fold().shown())
+                + left
             )
         at = app.config.current().context["handoff_at"]
         n = s.context_tokens or 0
@@ -1571,12 +1585,12 @@ def register_agent_ops(app: App) -> None:
         if s.worker:
             # A worker's final message is its task's result, read by the
             # enqueuer, not a reply to the person.
-            return "noted"
+            return "noted" + left
         if p.handoff or not at or n < at:
-            said = f"noted. {seen_line(s.fold().shown())}"
+            said = f"noted. {seen_line(s.fold().shown())}{left}"
             return f"{said}\n{RENAME_LINE}" if unnamed else said
         then = BRIEF_IF if p.attention == "needs_you" else BRIEF_NOW
-        line = CONTEXT_LINE.format(k=f"{round(n / 1000)}k") + then
+        line = CONTEXT_LINE.format(k=f"{round(n / 1000)}k") + then + left
         return f"{line}\n{RENAME_LINE}" if unnamed else line
 
     toasted: dict[str, list[float]] = {}
