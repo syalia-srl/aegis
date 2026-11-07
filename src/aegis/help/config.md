@@ -575,6 +575,68 @@ others still can, and `aegis doctor` names the mistake. See the terminals page.
 `session_memory_max:` caps a session's, and takes the same values. Its default
 is the session cap's, 40%.
 
+## MCP servers
+
+`mcp:` maps a server's name to an MCP server. An agent attaches servers by name
+with its own `mcp:` list, and each session of that agent gets them beside
+aegis's own, on every harness.
+
+```yaml
+mcp:
+  notes:
+    url: https://notes.example/mcp
+    headers: {Authorization: "Bearer ${NOTES_TOKEN}"}
+  phone:
+    command: uv
+    args: [run, phone-mcp]
+    env: {PHONE_STATE: /var/lib/phone}
+agents:
+  clerk: {harness: claude-code, model: sonnet, effort: high, permission: write, mcp: [notes, phone]}
+```
+
+An entry is HTTP, a `url` with optional `headers`, or stdio, a `command` with
+optional `args` and `env`. An entry with both or neither is an error on its row.
+A name takes letters, digits, `-` and `_`; `aegis`, and the name Codex gives it, are
+reserved for aegis's own server.
+
+`${VAR}` in a header or env value is read from aegis's own environment when a
+session starts, so a token stays out of the file. aegis never puts a header or
+env value in a harness's command line or in a file: each harness gets it through
+its environment or its stdin. A `${VAR}` in a `url`, `command` or argument is an
+error on its row, since those reach a command line every user on the host can
+read; pass a key as a header or an env value instead.
+
+The harness's environment is also its shell's and its stdio servers', so the
+agent can read every attached server's values, as it can read aegis's own
+session token. Codex hides them from its shell. Attach a server holding a secret
+only to an agent you trust with that secret. Codex gives a stdio server its env
+under the keys you wrote, so it refuses a key that is `PATH`, `HOME`, an
+`AEGIS_` variable, one aegis's environment holds with another value, or one two
+servers set to different values.
+
+A session's servers come in this order: aegis's own, then its agent's `mcp:`
+list, then what the host policy's `mcp` adds (see
+[library](library#host-policy)). aegis refuses to start the session, and the
+transcript says why, when:
+
+- a `${VAR}` is not set in aegis's environment;
+- the agent names a server no source defines;
+- two servers have one name, from the file, `Server(mcp=...)` or the policy, or
+  two of their header or env values would travel in one variable;
+- the harness cannot take a server's transport. Every harness aegis drives takes
+  both today.
+
+The list is read at each start, so an edit applies at a session's next start,
+and a running session keeps its servers. A server's tools run without asking, at
+every permission level, as aegis's own do. On Claude Code, `read` runs in plan
+mode, which refuses a tool its server does not mark read-only.
+
+Settings has an MCP servers section: add a server as a URL or a command, edit
+its headers or env, and press Test, which connects to it as the form holds it
+and lists its tools. An agent's card lists each server to attach. `aegis doctor`
+checks that each stdio command exists and each URL answers, and warns about a
+`${VAR}` that is not set.
+
 ## Editing it
 
 The file is the configuration. A running server notices a change within a

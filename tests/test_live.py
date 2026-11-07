@@ -2523,3 +2523,59 @@ async def test_real_claude_reads_an_urgent_handoff_inside_its_turn(tmp_path: Pat
         assert "PELICAN" in prose[-1]
     finally:
         await world.stop()
+
+
+async def test_real_claude_calls_a_tool_of_its_agents_mcp_server(tmp_path: Path):
+    """An agent with ``mcp: [echo]`` (#960): its session gets the server beside
+    aegis's own and calls its tool without asking."""
+    import asyncio
+    import sys
+
+    import uvicorn
+
+    from aegis.app import App
+    from aegis.roots import make_roots
+    from aegis.web import build_web
+
+    from .test_agents import _free_port
+
+    claude = shutil.which("claude")
+    assert claude, "claude is not on PATH"
+    echo = Path(__file__).parent / "fixtures" / "mcp_echo.py"
+    (tmp_path / ".aegis.yaml").write_text(
+        f"mcp:\n  echo: {{command: {sys.executable}, args: [{echo}]}}\n"
+        "default_agent: haiku\n"
+        f"agents:\n  haiku: {{harness: claude-code, model: {HAIKU}, effort: low, "
+        "permission: full, mcp: [echo]}\n"
+    )
+    port = _free_port()
+    app = App(
+        make_roots(tmp_path, None),
+        claude_bin=claude,
+        base_url=f"http://127.0.0.1:{port}",
+    )
+    server = uvicorn.Server(
+        uvicorn.Config(
+            build_web(app, "t", {f"127.0.0.1:{port}"}), port=port, log_level="warning"
+        )
+    )
+    task = asyncio.create_task(server.serve())
+    await until(lambda: server.started, timeout=10, what="uvicorn")
+    try:
+        r = await app.registry.call("session.spawn", {"agent": "haiku"})
+        s = app.sessions.sessions[r["log_id"]]
+        await s.send(
+            "Call the ping tool of the echo MCP server with marker KESTREL-7, "
+            "then reply with exactly what it returned."
+        )
+        await until(
+            lambda: s.status == "idle" and s.cost_usd,
+            timeout=180,
+            what="the answer",
+        )
+        prose = [e["md"] for e in s.entries() if e["kind"] == "prose"]
+        assert "mcp__echo__ping" in json.dumps(s.entries())
+        assert "pong KESTREL-7" in prose[-1]
+    finally:
+        server.should_exit = True
+        await asyncio.wait_for(task, 30)

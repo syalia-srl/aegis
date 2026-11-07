@@ -21,11 +21,18 @@ Measured on pi 1.5.0 (``@earendil-works/pi-coding-agent``; spec
 
 from __future__ import annotations
 
+import hashlib
 import json
+from collections.abc import Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ..claude.control import Catalog, Model
 from ..harness import HEADER, TOKEN_VAR, Launch
+from ..mcp_servers import by_ref
+
+if TYPE_CHECKING:
+    from ..policy import McpServer
 
 SERVER = "aegis"
 AGENT_DIR_VAR = "PI_CODING_AGENT_DIR"
@@ -62,28 +69,44 @@ def state_dir(launch: Launch) -> Path:
     return launch.stderr_path.parent.parent / "pi"
 
 
-def mcp_config(url: str) -> dict:
-    return {
-        "mcpServers": {
-            SERVER: {
-                "url": url,
-                "headers": {HEADER: "${" + TOKEN_VAR + "}"},
-                "exposure": "deferred",
-                "toolExposure": {name: "direct" for name in DIRECT},
-            }
+def mcp_config(url: str | None, servers: Sequence[McpServer] = ()) -> dict:
+    """``servers`` (#960) go in by reference (mcp_servers.by_ref): pi expands
+    ``${VAR}`` in header and env values, and the file is shared."""
+    entries: dict[str, dict] = {}
+    if url is not None:
+        entries[SERVER] = {
+            "url": url,
+            "headers": {HEADER: "${" + TOKEN_VAR + "}"},
+            "exposure": "deferred",
+            "toolExposure": {name: "direct" for name in DIRECT},
         }
-    }
+    for s in by_ref(servers)[0]:
+        if s.transport == "http":
+            entries[s.name] = {"url": s.url, "headers": s.headers}
+        else:
+            entries[s.name] = {"command": s.command, "args": list(s.args), "env": s.env}
+    return {"mcpServers": entries}
 
 
-def agent_dir(root: Path, url: str | None, home: Path | None = None) -> Path:
+def agent_dir(
+    root: Path,
+    url: str | None,
+    home: Path | None = None,
+    servers: Sequence[McpServer] = (),
+) -> Path:
     """aegis's agent directory under ``root``, written if missing or stale:
     the aegis ``mcp.json`` (left as it is when there is no endpoint: a probe
-    runs with ``--no-mcp``) and links to what the person's own holds."""
-    d = root / "agent"
+    runs with ``--no-mcp``) and links to what the person's own holds. pi reads
+    servers only from this file, so a session with ``servers`` gets
+    ``agent-<hash of the file>``: sessions with one set share a directory."""
+    text = json.dumps(mcp_config(url, servers), indent=2) + "\n"
+    name = "agent"
+    if servers:
+        name += "-" + hashlib.sha256(text.encode()).hexdigest()[:8]
+    d = root / name
     d.mkdir(parents=True, exist_ok=True)
     mcp = d / "mcp.json"
-    if url is not None:
-        text = json.dumps(mcp_config(url), indent=2) + "\n"
+    if url is not None or servers:
         if not mcp.exists() or mcp.read_text() != text:
             mcp.write_text(text)
     own = (home or Path.home()) / ".pi" / "agent"
@@ -109,10 +132,11 @@ def argv(
         cmd += ["--append-system-prompt", launch.system_prompt]
     tools = TOOLS.get(launch.permission)
     if tools is not None:
-        cmd += ["--tools", ",".join(tools)]
+        extra = tuple(f"mcp__{s.name}__*" for s in launch.extra_mcp)
+        cmd += ["--tools", ",".join((*tools, *extra))]
     if launch.knowledge_native:
         cmd.append("--no-skills")
-    if launch.mcp is None:
+    if launch.mcp is None and not launch.extra_mcp:
         cmd.append("--no-mcp")
     return cmd
 

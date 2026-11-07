@@ -46,6 +46,8 @@ class Ops:
     @property
     def link(self) -> _link: ...
     @property
+    def mcp(self) -> _mcp: ...
+    @property
     def memory(self) -> _memory: ...
     async def meta(self) -> Any:
         """How aegis works for you, and its tools."""
@@ -498,6 +500,10 @@ class _link:
         """The servers this one links, with their state; never their tokens."""
     async def remove(self, *, name: str) -> Any:
         """link.remove"""
+
+class _mcp:
+    async def test(self, *, entry: dict[str, Any]) -> Any:
+        """Connect to an MCP server as the Settings form holds it, saved or not, and name its tools. Runs a stdio server's command on this machine."""
 
 class _memory:
     async def delete(self, *, name: str) -> Any:

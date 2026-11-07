@@ -46,6 +46,9 @@ from .config import (
 )
 from .harness import harness_for
 from .links import LinkStore
+from . import mcp_servers
+from .ops import OpError
+from .policy import McpServer
 from .harness_versions import OUTSIDE, VERSION_TIMEOUT_S, judge
 from .knowledge import embed
 from .ranking import annotate, ranking
@@ -537,6 +540,24 @@ def _terminal(name: str, p: dict, root: Path) -> Finding:
     return Finding("ok", where, f"{p['cmd']} in {cwd}{restart}")
 
 
+async def _mcp(name: str, s: McpServer) -> Finding:
+    """A stdio command that exists, a URL that answers; a ${VAR} not set here
+    is a warning, since aegis may be started with it."""
+    where = f"mcp.{name}"
+    try:
+        s = mcp_servers.expand(s, os.environ)
+    except OpError as e:
+        return Finding("warn", where, e.message)
+    if s.transport == "stdio":
+        cmd = str(s.command)
+        if shutil.which(cmd) is None and not Path(cmd).is_file():
+            return Finding("error", where, f"{cmd} is not on PATH or a file")
+        return Finding("ok", where, " ".join([cmd, *s.args]))
+    if why := await mcp_servers.unreachable(str(s.url)):
+        return Finding("error", where, why)
+    return Finding("ok", where, str(s.url))
+
+
 def _state(roots: Roots) -> Finding:
     sr = roots.state_root
     if found := legacy_state(sr):
@@ -583,8 +604,12 @@ def _installed_unit() -> dict[str, str] | None:
 
 
 async def doctor(
-    roots: Roots, bins: dict[str, str], start: Path | None = None
+    roots: Roots,
+    bins: dict[str, str],
+    start: Path | None = None,
+    extra_mcp: Iterable[str] = (),
 ) -> list[Finding]:
+    """``extra_mcp``: the names a program passes as Server(mcp=...)."""
     path = roots.config_root / CONFIG_FILE
     if not path.is_file():
         return [
@@ -626,8 +651,20 @@ async def doctor(
         if (token := _claude_token(time.time())) is not None:
             out.append(token)
     by_name = {a.name: a for a in snap.agents}
+    known = {*snap.mcp, *snap.mcp_errors, *extra_mcp}
     for a in snap.agents:
         out += _agent(a, found.get(a.harness))
+        if unknown := [n for n in a.mcp if n not in known]:
+            row = f"agents.{a.name}"
+            out.append(
+                Finding(
+                    "error",
+                    row,
+                    f"mcp names {', '.join(unknown)}, which the mcp: map does not "
+                    "define",
+                    row,
+                )
+            )
     out.append(_default(snap.default_agent, by_name))
     for name, q in snap.queues.items():
         out += _queue(name, q, by_name)
@@ -636,6 +673,8 @@ async def doctor(
     if snap.terminals_error:
         out.append(Finding("error", "terminals", snap.terminals_error))
     out += [_terminal(n, p, roots.config_root) for n, p in snap.terminals.items()]
+    out += [Finding("error", f"mcp.{n}", e) for n, e in snap.mcp_errors.items()]
+    out += await asyncio.gather(*(_mcp(n, s) for n, s in snap.mcp.items()))
     if snap.terminal_memory_error:
         out.append(Finding("error", "terminal_memory_max", snap.terminal_memory_error))
     out += _recap(roots)
