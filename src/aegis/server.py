@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from .api.schedules import Schedules
     from .api.sessions import Sessions
     from .api.workflows import Workflows
+    from .policy import HostPolicy
     from .app import App
     from .roots import Roots
 
@@ -122,6 +123,7 @@ class Server:
         codex: str = "codex",
         cursor: str = "cursor-agent",
         origins: Iterable[str] = (),
+        policy: HostPolicy | None = None,
     ) -> None:
         # Required: nothing below the CLI reads the working directory (test_no_cwd).
         self._root = Path(root)
@@ -130,6 +132,7 @@ class Server:
         self._name = name
         self._bins = (claude, opencode, codex, cursor)
         self._origins = list(origins)
+        self._policy = policy
         self._app: App | None = None
         self._uvicorn: Any = None
         self._task: asyncio.Task | None = None
@@ -191,6 +194,7 @@ class Server:
             opencode_bin=self._bins[1],
             codex_bin=self._bins[2],
             cursor_bin=self._bins[3],
+            policy=self._policy,
         )
         web = build_web(
             self._app, self.token, allowed_hosts(self._host, port), self._origins

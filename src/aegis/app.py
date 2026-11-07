@@ -138,6 +138,7 @@ from .quota_gate import (
 )
 from .btws import SideNotes
 from .recaps import Recaps
+from .policy import HostPolicy, SessionView, StandalonePolicy
 from .ops import Caller, NoParams, OpError, Principal, Registry as Ops
 from . import launch
 from .opencode import sweep as opencode_sweep
@@ -449,6 +450,7 @@ class App:
         cursor_bin: str = "cursor-agent",
         dictation_dir: Path | None = None,
         user: str | None = None,
+        policy: HostPolicy | None = None,
     ) -> None:
         self.roots = roots
         self.server_name = server_name
@@ -613,6 +615,9 @@ class App:
         self.user = user or getpass.getuser()
         # The tokens that may use this server, the admin's first (tokens.py).
         self.principals = TokenStore(roots.state_root, self.user)
+        # What the embedding program decides (policy.py); aegis serve's own.
+        self.policy = policy if policy is not None else StandalonePolicy()
+        self.policy.attach(self)
         self.links = Links(roots.state_root, server_name, self.user, self.publish)
         self.links.answer = self.answer_link
         self.links.serve, self.links.rwatch = self.serve_link, self.watch_link
@@ -1102,6 +1107,25 @@ class App:
             if local in (m.get("handle"), log_id):
                 return m.get("owner") or self.user
         return None
+
+    def view_of(self, log_id: str) -> SessionView | None:
+        """A session, open or archived, as the policy's hooks see it; None
+        for no such session."""
+        s = self.sessions.sessions.get(log_id)
+        meta = s.meta() if s is not None else self.sessions.archived.get(log_id)
+        if meta is None:
+            return None
+        return SessionView(
+            log_id=log_id,
+            owner=meta.get("owner") or self.user,
+            agent=str(meta.get("agent") or ""),
+            harness=str(meta.get("harness") or "claude-code"),
+            model=str(meta.get("model") or ""),
+            cwd=str(meta.get("cwd") or ""),
+            spawned_from=meta.get("spawned_from"),
+            archived=bool(meta.get("archived")),
+            tags=dict(meta.get("tags") or {}),
+        )
 
     def owner_of(self, log_id: str) -> str | None:
         """A session's owner by log id, None for no such session. One from
