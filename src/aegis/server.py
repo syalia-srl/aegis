@@ -268,7 +268,7 @@ class Server:
         itself acts as the server's own caller."""
         if self._caller is None:
             raise RuntimeError("the Server is not running: use it in `async with`")
-        key = self.app.policy.key(who)
+        key = self.app._host_key(who)
         self.app.whos[key] = who
         acting = copy.copy(self)
         acting._caller = Caller("user", principal=Principal(key, who))

@@ -27,6 +27,8 @@ SESSIONISH = {
     "artifact_id",
     "from_agent",
     "worker",
+    "id",
+    "monitor_id",
 }
 
 # Fields with those names that do not name something a session owns, and why.
@@ -55,6 +57,27 @@ NOT_AN_ID: dict[tuple[str, str], str] = {
         )
     },
     **{
+        (op, "id"): "an artifact of the calling agent's own session"
+        for op in (
+            "artifact.close",
+            "artifact.read",
+            "artifact.send",
+            "artifact.update",
+        )
+    },
+    **{
+        (op, "id"): "a device's push subscription, the caller's own"
+        for op in ("push.remove", "push.subscribe", "push.test", "push.update")
+    },
+    **{
+        (op, "id"): "a terminal; term.* act on the whole server (Operation.server)"
+        for op in ("term.close", "term.input", "term.resize", "term.restart")
+    },
+    **{
+        (op, "id"): "a saved workflow definition, the server's"
+        for op in ("workflow.arm", "workflow.delete", "workflow.read")
+    },
+    **{
         (op, "artifact_id"): "looked up inside the log_id's session"
         for op in (
             "artifact.emit",
@@ -71,6 +94,7 @@ NOT_FOUND = {
     "task": "no_task",
     "run": "no_run",
     "browser": "unknown_browser",
+    "monitor": "no_monitor",
 }
 
 ANA_S = "20260101-000000-aaaaaa"
@@ -127,6 +151,7 @@ HAND: dict[str, dict] = {
     "peer.deliver": {"sender": SENDER},
     "peer.close": {"sender": {"handle": "h", "server": "far"}},
     "browser.resize": {"width": 800, "height": 600},
+    "browser.view": {"width": 800, "height": 600},
     "knowledge.import": {"items": [{"source": "s", "kind": "memory"}]},
 }
 
@@ -147,7 +172,11 @@ def test_every_op_with_an_id_field_declares_it(hidden):
         (op.name, f)
         for op in hidden.registry._ops.values()
         for f in op.params.model_fields
-        if f in SESSIONISH and f not in dict(op.names) and (op.name, f) not in NOT_AN_ID
+        if f in SESSIONISH
+        and f not in dict(op.names)
+        and (op.name, f) not in NOT_AN_ID
+        # An id looked up inside the session the call's log_id names.
+        and not (f == "id" and "log_id" in dict(op.names))
     ]
     assert missing == []
 
@@ -155,6 +184,8 @@ def test_every_op_with_an_id_field_declares_it(hidden):
 async def test_a_hidden_session_answers_as_missing_from_every_op_that_names_it(hidden):
     walked, wrong = 0, []
     for op in hidden.registry._ops.values():
+        if op.server:
+            continue  # refused to every host caller (test_policy_review)
         for field, kind in op.names:
             value = "ana-one" if kind == "session" else "some-id"
             try:

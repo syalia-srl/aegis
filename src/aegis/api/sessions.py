@@ -15,7 +15,6 @@ import builtins
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Literal
 
-from ..ops import Caller
 from ._wait import until
 from .models import (
     UNSETTLED,
@@ -77,7 +76,7 @@ class Sessions:
         """Whether the caller this API acts as may ``action`` the session,
         under the host policy (Server.as_who)."""
         app = self._srv.app
-        return app.sees(app.who(self._srv._caller or Caller("user")), log_id, action)
+        return app.sees(app.acting(self._srv._caller), log_id, action)
 
     async def list(self) -> builtins.list[Session]:
         """Every open session the caller may see, oldest first."""
@@ -118,7 +117,14 @@ class Session:
             raise SessionNotFound(f"session {self.log_id} is closed")
         return s
 
+    def _readable(self) -> None:
+        """Refuse, as missing, a session the acting caller may not read."""
+        app = self._srv.app
+        if not app.sees(app.acting(self._srv._caller), self.log_id, "read"):
+            raise SessionNotFound(f"no open session {self.log_id!r}")
+
     def _rows(self) -> list[dict]:
+        self._readable()
         snap = self._srv.app.sessions.transcript(self.log_id)
         if snap is None:
             raise SessionNotFound(f"session {self.log_id} is closed")
@@ -127,6 +133,7 @@ class Session:
     # -- reading --------------------------------------------------------------
     async def info(self) -> SessionInfo:
         """The session's card, now."""
+        self._readable()
         return SessionInfo.model_validate(self._live().wire())
 
     async def entries(self) -> builtins.list[AnyEntry]:
@@ -177,6 +184,7 @@ class Session:
         """Each transcript entry once it settles, and ``TurnEnded`` when a turn
         ends. Starts with new entries, or with every entry when ``history``.
         An entry that changes after it settled arrives again with the same id."""
+        self._readable()
         app = self._srv.app
         q: asyncio.Queue[tuple[str, dict | None]] = asyncio.Queue()
         tsub = app.channels.subscribe(

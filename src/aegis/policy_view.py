@@ -23,6 +23,7 @@ ROWS = {"sessions": ("log_id", "log_id"), "workflow-runs": ("run", "owner")}
 class PolicyView:
     def __init__(self, app: App, principal: Principal) -> None:
         self._app = app
+        self._principal = principal
         self._who = principal.who
         self._sent: dict[str, set[Any]] = {}
 
@@ -47,6 +48,8 @@ class PolicyView:
         return True
 
     def snapshot(self, channel: str, data: Any) -> Any:
+        if channel == "schedules" and isinstance(data, list):
+            return [r for r in data if self._owns(r)]
         if channel not in ROWS or not isinstance(data, list):
             return data
         key, owner = ROWS[channel]
@@ -54,7 +57,16 @@ class PolicyView:
         self._sent[channel] = {r.get(key) for r in rows}
         return rows
 
+    def _owns(self, row: dict) -> bool:
+        return self._app.owns_schedule(self._principal, str(row.get("name")))
+
     def op(self, channel: str, op: dict) -> dict | None:
+        if channel == "schedules":
+            row = op.get("upsert")
+            return op if row is None or self._owns(row) else None
+        if channel == "toasts":
+            source = (op.get("toast") or {}).get("from") or {}
+            return op if self._can("list", source.get("id")) else None
         if channel not in ROWS:
             return op
         key, owner = ROWS[channel]

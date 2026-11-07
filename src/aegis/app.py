@@ -669,6 +669,7 @@ class App:
         self.registry.who = self.who
         self.registry.ensure_who = self.ensure_who
         self.registry.policy = self.policy
+        self.registry.narrows = self.narrows
         self.sessions.admit = self.admit
         self.sessions.resume_hook = self.admit_resume
         self.sessions.tools_for = self.tools_for
@@ -930,9 +931,17 @@ class App:
             if cred.token.startswith(host_tokens.PREFIX):
                 raise Refused("this token has expired or is not valid")
         who = await self.policy.identify(cred)
-        key = self.policy.key(who)
+        key = self._host_key(who)
         self.whos[key] = who
         return Principal(key, who)
+
+    def _host_key(self, who: Any) -> str:
+        """A host's key for ``who``. Under a host policy it may not be the
+        server's own key, which means the server itself (who None)."""
+        key = self.policy.key(who)
+        if key == self.user and not isinstance(self.policy, StandalonePolicy):
+            raise Refused(f"{key!r} is the server's own key; key(who) must differ")
+        return key
 
     def checks_itself(self, token: object) -> bool:
         """Whether aegis can check ``token`` again on its own: the server's
@@ -954,7 +963,7 @@ class App:
 
     def token_for(self, who: Any, ttl: float = 3600) -> str:
         """A token the host's page passes to the client for ``who``."""
-        key = self.policy.key(who)
+        key = self._host_key(who)
         self.whos[key] = who
         return host_tokens.mint(self.host_secret, key, ttl)
 
@@ -1315,11 +1324,20 @@ class App:
         got = self.policy.tools(self.whos.get(view.owner), view)
         self.tools_of[s.log_id] = None if got is None else frozenset(got)
 
+    def listens(self) -> bool:
+        """Whether the policy overrides on_event."""
+        return type(self.policy).on_event is not HostPolicy.on_event
+
     def event(self, kind: EventKind, log_id: str, data: dict) -> None:
         """Tell the policy's on_event what happened to a session."""
+        if kind == "close":
+            self.tools_of.pop(log_id, None)
+        if not self.listens():
+            return
         view = self.view_of(log_id)
-        who = self.whos.get(view.owner) if view is not None else None
-        self.events.emit(who, Event(kind, log_id, data))
+        owner = view.owner if view is not None else None
+        who = self.whos.get(owner) if owner is not None else None
+        self.events.emit(who, Event(kind, log_id, data, owner))
 
     def narrows(self) -> bool:
         """Whether the policy hides anything: it overrides can."""
@@ -1330,6 +1348,20 @@ class App:
         session that does not exist here hides nothing."""
         view = self.view_of(log_id)
         return view is None or self.policy.can(principal.who, action, view)
+
+    def acting(self, caller: Caller | None) -> Principal:
+        """Who a library call acts as (Server.as_who); the server's own
+        caller when it names none."""
+        return self.who(caller or Caller("user"))
+
+    def owns_schedule(self, principal: Principal, name: str) -> bool:
+        """Whether ``principal`` may see and change schedule ``name``: always
+        when the policy hides nothing or for the server's own caller, else
+        only its maker's person (#959)."""
+        if not self.narrows() or principal.who is None:
+            return True
+        s = self.schedules.items.get(name)
+        return s is not None and s.owner.get("principal") == principal.name
 
     def visible_ids(self, principal: Principal) -> set[str] | None:
         """The log ids, open or archived, ``principal`` may list; None for
@@ -1364,6 +1396,9 @@ class App:
         if kind == "browser":
             b = self.browsers.open.get(value)
             return b.meta.get("session") if b is not None else None
+        if kind == "monitor":
+            m = self.monitors.items.get(value)
+            return m.owner if m is not None else None
         return None
 
     def view_of(self, log_id: str) -> SessionView | None:
@@ -3236,12 +3271,12 @@ class App:
             )
             return {"kinds": kinds + ["code"] * (len(paths) - len(head))}
 
-        @r.op("link.list")
+        @r.op("link.list", server=True)
         async def link_list(_, caller):
             """The servers this one links, with their state; never their tokens."""
             return [link.wire() for link in self.links.links()]
 
-        @r.op("link.add", LinkAdd)
+        @r.op("link.add", LinkAdd, server=True)
         async def link_add(p: LinkAdd, caller):
             """Link another aegis server: connect once with its token, take the
             name it gives itself, and keep the link in links.json."""
@@ -3259,17 +3294,17 @@ class App:
             self.links.add(name, p.url, p.token, p.trusted)
             return {"name": name}
 
-        @r.op("link.remove", LinkName)
+        @r.op("link.remove", LinkName, server=True)
         async def link_remove(p: LinkName, caller):
             self.links.remove(p.name)
 
-        @r.op("link.trust", LinkTrust)
+        @r.op("link.trust", LinkTrust, server=True)
         async def link_trust(p: LinkTrust, caller):
             """Ask a link for trust (both ways, agents unrestricted), or stop
             asking. The link reconnects; the far server decides."""
             self.links.trust(p.name, p.trusted)
 
-        @r.op("link.incoming")
+        @r.op("link.incoming", server=True)
         async def link_incoming(_, caller):
             """The servers that linked this one with trust, so their agents
             reach this one over their link, and what each took as an exit."""
@@ -3278,7 +3313,7 @@ class App:
                 for row in self.links.incoming()
             ]
 
-        @r.op("link.exit", LinkExit)
+        @r.op("link.exit", LinkExit, server=True)
         async def link_exit(p: LinkExit, caller):
             """Make a link this server's exit, or stop exiting: what aegis
             starts from now on reaches the internet from there (exit.py)."""
@@ -3297,7 +3332,7 @@ class App:
             """The pause in force (pause.py), or null."""
             return {"paused": self.paused}
 
-        @r.op("server.pause")
+        @r.op("server.pause", server=True)
         async def server_pause(p, caller):
             """Pause every session: end their processes, hold all new work."""
             ended = await self.pause_all(
@@ -3305,13 +3340,13 @@ class App:
             )
             return {"paused": self.paused, "ended": ended}
 
-        @r.op("server.resume")
+        @r.op("server.resume", server=True)
         async def server_resume(p, caller):
             """Resume every session the pause held, and the work it held."""
             await self.resume_all()
             return {"paused": None}
 
-        @r.op("token.revoke", TokenName)
+        @r.op("token.revoke", TokenName, server=True)
         async def token_revoke(p: TokenName, caller):
             """End a token. The admin's is replaced, and the new one returned
             to whoever revoked it, so that browser can sign in again. Its
@@ -3325,7 +3360,7 @@ class App:
             install = await self.updater.install()
             return await self.versions.wire() | {"install": install.wire()}
 
-        @r.op("server.update")
+        @r.op("server.update", server=True)
         async def server_update(_, caller):
             """Upgrade aegis with the installer that owns it, check the new
             build, and restart onto it (self_update.py). Progress is on the

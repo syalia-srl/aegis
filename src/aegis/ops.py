@@ -76,6 +76,7 @@ KINDS = {
     "task": "no_task",
     "run": "no_run",
     "browser": "unknown_browser",
+    "monitor": "no_monitor",
 }
 
 # What a schedule's run with spawn: false may not call: each starts other work
@@ -103,6 +104,10 @@ class Operation:
     # host policy's can decides (Registry.call, #959).
     names: tuple[tuple[str, str], ...] = ()
     access: str = "write"
+    # Acts on the whole server (its config, links, files, shells, harness
+    # sign-ins): HostPolicy.guard refuses it to every caller a host
+    # identified; StandalonePolicy's one person keeps it (#959).
+    server: bool = False
 
     @property
     def tool_name(self) -> str:
@@ -162,6 +167,8 @@ class Registry:
         # The host policy (policy.py); set by the app. Without one, the
         # default guard runs and nothing wraps a handler.
         self.policy: HostPolicy | None = None
+        # Whether the policy hides anything (App.narrows); set by the app.
+        self.narrows: Callable[[], bool] = lambda: False
         # The session a named id belongs to, None when it names none here, and
         # a session as the policy sees it; both set by the app.
         self.session_of: Callable[[str, str], str | None] = lambda kind, value: None
@@ -180,6 +187,7 @@ class Registry:
         local: bool = False,
         names: tuple[tuple[str, str], ...] = (),
         access: str = "write",
+        server: bool = False,
     ) -> Callable[[Handler], Handler]:
         def register(handler: Handler) -> Handler:
             if name in self._ops:
@@ -195,6 +203,7 @@ class Registry:
                 local,
                 names,
                 access,
+                server,
             )
             return handler
 
@@ -265,7 +274,7 @@ class Registry:
             params = op.params.model_validate(raw if raw is not None else {})
         except ValidationError as e:
             raise OpError("bad_params", str(e)) from e
-        if self.policy is not None:
+        if self.policy is not None and self.narrows():
             self._check_named(op, params, who, caller)
         try:
             if self.policy is None:

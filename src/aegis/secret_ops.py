@@ -269,7 +269,7 @@ def register_secret_ops(app: App) -> ss.SecretStore:
         )
         return "ok"
 
-    @r.op("claude.token", SecretProvide, names=(("log_id", "session"),))
+    @r.op("claude.token", SecretProvide, names=(("log_id", "session"),), server=True)
     async def claude_token(p: SecretProvide, caller):
         """The sign-in card's paste-a-token field (signin/core.py): check a
         setup-token, keep it, restart the sessions that failed to sign in."""
@@ -288,7 +288,7 @@ def register_secret_ops(app: App) -> ss.SecretStore:
             raise OpError("off", "this server runs no sign-ins")
         return reg.sign_in
 
-    @r.op("signin.answer", SecretProvide, names=(("log_id", "session"),))
+    @r.op("signin.answer", SecretProvide, names=(("log_id", "session"),), server=True)
     async def sign_in_answer(p: SecretProvide, caller):
         """Type the code the sign-in page gave into the waiting login."""
         reg.open(p.log_id)
@@ -298,7 +298,7 @@ def register_secret_ops(app: App) -> ss.SecretStore:
             raise OpError("refused", str(e)) from None
         return "ok"
 
-    @r.op("signin.choose", SignInChoose, names=(("log_id", "session"),))
+    @r.op("signin.choose", SignInChoose, names=(("log_id", "session"),), server=True)
     async def sign_in_choose(p: SignInChoose, caller):
         """Pick one of the login's offered options."""
         reg.open(p.log_id)
@@ -308,7 +308,7 @@ def register_secret_ops(app: App) -> ss.SecretStore:
             raise OpError("refused", str(e)) from None
         return "ok"
 
-    @r.op("signin.cancel", SecretRef, names=(("log_id", "session"),))
+    @r.op("signin.cancel", SecretRef, names=(("log_id", "session"),), server=True)
     async def sign_in_cancel(p: SecretRef, caller):
         """Stop the login; the sessions keep waiting."""
         reg.open(p.log_id)
@@ -318,7 +318,7 @@ def register_secret_ops(app: App) -> ss.SecretStore:
             raise OpError("refused", str(e)) from None
         return "ok"
 
-    @r.op("signin.open", SignInOpen, agent=True)
+    @r.op("signin.open", SignInOpen, agent=True, server=True)
     async def signin_open(p: SignInOpen, caller):
         """Open a sign-in card for a harness in your transcript, to renew its
         sign-in before it expires or when the person asks. aegis runs the
@@ -337,7 +337,7 @@ def register_secret_ops(app: App) -> ss.SecretStore:
         rows = await harness_status(_sign_ins().recipes())
         return [r for r in rows if app.offers(caller, harness=str(r["harness"]))]
 
-    @r.op("signin.start", SignInStart, names=(("log_id", "session"),))
+    @r.op("signin.start", SignInStart, names=(("log_id", "session"),), server=True)
     async def sign_in_start(p: SignInStart, caller):
         """Open a sign-in card in this session's transcript, or name the one open."""
         s = reg.open(p.log_id)

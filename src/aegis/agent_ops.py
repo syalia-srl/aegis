@@ -857,7 +857,13 @@ def register_agent_ops(app: App) -> None:
         )
         return {"monitor_id": m.id, "other_live_monitors": roster(s.log_id, m.id)}
 
-    @r.op("monitor.cancel", MonitorId, agent=True, read=True)
+    @r.op(
+        "monitor.cancel",
+        MonitorId,
+        agent=True,
+        read=True,
+        names=(("monitor_id", "monitor"),),
+    )
     async def monitor_cancel(p: MonitorId, caller):
         """Stop one of your monitors. No wake is sent."""
         m = app.monitors.items.get(p.monitor_id)
@@ -871,10 +877,11 @@ def register_agent_ops(app: App) -> None:
     @r.op("monitor.list", NoArgs, agent=True, read=True)
     async def monitor_list(_, caller):
         """Your live monitors."""
+        me = app.who(caller)
         items = (
             app.monitors.of(caller.log_id)
             if caller.is_agent
-            else list(app.monitors.items.values())
+            else [m for m in app.monitors.items.values() if app.sees(me, m.owner)]
         )
         return [
             {
