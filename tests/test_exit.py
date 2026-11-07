@@ -14,11 +14,12 @@ from pathlib import Path
 
 import httpx
 import pytest
+from ruamel.yaml import YAML
 
 from aegis import doctor, launch
 from aegis import exit as exit_
 from aegis.browsers import launch_proxy
-from aegis.config import Snapshot, write
+from aegis.config import Snapshot, stamp_of, write
 from aegis.links import LinkStore
 from aegis.net.config import NetConfig
 from aegis.net.probe import Reach, Trace
@@ -447,6 +448,29 @@ async def test_a_session_exits_and_a_profile_with_exit_off_does_not(trusted):  #
     assert d.wire()["exit"] is None
 
 
+async def test_a_hosts_block_sets_the_exit_on_its_server_alone(trusted):  # noqa: F811
+    alpha, _ = trusted
+    text = CONFIG_EXIT.replace("exit_via: beta\n", "")
+    other = text + "hosts:\n  somewhere-else: {exit_via: beta}\n"
+    path = alpha.root / ".aegis.yaml"
+    path.write_text(other)
+    await until(
+        lambda: alpha.app.config.current().stamp == stamp_of(path),
+        timeout=5,
+        what="the config",
+    )
+    assert launch.resolve_via() is None
+    mine = text + f"hosts:\n  {alpha.app.server_name}: {{exit_via: beta}}\n"
+    path.write_text(mine)
+    await until(lambda: launch.resolve_via() == "beta", timeout=5, what="the block")
+    # Settings edits the shared layer: the block is not in its form.
+    assert alpha.app.config.current().doc.exit_via is None
+    s = await alpha.spawn(agent="opus")
+    await until(lambda: s.pid, timeout=10, what="the process")
+    env = await _environ(s.pid)
+    assert env["HTTPS_PROXY"] == alpha.app.exits.get("beta").url
+
+
 async def test_a_profile_alone_can_name_the_exit(trusted):  # noqa: F811
     alpha, _ = trusted
     text = CONFIG_EXIT.replace("exit_via: beta\n", "").replace(
@@ -487,7 +511,10 @@ async def test_link_exit_writes_the_config_and_refuses_an_unknown_link(trusted):
     alpha, _ = trusted
     r = await alpha.app.registry.call("link.exit", {"name": "beta"})
     assert r == {"exit_via": "beta"}
-    assert "exit_via: beta" in (alpha.root / ".aegis.yaml").read_text()
+    data = YAML(typ="safe").load((alpha.root / ".aegis.yaml").read_text())
+    # This server's own block: the far one reads the same file in git.
+    assert data["hosts"][alpha.app.server_name] == {"exit_via": "beta"}
+    assert "exit_via" not in data
     await until(lambda: launch.resolve_via() == "beta", timeout=5, what="the config")
     await alpha.app.registry.call("link.exit", {"name": None})
     assert "exit_via" not in (alpha.root / ".aegis.yaml").read_text()
