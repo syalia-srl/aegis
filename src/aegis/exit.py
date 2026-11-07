@@ -8,10 +8,8 @@ stream the proxy opens one websocket to the far server's ``/tunnel``, and
 ``relay`` there connects to the target. One socket per stream leaves flow
 control to TCP, and a download cannot delay the link's own frames.
 
-Only a trusted link can be an exit: the rule that nothing from a linked server
-reaches an agent holds for a plain link, and plain HTTP through a relay is
-exactly that. A trusted link's token can already run a shell on the far server,
-so the relay gives it no new power, and it needs no setting of its own.
+Any link can be an exit. A link's token can already run a shell on the far
+server, so the relay gives it no new power, and it needs no setting of its own.
 
 Three rules:
 
@@ -290,13 +288,9 @@ class Exit:
         link = self.links.outbound(self.name)
         if link is None:
             return "no such link"
-        if not link.trusted:
-            return "the link is not trusted"
         if link.state != "linked":
             since = time.strftime("%H:%M", time.localtime(link.since))
             return f"link {link.state} since {since}"
-        if not link.granted:
-            return link.trust_error or "the far server did not grant trust"
         return None
 
     async def _serve(

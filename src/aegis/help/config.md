@@ -524,9 +524,9 @@ false to turn that off. It is read when aegis starts.
 
 ## Exit through a link
 
-`exit_via:` names a trusted link: what aegis starts reaches the internet from
-that server's address. `exit:` on an agent names another link, or `off` for the
-machine's own route. See [links](links#exit-through-a-trusted-link).
+`exit_via:` names a link: what aegis starts reaches the internet from that
+server's address. `exit:` on an agent names another link, or `off` for the
+machine's own route. See [links](links#exit-through-a-link).
 
 ## Per-host overrides
 

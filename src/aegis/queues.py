@@ -84,7 +84,7 @@ class Task:
     # The principal the task and its worker belong to (tokens.py); None in a
     # log from before owners, which reads as the admin's.
     owner: str | None = None
-    # The agent on a server linked with trust that enqueued it, as
+    # The agent on a linked server that enqueued it, as
     # {handle, server}: its result goes back over the link (#684).
     far_enqueuer: dict | None = None
 

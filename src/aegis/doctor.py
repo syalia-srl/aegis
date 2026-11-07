@@ -476,10 +476,6 @@ def _exit(snap: Snapshot, roots) -> list[Finding]:
         link = links.get(name)
         if link is None:
             out.append(Finding("error", "exit_via", f"{name} is not a link here"))
-        elif not link.get("trusted"):
-            out.append(
-                Finding("error", "exit_via", f"the link to {name} is not trusted")
-            )
         else:
             out.append(
                 Finding("ok", "exit_via", f"what aegis starts exits through {name}")

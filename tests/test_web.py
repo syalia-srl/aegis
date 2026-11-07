@@ -191,14 +191,14 @@ def test_a_socket_with_no_origin_is_refused_unless_it_is_a_link(
             ws.receive_json()
         assert e.value.code == 4403
         with c.websocket_connect("/ws", headers=headers) as ws:
-            link = {"server": "zion", "user": "alex"}
+            link = {"server": "zion", "user": "alex", "both_ways": True}
             ws.send_json({"t": "hello", "token": TOKEN, "proto": PROTO, "link": link})
             assert ws.receive_json()["t"] == "welcome"
         with (
             pytest.raises(WebSocketDisconnect) as e,
             c.websocket_connect("/ws", headers=headers) as ws,
         ):
-            link = {"server": "zion", "user": "alex"}
+            link = {"server": "zion", "user": "alex", "both_ways": True}
             ws.send_json({"t": "hello", "token": "nope", "proto": PROTO, "link": link})
             ws.receive_json()
         assert e.value.code == 4401

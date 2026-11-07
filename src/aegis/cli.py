@@ -603,8 +603,8 @@ def _open_running(state_root: Path, host: str, port: int, browser: str | None) -
 
 link_app = typer.Typer(
     add_completion=False,
-    help="Link other aegis servers: this one becomes their client, and they "
-    "can never reach it, unless the link is trusted (--trusted).",
+    help="Link other aegis servers: one link joins two servers both ways, and "
+    "agents on each act on the other as at home.",
 )
 app.add_typer(link_app, name="link")
 
@@ -628,17 +628,10 @@ def link_add(
     server: str | None = typer.Option(
         None, "--as", help="This server's name, if serve runs with --name."
     ),
-    trusted: bool = typer.Option(
-        False,
-        "--trusted",
-        help="Both ways, agents unrestricted: only for a server you alone use.",
-    ),
 ) -> None:
-    """Link the server at URL. Reads its token from stdin, so it stays out of
-    the shell history: `ssh far cat .aegis/state/token | aegis link add far URL`.
-    With --trusted, the far server also reaches this one over the link, and
-    agents on both act across it as at home; it grants that only to its admin
-    token while nobody else holds one."""
+    """Link the server at URL, both ways. Reads its token from stdin, so it
+    stays out of the shell history:
+    `ssh far cat .aegis/state/token | aegis link add far URL`."""
     import getpass
     import sys
 
@@ -652,7 +645,7 @@ def link_add(
     store = _link_store(root)
     own = server or socket.gethostname()
     try:
-        welcome = asyncio.run(probe(url, token, own, getpass.getuser(), trusted))
+        welcome = asyncio.run(probe(url, token, own, getpass.getuser()))
     except LinkError as e:
         typer.echo(f"not linked: {e.message}", err=True)
         raise typer.Exit(1) from e
@@ -676,36 +669,12 @@ def link_add(
             "token": token,
             "added": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
-        | ({"trusted": True} if trusted else {})
     )
     store.save(entries)
-    how = "trusted, both ways" if trusted else "one way"
     typer.echo(
-        f"linked {name} at {url}, {how}; a running server picks it up within a second"
+        f"linked {name} at {url}, both ways; a running server picks it up "
+        "within a second"
     )
-
-
-@link_app.command("trust")
-def link_trust(
-    name: str = typer.Argument(...),
-    off: bool = typer.Option(False, "--off", help="Stop asking for trust."),
-    root: Path | None = _ROOT_OPTION,
-) -> None:
-    """Ask an existing link for trust (both ways, agents unrestricted), or stop
-    with --off. The link reconnects; the far server decides, and Settings
-    shows whether it granted it."""
-    store = _link_store(root)
-    entries = store.load()
-    if not any(e["name"] == name for e in entries):
-        typer.echo(f"no link named {name}", err=True)
-        raise typer.Exit(1)
-    for e in entries:
-        if e["name"] == name:
-            e.pop("trusted", None)
-            if not off:
-                e["trusted"] = True
-    store.save(entries)
-    typer.echo(f"{name}: {'one way' if off else 'trust asked'}")
 
 
 @link_app.command("remove")
@@ -727,8 +696,7 @@ def link_list(root: Path | None = _ROOT_OPTION) -> None:
     """The links this server holds: names and URLs, never tokens."""
     entries = _link_store(root).load()
     for e in entries:
-        trust = "  trusted" if e.get("trusted") is True else ""
-        typer.echo(f"{e['name']:<16} {e['url']}{trust}")
+        typer.echo(f"{e['name']:<16} {e['url']}")
     typer.echo(f"{len(entries)} links")
 
 

@@ -1,8 +1,8 @@
-"""Trusted links (#684): two servers one person alone uses, reaching each other
-both ways over the one socket the near server opened (links.py, Backlink).
+"""The way back (#684, #985): two linked servers reach each other both ways over
+the one socket the near server opened (links.py, Backlink).
 
-Alpha links beta with trust, as in test_links.py. Beta grants it while only its
-admin holds a token, and its agents then reach alpha as ``handle@alpha``.
+Alpha links beta, as in test_links.py, and beta's agents then reach alpha as
+``handle@alpha``.
 """
 
 import asyncio
@@ -10,45 +10,36 @@ import json
 import re
 
 import pytest
-from typer.testing import CliRunner
 
-from aegis import links
-from aegis.cli import app as cli
 
 from .conftest import until
 from .test_links import Browser, Node, inbox, mcp, turn
 
 
-async def _granted(alpha: Node, beta: Node) -> None:
+async def _joined(alpha: Node, beta: Node) -> None:
     await until(
-        lambda: (
-            (link := alpha.app.links.get("beta")) is not None
-            and link.state == "linked"
-            and link.granted
-            and beta.app.links.get("alpha") is not None
-        ),
+        lambda: alpha.app.links.joined("beta") and beta.app.links.joined("alpha"),
         timeout=10,
-        what="the trusted link",
+        what="the link both ways",
     )
 
 
 @pytest.fixture
-async def trusted(tmp_path, fake_claude):
+async def linked(tmp_path, fake_claude):
     beta = await Node(tmp_path / "beta", "beta", fake_claude).start()
     alpha = await Node(tmp_path / "alpha", "alpha", fake_claude).start()
-    alpha.app.links.add("beta", beta.base, beta.token, trusted=True)
-    await _granted(alpha, beta)
+    alpha.app.links.add("beta", beta.base, beta.token)
+    await _joined(alpha, beta)
     yield alpha, beta
     await alpha.stop()
     await beta.stop()
 
 
-# -- granting -----------------------------------------------------------------------
-async def test_a_trusted_link_is_granted_and_opens_the_way_back(trusted):
-    alpha, beta = trusted
+# -- the link -------------------------------------------------------------------------
+async def test_a_link_opens_the_way_back(linked):
+    alpha, beta = linked
     (w,) = alpha.app.links.wire()
-    assert w["trusted"] and w["granted"] and w["trust_error"] == ""
-    assert alpha.app.links.trusted("beta") and beta.app.links.trusted("alpha")
+    assert w["state"] == "linked" and "trusted" not in w and "granted" not in w
     incoming = await beta.app.registry.call("link.incoming", {})
     assert [(i["name"], i["state"]) for i in incoming] == [("alpha", "linked")]
     # The way back is listed for beta's browsers, marked as one (#969).
@@ -57,50 +48,18 @@ async def test_a_trusted_link_is_granted_and_opens_the_way_back(trusted):
     ]
 
 
-async def test_a_plain_link_opens_no_way_back(tmp_path, fake_claude):
-    beta = await Node(tmp_path / "beta", "beta", fake_claude).start()
-    alpha = await Node(tmp_path / "alpha", "alpha", fake_claude).start()
-    try:
-        alpha.app.links.add("beta", beta.base, beta.token)
-        await until(lambda: alpha.app.links.get("beta").state == "linked")
-        link = alpha.app.links.get("beta")
-        assert not link.trusted and not link.granted
-        assert beta.app.links.get("alpha") is None
-        # An rcall down a plain link is dropped: nothing here answers it.
-        link._receive(json.dumps({"t": "rcall", "id": 1, "op": "session.list"}))
-        assert not link._answering
-    finally:
-        await alpha.stop()
-        await beta.stop()
-
-
-async def test_link_trust_asks_and_stops_asking(tmp_path, fake_claude):
-    beta = await Node(tmp_path / "beta", "beta", fake_claude).start()
-    alpha = await Node(tmp_path / "alpha", "alpha", fake_claude).start()
-    try:
-        alpha.app.links.add("beta", beta.base, beta.token)
-        await until(lambda: alpha.app.links.get("beta").state == "linked")
-        await alpha.app.registry.call("link.trust", {"name": "beta", "trusted": True})
-        await _granted(alpha, beta)
-        await alpha.app.registry.call("link.trust", {"name": "beta", "trusted": False})
-        await until(
-            lambda: (
-                (link := alpha.app.links.get("beta")) is not None
-                and link.state == "linked"
-                and not link.trusted
-                and beta.app.links.get("alpha") is None
-            ),
-            timeout=10,
-            what="the link back to one way",
-        )
-    finally:
-        await alpha.stop()
-        await beta.stop()
+async def test_an_unlink_frame_closes_the_socket(linked):
+    alpha, _ = linked
+    link = alpha.app.links.get("beta")
+    attempts = link.attempts
+    link._receive(json.dumps({"t": "unlink", "reason": "revoked"}))
+    assert not link.back
+    await until(lambda: link.attempts > attempts, timeout=10, what="the reconnect")
 
 
 # -- the way back ---------------------------------------------------------------------
-async def test_an_agent_on_beta_hands_off_to_alpha(trusted):
-    alpha, beta = trusted
+async def test_an_agent_on_beta_hands_off_to_alpha(linked):
+    alpha, beta = linked
     here, far = await alpha.spawn(), await beta.spawn()
     out = await turn(
         far,
@@ -113,8 +72,8 @@ async def test_an_agent_on_beta_hands_off_to_alpha(trusted):
     assert "the fix is in" in msg["md"]
 
 
-async def test_an_agent_on_beta_spawns_on_alpha(trusted):
-    alpha, beta = trusted
+async def test_an_agent_on_beta_spawns_on_alpha(linked):
+    alpha, beta = linked
     far = await beta.spawn(permission="write")
     out = await turn(far, mcp("session_spawn", agent="opus@alpha", prompt="hi"))
     assert out.startswith("mcp ok:"), out
@@ -126,18 +85,18 @@ async def test_an_agent_on_beta_spawns_on_alpha(trusted):
     assert m["permission"] == "write"  # capped at the spawning agent's
 
 
-async def test_an_agent_on_beta_lists_alphas_sessions(trusted):
-    alpha, beta = trusted
+async def test_an_agent_on_beta_lists_alphas_sessions(linked):
+    alpha, beta = linked
     here, far = await alpha.spawn(), await beta.spawn()
     listed = json.loads((await turn(far, mcp("session_list"))).removeprefix("mcp ok: "))
     (entry,) = [e for e in listed if e.get("server") == "alpha"]
     assert entry["handle"] == here.handle and entry["state"] == here.status
 
 
-async def test_a_person_on_beta_watches_alphas_sessions(trusted):
+async def test_a_person_on_beta_watches_alphas_sessions(linked):
     """Live views go both ways (#969): a browser on beta subscribes to alpha's
     sessions down the socket alpha opened, as a browser on alpha does to beta's."""
-    alpha, beta = trusted
+    alpha, beta = linked
     async with Browser(beta) as b:
         r = await b.call("agents.list", server="alpha")
         assert "result" in r and r["result"]["agents"]
@@ -161,8 +120,8 @@ async def test_a_person_on_beta_watches_alphas_sessions(trusted):
         assert not any(f.get("t") == "error" for f in b.frames)
 
 
-async def test_an_unsubscribed_view_back_gets_nothing_more(trusted):
-    alpha, beta = trusted
+async def test_an_unsubscribed_view_back_gets_nothing_more(linked):
+    alpha, beta = linked
     async with Browser(beta) as b:
         await b.send(t="sub", channel="sessions", server="alpha")
         await until(lambda: b.of("sessions", "alpha"), what="alpha's snapshot")
@@ -177,8 +136,8 @@ async def test_an_unsubscribed_view_back_gets_nothing_more(trusted):
         assert not [f for f in b.frames[n:] if f.get("server") == "alpha"]
 
 
-async def test_a_view_back_ends_when_the_browser_goes(trusted):
-    alpha, beta = trusted
+async def test_a_view_back_ends_when_the_browser_goes(linked):
+    alpha, beta = linked
     async with Browser(beta) as b:
         await b.send(t="sub", channel="sessions", server="alpha")
         await until(lambda: b.of("sessions", "alpha"), what="alpha's snapshot")
@@ -187,8 +146,8 @@ async def test_a_view_back_ends_when_the_browser_goes(trusted):
     )
 
 
-async def test_a_view_back_fails_when_the_link_drops(trusted):
-    alpha, beta = trusted
+async def test_a_view_back_fails_when_the_link_drops(linked):
+    alpha, beta = linked
     async with Browser(beta) as b:
         await b.send(t="sub", channel="sessions", server="alpha")
         await until(lambda: b.of("sessions", "alpha"), what="alpha's snapshot")
@@ -203,20 +162,10 @@ async def test_a_view_back_fails_when_the_link_drops(trusted):
         assert err["error"]["code"] == "server_offline"
 
 
-def test_a_way_back_from_an_older_server_is_still_not_watched():
-    """A near server from before #969 does not say ``views`` in its hello: it
-    would answer an rsub as a bad call, so the far server refuses the view."""
-    sent: list[dict] = []
-    back = links.Backlink("alpha", sent.append, lambda: None, views=False)
-    got: list[dict] = []
-    back.sub("s1", "sessions", None, got.append)
-    assert got[0]["error"]["code"] == "not_both_ways" and not sent
-
-
 async def test_a_call_back_is_not_relayed_to_a_third_server(
-    trusted, tmp_path, fake_claude
+    linked, tmp_path, fake_claude
 ):
-    alpha, beta = trusted
+    alpha, beta = linked
     gamma = await Node(tmp_path / "gamma", "gamma", fake_claude).start()
     try:
         alpha.app.links.add("gamma", gamma.base, gamma.token)
@@ -231,8 +180,8 @@ async def test_a_call_back_is_not_relayed_to_a_third_server(
         await gamma.stop()
 
 
-async def test_the_way_back_goes_when_the_link_does(trusted):
-    alpha, beta = trusted
+async def test_the_way_back_goes_when_the_link_does(linked):
+    alpha, beta = linked
     alpha.app.links.remove("beta")
     await until(lambda: beta.app.links.get("alpha") is None, what="the way back gone")
     far = await beta.spawn()
@@ -240,31 +189,9 @@ async def test_the_way_back_goes_when_the_link_does(trusted):
     assert "unknown_server" in out
 
 
-def test_aegis_link_add_trusted_names_the_refusal(tmp_path, monkeypatch):
-    async def refuse(*a, **k):
-        raise links.LinkError("trust_refused", "beta has tokens besides its admin's")
-
-    monkeypatch.setattr(links, "probe", refuse)
-    r = CliRunner().invoke(
-        cli,
-        [
-            "link",
-            "add",
-            "beta",
-            "http://127.0.0.1:9",
-            "--trusted",
-            "--root",
-            str(tmp_path),
-        ],
-        input="tok\n",
-    )
-    assert r.exit_code == 1
-    assert "not linked: beta has tokens besides its admin's" in r.output
-
-
 # -- reading across ---------------------------------------------------------------------
-async def test_session_list_shows_a_trusted_servers_sessions_in_full(trusted):
-    alpha, beta = trusted
+async def test_session_list_shows_a_linked_servers_sessions_in_full(linked):
+    alpha, beta = linked
     here, far = await alpha.spawn(), await beta.spawn()
     beta.app.sessions.rename(far.log_id, None, "a far title")
     listed = json.loads(
@@ -275,8 +202,8 @@ async def test_session_list_shows_a_trusted_servers_sessions_in_full(trusted):
     assert "attention" in entry and "cwd" in entry and "you" not in entry
 
 
-async def test_an_agent_reads_a_session_across_a_trusted_link_both_ways(trusted):
-    alpha, beta = trusted
+async def test_an_agent_reads_a_session_across_a_link_both_ways(linked):
+    alpha, beta = linked
     here, far = await alpha.spawn(), await beta.spawn()
     await turn(far, "say the far marker")
     await turn(here, "say the near marker")
@@ -286,8 +213,8 @@ async def test_an_agent_reads_a_session_across_a_trusted_link_both_ways(trusted)
     assert out.startswith("mcp ok:") and "the near marker" in out, out
 
 
-async def test_a_trusted_servers_error_text_reaches_the_agent(trusted):
-    alpha, beta = trusted
+async def test_a_linked_servers_error_text_reaches_the_agent(linked):
+    alpha, beta = linked
     here = await alpha.spawn()
     out = await turn(here, mcp("peer_handoff", target="nosuch-one@beta", context="x"))
     assert out.startswith("mcp error:") and "beta: no open session 'nosuch-one'" in out
@@ -295,23 +222,9 @@ async def test_a_trusted_servers_error_text_reaches_the_agent(trusted):
     assert "beta: no open session 'nosuch-one'" in out, out
 
 
-async def test_reading_across_a_plain_link_is_still_refused(tmp_path, fake_claude):
-    beta = await Node(tmp_path / "beta", "beta", fake_claude).start()
-    alpha = await Node(tmp_path / "alpha", "alpha", fake_claude).start()
-    try:
-        alpha.app.links.add("beta", beta.base, beta.token)
-        await until(lambda: alpha.app.links.get("beta").state == "linked")
-        here, far = await alpha.spawn(), await beta.spawn()
-        out = await turn(here, mcp("peer_read", target=f"{far.handle}@beta"))
-        assert "not_across_links" in out and "trusted" in out, out
-    finally:
-        await alpha.stop()
-        await beta.stop()
-
-
 # -- acting across ----------------------------------------------------------------------
-async def test_an_agent_enqueues_across_and_gets_the_result_back(trusted):
-    alpha, beta = trusted
+async def test_an_agent_enqueues_across_and_gets_the_result_back(linked):
+    alpha, beta = linked
     here = await alpha.spawn()
     said = await turn(
         here,
@@ -333,8 +246,8 @@ async def test_an_agent_enqueues_across_and_gets_the_result_back(trusted):
     assert said.startswith("mcp ok:") and '"completed"' in said, said
 
 
-async def test_only_a_trusted_link_delivers_a_tasks_result(trusted):
-    alpha, beta = trusted
+async def test_only_a_link_delivers_a_tasks_result(linked):
+    alpha, beta = linked
     here = await alpha.spawn()
     params = {
         "target": here.handle,
@@ -353,8 +266,8 @@ async def test_only_a_trusted_link_delivers_a_tasks_result(trusted):
     assert not inbox(here)
 
 
-async def test_an_agent_waits_on_a_session_across_a_trusted_link(trusted):
-    alpha, beta = trusted
+async def test_an_agent_waits_on_a_session_across_a_link(linked):
+    alpha, beta = linked
     here, far = await alpha.spawn(), await beta.spawn()
     said = await turn(
         here,
@@ -372,8 +285,8 @@ async def test_an_agent_waits_on_a_session_across_a_trusted_link(trusted):
     assert " · ok · " in wake["title"] and f"{far.handle}@beta review" in wake["md"]
 
 
-async def test_waiting_on_an_unknown_far_session_is_refused(trusted):
-    alpha, beta = trusted
+async def test_waiting_on_an_unknown_far_session_is_refused(linked):
+    alpha, beta = linked
     here = await alpha.spawn()
     said = await turn(
         here, mcp("monitor_sessions", description="x", sessions=["nosuch-one@beta"])
@@ -381,8 +294,8 @@ async def test_waiting_on_an_unknown_far_session_is_refused(trusted):
     assert said.startswith("mcp error: no_session"), said
 
 
-async def test_an_agent_closes_a_far_session_under_the_same_rule(trusted):
-    alpha, beta = trusted
+async def test_an_agent_closes_a_far_session_under_the_same_rule(linked):
+    alpha, beta = linked
     here = await alpha.spawn()
     other = await beta.spawn()
     # One it did not start: refused with a token, closed on the second call.
@@ -402,24 +315,3 @@ async def test_an_agent_closes_a_far_session_under_the_same_rule(trusted):
     await turn(far, mcp("turn_end", attention="done", line="Done."))
     said = await turn(here, mcp("session_close", handle=f"{child}@beta"))
     assert said.startswith("mcp ok:") and "closed" in said, said
-
-
-async def test_acting_across_a_plain_link_is_still_refused(tmp_path, fake_claude):
-    beta = await Node(tmp_path / "beta", "beta", fake_claude).start()
-    alpha = await Node(tmp_path / "alpha", "alpha", fake_claude).start()
-    try:
-        alpha.app.links.add("beta", beta.base, beta.token)
-        await until(lambda: alpha.app.links.get("beta").state == "linked")
-        here, far = await alpha.spawn(), await beta.spawn()
-        for call in (
-            mcp("queue_enqueue", queue="general@beta", payload="x"),
-            mcp("session_close", handle=f"{far.handle}@beta"),
-            mcp("monitor_sessions", description="x", sessions=[f"{far.handle}@beta"]),
-            mcp("task_status", task_id="task-ab12@beta"),
-        ):
-            said = await turn(here, call)
-            assert "not_across_links" in said, (call, said)
-        assert far.log_id in beta.app.sessions.sessions and not beta.app.queues.tasks
-    finally:
-        await alpha.stop()
-        await beta.stop()

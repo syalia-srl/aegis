@@ -1,16 +1,14 @@
-"""An agent's schedule tools across a trusted link (#875): ``name@server``. The
+"""An agent's schedule tools across a link (#875): ``name@server``. The
 schedule lives and ticks on the far server, and the rule that a schedule an
 agent makes waits for a person holds there, whichever way the call came."""
 
 import json
 
-import pytest
-
 
 from .conftest import until
 from .test_links import Node, mcp, turn
 from .test_schedules_e2e import DONE, create, ended, frozen, runs, tick
-from .test_trusted_links import trusted  # noqa: F401
+from .test_links_back import linked  # noqa: F401
 from .test_workflow_store import BY, NAP
 
 NEW = {"clock": {"every": "5m"}, "fire": {"agent": "opus"}, "prompt": "triage"}
@@ -35,8 +33,8 @@ async def approve(alpha, name: str = "far-triage", **kw) -> None:
 
 
 # -- where it lives -----------------------------------------------------------------
-async def test_a_schedule_made_across_lives_on_the_far_server(trusted):  # noqa: F811
-    alpha, beta = trusted
+async def test_a_schedule_made_across_lives_on_the_far_server(linked):  # noqa: F811
+    alpha, beta = linked
     here = await alpha.spawn()
     w = await made(here)
     assert w["name"] == "far-triage@beta" and w["server"] == "beta"
@@ -51,8 +49,8 @@ async def test_a_schedule_made_across_lives_on_the_far_server(trusted):  # noqa:
     assert s.d.fire.cwd == str(beta.app.roots.harness_cwd)
 
 
-async def test_it_ticks_on_the_far_server_and_its_runs_start_there(trusted):  # noqa: F811
-    alpha, beta = trusted
+async def test_it_ticks_on_the_far_server_and_its_runs_start_there(linked):  # noqa: F811
+    alpha, beta = linked
     here = await alpha.spawn()
     t = frozen(beta)
     ok(
@@ -69,8 +67,8 @@ async def test_it_ticks_on_the_far_server_and_its_runs_start_there(trusted):  # 
     assert ok(await turn(here, mcp("schedule_runs", name="far-tick@beta")))["total"]
 
 
-async def test_the_card_is_under_the_call_here_and_names_the_far_server(trusted):  # noqa: F811
-    alpha, beta = trusted
+async def test_the_card_is_under_the_call_here_and_names_the_far_server(linked):  # noqa: F811
+    alpha, beta = linked
     here = await alpha.spawn()
     await made(here)
     assert cards(here) == [
@@ -87,8 +85,8 @@ async def test_the_card_is_under_the_call_here_and_names_the_far_server(trusted)
     assert beta.app.schedules.items["far-triage"].paused["by"] == "approval"
 
 
-async def test_a_card_here_keeps_no_server_field(trusted):  # noqa: F811
-    alpha, _ = trusted
+async def test_a_card_here_keeps_no_server_field(linked):  # noqa: F811
+    alpha, _ = linked
     here = await alpha.spawn()
     ok(await turn(here, mcp("schedule_create", name="home-triage", **NEW)))
     assert cards(here) == [
@@ -96,8 +94,8 @@ async def test_a_card_here_keeps_no_server_field(trusted):  # noqa: F811
     ]
 
 
-async def test_this_servers_own_name_addresses_this_server(trusted):  # noqa: F811
-    alpha, _ = trusted
+async def test_this_servers_own_name_addresses_this_server(linked):  # noqa: F811
+    alpha, _ = linked
     here = await alpha.spawn()
     w = ok(await turn(here, mcp("schedule_create", name="home-triage@alpha", **NEW)))
     assert w["name"] == "home-triage" and "home-triage" in alpha.app.schedules.items
@@ -107,8 +105,8 @@ async def test_this_servers_own_name_addresses_this_server(trusted):  # noqa: F8
     }
 
 
-async def test_list_and_runs_read_the_far_servers_schedules(trusted):  # noqa: F811
-    alpha, beta = trusted
+async def test_list_and_runs_read_the_far_servers_schedules(linked):  # noqa: F811
+    alpha, beta = linked
     here = await alpha.spawn()
     create(alpha, "near-one", "x")
     create(beta, "beta-own", "x")
@@ -123,8 +121,8 @@ async def test_list_and_runs_read_the_far_servers_schedules(trusted):  # noqa: F
     assert rows
 
 
-async def test_a_person_and_a_link_list_this_server_alone(trusted):  # noqa: F811
-    alpha, beta = trusted
+async def test_a_person_and_a_link_list_this_server_alone(linked):  # noqa: F811
+    alpha, beta = linked
     create(beta, "beta-own", "x")
     create(alpha, "near-one", "x")
     assert [w["name"] for w in await alpha.app.registry.call("schedule.list", {})] == [
@@ -134,8 +132,8 @@ async def test_a_person_and_a_link_list_this_server_alone(trusted):  # noqa: F81
     assert [w["name"] for w in far] == ["beta-own"]
 
 
-async def test_schedule_test_runs_on_the_far_server(trusted):  # noqa: F811
-    alpha, beta = trusted
+async def test_schedule_test_runs_on_the_far_server(linked):  # noqa: F811
+    alpha, beta = linked
     here = await alpha.spawn()
     said = ok(
         await turn(
@@ -152,8 +150,8 @@ async def test_schedule_test_runs_on_the_far_server(trusted):  # noqa: F811
     assert said["check"]["stdout"].strip() == str(beta.app.roots.harness_cwd.resolve())
 
 
-async def test_an_owner_pauses_resumes_and_deletes_after_approval(trusted):  # noqa: F811
-    alpha, beta = trusted
+async def test_an_owner_pauses_resumes_and_deletes_after_approval(linked):  # noqa: F811
+    alpha, beta = linked
     here = await alpha.spawn()
     await made(here)
     await approve(alpha)
@@ -171,8 +169,8 @@ async def test_an_owner_pauses_resumes_and_deletes_after_approval(trusted):  # n
     assert "far-triage" not in beta.app.schedules.items
 
 
-async def test_a_far_fire_starts_its_run_on_the_far_server(trusted):  # noqa: F811
-    alpha, beta = trusted
+async def test_a_far_fire_starts_its_run_on_the_far_server(linked):  # noqa: F811
+    alpha, beta = linked
     here = await alpha.spawn()
     ok(
         await turn(
@@ -187,10 +185,10 @@ async def test_a_far_fire_starts_its_run_on_the_far_server(trusted):  # noqa: F8
 
 
 # -- the approval rule -----------------------------------------------------------------
-async def test_an_agent_cannot_unpause_or_fire_across_a_link(trusted):  # noqa: F811
+async def test_an_agent_cannot_unpause_or_fire_across_a_link(linked):  # noqa: F811
     """The security property: an agent's call across a link never stands in for
     a person's Unpause, by the tools, by naming itself, or by the raw link."""
-    alpha, beta = trusted
+    alpha, beta = linked
     here = await alpha.spawn()
     await made(here)
     far = "far-triage@beta"
@@ -244,8 +242,8 @@ async def test_an_agent_cannot_unpause_or_fire_across_a_link(trusted):  # noqa: 
     assert beta.app.schedules.items["far-triage"].paused["by"] == "approval"
 
 
-async def test_the_way_back_keeps_the_approval_rule_too(trusted):  # noqa: F811
-    alpha, beta = trusted
+async def test_the_way_back_keeps_the_approval_rule_too(linked):  # noqa: F811
+    alpha, beta = linked
     there = await beta.spawn()
     w = ok(await turn(there, mcp("schedule_create", name="far-triage@alpha", **NEW)))
     # This server's browser cannot follow alpha's schedules: the reply says where.
@@ -257,10 +255,10 @@ async def test_the_way_back_keeps_the_approval_rule_too(trusted):  # noqa: F811
     assert alpha.app.schedules.items["far-triage"].paused["by"] == "approval"
 
 
-async def test_only_a_trusted_link_names_a_far_agent(trusted):  # noqa: F811
+async def test_only_a_link_names_a_far_agent(linked):  # noqa: F811
     """On its own server an agent cannot pose as another server's agent, to
     take over a schedule that agent made or to look like the link."""
-    alpha, beta = trusted
+    alpha, beta = linked
     here, local = await alpha.spawn(), await beta.spawn()
     await made(here)
     await approve(alpha)
@@ -285,8 +283,8 @@ async def test_only_a_trusted_link_names_a_far_agent(trusted):  # noqa: F811
     assert r["error"]["code"] == "not_a_link", r
 
 
-async def test_an_agent_changes_only_the_far_schedules_it_made(trusted):  # noqa: F811
-    alpha, beta = trusted
+async def test_an_agent_changes_only_the_far_schedules_it_made(linked):  # noqa: F811
+    alpha, beta = linked
     here, other, local = await alpha.spawn(), await alpha.spawn(), await beta.spawn()
     await made(here)
     create(beta, "beta-own", "x")
@@ -301,8 +299,8 @@ async def test_an_agent_changes_only_the_far_schedules_it_made(trusted):  # noqa
     assert {"far-triage", "beta-own"} <= set(beta.app.schedules.items)
 
 
-async def test_a_far_schedule_that_fires_a_workflow_stays_refused(trusted):  # noqa: F811
-    alpha, beta = trusted
+async def test_a_far_schedule_that_fires_a_workflow_stays_refused(linked):  # noqa: F811
+    alpha, beta = linked
     beta.app.saved.save(NAP, beta.app.workflows._agents(), BY)
     here = await alpha.spawn()
     w = ok(
@@ -322,16 +320,16 @@ async def test_a_far_schedule_that_fires_a_workflow_stays_refused(trusted):  # n
     assert beta.app.schedules.state["far-nap"].runs == 0
 
 
-async def test_a_far_schedule_cannot_outrank_the_agent_that_made_it(trusted):  # noqa: F811
-    alpha, beta = trusted
+async def test_a_far_schedule_cannot_outrank_the_agent_that_made_it(linked):  # noqa: F811
+    alpha, beta = linked
     here = await alpha.spawn(permission="write")
     said = await turn(here, mcp("schedule_create", name="too-strong@beta", **NEW))
     assert "not_allowed" in said, said
     assert "too-strong" not in beta.app.schedules.items
 
 
-async def test_a_run_with_spawn_off_cannot_make_one_across(trusted):  # noqa: F811
-    alpha, beta = trusted
+async def test_a_run_with_spawn_off_cannot_make_one_across(linked):  # noqa: F811
+    alpha, beta = linked
     t = frozen(alpha)
     create(alpha, "no-nest", mcp("schedule_create", name="nested-one@beta", **NEW))
     await tick(alpha, t)
@@ -357,40 +355,12 @@ TOOLS = (
 )
 
 
-@pytest.fixture
-async def plain(tmp_path, fake_claude):
-    beta = await Node(tmp_path / "beta", "beta", fake_claude).start()
-    alpha = await Node(tmp_path / "alpha", "alpha", fake_claude).start()
-    alpha.app.links.add("beta", beta.base, beta.token)
-    await until(lambda: alpha.app.links.get("beta").state == "linked")
-    yield alpha, beta
-    await alpha.stop()
-    await beta.stop()
-
-
-async def test_a_plain_link_refuses_every_schedule_tool(plain):
-    alpha, beta = plain
-    here = await alpha.spawn()
-    create(beta, "beta-own", "x")
-    for call in TOOLS:
-        said = await turn(here, call)
-        assert "not_across_links" in said, (call, said)
-    assert list(beta.app.schedules.items) == ["beta-own"]
-    assert not cards(here)
-    assert ok(await turn(here, mcp("schedule_list"))) == []
-
-
-async def test_nothing_relays_to_a_third_server(trusted, tmp_path, fake_claude):  # noqa: F811
-    alpha, beta = trusted
+async def test_nothing_relays_to_a_third_server(linked, tmp_path, fake_claude):  # noqa: F811
+    alpha, beta = linked
     gamma = await Node(tmp_path / "gamma", "gamma", fake_claude).start()
     try:
-        alpha.app.links.add("gamma", gamma.base, gamma.token, trusted=True)
-        await until(
-            lambda: (
-                (link := alpha.app.links.get("gamma")).state == "linked"
-                and link.granted
-            )
-        )
+        alpha.app.links.add("gamma", gamma.base, gamma.token)
+        await until(lambda: alpha.app.links.joined("gamma"))
         create(gamma, "gamma-own", "x")
         # Beta's call down the way back asks alpha to go on to gamma.
         back = beta.app.links.get("alpha")

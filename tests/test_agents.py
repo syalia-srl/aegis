@@ -710,7 +710,7 @@ async def test_waiting_on_sessions_refuses_itself_unknown_far_and_archived(world
     cases = (
         ([a.handle], "not_yourself"),
         (["no-such-one"], "no_session"),
-        ([f"{b.handle}@far"], "not_across_links"),
+        ([f"{b.handle}@far"], "unknown_server"),
     )
     for handles, code in cases:
         said = await turn(a, wait_on(*handles))
