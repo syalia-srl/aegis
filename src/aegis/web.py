@@ -61,6 +61,7 @@ from .channels import Sub
 from .links import PROTO, Backlink
 from .ops import Caller, OpError
 from .policy import Credential, Refused
+from .policy_view import PolicyView
 from .version import running
 from .tokens import load_or_create_token  # noqa: F401 — cli and tests import it from here
 
@@ -389,6 +390,27 @@ def build_web(
             text, media_type="text/javascript", headers={"Cache-Control": "no-cache"}
         )
 
+    async def may_read_file(request, file_id: str) -> bool:
+        """Under a policy that hides sessions, a sent file is served to who may
+        read the session that sent it; one sent before aegis 3.0 records no
+        session and is the server's own caller's alone."""
+        if not app.narrows():
+            return True
+        given = request.cookies.get(cookie)
+        scheme, _, bearer = request.headers.get("authorization", "").partition(" ")
+        if scheme.lower() == "bearer" and bearer:
+            given = bearer
+        if not isinstance(given, str) or not given:
+            return False
+        try:
+            principal = await app.identify(Credential(given, "http"))
+        except Refused:
+            return False
+        log_id = files.session_of(app.roots.state_root, file_id)
+        if log_id is None:
+            return principal.name == app.user and principal.who is None
+        return app.sees(principal, log_id, "read")
+
     async def sent_file(request):
         """A file an agent sent. The id is the secret (files.py); a Host the
         websocket would refuse, local or a proxy's public name, gets the same
@@ -400,7 +422,7 @@ def build_web(
             if host in allowed_hosts or host in public
             else None
         )
-        if path is None:
+        if path is None or not await may_read_file(request, p["file_id"]):
             return PlainTextResponse("Not Found", status_code=404)
         return _file_response(path, request.query_params.get("download") == "1")
 
@@ -591,6 +613,8 @@ def build_web(
         # A host's raw token was checked at the hello; the server's own and a
         # minted one are checked again at each message (App.checks_itself).
         recheck = app.checks_itself(given)
+        # A policy that hides sessions narrows every subscription (#959).
+        narrows = app.narrows()
         out: asyncio.Queue[dict] = asyncio.Queue()
         # This socket's subscriptions forwarded down links: <bid>:<channel>.
         bid = secrets.token_hex(6)
@@ -784,6 +808,7 @@ def build_web(
                             send,
                             since,
                             merge=msg.get("merge") is True,
+                            view=PolicyView(app, principal) if narrows else None,
                         )
                     except OpError as e:
                         send(

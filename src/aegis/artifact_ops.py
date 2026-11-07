@@ -153,7 +153,7 @@ def register_artifact_ops(app: App) -> None:
             raise _err(e) from e
         try:
             (rec,) = await asyncio.to_thread(
-                files.store_all, app.roots.state_root, [path]
+                files.store_all, app.roots.state_root, [path], s.log_id
             )
         except files.FileError as e:
             raise OpError(e.code, e.message) from e
@@ -177,6 +177,9 @@ def register_artifact_ops(app: App) -> None:
             ):  # a failed probe, a late submit, an interrupt: nothing is served
                 shutil.rmtree(
                     app.roots.state_root / "files" / rec["file_id"], ignore_errors=True
+                )
+                (app.roots.state_root / files.SESSIONS / rec["file_id"]).unlink(
+                    missing_ok=True
                 )
         return {"id": a.id, "url": url, "started": started, "watching": watching > 0}
 
