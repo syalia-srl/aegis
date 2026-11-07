@@ -1,0 +1,2 @@
+- **`turn_end` done names what the session left in its repos.** A done is still accepted, and its answer now lists the worktrees still there, the uncommitted files the session wrote, its unpushed commits, its branches without a pull request and its open pull requests, probed at that moment. The agent finishes what is its work and calls done again, or ignores the rest. Before, the person found the leftovers after archiving the session (#977).
+help: sessions#what-the-agent-reports
