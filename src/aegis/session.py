@@ -561,6 +561,9 @@ class Session:
         # The environment a host's spawn added (policy.SpawnRequest.env): kept
         # in memory only, never in the meta, and asked for again on a resume.
         self.host_env: dict[str, str] = {}
+        # Set by Registry.spawn, which asked the host policy for this first
+        # start; every later start asks it again (admit_resume).
+        self.admitted = False
         # The last launch's version when it was outside the tested range, for
         # the panel's warning colour (#456); None in range or before a launch.
         self.untested_version: dict | None = None
@@ -653,6 +656,7 @@ class Session:
         m.pop("held")
         m.pop("standing")
         m.pop("priming", None)  # the agent's text stays on the server
+        m.pop("tags", None)  # a host's strings are shown to no one (#959)
         m["unread"] = len(self.unread)
         m["held_count"] = len(self.held)
         m["state"] = self.status
@@ -817,8 +821,19 @@ class Session:
 
         await self._check_version()
         resume = self.resume_id
-        if resume is not None:
-            await self._host.admit_resume(self)
+        if self.admitted:
+            self.admitted = False  # the next start asks again
+        else:
+            try:
+                await self._host.admit_resume(self)
+            except OpError as e:
+                self._record(
+                    {
+                        "kind": "harness_error",
+                        "text": f"This session cannot start: {e.message}",
+                    }
+                )
+                raise
         mcp, system_prompt = self._host.spawn_args(self)
         inbox = await asyncio.to_thread(
             attachments.ensure_inbox, self.state_root, self.log_id

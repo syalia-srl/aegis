@@ -37,7 +37,7 @@ from .notice_sources import Item
 from .notices import TEXT_MAX
 from .ops import OpError
 from .roots import Roots
-from .policy import EventKind
+from .policy import EventKind, Refused
 from .session import Host, Session, SpawnSpec
 from .transcript.entries import Fold, fold_records, tool_output
 from .transcript.store import Store, read_store
@@ -89,7 +89,7 @@ def _public(meta: dict) -> dict:
     """A stored meta as a browser may see it: the agent's priming and its raw
     standing stay on the server, like ``Session.wire`` keeps them. It carries
     the harness's label as the wire does, for the side panel's model line."""
-    out = {k: v for k, v in meta.items() if k not in ("priming", "standing")}
+    out = {k: v for k, v in meta.items() if k not in ("priming", "standing", "tags")}
     harness = harness_for(
         meta.get("harness") or "claude-code",
         "claude",
@@ -880,11 +880,14 @@ class Registry(Host):
                 continue
             try:
                 await s._flush_held()
-            except Exception:
+            except Exception as e:
                 # _flush_held empties held before it sends: put the batch back.
-                log.exception(
-                    "aegis: could not continue %s after the restart", s.handle
-                )
+                if isinstance(e, Refused):
+                    log.warning("aegis: %s stays stopped: %s", s.handle, e.message)
+                else:
+                    log.exception(
+                        "aegis: could not continue %s after the restart", s.handle
+                    )
                 s.held = msgs
                 self.metas.write(s.meta())
                 # Not continued after all: a worker's queue tries, and fails
@@ -983,7 +986,7 @@ class Registry(Host):
             }
         )
         self.sessions[log_id] = s
-        s.host_env = env
+        s.host_env, s.admitted = env, True
         self._publish("sessions", [{"upsert": s.wire()}])
         s.launch_by = launch_by
         self.event("start", log_id, {})

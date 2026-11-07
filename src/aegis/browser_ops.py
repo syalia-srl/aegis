@@ -377,15 +377,15 @@ def register_browser_ops(app: App) -> None:
         b = await br.open_(app.who(caller).name, p.url, profile=p.profile)
         return br.card(b)
 
-    @r.op("browser.input", PaneInput)
+    @r.op("browser.input", PaneInput, names=(("id", "browser"),))
     async def input_(p: PaneInput, caller):
         await br.input(p.id, p.events)
 
-    @r.op("browser.nav", PaneNav)
+    @r.op("browser.nav", PaneNav, names=(("id", "browser"),))
     async def nav(p: PaneNav, caller):
         return await br.goto(p.id, p.url, p.action, "person")
 
-    @r.op("browser.view", PaneResize)
+    @r.op("browser.view", PaneResize, names=(("id", "browser"),), access="read")
     async def view(p: PaneResize, caller):
         """The person's pane took the page: fit the viewport to it."""
         b = br.get(p.id)
@@ -393,11 +393,11 @@ def register_browser_ops(app: App) -> None:
             raise OpError("agent_has_control", "the agent holds this page")
         return await br.resize(p.id, p.width, p.height)
 
-    @r.op("browser.take", PaneRef)
+    @r.op("browser.take", PaneRef, names=(("id", "browser"),))
     async def take(p: PaneRef, caller):
         br.take(p.id)
 
-    @r.op("browser.handback", PaneRef)
+    @r.op("browser.handback", PaneRef, names=(("id", "browser"),))
     async def give_back(p: PaneRef, caller):
         await br.give_back(p.id)
 
@@ -418,11 +418,11 @@ def register_browser_ops(app: App) -> None:
         await br.give(p.id, s.log_id, s.handle)
         dock(s, p.id, "right")
 
-    @r.op("browser.reopen", PaneRef)
+    @r.op("browser.reopen", PaneRef, names=(("id", "browser"),))
     async def reopen(p: PaneRef, caller):
         await br.reopen(p.id)
 
-    @r.op("browser.shut", PaneRef)
+    @r.op("browser.shut", PaneRef, names=(("id", "browser"),))
     async def shut(p: PaneRef, caller):
         """Close a browser from its tab: Chromium stops, the profile stays."""
         await br.close(p.id)

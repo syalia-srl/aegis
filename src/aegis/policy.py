@@ -116,6 +116,9 @@ class Event:
     kind: EventKind
     log_id: str
     data: dict = field(default_factory=dict)
+    # The stored key of the session's owner (restore(owner) gives its who);
+    # None when the session is unknown here.
+    owner: str | None = None
 
 
 @dataclass(frozen=True)
@@ -184,8 +187,13 @@ class HostPolicy:
         """The checks that are not about people; raise OpError to refuse. The
         default keeps aegis's own: operations closed to agents, read-permission
         sessions, schedule runs with spawn: false, operations closed to links.
-        Call ``super().guard(...)`` to keep them."""
+        Call ``super().guard(...)`` to keep them. It also refuses the
+        operations that act on the whole server (``Operation.server``: config,
+        links, files, shells, harness sign-ins, usage) to every caller you
+        identified; the server's own caller (who None) keeps them."""
         default_guard(op, caller)
+        if op.server and who is not None:
+            raise Refused(f"{op.name} acts on the whole server")
 
     def can(self, who: Any, action: Action, session: SessionView) -> bool:
         return True
@@ -214,6 +222,9 @@ class StandalonePolicy(HostPolicy):
     """``aegis serve``'s policy: the holder of the server's token may do
     everything, and linked servers are taken as before. Its key is the server
     owner's name, which every owner field on disk already holds."""
+
+    def guard(self, op: Operation, who: Any, caller: CallerInfo) -> None:
+        default_guard(op, caller)
 
     async def identify(self, cred: Credential) -> Any:
         if self._app.principals.resolve(cred.token) is None:

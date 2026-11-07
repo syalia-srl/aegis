@@ -181,5 +181,17 @@ client: it holds the caller's key and an expiry, needs no table, and survives
 a restart until it expires. `srv.as_who(who)` is the same API acting as that
 person: `await srv.as_who(who).sessions.spawn()` starts a session of theirs.
 
-Terminals are not agents: `spawn` does not see them. A host that wants no
-shells refuses `term.*` operations in `around`.
+Some operations act on the whole server rather than on a session: the
+config, links, the Files view, terminals, harness sign-ins, usage, Pause all
+and updates. `HostPolicy.guard` refuses them to every caller you identified,
+and only the server's own caller keeps them; override `guard` to open one.
+A schedule belongs to the person who made it, and others neither see nor
+change it.
+
+Your `key(who)` must differ from the server's own key (the user `aegis serve`
+runs as), which stands for the server itself; aegis refuses a caller whose key
+is that. aegis asks `restore` once per key and process, and keeps the who
+until a restart.
+
+Memories, skills and help state are kept per key; dictation, saved workflow
+definitions and harness sign-ins are the server's.
