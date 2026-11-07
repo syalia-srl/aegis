@@ -30,6 +30,7 @@ Measured on codex-cli 0.162.1 (spec ``2026-10-09-aegis-2-codex-harness-design.md
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
@@ -83,12 +84,41 @@ def _server_vars(s: McpServer) -> dict[str, str]:
     return {ref_name(s.name, k): v for k, v in s.headers.items()}
 
 
+def env_conflict(
+    servers: Sequence[McpServer], environ: Mapping[str, str]
+) -> str | None:
+    """Why ``servers`` cannot start under Codex, which forwards a stdio
+    server's env under its own names from Codex's environment: a key that
+    would change Codex's own (PATH, HOME, an AEGIS_ variable, or one aegis's
+    environment holds with another value), or one key two servers set."""
+    held: dict[str, McpServer] = {}
+    for s in servers:
+        if s.transport != "stdio":
+            continue
+        for k, v in s.env.items():
+            if k in ("PATH", "HOME") or k.startswith("AEGIS_"):
+                return f"Codex cannot give MCP server {s.name} {k}: it is Codex's own"
+            if k in environ and environ[k] != v:
+                return (
+                    f"Codex cannot give MCP server {s.name} {k}: aegis's "
+                    "environment holds another value"
+                )
+            if k in held and held[k].env[k] != v:
+                return (
+                    f"Codex cannot give MCP servers {held[k].name} and {s.name} "
+                    f"two values of {k}"
+                )
+            held[k] = s
+    return None
+
+
 def argv(
     bin: str,
     mcp_url: str | None,
     exclude: Sequence[str] = (),
     native: bool = False,
     servers: Sequence[McpServer] = (),
+    environ: Mapping[str, str] | None = None,
 ) -> list[str]:
     """``exclude`` is the person's own shell exclude list, kept. ``native``
     turns Codex's own skills and memories off. ``servers`` (#960) are written
@@ -109,10 +139,12 @@ def argv(
             "-c", f'mcp_servers.{SERVER}.env_http_headers={{"{HEADER}"="{TOKEN_ENV}"}}',
             "-c", f'mcp_servers.{SERVER}.default_tools_approval_mode="approve"',
         ]  # fmt: skip
+    environ = os.environ if environ is None else environ
     for s in servers:
         key = f"mcp_servers.{s.name}"
         names = list(_server_vars(s))
-        hidden += names
+        # A variable aegis's own environment already holds stays in the shell.
+        hidden += [n for n in names if n not in environ]
         if s.transport == "stdio":
             out += [
                 "-c", f"{key}.command={json.dumps(s.command)}",

@@ -1334,6 +1334,8 @@ class App:
         chosen: dict[str, tuple[McpServer, str]] = {}
 
         def add(m: McpServer, source: str) -> None:
+            if (why := mcp_servers.problem(m)) and m.name != mcp_servers.RESERVED:
+                raise OpError("bad_mcp", f"MCP server {m.name} from {source}: {why}")
             if m.name == mcp_servers.RESERVED or m.name in chosen:
                 held = "aegis" if m.name == mcp_servers.RESERVED else chosen[m.name][1]
                 raise OpError(
@@ -1366,6 +1368,8 @@ class App:
         if view is not None:
             for m in self.policy.mcp(self.whos.get(view.owner), view):
                 add(m, "the host policy")
+        if why := mcp_servers.ref_conflict([m for m, _ in chosen.values()]):
+            raise OpError("mcp_conflict", why)
         takes = s.harness.mcp_transports
         out = []
         for m, _ in chosen.values():
@@ -1376,6 +1380,11 @@ class App:
                     f"{m.transport}",
                 )
             out.append(mcp_servers.expand(m, os.environ))
+        if s.harness.name == "codex":
+            from .codex.config import env_conflict
+
+            if why := env_conflict(out, os.environ):
+                raise OpError("mcp_conflict", why)
         return tuple(out)
 
     def listens(self) -> bool:

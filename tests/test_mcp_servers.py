@@ -324,3 +324,79 @@ agents:
         f.level == "error" and "ghost" in f.message and "echo" not in f.message
         for f in clerk
     )
+
+
+# -- the review's findings (fix pass) --------------------------------------------
+
+
+def test_a_variable_in_a_url_command_or_argument_is_refused_on_its_entry():
+    _, errors = parse({
+        "u": {"url": "https://z/mcp?key=${K}"},
+        "a": {"command": "x", "args": ["--token", "${T}"]},
+        "c": {"command": "${BIN}"},
+        "ok": {"url": "https://z/mcp", "headers": {"A": "${K}"}},
+    })  # fmt: skip
+    for name in ("u", "a", "c"):
+        assert "headers or env" in errors[name]
+    assert "ok" not in errors
+
+
+def test_a_name_is_letters_digits_dashes_and_underscores_and_not_a_drivers_own():
+    _, errors = parse({
+        "my.notes": {"url": "http://x"},
+        "my notes": {"url": "http://x"},
+        "aegis_session": {"url": "http://x"},
+        "gh-enterprise_2": {"url": "http://x"},
+    })  # fmt: skip
+    assert "letters" in errors["my.notes"] and "letters" in errors["my notes"]
+    assert "reserved" in errors["aegis_session"]
+    assert "gh-enterprise_2" not in errors
+
+
+async def test_two_values_under_one_reference_refuse_the_start(tmp_path, fake_claude):
+    app, s = await started(tmp_path, fake_claude)
+    try:
+        app.policy.servers = [
+            McpServer.http("gh", "http://g", {"Enterprise-Token": "a"}),
+            McpServer.http("gh-enterprise", "http://e", {"Token": "b"}),
+        ]
+        with pytest.raises(OpError) as e:
+            app.mcp_for(s)
+        assert e.value.code == "mcp_conflict"
+        assert "AEGIS_MCP_GH_ENTERPRISE_TOKEN" in e.value.message
+        app.policy.servers = [McpServer.http("bad.name", "http://g")]
+        with pytest.raises(OpError, match="bad.name"):
+            app.mcp_for(s)
+    finally:
+        await app.shutdown()
+
+
+def test_codex_refuses_an_env_key_that_would_change_its_own_environment():
+    from aegis.codex.config import env_conflict
+
+    env = {"PATH": "/usr/bin", "GITHUB_TOKEN": "g"}
+
+    def check(*servers):
+        return env_conflict(servers, env)
+
+    assert "PATH" in check(McpServer.stdio("p", "x", [], {"PATH": "/opt"}))
+    assert "HOME" in check(McpServer.stdio("p", "x", [], {"HOME": "/var"}))
+    assert "AEGIS_SESSION_TOKEN" in check(
+        McpServer.stdio("p", "x", [], {"AEGIS_SESSION_TOKEN": "t"})
+    )
+    two = check(
+        McpServer.stdio("p", "x", [], {"API_KEY": "1"}),
+        McpServer.stdio("q", "x", [], {"API_KEY": "2"}),
+    )
+    assert "API_KEY" in two and "p" in two and "q" in two
+    assert check(McpServer.stdio("p", "x", [], {"GITHUB_TOKEN": "g"})) is None
+    assert check(McpServer.stdio("p", "x", [], {"PHONE_STATE": "/v"})) is None
+
+
+def test_codex_hides_from_its_shell_only_what_aegis_does_not_already_have():
+    from aegis.codex.config import argv
+
+    s = McpServer.stdio("p", "x", [], {"GITHUB_TOKEN": "g", "PHONE_STATE": "/v"})
+    out = argv("codex", "u", (), servers=(s,), environ={"GITHUB_TOKEN": "g"})
+    (exclude,) = [a for a in out if a.startswith("shell_environment_policy.exclude=")]
+    assert "PHONE_STATE" in exclude and "GITHUB_TOKEN" not in exclude

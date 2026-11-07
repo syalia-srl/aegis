@@ -596,12 +596,23 @@ agents:
 
 An entry is HTTP, a `url` with optional `headers`, or stdio, a `command` with
 optional `args` and `env`. An entry with both or neither is an error on its row.
-The name `aegis` is reserved for aegis's own server.
+A name takes letters, digits, `-` and `_`; `aegis`, and the name Codex gives it, are
+reserved for aegis's own server.
 
-`${VAR}` in any value is read from aegis's own environment when a session
-starts, so a token stays out of the file. aegis never puts a header or env value
-in a harness's command line or in a file: each harness gets it through its
-environment or its stdin.
+`${VAR}` in a header or env value is read from aegis's own environment when a
+session starts, so a token stays out of the file. aegis never puts a header or
+env value in a harness's command line or in a file: each harness gets it through
+its environment or its stdin. A `${VAR}` in a `url`, `command` or argument is an
+error on its row, since those reach a command line every user on the host can
+read; pass a key as a header or an env value instead.
+
+The harness's environment is also its shell's and its stdio servers', so the
+agent can read every attached server's values, as it can read aegis's own
+session token. Codex hides them from its shell. Attach a server holding a secret
+only to an agent you trust with that secret. Codex gives a stdio server its env
+under the keys you wrote, so it refuses a key that is `PATH`, `HOME`, an
+`AEGIS_` variable, one aegis's environment holds with another value, or one two
+servers set to different values.
 
 A session's servers come in this order: aegis's own, then its agent's `mcp:`
 list, then what the host policy's `mcp` adds (see
@@ -610,7 +621,8 @@ transcript says why, when:
 
 - a `${VAR}` is not set in aegis's environment;
 - the agent names a server no source defines;
-- two servers have one name, from the file, `Server(mcp=...)` or the policy;
+- two servers have one name, from the file, `Server(mcp=...)` or the policy, or
+  two of their header or env values would travel in one variable;
 - the harness cannot take a server's transport. Every harness aegis drives takes
   both today.
 
