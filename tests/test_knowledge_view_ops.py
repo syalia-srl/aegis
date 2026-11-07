@@ -12,10 +12,10 @@ from aegis.knowledge import history
 from aegis.ops import Caller, OpError
 
 from .knowledge_samples import mem, skill
-from .test_acts_for import BEN, recorded  # noqa: F401
+from .one_person import BEN, recorded  # noqa: F401
 from .test_agents import turn, world  # noqa: F401  (fixture)
-from .test_member_view import ADMIN, homes, spawn  # noqa: F401
-from .test_member_view import world as members  # noqa: F401
+from .one_person import ADMIN, homes, spawn  # noqa: F401
+from .one_person import world as members  # noqa: F401
 
 
 async def call(world, op: str, caller: Caller = ADMIN, **params):
@@ -220,27 +220,6 @@ async def test_the_view_ops_are_not_agent_tools(world):
         with pytest.raises(OpError) as e:
             await world.app.registry.call(op, params, agent)
         assert e.value.code == "not_for_agents"
-
-
-async def test_knowledge_list_is_per_principal_for_an_admin_too(members):
-    app = members.app
-    await seed(members, mem("admin-fact", "The admin's own"))
-    await seed(members, mem("ben-fact", "The bot runs on the small host"), owner="ben")
-    mine = await call(members, "knowledge.list")
-    assert [r["name"] for r in mine["items"]] == ["admin-fact"]
-    bens = await call(members, "knowledge.list", BEN)
-    assert [r["name"] for r in bens["items"]] == ["ben-fact"]
-    for op in ("knowledge.get", "knowledge.remove"):
-        assert (await refused(members, op, name="ben-fact")).code == "not_found"
-    got = await call(members, "knowledge.history", name="ben-fact")
-    assert got["history"] == []
-    assert app.knowledge.store.get("ben", "ben-fact") is not None
-    # An admin still reads a member's transcript, the hint's row included.
-    lid = await spawn(members, BEN)
-    await turn(app.sessions.sessions[lid], "where does the bot run on the host")
-    rows = app.sessions.sessions[lid].entries()
-    assert any("ben-fact" in (e.get("md") or "") for e in rows)
-    assert app.sees(app.who(ADMIN), "ben")
 
 
 async def test_an_edit_and_a_remove_work_in_a_store_filled_by_hand(world):

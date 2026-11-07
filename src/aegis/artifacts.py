@@ -85,9 +85,7 @@ def mint_id() -> str:
 
 
 def draft_dir(base: Path, id: str) -> Path:
-    """A draft's folder under ``base``: the state root, or in multi-user mode
-    ``~/.aegis`` in the home of the user the session runs as, whose agent
-    edits the draft with its own tools (#555)."""
+    """A draft's folder under ``base``, the state root."""
     return base / "artifacts" / id
 
 

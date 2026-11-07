@@ -52,8 +52,7 @@ changes. Two flags change the timing:
 
 The reply says what happened: `landed at <handle>` (it was idle), `held for
 <handle>` (with the reason when its harness cannot take an urgent message), or
-`steered into <handle>`. A handoff to an archived session is refused, and a
-member's agent can hand off only to sessions its owner owns.
+`steered into <handle>`. A handoff to an archived session is refused.
 
 A handoff does not report back. If you need the answer, say in the context
 how to give it to you, for example by handing off back to your handle.

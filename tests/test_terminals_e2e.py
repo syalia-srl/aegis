@@ -4,7 +4,7 @@ import pytest
 from starlette.testclient import TestClient
 
 from aegis.app import App
-from aegis.ops import Caller, OpError, Principal
+from aegis.ops import Caller, OpError
 from aegis.roots import make_roots
 from aegis.web import build_web
 
@@ -21,7 +21,6 @@ terminals:
   sh: {cmd: sh, cwd: .}
   api: {cmd: "echo serving; sleep 100", cwd: ., restart: on-failure}
 """
-BEN = Principal("ben", "member")
 
 
 def as_(principal):
@@ -79,22 +78,8 @@ def test_a_browser_gets_output_and_on_reconnect_only_what_it_missed(
 async def world(tmp_path, fake_claude):
     (tmp_path / ".aegis.yaml").write_text(CONFIG)
     w = await World(tmp_path, fake_claude).start()
-    w.app.principals.add("ben", "member")
     yield w
     await w.stop()
-
-
-async def test_a_member_reads_any_terminal_but_types_only_into_their_own(world):
-    call = world.app.registry.call
-    admins = await call("term.spawn", {"profile": "echo"})
-    with pytest.raises(OpError) as e:
-        await call("term.input", {"id": admins["id"], "data": "x"}, as_(BEN))
-    assert e.value.code == "not_owner"
-    assert world.app.channels.subscribe(f"term:{admins['id']}", lambda m: None)
-    mine = await call("term.spawn", {"profile": "echo"}, as_(BEN))
-    assert mine["owner"] == "ben"
-    await call("term.input", {"id": mine["id"], "data": "x"}, as_(BEN))
-    await call("term.close", {"id": mine["id"]}, as_(BEN))
 
 
 async def test_agents_have_no_terminal_operations_in_phase_1(world):

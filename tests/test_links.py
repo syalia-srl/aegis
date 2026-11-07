@@ -21,7 +21,7 @@ from websockets.asyncio.server import serve as ws_serve
 
 from aegis import attachments, links
 from aegis.app import App
-from aegis.ops import Caller, OpError, Principal
+from aegis.ops import OpError
 from aegis.roots import make_roots
 from aegis.web import PROTO, build_web
 
@@ -756,27 +756,22 @@ async def test_reading_and_enqueueing_across_a_link_are_refused(pair):
     assert list(beta.app.sessions.sessions) == [far.log_id]
 
 
-async def member_link(alpha, beta, policy):
-    """Relink alpha to beta with a member token of beta's, gated by ``policy``."""
-    token = beta.app.principals.add("alpha", "member")
-    beta.app.principals.set_policy("alpha", policy)
+async def admin_link(alpha, beta):
+    """Relink alpha to beta with beta's token, plain (not trusted)."""
     alpha.app.links.remove("beta")
-    alpha.app.links.add("beta", beta.base, token)
+    alpha.app.links.add("beta", beta.base, beta.token)
     await until(
         lambda: (
             (link := alpha.app.links.get("beta")) is not None and link.state == "linked"
         ),
         timeout=10,
-        what="the member link",
+        what="the link",
     )
-
-
-OPEN = {"claude": {"mode": "open"}}
 
 
 async def test_an_agent_spawns_on_a_linked_server_as_the_links_token(pair):
     alpha, beta = pair
-    await member_link(alpha, beta, OPEN)
+    await admin_link(alpha, beta)
     here = await alpha.spawn(permission="write")
     out = await turn(here, mcp("session_spawn", agent="opus@beta", prompt="hi"))
     assert out.startswith("mcp ok:"), out
@@ -784,35 +779,14 @@ async def test_an_agent_spawns_on_a_linked_server_as_the_links_token(pair):
     (far,) = beta.app.sessions.sessions.values()
     assert r == {"log_id": far.log_id, "handle": f"{far.handle}@beta", "server": "beta"}
     m = far.meta()
-    assert m["owner"] == "alpha" and m["spawned_from"] == f"{here.handle}@alpha"
+    assert (
+        m["owner"] == beta.app.principals.owner
+        and m["spawned_from"] == f"{here.handle}@alpha"
+    )
     # Opus is full on beta; the spawning agent has write, so the far one too.
     assert m["permission"] == "write" and m.get("spawned_by") is None
     out = await turn(here, mcp("session_spawn", agent="opus@beta", permission="full"))
     assert "not_allowed" in out
-
-
-async def test_a_closed_gate_on_the_far_side_refuses_an_agents_spawn(pair):
-    alpha, beta = pair
-    await member_link(alpha, beta, {})  # every pool closed for the link
-    here = await alpha.spawn()
-    out = await turn(here, mcp("session_spawn", agent="opus@beta"))
-    assert out.startswith("mcp error:") and "quota_closed" in out, out
-    assert "quota gate" in out and not beta.app.sessions.sessions
-
-
-async def test_a_members_agent_cannot_spawn_across_a_link(pair):
-    alpha, beta = pair
-    await member_link(alpha, beta, OPEN)
-    alpha.app.principals.add("ben", "member")
-    alpha.app.principals.set_default_policy(OPEN)
-    r = await alpha.app.registry.call(
-        "session.spawn",
-        {"agent": "opus"},
-        Caller("user", principal=Principal("ben", "member")),
-    )
-    here = alpha.app.sessions.sessions[r["log_id"]]
-    out = await turn(here, mcp("session_spawn", agent="opus@beta"))
-    assert "not_for_members" in out and not beta.app.sessions.sessions
 
 
 async def test_only_a_link_names_where_a_spawn_came_from(pair):
@@ -1158,45 +1132,13 @@ async def test_a_person_on_alpha_attaches_a_file_to_a_session_on_beta(pair):
         assert (await c.get(f"{alpha.base}/via/beta{url}")).content == body
 
 
-async def test_a_link_with_a_member_token_is_a_member_on_the_far_side(pair):
-    alpha, beta = pair
-    member = beta.app.principals.add("alpha", "member")
-    alpha.app.links.remove("beta")
-    alpha.app.links.add("beta", beta.base, member)
-    await until(
-        lambda: (
-            (link := alpha.app.links.get("beta")) is not None and link.state == "linked"
-        ),
-        timeout=10,
-        what="the member link",
-    )
-    link = alpha.app.links.get("beta")
-    snap = (await link.call_raw("config.read", {}))["result"]
-    r = await link.call_raw(
-        "config.write", {"doc": snap["doc"], "stamp": snap["stamp"]}
-    )
-    assert r["error"]["code"] == "not_for_members"
-
-
-async def test_a_member_here_cannot_act_through_the_link(pair):
-    alpha, beta = pair
-    member = alpha.app.principals.add("ben", "member")
-    async with Browser(alpha, member) as b:
-        r = await b.call("token.add", server="beta", name="mallory", role="admin")
-        assert r["error"]["code"] == "not_for_members"
-        r = await b.call("session.spawn", server="beta", agent="opus")
-        assert r["error"]["code"] == "not_for_members"
-    assert "mallory" not in [t["name"] for t in beta.app.principals.rows()]
-
-
 async def test_a_revoked_token_on_an_idle_socket_stops_receiving(tmp_path, fake_claude):
     node = await Node(tmp_path / "solo", "solo", fake_claude).start()
     try:
-        member = node.app.principals.add("ben", "member")
-        async with Browser(node, member) as ben:
+        async with Browser(node, node.app.principals.admin_token()) as ben:
             await ben.send(t="sub", channel="sessions")
             await until(lambda: ben.of("sessions"), what="the snapshot")
-            node.app.principals.revoke("ben")
+            node.app.principals.revoke(node.app.principals.owner)
             seen = len(ben.frames)
             await node.spawn()  # a sessions frame meant for ben, who sends nothing
             await until(
@@ -1207,33 +1149,6 @@ async def test_a_revoked_token_on_an_idle_socket_stops_receiving(tmp_path, fake_
             assert ben.frames[seen:] == [] and ben.ws.close_code == 4401
     finally:
         await node.stop()
-
-
-async def test_a_member_link_delivers_only_into_its_own_sessions(pair):
-    alpha, beta = pair
-    theirs = await beta.spawn()  # beta's admin's
-    member = beta.app.principals.add("alpha", "member")
-    alpha.app.links.remove("beta")
-    alpha.app.links.add("beta", beta.base, member)
-    await until(
-        lambda: (
-            (link := alpha.app.links.get("beta")) is not None and link.state == "linked"
-        ),
-        timeout=10,
-        what="the member link",
-    )
-    link = alpha.app.links.get("beta")
-    sender = {"handle": "user", "server": "alpha", "user": "ben"}
-    r = await link.call_raw(
-        "peer.deliver",
-        {
-            "target": theirs.handle,
-            "context": "hi",
-            "interrupt": False,
-            "sender": sender,
-        },
-    )
-    assert r["error"]["code"] == "not_owner"
 
 
 async def old_far(port: int):
@@ -1296,7 +1211,7 @@ async def test_session_list_reads_an_old_servers_states_as_asleep(
 
 async def test_an_agents_far_spawn_joins_its_group(pair):
     alpha, beta = pair
-    await member_link(alpha, beta, OPEN)
+    await admin_link(alpha, beta)
     here = await alpha.spawn(permission="write")
     out = await turn(here, mcp("session_spawn", agent="opus@beta", prompt="hi"))
     assert out.startswith("mcp ok:"), out
@@ -1306,7 +1221,7 @@ async def test_an_agents_far_spawn_joins_its_group(pair):
 
 async def test_a_far_server_without_groups_still_takes_the_spawn(pair):
     alpha, beta = pair
-    await member_link(alpha, beta, OPEN)
+    await admin_link(alpha, beta)
     alpha.app.links.get("beta").remote.pop("groups", None)  # as a server before #586
     here = await alpha.spawn(permission="write")
     out = await turn(here, mcp("session_spawn", agent="opus@beta", prompt="hi"))

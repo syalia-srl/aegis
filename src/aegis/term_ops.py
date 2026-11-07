@@ -57,19 +57,19 @@ def register_term_ops(app: App) -> None:
         t = await terms.spawn(p.profile, owner=app.who(caller).name, cwd=p.cwd)
         return terms.card(t)
 
-    @r.op("term.input", TermInput, owned="id")
+    @r.op("term.input", TermInput)
     async def input_(p: TermInput, caller):
         terms.get(p.id).input(p.data)
 
-    @r.op("term.resize", TermResize, owned="id")
+    @r.op("term.resize", TermResize)
     async def resize(p: TermResize, caller):
         terms.get(p.id).resize(p.cols, p.rows)
 
-    @r.op("term.restart", TermRef, owned="id")
+    @r.op("term.restart", TermRef)
     async def restart(p: TermRef, caller):
         await terms.restart(p.id)
 
-    @r.op("term.close", TermRef, owned="id")
+    @r.op("term.close", TermRef)
     async def close(p: TermRef, caller):
         await terms.close(p.id)
 

@@ -1,6 +1,6 @@
 """Every file access in the modules that serve a person's files is accounted
-for (#555): it runs on the runner of the person's place (as_user.py), or it
-touches only the server's own state. A new one fails here until it is put in
+for (#555): it runs in a thread on the caller's place, or it touches only the
+server's own state. A new one fails here until it is put in
 one of the two tables, which is the moment to decide which it is."""
 
 from __future__ import annotations

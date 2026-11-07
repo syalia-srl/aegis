@@ -79,8 +79,6 @@ class Launch:
     # Harness tools the agent keeps although aegis replaces them
     # (claude/process.py REPLACED_TOOLS); other harnesses ignore it.
     keep_harness_tools: tuple[str, ...] = ()
-    # The Linux user the process runs as, in multi-user mode (launch.py).
-    user: str | None = None
     # The owner's knowledge setting is native: the harness starts without its
     # own skills and memory, which aegis's knowledge tools replace.
     knowledge_native: bool = False

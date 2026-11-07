@@ -4,9 +4,9 @@ A device subscribes from the bell (``client/js/pushpanel.js``) with the sources
 it wants to hear about. Its subscription is kept in
 ``<state>/push/subscriptions.json``, mode 0600 like the VAPID key beside it:
 an endpoint and its two keys are all anyone needs to push to that device. Each
-row belongs to the principal whose token made it; a member changes only their
-own, an admin any, and revoking a token deletes its rows (``token.revoke`` in
-``app.py``), so a lost phone stops hearing about the work.
+row records the principal whose token made it, and revoking the token deletes
+its rows (``token.revoke`` in ``app.py``), so a lost phone stops hearing about
+the work.
 
 The sender listens to the ``sessions`` channel inside the server, as a browser
 does, and to ``App.toast``, and applies ping.js's rule: an event is a session
@@ -46,7 +46,7 @@ import httpx
 from pydantic import BaseModel, Field, field_validator
 
 from . import webpush
-from .ops import Caller, OpError, Principal
+from .ops import Caller, OpError
 
 if TYPE_CHECKING:
     from .app import App
@@ -186,6 +186,13 @@ class Subscriptions:
     def remove(self, id: str) -> None:
         self._rows = [r for r in self._rows if r["id"] != id]
         self._save()
+
+    def keep_owner(self, name: str) -> None:
+        """Drop every row another principal made: a former member's device,
+        from before aegis 3.0 removed the multi-user mode (#958)."""
+        if any(r["owner"] != name for r in self._rows):
+            self._rows = [r for r in self._rows if r["owner"] == name]
+            self._save()
 
     def remove_owner(self, name: str) -> None:
         if any(r["owner"] == name for r in self._rows):
@@ -370,14 +377,8 @@ class Sender:
         if not self._running:
             return  # not started, or stopped
         now = time.monotonic()
-        app = self.app
-        about = app.owner_of(payload["key"])
         for row in self.push.subscriptions.list():
             if source not in row.get("sources", ()):
-                continue
-            # In multi-user mode a member's devices hear of its own only.
-            role = app.principals.role_of(row["owner"]) or "member"
-            if not app.sees(Principal(row["owner"], role), about):
                 continue
             sid = row["id"]
             self._pending.setdefault(sid, deque()).append((payload, now))
@@ -549,9 +550,6 @@ def register_push_ops(app: App) -> Push:
         row = push.subscriptions.get(id)
         if row is None:
             raise OpError("unknown_subscription", f"no push subscription {id}")
-        who = app.who(caller)
-        if not who.is_admin and row["owner"] != who.name:
-            raise OpError("not_owner", f"{id} belongs to {row['owner']}")
         return row
 
     @r.op("push.key")
@@ -609,11 +607,9 @@ def register_push_ops(app: App) -> Push:
     @r.op("push.list")
     async def push_list(_, caller):
         """The caller's subscriptions, every one for an admin, without keys."""
-        who = app.who(caller)
         rows = [
             {k: v for k, v in row.items() if k != "keys"}
             for row in push.subscriptions.list()
-            if who.is_admin or row["owner"] == who.name
         ]
         return {"subscriptions": rows}
 

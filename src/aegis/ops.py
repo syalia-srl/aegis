@@ -32,15 +32,10 @@ class OpError(Exception):
 
 @dataclass(frozen=True)
 class Principal:
-    """Who a token is (tokens.py): a person, a linked server or a job. The
-    role decides what it may change; a session's owner is a principal's name."""
+    """Who a token is (tokens.py): the server's owner, whose name a session
+    records as its owner."""
 
     name: str
-    role: str  # "admin" | "member"
-
-    @property
-    def is_admin(self) -> bool:
-        return self.role == "admin"
 
 
 @dataclass(frozen=True)
@@ -86,10 +81,6 @@ class Operation:
     doc: str = ""
     # Open to an agent whose session runs with read permission.
     read: bool = False
-    # Only an admin may call it (tokens.py).
-    admin: bool = False
-    # The param naming the session it changes: a member must own that session.
-    owned: str | None = None
     # Refused to a caller acting through a link: a far server never reads or
     # writes this server's files (fs_ops.py).
     local: bool = False
@@ -110,15 +101,8 @@ class Registry:
         self.permission_of: Callable[[str], str | None] = lambda log_id: None
         # The principal a caller acts as, and a session's owner by log id; both
         # set by the app. Without an app every caller is an admin.
-        self.who: Callable[[Caller], Principal] = lambda c: (
-            c.principal or Principal("", "admin")
-        )
+        self.who: Callable[[Caller], Principal] = lambda c: c.principal or Principal("")
         self.owner_of: Callable[[str], str | None] = lambda log_id: None
-        # What a caller may not know exists (multi-user mode, app.py): the
-        # error a missing thing gives, or None when it may see it.
-        self.hides: Callable[[Principal, str, BaseModel], OpError | None] = (
-            lambda who, name, params: None
-        )
         # A session's schedule meta by log id (session.py); set by the app.
         self.schedule_of: Callable[[str], dict | None] = lambda log_id: None
 
@@ -130,8 +114,6 @@ class Registry:
         agent: bool = False,
         doc: str = "",
         read: bool = False,
-        admin: bool = False,
-        owned: str | None = None,
         local: bool = False,
     ) -> Callable[[Handler], Handler]:
         def register(handler: Handler) -> Handler:
@@ -144,8 +126,6 @@ class Registry:
                 agent,
                 doc or (handler.__doc__ or "").strip(),
                 read,
-                admin,
-                owned,
                 local,
             )
             return handler
@@ -189,23 +169,9 @@ class Registry:
             params = op.params.model_validate(raw if raw is not None else {})
         except ValidationError as e:
             raise OpError("bad_params", str(e)) from e
-        who = self.who(caller)
-        if op.admin and not who.is_admin:
-            raise OpError("not_for_members", f"{name} is for an admin of this server")
-        # Before not_owner, which would say whose it is.
-        if (hidden := self.hides(who, name, params)) is not None:
-            raise hidden
-        if op.owned and not who.is_admin:
-            target = getattr(params, op.owned, None)
-            owner = self.owner_of(target) if isinstance(target, str) else None
-            if owner is not None and owner != who.name:
-                raise OpError(
-                    "not_owner",
-                    f"{target} belongs to {owner}; you can read it, not change it",
-                )
         try:
             return await op.handler(params, caller)
         except PermissionError as e:
-            # Nothing may act as this person (users.py, as_user.py): fail
-            # closed, and say so rather than as an internal error.
+            # A refused file or process action: say so rather than as an
+            # internal error.
             raise OpError("forbidden", str(e)) from e

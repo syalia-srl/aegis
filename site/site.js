@@ -8,7 +8,7 @@
 // controls also act like the client: the fold button, a folded line, the
 // panel's rows and button, its edge, the layout picker and the theme.
 
-const FLEET = new Set(["fleet", "quota", "links", "multiuser"]);
+const FLEET = new Set(["fleet", "quota", "links"]);
 const OPEN_CARD = { subs: "usage-go", panel: "plan", plan: "plan" }; // the card a step opens by itself
 const THEMES = ["ink", "logbook", "electric", "phosphor", "blueprint", "amphora", "riso", "solari", "aizome", "poster"];
 const LAYOUTS = {

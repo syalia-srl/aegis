@@ -311,18 +311,6 @@ def test_a_session_tab_has_the_cards_menu(server, page):  # noqa: F811
     assert page.errors == []
 
 
-def test_another_members_card_offers_only_opening(server, page, browser):  # noqa: F811
-    from .test_browser import member_page
-
-    page.goto(server.url)
-    page.wait_for_selector("#a2[data-view=fleet]")
-    a = spawn(page, "hello")
-    pg, base = member_page(browser, server)
-    pg.wait_for_selector(card(a))
-    pg.click(card(a), button="right")
-    assert item_ids(pg) == ["open", "newtab"]
-
-
 def meta(srv, key: str) -> dict:
     return json.loads(
         (srv.root / ".aegis" / "state" / "sessions" / f"{key}.json").read_text()

@@ -99,15 +99,10 @@ def read_token(path: Path | None = None) -> str | None:
     return value if value and shape_error(value) is None else None
 
 
-def with_token(
-    env: Mapping[str, str] | None, user: str | None
-) -> dict[str, str] | None:
+def with_token(env: Mapping[str, str] | None) -> dict[str, str] | None:
     """A Claude Code child's environment with the token added: ``env`` (the
-    server's own when None) unchanged for a member's process, or when the
-    variable is already set (the server's environment or the pool file win),
-    or when there is no usable token file."""
-    if user is not None:
-        return None if env is None else dict(env)
+    server's own when None) unchanged when the variable is already set (the
+    server's environment wins), or when there is no usable token file."""
     base = os.environ if env is None else env
     if base.get(VAR):
         return None if env is None else dict(env)
@@ -172,7 +167,6 @@ async def probe(
                     "--setting-sources",
                     "",
                 ],
-                user=None,
                 via=launch.resolve_via(),
                 cwd=scratch,
                 env=env,

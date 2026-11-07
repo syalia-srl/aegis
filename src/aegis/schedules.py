@@ -308,15 +308,9 @@ class Schedules:
             return self._tick(name, tick, "held", why="overlap", **extra)
         stdout, sha = None, None
         if s.d.check is not None and not manual:
-            try:
-                user = self._reg.acts_for(s.owner.get("principal"))
-            except PermissionError as e:
-                # Nothing runs as the server for an owner without a user.
-                rc, out, err = None, "", str(e)
-            else:
-                rc, out, err = await run_bash(
-                    s.d.check.bash, self._cwd(s), s.d.check.timeout_s, user=user
-                )
+            rc, out, err = await run_bash(
+                s.d.check.bash, self._cwd(s), s.d.check.timeout_s
+            )
             if rc == 0:
                 sha = hashlib.sha256(out.encode()).hexdigest()
                 if sha == st.sha:
@@ -759,7 +753,6 @@ class Schedules:
         check: Check | None,
         cwd: Path,
         name: str | None,
-        user: str | None = None,
     ) -> dict:
         """The next three ticks, and what the check would do now. Writes nothing."""
         now = int(self.now())
@@ -768,9 +761,7 @@ class Schedules:
             "tz": time.strftime("%Z"),
         }
         if check is not None:
-            rc, stdout, err = await run_bash(
-                check.bash, str(cwd), check.timeout_s, user=user
-            )
+            rc, stdout, err = await run_bash(check.bash, str(cwd), check.timeout_s)
             st = self.state.get(name or "")
             sha = hashlib.sha256(stdout.encode()).hexdigest() if rc == 0 else None
             fires = rc == 0 and sha != (st.sha if st else None)

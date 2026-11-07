@@ -4,7 +4,6 @@
 // decided in Python. These functions only turn it into the markup the themes
 // style; they compute nothing about tools.
 
-import { who } from "./me.js";
 import markdownit from "../vendor/markdown-it.mjs";
 import { copyButton } from "./copy.js";
 import { speakButton } from "./speak.js";
@@ -667,8 +666,6 @@ function fillConfig(card, e) {
   const kids = [bar, el("div", "sbody why", d.why || ""), diff];
   if (e.status !== "pending") {
     kids.push(el("div", "sbody dim", CONFIG_DONE[e.status] || e.status));
-  } else if (who.role === "member") {
-    kids.push(el("div", "sbody dim", "An admin applies this."));
   } else {
     const hint = el("span", "hint");
     const press = (op, label) => {

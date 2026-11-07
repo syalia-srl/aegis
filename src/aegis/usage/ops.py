@@ -14,7 +14,6 @@ import asyncio
 import copy
 import json
 import logging
-import pwd
 import re
 import time
 from dataclasses import asdict
@@ -129,20 +128,11 @@ def query_of(p: ReadParams, now: float) -> UsageQuery:
     )
 
 
-def people(app: "App", con, who: "Principal") -> set[str] | None:
-    """The owners whose sessions ``who`` may see, as usage_turns names them;
-    None for all."""
-    if app.multi_user is None or who.is_admin:
-        return None
-    names = [n for (n,) in con.execute("SELECT DISTINCT person FROM usage_turns")]
-    return {n for n in names if app.sees(who, n)}
-
-
 def answer(app: "App", q: UsageQuery, who: "Principal") -> dict:
     """``q`` over this server's tables, as usage.read returns it."""
     con = db.open_read(app.journal.path)
     try:
-        q.people = people(app, con, who)
+        q.people = None
         try:
             usage = app.config.current().usage
             a = run(
@@ -194,10 +184,9 @@ async def far(
     A server that fails serves the last answers ``last`` kept, as cached; one
     never answered (down, or an aegis with no usage.read) is missing. An
     answer younger than LINKED_S (``asked`` keeps when) is reused. A call
-    over a link and a member's call ask no link: links are the admin's."""
+    over a link asks no link."""
     links = getattr(app, "links", None)
-    member = app.multi_user is not None and not who.is_admin
-    if links is None or caller.link is not None or member:
+    if links is None or caller.link is not None:
         return {}
     up = links.up()
 
@@ -355,21 +344,12 @@ class ImportParams(_Strict):
 
 
 def import_sources(app: "App", people: list[str] | None) -> list[tuple]:
-    """(person, Linux user, home) for each person whose Claude Code files
-    the import reads: the server's own user's, and each member's read as its
-    Linux user. A token without a user of its own acts as the server."""
+    """(person, None, home) for the server's own person, whose Claude Code
+    files the import reads."""
     out = []
-    for row in app.principals.rows():
-        name, user = str(row["name"]), row["linux_user"]
-        if people is not None and name not in people:
-            continue
-        if row["owner"]:
-            out.append((name, None, Path.home()))
-        elif user:
-            try:
-                out.append((name, user, Path(pwd.getpwnam(user).pw_dir)))
-            except KeyError:
-                continue  # aegis warns at boot
+    name = app.principals.owner
+    if people is None or name in people:
+        out.append((name, None, Path.home()))
     return out
 
 
@@ -406,10 +386,10 @@ def register_usage_ops(app: "App") -> None:
         servers = await far(app, caller, who, {key: params}, last, asked)
         return await asyncio.to_thread(across, app, q, who, servers)
 
-    @r.op("usage.import", ImportParams, agent=True, admin=True)
+    @r.op("usage.import", ImportParams, agent=True)
     async def usage_import(p: ImportParams, caller):
         """Count once the sessions Claude Code ran outside aegis: each
-        person's ~/.claude/projects, read as their Linux user, as mode
+        person's ~/.claude/projects, as mode
         outside. Messages aegis already counts are skipped, and a file
         already imported is not read again. Claude Code purges its files
         after 30 days, so run it soon after upgrading, on each server."""
@@ -421,7 +401,7 @@ def register_usage_ops(app: "App") -> None:
             total = ImportReport()
             for person, user, home in sources:
                 r = import_claude_projects(
-                    con, [home / ".claude" / "projects"], known, person, user=user
+                    con, [home / ".claude" / "projects"], known, person
                 )
                 for k in ("files", "sessions", "turns", "already", "live"):
                     setattr(total, k, getattr(total, k) + getattr(r, k))

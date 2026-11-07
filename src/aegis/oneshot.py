@@ -12,7 +12,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import pwd
 import signal
 from pathlib import Path
 from typing import TypeVar
@@ -220,22 +219,15 @@ async def run(
     argv: list[str],
     cwd: Path,
     timeout: float,
-    user: str | None,
     prompt: str,
     harness: str = "claude-code",
 ) -> str:
-    """stdout of one call, as ``user`` (launch.py). A cancelled caller kills
-    its claude: one left running would keep billing. A call as a user runs in
-    that user's home, since ``cwd`` is under the server's state."""
-    if user is not None:
-        try:
-            cwd = Path(pwd.getpwnam(user).pw_dir)
-        except KeyError:
-            raise OneshotError(f"Linux user {user} does not exist") from None
+    """stdout of one call (launch.py). A cancelled caller kills its claude:
+    one left running would keep billing."""
     cwd.mkdir(parents=True, exist_ok=True)
     env = {**os.environ, "MAX_THINKING_TOKENS": "0"}
     if harness == "claude-code":
-        env = login.with_token(env, user) or env
+        env = login.with_token(env) or env
     try:
         proc = await launch.child(
             argv,
@@ -244,7 +236,6 @@ async def run(
             stdin=launch.PIPE,
             stdout=launch.PIPE,
             stderr=launch.DEVNULL,
-            user=user,
             via=launch.resolve_via(),
         )
     except OSError as e:
@@ -252,12 +243,12 @@ async def run(
     try:
         out, _ = await asyncio.wait_for(proc.communicate(prompt.encode()), timeout)
     except asyncio.TimeoutError:
-        await launch.signal_process_async(proc.pid, signal.SIGKILL, user=user)
+        await launch.signal_process_async(proc.pid, signal.SIGKILL)
         await proc.wait()
         raise OneshotError(f"no answer in {timeout:g}s") from None
     except BaseException:
         if proc.returncode is None:
-            await launch.signal_process_async(proc.pid, signal.SIGKILL, user=user)
+            await launch.signal_process_async(proc.pid, signal.SIGKILL)
             await proc.wait()
         raise
     if proc.returncode != 0:

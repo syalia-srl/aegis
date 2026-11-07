@@ -192,21 +192,6 @@ async def test_always_on_broken_config_starts_and_says_why(world, monkeypatch):
     assert "does not parse" in r["not_saved"] or "fix it" in r["not_saved"]
 
 
-async def test_member_cannot_always(world, monkeypatch):
-    from aegis.ops import Caller, OpError, Principal
-
-    world.app.principals.add("ben", "member")
-    world.app.principals.set_default_policy({"claude": {"mode": "open"}})
-    ben = Caller("user", principal=Principal("ben", "member"))
-    untested(monkeypatch, world.fake, "99.0.0")
-    with pytest.raises(OpError) as e:
-        await person_spawn(world, ben)
-    assert e.value.data["may_always"] is False
-    r = await person_spawn(world, ben, untested="always")
-    assert "admin" in r["not_saved"] and len(notices(world.session(r["log_id"]))) == 1
-    assert "99.0.0" not in (world.root / ".aegis.yaml").read_text()
-
-
 @pytest.mark.parametrize("policy,want", [("warn", 1), ("off", 0)])
 async def test_person_warn_and_off(tmp_path, fake_claude, monkeypatch, policy, want):
     (tmp_path / ".aegis.yaml").write_text(

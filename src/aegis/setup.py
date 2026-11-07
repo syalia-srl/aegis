@@ -7,8 +7,7 @@ the harnesses installed, the agents and queues configured) and the caller's
 last run, so a second run proposes only what is new.
 
 The record is one JSON file per principal under the state directory, written
-through the ``setup_record`` tool: in multi-user mode a member's agent runs as
-the member's Linux user and cannot write the server's state directory itself.
+through the ``setup_record`` tool.
 """
 
 from __future__ import annotations

@@ -196,14 +196,6 @@ async def test_a_screen_no_rule_knows_fails_as_unknown(world, monkeypatch):
     assert card["error"] == "unknown screen"
 
 
-async def test_a_members_session_opens_no_card(world):
-    w = world
-    member = FakeSession("member", linux_user="bob")
-    w.sessions[member.log_id] = member
-    w.sign_ins.failed(member, "claude-code")
-    assert member.records == [] and w.spawns == []
-
-
 async def test_opencode_go_is_chosen_then_its_key_is_checked(world):
     w = world
     checked: list = []
