@@ -65,7 +65,7 @@ def register_config_ops(app: App) -> None:
         the error when the file on disk does not parse."""
         return app.config.current().wire()
 
-    @r.op("config.write", WriteParams)
+    @r.op("config.write", WriteParams, server=True)
     async def config_write(p: WriteParams, caller):
         """Write the Settings form to .aegis.yaml. Refused when the file changed
         since `stamp`; nothing is written when the document has a problem."""
@@ -76,7 +76,7 @@ def register_config_ops(app: App) -> None:
             "config": app.config.current().wire(),
         }
 
-    @r.op("config.detect")
+    @r.op("config.detect", server=True)
     async def config_detect(_, caller):
         """The harnesses installed on this machine: binary, version, models."""
         return [f.wire() for f in await detected()]
@@ -88,7 +88,7 @@ def register_config_ops(app: App) -> None:
         wrong."""
         return [f.wire() for f in await doctor(app.roots, bins())]
 
-    @r.op("config.propose")
+    @r.op("config.propose", server=True)
     async def config_propose(_, caller):
         """The first configuration `aegis init` would write here."""
         return propose(await detected()).model_dump()
@@ -107,6 +107,8 @@ def register_config_ops(app: App) -> None:
         rows = []
         for f in await detected():
             for m in f.models:
+                if not app.offers(caller, harness=f.harness, model=m.value):
+                    continue
                 used = [
                     {"agent": a.name, "at": a.models.index(v)}
                     for a in agents

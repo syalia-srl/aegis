@@ -113,7 +113,13 @@ class Schedules:
         return Schedule(self._srv, name)
 
     async def list(self) -> builtins.list[Schedule]:
-        return [Schedule(self._srv, n) for n in sorted(self._srv.app.schedules.items)]
+        app = self._srv.app
+        me = app.acting(self._srv._caller)
+        return [
+            Schedule(self._srv, n)
+            for n in sorted(app.schedules.items)
+            if app.owns_schedule(me, n)
+        ]
 
 
 class Schedule:
