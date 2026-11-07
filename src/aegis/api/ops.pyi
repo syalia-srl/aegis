@@ -488,20 +488,16 @@ class _layout:
         """layout.undock"""
 
 class _link:
-    async def add(
-        self, *, url: str, token: str, name: str | None = ..., trusted: bool = ...
-    ) -> Any:
+    async def add(self, *, url: str, token: str, name: str | None = ...) -> Any:
         """Link another aegis server: connect once with its token, take the name it gives itself, and keep the link in links.json."""
     async def exit(self, *, name: str | None = ...) -> Any:
         """Make a link this server's exit, or stop exiting: what aegis starts from now on reaches the internet from there (exit.py)."""
     async def incoming(self) -> Any:
-        """The servers that linked this one with trust, so their agents reach this one over their link, and what each took as an exit."""
+        """The servers that linked this one, so their agents reach this one over their link, and what each took as an exit."""
     async def list(self) -> Any:
         """The servers this one links, with their state; never their tokens."""
     async def remove(self, *, name: str) -> Any:
         """link.remove"""
-    async def trust(self, *, name: str, trusted: bool) -> Any:
-        """Ask a link for trust (both ways, agents unrestricted), or stop asking. The link reconnects; the far server decides."""
 
 class _memory:
     async def delete(self, *, name: str) -> Any:
@@ -579,7 +575,7 @@ class _peer:
     async def close(
         self, *, target: str, token: str | None = ..., sender: dict[str, Any]
     ) -> Any:
-        """session_close from an agent on a server linked with trust, under the same rule as here: a session it started closes at once when done, any other on a second call with the token it was given."""
+        """session_close from an agent on a linked server, under the same rule as here: a session it started closes at once when done, any other on a second call with the token it was given."""
     async def deliver(
         self,
         *,
@@ -593,9 +589,9 @@ class _peer:
     async def handoff(
         self, *, target: str, context: str, interrupt: bool = ..., urgent: bool = ...
     ) -> Any:
-        """Give another session context or an instruction; it arrives as a user turn headed `> from agent:<you>`. A busy target gets it when its turn ends, and is told meanwhile who waits; urgent reaches it inside the turn instead, at its next tool step, and interrupt cuts that turn first. `handle@server` reaches a session on a server this one links; nothing there can reach you back, unless the link is trusted."""
+        """Give another session context or an instruction; it arrives as a user turn headed `> from agent:<you>`. A busy target gets it when its turn ends, and is told meanwhile who waits; urgent reaches it inside the turn instead, at its next tool step, and interrupt cuts that turn first. `handle@server` reaches a session on a server this one links."""
     async def read(self, *, target: str, last: int = ..., tools: bool = ...) -> Any:
-        """The last entries of another session's transcript, one line each. `handle@server` reads a session on a server this one links with trust."""
+        """The last entries of another session's transcript, one line each. `handle@server` reads a session on a server this one links."""
 
 class _plan:
     async def update(self, *, items: builtins.list[dict[str, Any]]) -> Any:
@@ -641,9 +637,9 @@ class _queue:
         outcome: Literal["ok", "error"],
         body: str,
     ) -> Any:
-        """A task's result from a server linked with trust, for the agent here that enqueued it. Only that link may call it; the header is composed here from values checked here."""
+        """A task's result from a linked server, for the agent here that enqueued it. Only that link may call it; the header is composed here from values checked here."""
     async def enqueue(self, *, queue: str, payload: str, callback: bool = ...) -> Any:
-        """Hand a self-contained task to a fresh worker on a queue. Returns at once with the task id; the worker's final message reaches your inbox when it finishes (with callback). Keep working meanwhile. `queue@server` enqueues on a server linked with trust; the result still reaches your inbox, and the task id comes back as `task-id@server`."""
+        """Hand a self-contained task to a fresh worker on a queue. Returns at once with the task id; the worker's final message reaches your inbox when it finishes (with callback). Keep working meanwhile. `queue@server` enqueues on a linked server; the result still reaches your inbox, and the task id comes back as `task-id@server`."""
 
 class _quota:
     async def read(self) -> Any:
@@ -665,23 +661,23 @@ class _schedule:
         quota: dict[str, dict[str, int | Literal["pace"]]] = ...,
         name: str,
     ) -> Any:
-        """Fire a prompt on a clock: every 5m, a cron line, or once at a time, into a new session from an agent or into an existing session's inbox. With a bash check, a tick fires only when the check exits 0 with a stdout different from the last fire's, and that stdout is appended to the prompt. You own what you create; schedule_delete removes it. A schedule you create or change waits, paused, until a person approves it from the card under your call. `name@server` makes it on a server linked with trust: it lives and ticks there, its runs start there, and a directory or a session in it is that server's."""
+        """Fire a prompt on a clock: every 5m, a cron line, or once at a time, into a new session from an agent or into an existing session's inbox. With a bash check, a tick fires only when the check exits 0 with a stdout different from the last fire's, and that stdout is appended to the prompt. You own what you create; schedule_delete removes it. A schedule you create or change waits, paused, until a person approves it from the card under your call. `name@server` makes it on a linked server: it lives and ticks there, its runs start there, and a directory or a session in it is that server's."""
     async def delete(self, *, name: str) -> Any:
-        """Delete a schedule you own. A live run keeps going. `name@server` is one on a server linked with trust."""
+        """Delete a schedule you own. A live run keeps going. `name@server` is one on a linked server."""
     async def fire(self, *, name: str) -> Any:
-        """Fire a schedule you own now, skipping its clock and its check. The overlap rule still holds: with a live run, wait holds it and skip drops it. A schedule that fires a workflow fires only on its clock for an agent: the person approved the clock, not runs on demand. `name@server` is one on a server linked with trust, and its run starts there."""
+        """Fire a schedule you own now, skipping its clock and its check. The overlap rule still holds: with a live run, wait holds it and skip drops it. A schedule that fires a workflow fires only on its clock for an agent: the person approved the clock, not runs on demand. `name@server` is one on a linked server, and its run starts there."""
     async def list(self) -> Any:
-        """Every schedule on this server: its clock, layers and owner, its next tick, its live runs, and whether it is paused. An agent also gets each server's linked with trust, named `name@server` and with `server`."""
+        """Every schedule on this server: its clock, layers and owner, its next tick, its live runs, and whether it is paused. An agent also gets each linked server's, named `name@server` and with `server`."""
     async def pause(self, *, name: str) -> Any:
-        """Stop a schedule you own from ticking until it is resumed. `name@server` is one on a server linked with trust."""
+        """Stop a schedule you own from ticking until it is resumed. `name@server` is one on a linked server."""
     async def pools(self) -> Any:
         """The pools a schedule's quota lines may name, with their windows, and the lines a schedule gets when it names none: for the view's editor."""
     async def resume(self, *, name: str, workflow: str | None = ...) -> Any:
-        """Start a paused schedule again from now, its error count cleared. The ticks that fell during the pause do not fire. `name@server` is one on a server linked with trust; one waiting for a person stays a person's to unpause there too."""
+        """Start a paused schedule again from now, its error count cleared. The ticks that fell during the pause do not fire. `name@server` is one on a linked server; one waiting for a person stays a person's to unpause there too."""
     async def runs(
         self, *, name: str, offset: int = ..., limit: int = ..., quiet: bool = ...
     ) -> Any:
-        """One schedule's fires and ticks, newest first, a page at a time. The ticks that changed nothing are left out unless you pass quiet. `name@server` reads one on a server linked with trust."""
+        """One schedule's fires and ticks, newest first, a page at a time. The ticks that changed nothing are left out unless you pass quiet. `name@server` reads one on a linked server."""
     async def test(
         self,
         *,
@@ -691,7 +687,7 @@ class _schedule:
         cwd: str | None = ...,
         name: str | None = ...,
     ) -> Any:
-        """Try a clock and a check without saving anything: the next three ticks, and whether the check would fire now and why. With `name@server` both are tried on a server linked with trust."""
+        """Try a clock and a check without saving anything: the next three ticks, and whether the check would fire now and why. With `name@server` both are tried on a linked server."""
     async def update(
         self,
         *,
@@ -703,7 +699,7 @@ class _schedule:
         quota: dict[str, dict[str, int | Literal["pace"]]] = ...,
         name: str,
     ) -> Any:
-        """Replace a schedule you own with a new definition. It applies from the next tick; a live run is not touched. `name@server` is one on a server linked with trust."""
+        """Replace a schedule you own with a new definition. It applies from the next tick; a live run is not touched. `name@server` is one on a linked server."""
 
 class _secret:
     async def provide(self, *, log_id: str, id: str, secret: str) -> Any:
@@ -765,7 +761,7 @@ class _session:
     async def kills(self, *, log_id: str) -> Any:
         """What Sleep would end with the process, one plain line each: what a park waits for, the stray processes included (park.kills). Asked when Sleep is chosen, since the /proc scan is too dear per publish."""
     async def list(self) -> Any:
-        """The open sessions on this server, each with its state, what it needs (attention and its line, what it waits on), its plan and what it is doing now, its model (`model` as configured, `model_id` as the harness resolved it, null until it has), spend, and `load`: the CPU in cores over the last minute and the RAM in GB of it and everything it started, null while it has no process; then each linked server's by handle and state alone, as `handle@server`: reach one with peer_handoff. A server linked with trust lists its sessions in full, with `server`."""
+        """The open sessions on this server, each with its state, what it needs (attention and its line, what it waits on), its plan and what it is doing now, its model (`model` as configured, `model_id` as the harness resolved it, null until it has), spend, and `load`: the CPU in cores over the last minute and the RAM in GB of it and everything it started, null while it has no process; then each linked server's sessions in full, with `server`: reach one as `handle@server`."""
     async def quiet(self, *, handle: str | None = ...) -> Any:
         """Hide a session's tab while it works: it stays in the Fleet, dimmed, and its tab comes back by itself when its turn ends done, review, needs_you or error. Only a working or waiting session can be quiet. Use it for a session doing background work the person need not watch, your own included."""
     async def read(self, *, log_id: str, ids: builtins.list[str]) -> Any:
@@ -808,7 +804,7 @@ class _session:
         prompt: str | None = ...,
         quiet: bool = ...,
     ) -> Any:
-        """Start a new session from an agent, overriding its harness, model, effort or permission if you need to, and send it `prompt` as its first message. Its permission can be at most yours. Returns its log id and handle. It does not report back: read it with peer_read, message it with peer_handoff. With agent@server it starts on that linked server, as this server's link there, and that server's quota policy for the link decides; you can hand off to it, not read it."""
+        """Start a new session from an agent, overriding its harness, model, effort or permission if you need to, and send it `prompt` as its first message. Its permission can be at most yours. Returns its log id and handle. It does not report back: read it with peer_read, message it with peer_handoff. With agent@server it starts on that linked server, as this server's link there, and that server's quota gate decides."""
     async def stop(self, *, log_id: str) -> Any:
         """session.stop"""
     async def unquiet(self, *, log_id: str) -> Any:
@@ -887,7 +883,7 @@ class _task:
     async def resume(self, *, task_id: str) -> Any:
         """Put a failed or cancelled task's worker back to work, with its conversation intact."""
     async def status(self, *, task_id: str) -> Any:
-        """A task's status, its worker, and its result once finished. `task-id@server` reads one on a server linked with trust."""
+        """A task's status, its worker, and its result once finished. `task-id@server` reads one on a linked server."""
 
 class _term:
     async def close(self, *, id: str) -> Any:

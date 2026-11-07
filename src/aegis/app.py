@@ -776,9 +776,15 @@ class App:
 
     def link_refusal(self, server: str) -> str | None:
         """Why this server will not take ``server``'s link, or None: one link
-        joins a pair of servers both ways, so it refuses a second (links.py)."""
+        joins a pair of servers both ways (links.py). When both link each
+        other, the one already up stays; while neither is, the one opened by
+        the server whose name sorts first. A link of this server's that was
+        refused never competes, so the pair settles on one."""
         me = self.server_name
-        if self.links.outbound(server) is not None:
+        out = self.links.outbound(server)
+        if out is None or out.state == "refused":
+            return None
+        if out.state == "linked" or me < server:
             return (
                 f"{me} links a server named {server} itself; remove one of "
                 "the two links"

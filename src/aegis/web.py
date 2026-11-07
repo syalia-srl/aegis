@@ -541,7 +541,7 @@ def build_web(
             )
             if principal is None:
                 return "bad token"
-            return app.link_refusal(via) if via else "no link named"
+            return None if via else "no link named"
 
         await exit_.relay(
             websocket,
@@ -638,7 +638,7 @@ def build_web(
             def still() -> str | None:
                 if recheck and not app.still_valid(given, principal):
                     return "the link's token was revoked"
-                return app.link_refusal(via)
+                return None
 
             back = Backlink(via, out.put_nowait, still, app.links.detach)
 
