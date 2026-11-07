@@ -44,6 +44,7 @@ from ruamel.yaml.scalarstring import LiteralScalarString
 from ruamel.yaml.util import load_yaml_guess_indent
 
 from .agents import EFFORTS, HARNESSES, PERMISSION_ORDER, Agent, agents_from
+from .session import SWITCHES
 from .claude.process import REPLACED_TOOLS
 
 # Imported for their notice sources' declarations (notice_sources.py), so
@@ -76,6 +77,7 @@ NOT_PER_HOST = ("hosts",)
 AGENT_KEYS = (
     "harness", "provider", "model", "models", "effort", "permission", "priming",
     "keep_harness_tools", "exit", "mcp",
+    "harness_tools", "isolated", "primer", "notices",
 )  # fmt: skip
 QUEUE_KEYS = ("agent", "priority", "quiet")
 
@@ -714,6 +716,11 @@ class AgentDoc(BaseModel):
     # A linked server to exit through, or "off"; blank: the server's exit_via.
     exit: str = ""
     mcp: list[str] = Field(default_factory=list)
+    # A product agent's switches (session.SWITCHES, #983).
+    harness_tools: bool = True
+    isolated: bool = False
+    primer: bool = True
+    notices: bool = True
 
 
 class QueueDoc(BaseModel):
@@ -807,6 +814,7 @@ def doc_from(data: dict) -> ConfigDoc:
             keep_harness_tools=_keep_raw(data, a.name),
             exit=a.exit,
             mcp=_mcp_raw(data, a.name),
+            **{k: getattr(a, k) for k in SWITCHES},
         )
         for a in agents_from(data)
     ]
@@ -1344,6 +1352,11 @@ def _set_agent(node: CommentedMap, a: AgentDoc) -> None:
         _put(node, "mcp", list(a.mcp))
     else:
         node.pop("mcp", None)
+    for k, default in SWITCHES.items():
+        if getattr(a, k) != default:
+            _put(node, k, getattr(a, k))
+        else:
+            node.pop(k, None)
 
 
 def _apply(data: CommentedMap, doc: ConfigDoc) -> None:

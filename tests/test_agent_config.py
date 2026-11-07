@@ -238,3 +238,25 @@ def test_an_opencode_agent_names_provider_and_model(tmp_path):
         == "an OpenCode model is provider/model, such as opencode-go/deepseek-v4-pro"
     )
     assert not a.enabled
+
+
+PRODUCT = (
+    "agents:\n"
+    "  product: {harness: claude-code, model: opus, effort: high, permission: full,\n"
+    "            harness_tools: false, isolated: true, primer: false, notices: false}\n"
+    "  bad: {harness: claude-code, model: opus, effort: high, permission: full,\n"
+    "        isolated: 'yes'}\n"
+)
+
+
+def test_the_product_switches_parse_and_reach_the_spec(tmp_path):
+    agents = load_agents(write(tmp_path, PRODUCT))
+    spec = resolve(agents, None, "product", none(), tmp_path)
+    assert (spec.harness_tools, spec.isolated, spec.primer, spec.notices) == (
+        False,
+        True,
+        False,
+        False,
+    )
+    bad = {a.name: a for a in agents}["bad"]
+    assert bad.error == "isolated must be true or false" and not bad.enabled
