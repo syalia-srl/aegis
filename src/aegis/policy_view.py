@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .app import App
+    from .policy import Action
     from .ops import Principal
 
 # The channels whose rows belong to a session, by the field that keys a row
@@ -25,7 +26,7 @@ class PolicyView:
         self._who = principal.who
         self._sent: dict[str, set[Any]] = {}
 
-    def _can(self, action: str, log_id: str | None) -> bool:
+    def _can(self, action: Action, log_id: str | None) -> bool:
         if not log_id:
             return True
         app = self._app
