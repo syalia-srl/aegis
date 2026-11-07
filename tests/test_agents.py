@@ -52,6 +52,7 @@ class World:
         self.port = _free_port()
         self.base = f"http://127.0.0.1:{self.port}"
         self.app: App | None = None
+        self.policy = None  # a host policy for the App (#959)
         self._server = None
         self._task = None
 
@@ -62,6 +63,7 @@ class World:
             opencode_bin=self.opencode,
             base_url=self.base,
             interrupt_timeout=1,
+            policy=self.policy,
         )
         web = build_web(self.app, "tok", {f"127.0.0.1:{self.port}"})
         self._server = uvicorn.Server(
