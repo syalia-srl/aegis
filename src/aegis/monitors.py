@@ -71,7 +71,7 @@ def classify(attention: str) -> str:
 
 
 async def run_bash(
-    cmd: str, cwd: str, timeout: float = CONDITION_LIMIT_S, *, user: str | None
+    cmd: str, cwd: str, timeout: float = CONDITION_LIMIT_S
 ) -> tuple[int | None, str, str]:
     """Run ``cmd`` under bash in ``cwd``, as ``user`` (launch.py): its exit
     code, stdout and stderr. The code is None when bash could not start or the
@@ -83,7 +83,6 @@ async def run_bash(
             cwd=cwd,
             stdout=launch.PIPE,
             stderr=launch.PIPE,
-            user=user,
             via=launch.resolve_via(),
         )
     except OSError as e:
@@ -91,7 +90,7 @@ async def run_bash(
     try:
         out, err = await asyncio.wait_for(proc.communicate(), timeout)
     except TimeoutError:
-        await launch.signal_process_async(proc.pid, signal.SIGKILL, user=user)
+        await launch.signal_process_async(proc.pid, signal.SIGKILL)
         await proc.wait()
         return None, "", f"took over {timeout:g}s"
     return (
@@ -357,26 +356,11 @@ class Monitors:
     def _arm(self, m: Monitor) -> None:
         self._tasks[m.id] = asyncio.get_running_loop().create_task(self._watch(m))
 
-    async def _run(
-        self, cmd: str, cwd: str, user: str | None = None
-    ) -> tuple[int | None, str, str]:
-        return await run_bash(cmd, cwd, user=user)
+    async def _run(self, cmd: str, cwd: str) -> tuple[int | None, str, str]:
+        return await run_bash(cmd, cwd)
 
     async def _check(self, m: Monitor, kind: str) -> tuple[int | None, str, bool]:
-        # As the owner of the session that armed it (users.py); in multi-user
-        # mode never as the server for a session that has no user or is gone.
-        s = self._registry.sessions.get(m.owner)
-        try:
-            if s is None:
-                if self._registry.multi_user:
-                    raise PermissionError("the session that armed it is gone")
-                user = None
-            else:
-                user = self._registry.user_for(s.spec)
-        except PermissionError as e:
-            rc, out, err = None, "", str(e)
-        else:
-            rc, out, err = await self._run(getattr(m, kind), m.cwd, user)
+        rc, out, err = await self._run(getattr(m, kind), m.cwd)
         return rc, out, m.record(kind, rc, out, err)
 
     def _publish(self, m: Monitor) -> None:

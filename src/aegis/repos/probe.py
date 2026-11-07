@@ -40,7 +40,7 @@ class Probe:
     slug: str = ""
 
 
-def git(top: str, *args: str, user: str | None = None) -> str | None:
+def git(top: str, *args: str) -> str | None:
     try:
         r = launch.run(
             ["git", "-C", top, *args],
@@ -48,27 +48,24 @@ def git(top: str, *args: str, user: str | None = None) -> str | None:
             errors="surrogateescape",  # a path git prints may not be UTF-8
             timeout=TIMEOUT,
             env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"},
-            user=user,
         )
     except (OSError, subprocess.TimeoutExpired, ValueError):
         return None
     return r.stdout if r.returncode == 0 else None
 
 
-def _op(top: str, user: str | None = None) -> str:
-    gd = git(top, "rev-parse", "--absolute-git-dir", user=user)
+def _op(top: str) -> str:
+    gd = git(top, "rev-parse", "--absolute-git-dir")
     if not gd:
         return ""
     gd = gd.strip()
     return next((name for m, name in OPS if os.path.exists(os.path.join(gd, m))), "")
 
 
-def probe(top: str, user: str | None = None) -> Probe | None:
+def probe(top: str) -> Probe | None:
     """The worktree's branch, upstream, operation and changed files; ``None``
     when it is gone or git cannot read it."""
-    # The server may not see inside a member's home: as a user, git's own
-    # failure says the worktree is gone.
-    if user is None and not os.path.isdir(top):
+    if not os.path.isdir(top):
         return None
     out = git(
         top,
@@ -77,13 +74,12 @@ def probe(top: str, user: str | None = None) -> Probe | None:
         "--branch",
         "-z",
         "--untracked-files=all",
-        user=user,
     )
     if out is None:
         return None
     p = Probe(
-        op=_op(top, user),
-        slug=slug(git(top, "remote", "get-url", "origin", user=user) or ""),
+        op=_op(top),
+        slug=slug(git(top, "remote", "get-url", "origin") or ""),
     )
     fields = out.split("\0")
     i = 0
@@ -107,7 +103,7 @@ def probe(top: str, user: str | None = None) -> Probe | None:
         elif line.startswith("2 "):
             p.dirty[line.split(" ", 9)[-1]] = ""
             i += 1  # the rename's original path is the next field
-    stat = git(top, "diff", "--numstat", "HEAD", "--", user=user) or ""
+    stat = git(top, "diff", "--numstat", "HEAD", "--") or ""
     for row in stat.splitlines():
         a, d, path = (row.split("\t", 2) + ["", ""])[:3]
         if path in p.dirty and not p.dirty[path]:
@@ -117,23 +113,17 @@ def probe(top: str, user: str | None = None) -> Probe | None:
     return p
 
 
-def base(top: str, upstream: str, user: str | None = None) -> str:
+def base(top: str, upstream: str) -> str:
     """What "upstream" means for a worktree: its branch's upstream while that
     ref exists, else the remote's default branch. A PR merged by rebase with its
     branch deleted leaves a worktree whose upstream is gone."""
-    if (
-        upstream
-        and git(top, "rev-parse", "--verify", "--quiet", upstream, user=user)
-        is not None
-    ):
+    if upstream and git(top, "rev-parse", "--verify", "--quiet", upstream) is not None:
         return upstream
-    head = git(
-        top, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD", user=user
-    )
+    head = git(top, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
     if head:
         return head.strip()
     for ref in ("origin/main", "origin/master"):
-        if git(top, "rev-parse", "--verify", "--quiet", ref, user=user) is not None:
+        if git(top, "rev-parse", "--verify", "--quiet", ref) is not None:
             return ref
     return ""
 
@@ -144,9 +134,7 @@ def slug(url: str) -> str:
     return f"{m[1]}/{m[2]}" if m else ""
 
 
-def unpushed(
-    top: str, shas: list[str], upstream: str, user: str | None = None
-) -> list[str] | None:
+def unpushed(top: str, shas: list[str], upstream: str) -> list[str] | None:
     """Of ``shas``, those not yet upstream, in their given order. A sha counts
     as pushed when a remote-tracking ref contains it, or when an equivalent
     patch is on ``upstream`` (a rebase merge rewrote it). A sha the repo no
@@ -154,9 +142,7 @@ def unpushed(
     tell: never read as "all pushed"."""
     if not shas:
         return []
-    out = git(
-        top, "rev-list", "--ignore-missing", *shas, "--not", "--remotes", user=user
-    )
+    out = git(top, "rev-list", "--ignore-missing", *shas, "--not", "--remotes")
     if out is None:
         return None
     walked = set(out.split())
@@ -170,7 +156,7 @@ def unpushed(
             continue
         # Every commit between the merge base and tip, "-" when upstream has
         # an equivalent patch: one call covers a whole branch.
-        cherry = git(top, "cherry", upstream, tip, user=user)
+        cherry = git(top, "cherry", upstream, tip)
         if cherry is None:
             return None
         for ln in cherry.splitlines():

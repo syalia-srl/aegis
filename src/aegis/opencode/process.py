@@ -208,7 +208,7 @@ class OpenCodeProcess:
             [self._bin, "serve", "--hostname", "127.0.0.1", "--port", "0"],
             cwd=self._launch.cwd, env=session_env(self._launch, env),
             stdin=launch.DEVNULL, stdout=launch.PIPE, stderr=launch.PIPE,
-            cgroup=self._launch.cgroup, oom=True, user=self._launch.user,
+            cgroup=self._launch.cgroup, oom=True,
             via=self._launch.via, die_with_parent=True,
         )  # fmt: skip
         try:
@@ -286,7 +286,7 @@ class OpenCodeProcess:
         proc = self._proc
         if proc is not None and proc.returncode is None:
             await launch.signal_process_async(
-                proc.pid, signal.SIGTERM, user=self._launch.user
+                proc.pid, signal.SIGTERM
             )  # direct signal before the fallback can yield
         else:
             proc = None
@@ -295,9 +295,7 @@ class OpenCodeProcess:
             try:
                 await asyncio.wait_for(proc.wait(), TERM_GRACE_S)
             except TimeoutError:
-                await launch.signal_process_async(
-                    proc.pid, signal.SIGKILL, user=self._launch.user
-                )
+                await launch.signal_process_async(proc.pid, signal.SIGKILL)
                 await proc.wait()
         if self._wait_task is not None:
             self._wait_task.cancel()
@@ -328,7 +326,7 @@ class OpenCodeProcess:
             self._note("the event stream closed")
             assert self._proc is not None
             await launch.signal_process_async(
-                self._proc.pid, signal.SIGTERM, user=self._launch.user
+                self._proc.pid, signal.SIGTERM
             )  # _wait reports the exit
 
     def _deliver(self, raw: str) -> None:

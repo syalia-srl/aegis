@@ -227,27 +227,10 @@ export class Settings {
       return;
     }
     this.drawLater = false;
-    // A member changes nothing on the server: this browser, the doctor, a word.
-    if (who.role === "member")
-      return this.box.replaceChildren(
-        h(
-          "div",
-          { className: "set-page" },
-          h("p", { className: "notice", id: "set-member", textContent: "Server settings (agents, queues, parking, workflows, servers, tokens) are edited by an admin." }),
-          this.browser(),
-          this.knowledge(),
-          this.checks(),
-          this.modelsView(),
-        ),
-      );
-    if (this.tokenRows === undefined) {
-      this.tokenRows = null;
-      this.loadTokens();
-    }
     const w = this.wire;
     // The title first, then what this browser keeps, then the servers; the
     // loading and no-config pages keep the same width and order.
-    const page = (...kids) => h("div", { className: "set-page" }, ...kids, this.browser(), this.knowledge(), this.servers(), this.tokens());
+    const page = (...kids) => h("div", { className: "set-page" }, ...kids, this.browser(), this.knowledge(), this.servers());
     if (!w || !this.doc) return this.box.replaceChildren(page(h("p", { className: "notice", textContent: "Loading…" })));
     if (!w.exists && !this.dirty) return this.box.replaceChildren(page(this.empty()));
     const full = h(
@@ -258,7 +241,6 @@ export class Settings {
       this.knowledge(),
       this.servers(),
       this.pauseView(),
-      this.tokens(),
       w.error && h("p", { className: "set-alert err", id: "set-error", textContent: `The file on disk does not parse, so aegis is still using the last version that did. ${w.error}` }),
       this.stale && this.staleAlert(),
       this.checks(),
@@ -650,360 +632,6 @@ export class Settings {
       }),
       h("div", { className: "set-linkrow" }, b),
     );
-  }
-
-  // Who may use this server (tokens.py) and how much of each pool its members
-  // may spend (quota_gate.py): the pools now, the default policy, a card per
-  // token, and a form to mint one, shown once. Policy edits go out with the
-  // save bar; adding and revoking act at once, because each shows or kills a
-  // secret. The chips are the server's verdict on the saved policies.
-  tokens() {
-    // In multi-user mode a token names the Linux user it runs as: the name
-    // until the field is edited (tokens.py).
-    const user =
-      this.multiUser &&
-      h("input", {
-        className: "set-in",
-        id: "set-token-user",
-        placeholder: "Linux user",
-        spellcheck: false,
-        value: this.tokenUser ?? this.tokenName ?? "",
-        oninput: (e) => (this.tokenUser = e.target.value),
-      });
-    const name = h("input", {
-      className: "set-in",
-      id: "set-token-name",
-      placeholder: "name, e.g. ben or laptop",
-      spellcheck: false,
-      value: this.tokenName || "",
-      oninput: (e) => {
-        this.tokenName = e.target.value;
-        if (user && this.tokenUser == null) user.value = e.target.value;
-      },
-    });
-    const role = select("role", ["member", "admin"], this.tokenRole || "member");
-    role.id = "set-token-role";
-    role.addEventListener("change", () => (this.tokenRole = role.value));
-    const add = button("Add token", "set-token-add", () => this.addToken(name.value.trim(), role.value, user ? user.value.trim() : null), "btn primary");
-    const once = this.tokenOnce;
-    const section = h(
-      "section",
-      { className: "set-tokens", id: "set-tokens" },
-      h("h3", { textContent: "Tokens" }),
-      h("p", { className: "set-none", textContent: "Who may use this server, and how much of each pool a member may spend. A member reads every session and changes only its own; an admin changes anything and is never gated." }),
-      this.pools && this.poolNow(),
-      this.pools && h("div", { className: "set-agents", id: "set-tokcards" }, this.tokenCard(null), ...(this.tokenRows || []).map((t) => this.tokenCard(t))),
-      h("div", { className: "set-linkrow" }, name, user, role, add),
-      this.tokenError && h("p", { className: "err-text", id: "set-token-error", textContent: this.tokenError }),
-      once &&
-        h(
-          "div",
-          { className: "notice set-once", id: "set-token-once" },
-          h("span", { textContent: once.text }),
-          h("code", { textContent: once.token }),
-          button("Copy", null, () => navigator.clipboard?.writeText(once.token)),
-        ),
-    );
-    this.handles(section);
-    return section;
-  }
-
-  // Each pool's gauges now, so lines are set against the real readings.
-  poolNow() {
-    const now = serverNow();
-    return h(
-      "div",
-      { className: "poolnow", id: "set-poolnow" },
-      ...this.pools.map((pool) => {
-        const p = this.reading(pool.name);
-        const rows = !pool.windows.length
-          ? [h("div", { className: "kv dim" }, h("span", { textContent: "no gauge" }))]
-          : !p
-            ? [h("div", { className: "kv dim" }, h("span", { textContent: "no reading" }))]
-            : p.windows.flatMap((w) => [
-                h("div", { className: "kv" }, h("span", { textContent: w.label }), h("span", { textContent: `${Math.round(w.percent)}%` })),
-                this.fill("bar", w.percent, elapsed(w, now)),
-              ]);
-        return h("div", { className: `pool-${pool.name}` }, h("h5", { textContent: pool.label }), ...rows);
-      }),
-    );
-  }
-
-  reading(pool) {
-    return (this.quota?.providers || []).find((p) => p.name === pool && p.state !== "failed") || null;
-  }
-
-  // A gauge's track: the fill, and the share of the window gone.
-  fill(cls, pct, gone) {
-    const b = h("div", { className: cls }, h("i", { style: `width:${Math.min(100, Math.max(0, pct))}%` }));
-    if (gone != null) b.append(h("span", { className: "tick", style: `left:${gone * 100}%` }));
-    return b;
-  }
-
-  // One card: the default policy (t null), an admin, or a member with its own
-  // policy or the default's.
-  tokenCard(t) {
-    const key = t ? t.name : "*";
-    const card = h("div", { className: t ? `set-agent set-tok tok-${t.name}` : "set-agent set-tok is-default", id: t ? "" : "set-tok-default" });
-    const chips = (gates) =>
-      this.pools.map((pool) => {
-        const st = gates?.[pool.name] || "closed";
-        return h("span", { className: `set-pill ${st === "open" ? "ok" : st === "stopped" ? "bad" : "warn"}`, textContent: `${pool.label} ${st}` });
-      });
-    const used = (t) => (t.used_at ? `used ${new Date(t.used_at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "not used since start");
-    if (!t) {
-      card.append(
-        h("span", { className: "set-name", textContent: "default" }),
-        h("div", { className: "picks" }, h("span", { className: "set-none", textContent: "every member without a policy of its own" }), ...chips(this.defaultGates)),
-        this.editor(key),
-      );
-      return card;
-    }
-    const member = t.role !== "admin";
-    const own = member && this.pol[key] != null;
-    const policyLink = member && button(own ? "Reset to default" : "Customize", null, () => this.customize(key, !own), "link");
-    const revoke = button(this.armed === t.name ? "Click again to confirm" : t.owner ? "Revoke and regenerate" : "Revoke", null, () => this.revoke(t.name), "link danger");
-    card.append(
-      h("span", { className: "set-name", textContent: t.name }),
-      h(
-        "div",
-        { className: "picks" },
-        h("span", { className: "set-pill", textContent: t.role }),
-        this.multiUser && h("span", { className: "set-pill set-uid", textContent: t.linux_user ? `uid ${t.linux_user}` : "server's user" }),
-        ...(member ? chips(t.gates) : [h("span", { className: "set-pill", textContent: "never gated" })]),
-        h("span", { className: "set-none set-used", textContent: used(t) }),
-        h("span", { className: "set-gap" }),
-        policyLink,
-        revoke,
-      ),
-    );
-    if (member) card.append(own ? this.editor(key) : h("div", { className: "pol" }, h("span", { className: "set-none", textContent: "uses the default" })));
-    return card;
-  }
-
-  // A policy per pool: closed, open without lines, or lines on its windows.
-  editor(key) {
-    const pol = this.pol[key];
-    return h(
-      "div",
-      { className: "pol" },
-      ...this.pools.map((pool) => {
-        const pp = pol[pool.name] || { mode: "closed" };
-        const modes = pool.windows.length ? ["closed", "open", "lines"] : ["closed", "open"];
-        const mode = select("mode", modes, pp.mode, (m) => (m === "open" ? "open, no lines" : m));
-        mode.dataset.pool = pool.name;
-        mode.setAttribute("aria-label", `${key === "*" ? "default" : key} ${pool.label} mode`);
-        mode.addEventListener("change", () => {
-          const cur = pol[pool.name] || {};
-          if (mode.value === "lines") {
-            const lines = cur.lines && Object.keys(cur.lines).length ? cur.lines : { [pool.windows[0].kind]: { launch: 50, stop: 90 } };
-            pol[pool.name] = { mode: "lines", lines };
-          } else pol[pool.name] = { mode: mode.value };
-          this.touchPolicy(true);
-        });
-        const note =
-          pp.mode !== "lines" &&
-          h("span", { className: "wv", textContent: (pp.mode === "open" ? "may start at any reading" : "may not start harnesses here") + (pool.windows.length ? "" : "; no gauge, so no lines") });
-        const rows = pp.mode === "lines" ? pool.windows.map((w) => this.winrow(key, pool, w, pp)) : [];
-        return h("div", { className: `poolrow pool-${pool.name}` }, h("span", { className: "pl", textContent: pool.label }), h("div", {}, h("div", { className: "modeline" }, mode, note), ...rows));
-      }),
-    );
-  }
-
-  winrow(key, pool, w, pp) {
-    pp.lines ||= {}; // a hand-edited "lines" with none: every window unused
-    const l = pp.lines[w.kind];
-    const rw = this.reading(pool.name)?.windows.find((x) => x.kind === w.kind);
-    const pct = rw ? rw.percent : 0;
-    const gone = rw ? elapsed(rw, serverNow()) : null;
-    const check = (act, checked, disabled, onchange) => h("input", { type: "checkbox", checked, disabled, onchange, className: `set-${act}` });
-    const use = check("use", !!l, false, (e) => {
-      if (e.target.checked) pp.lines[w.kind] = { launch: 50, stop: 90 };
-      else delete pp.lines[w.kind];
-      this.touchPolicy(true);
-    });
-    const pace =
-      w.pace &&
-      h(
-        "label",
-        {},
-        check("pace", l?.launch === "pace", !l, (e) => {
-          l.launch = e.target.checked ? "pace" : Math.min(50, l.stop - 1);
-          this.touchPolicy(true);
-        }),
-        "pace",
-      );
-    const name = h("div", { className: "wl" }, h("label", {}, use, w.label), pace);
-    const track = this.fill("track", pct, null);
-    Object.assign(track.dataset, { key, pool: pool.name, win: w.kind });
-    if (l) {
-      const handle = (which, at) => {
-        const b = h("button", { type: "button", className: `h ${which === "launch" ? "l" : "s"}`, style: `left:${at}%` }, h("span", { textContent: at }));
-        b.dataset.h = which;
-        b.setAttribute("aria-label", `${w.label} ${which} line`);
-        return b;
-      };
-      const lpos = l.launch === "pace" ? (gone ?? 0) * 100 : l.launch;
-      track.append(h("span", { className: "zone closed", style: `left:${lpos}%;width:${Math.max(0, l.stop - lpos)}%` }), h("span", { className: "zone stop", style: `left:${l.stop}%;right:0` }));
-      track.append(l.launch === "pace" ? h("span", { className: "pace", style: `left:${lpos}%` }, h("span", { textContent: "pace" })) : handle("launch", l.launch), handle("stop", l.stop));
-    }
-    return h("div", { className: `winrow win-${w.kind}${l ? "" : " off"}` }, name, track, h("span", { className: "wv" }, h("span", { className: "rd", textContent: l ? readout(l) : "not used" })));
-  }
-
-  // Drag a handle, or move it with the arrows (Shift: five points). The launch
-  // line never reaches the stop line. Moves the handle in place, so a drag
-  // and the focus survive; the save bar says the page is dirty.
-  handles(root) {
-    let drag = null;
-    const at = (b) => ({ ...b.parentElement.dataset, which: b.dataset.h, track: b.parentElement });
-    root.addEventListener("pointerdown", (e) => {
-      const b = e.target.closest(".h");
-      if (!b) return;
-      drag = at(b);
-      b.setPointerCapture(e.pointerId);
-      e.preventDefault();
-    });
-    root.addEventListener("pointermove", (e) => {
-      if (!drag) return;
-      const r = drag.track.getBoundingClientRect();
-      this.setLine(drag, Math.round(((e.clientX - r.left) / r.width) * 100));
-    });
-    const end = () => {
-      if (!drag) return;
-      drag = null;
-      this.touchPolicy(false);
-    };
-    root.addEventListener("pointerup", end);
-    root.addEventListener("pointercancel", end);
-    root.addEventListener("keydown", (e) => {
-      const b = e.target.closest(".h");
-      if (!b || !["ArrowLeft", "ArrowRight"].includes(e.key)) return;
-      e.preventDefault();
-      const d = at(b);
-      const l = this.pol[d.key][d.pool].lines[d.win];
-      this.setLine(d, l[d.which] + (e.key === "ArrowRight" ? 1 : -1) * (e.shiftKey ? 5 : 1));
-      this.touchPolicy(false);
-    });
-  }
-
-  setLine(d, v) {
-    const l = this.pol[d.key][d.pool].lines[d.win];
-    if (d.which === "launch") l.launch = Math.max(0, Math.min(v, l.stop - 1));
-    else l.stop = Math.min(100, Math.max(v, l.launch === "pace" ? 1 : l.launch + 1));
-    const tr = d.track;
-    const pace = tr.querySelector(".pace");
-    const lpos = l.launch === "pace" ? parseFloat(pace?.style.left) || 0 : l.launch;
-    for (const [sel, val] of [[".h.l", l.launch], [".h.s", l.stop]]) {
-      const b = tr.querySelector(sel);
-      if (!b) continue;
-      b.style.left = `${val}%`;
-      b.firstChild.textContent = val;
-    }
-    const zc = tr.querySelector(".zone.closed");
-    zc.style.left = `${lpos}%`;
-    zc.style.width = `${Math.max(0, l.stop - lpos)}%`;
-    tr.querySelector(".zone.stop").style.left = `${l.stop}%`;
-    tr.closest(".winrow").querySelector(".rd").textContent = readout(l);
-  }
-
-  // Customize copies the default into the token; Reset drops its own.
-  customize(key, on) {
-    this.pol[key] = on ? structuredClone(this.pol["*"]) : null;
-    this.touchPolicy(true);
-  }
-
-  touchPolicy(redraw) {
-    this.status = "";
-    if (redraw) this.drawTokens();
-    this.drawBar();
-  }
-
-  // The policies whose edits are not saved: "*" is the default.
-  policyChanges() {
-    return Object.keys(this.pol || {}).filter((k) => JSON.stringify(this.pol[k]) !== this.polSaved[k]);
-  }
-
-  // Each change on its own, so one refused (a token another admin revoked)
-  // keeps no other from saving; then the list as the server holds it.
-  async savePolicies() {
-    const failed = [];
-    for (const name of this.policyChanges()) {
-      try {
-        await this.conn.call("token.policy", { name, policy: this.pol[name] });
-      } catch (e) {
-        failed.push(`${name === "*" ? "default" : name}: ${e.message}`);
-      }
-    }
-    await this.loadTokens();
-    if (failed.length) throw new Error(`Not saved: ${failed.join("; ")}`);
-  }
-
-  // The live quota, for the pools strip: redrawn alone, never under a drag.
-  onQuota(q) {
-    this.quota = q;
-    const old = this.box.querySelector("#set-poolnow");
-    if (old && this.pools) old.replaceWith(this.poolNow());
-  }
-
-  async loadTokens() {
-    try {
-      const r = await this.conn.call("token.list");
-      this.tokenRows = r.tokens;
-      this.multiUser = !!r.multi_user;
-      this.pools = r.pools;
-      this.defaultGates = r.default_gates;
-      // What the server holds now; an unsaved edit survives an add or a revoke.
-      const fresh = { "*": r.default_policy ?? {} };
-      for (const t of r.tokens) if (t.role !== "admin") fresh[t.name] = t.policy;
-      const keep = new Set(this.policyChanges());
-      this.polSaved = Object.fromEntries(Object.entries(fresh).map(([k, v]) => [k, JSON.stringify(v)]));
-      this.pol = Object.fromEntries(Object.entries(fresh).map(([k, v]) => [k, keep.has(k) ? this.pol[k] : structuredClone(v)]));
-    } catch (e) {
-      this.tokenError = e.message;
-    }
-    this.drawTokens();
-    this.drawBar();
-  }
-
-  // Only the Tokens section: a whole-page draw would drop what is being typed
-  // in the agents and queues (draw() waits for that; this need not).
-  drawTokens() {
-    const old = this.box.querySelector("#set-tokens");
-    if (old) old.replaceWith(this.tokens());
-  }
-
-  async addToken(name, role, linuxUser) {
-    this.tokenError = "";
-    try {
-      const r = await this.conn.call("token.add", { name, role, ...(linuxUser ? { linux_user: linuxUser } : {}) });
-      this.tokenOnce = { text: `The token for ${r.name}, shown once: `, token: r.token };
-      this.tokenName = "";
-      this.tokenUser = null;
-    } catch (e) {
-      this.tokenError = e.message;
-    }
-    await this.loadTokens();
-  }
-
-  // The first click arms, the second revokes. Revoking the admin's own token
-  // signs this browser in with the new one before the socket is dropped.
-  async revoke(name) {
-    if (this.armed !== name) {
-      this.armed = name;
-      return this.drawTokens();
-    }
-    this.armed = null;
-    this.tokenError = "";
-    try {
-      const r = await this.conn.call("token.revoke", { name });
-      if (r.token) {
-        await fetch("/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ token: r.token }) });
-        this.tokenOnce = { text: "The new admin token, shown once: ", token: r.token };
-      }
-    } catch (e) {
-      this.tokenError = e.message;
-    }
-    await this.loadTokens();
   }
 
   async link(url, token, trusted) {
@@ -1928,14 +1556,13 @@ export class Settings {
   drawBar() {
     const b = this.barEl;
     if (!b) return;
-    const dirty = this.dirty || this.policyChanges().length > 0;
+    const dirty = this.dirty;
     const status = this.status || (dirty ? "Unsaved changes" : "");
     b.classList.toggle("dirty", dirty);
     const save = button("Save changes", "set-save", () => !offline() && this.save(), "btn primary needs-net");
     save.disabled = !dirty || this.saving;
     const discard = button("Discard", "set-discard", () => {
       this.load(this.wire);
-      for (const k of this.policyChanges()) this.pol[k] = JSON.parse(this.polSaved[k]);
       this.findings = null;
       this.status = "";
       this.draw();
@@ -1961,8 +1588,6 @@ export class Settings {
     }
   }
 
-  // The config first, then the policies (this server's, through token.policy),
-  // which wait for a config the server accepted.
   async save() {
     this.saving = true;
     this.drawBar();
@@ -1974,7 +1599,6 @@ export class Settings {
           this.load(r.config);
         }
         this.findings = null;
-        if (this.policyChanges().length) await this.savePolicies();
         this.status = "Saved";
       } else {
         this.findings = r.problems;

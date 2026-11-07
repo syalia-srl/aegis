@@ -1,7 +1,7 @@
 ---
 title: Getting started
 kind: tutorial
-when: the first hour with aegis, from one session to plans, files and pages, monitors, helpers and a queue of workers
+when: using aegis for the first time: the first hour, from one session to plans, files and pages, monitors, helpers and a queue of workers
 hints:
   - New here? The getting-started page goes from one session to queues in five levels.
 ---
@@ -145,5 +145,3 @@ Each of these is a tutorial of its own, for after this one:
   this one.
 - [Phone: install, offline, push](tutorial-phone): aegis as an app on a
   phone.
-- [Running a server for others](tutorial-server): tokens, quota lines and
-  running aegis as a service.

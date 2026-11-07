@@ -392,7 +392,7 @@ class SessionCgroups:
             pass  # without the pids controller the unit's TasksMax is the cap
         return d
 
-    def release(self, log_id: str, user: str | None = None) -> None:
+    def release(self, log_id: str) -> None:
         """Kill what is left in the session's cgroup and remove it. A process
         dies a moment after SIGKILL, so a busy rmdir is retried later; one the
         next spawn got to first fails harmlessly, as the cgroup is in use.
@@ -408,7 +408,7 @@ class SessionCgroups:
                 from .launch import signal_process
 
                 for p in _procs(d):
-                    signal_process(p, signal.SIGKILL, user=user)
+                    signal_process(p, signal.SIGKILL)
         except OSError:
             pass
         self._rmdir(d, RMDIR_TRIES)

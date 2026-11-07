@@ -2,16 +2,13 @@
 """/setup: the one turn it delivers, and the record each run leaves (#612;
 the spec's sections 03 and 07)."""
 
-import json
-
 from aegis import setup
 
 from .conftest import until
-from .test_acts_for import BEN, recorded  # noqa: F401
-from .test_agents import mcp, turn
+from .one_person import BEN, recorded  # noqa: F401
 from .test_commands import app, send  # noqa: F401
 from .test_commands import spawn as spawn_here
-from .test_member_view import ADMIN, call, homes, spawn, world  # noqa: F401
+from .one_person import ADMIN, call, homes, spawn, world  # noqa: F401
 
 REC = {
     "at": "2026-10-20T10:00:00Z",
@@ -91,25 +88,6 @@ async def test_the_setup_line_begins_a_person_turn(app):
     assert await send(app, lid, "/setup") == {"status": "delivered"}
     await until(lambda: inbox(s), timeout=5)
     assert s.person_turn
-
-
-async def test_a_member_may_run_setup_and_records_are_per_principal(world):
-    ben = world.app.sessions.sessions[await spawn(world, BEN)]
-    adm = world.app.sessions.sessions[await spawn(world, ADMIN)]
-    for s, key in ((ben, "schedule:weekly-prs"), (adm, "queue:tests")):
-        said = await turn(
-            s,
-            mcp("setup_record", applied=[key], declined=[], sources_until="t"),
-        )
-        assert said.startswith("mcp ok: "), said
-    r = await call(world, "session.send", {"log_id": ben.log_id, "text": "/setup"}, BEN)
-    assert r == {"status": "delivered"}
-    await until(lambda: inbox(ben), timeout=5)
-    (md,) = inbox(ben)
-    assert "schedule:weekly-prs" in md and "queue:tests" not in md
-    files = sorted(p.name for p in (world.app.roots.state_root / "setup").iterdir())
-    assert files == sorted(["ben.json", f"{world.app.user}.json"])
-    assert json.loads((world.app.roots.state_root / "setup" / files[0]).read_text())
 
 
 def test_the_setup_page_names_knowledge_import_and_the_keys():

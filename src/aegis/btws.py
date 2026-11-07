@@ -65,7 +65,6 @@ class SideNotes:
                 argv,
                 self.app.roots.state_root / "oneshot",
                 btw.TIMEOUT_S,
-                self.app.sessions.user_for(s.spec),
                 oneshot.message(btw.SYSTEM, text, cfg["harness"]),
                 harness=cfg["harness"],
             )

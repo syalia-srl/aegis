@@ -63,7 +63,6 @@ class Recaps:
                 ),
                 self.app.roots.state_root / "oneshot",
                 recap.TIMEOUT_S,
-                self.app.sessions.user_for(s.spec),
                 oneshot.message(recap.SYSTEM, prompt, cfg["harness"]),
                 harness=cfg["harness"],
             )

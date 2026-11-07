@@ -354,15 +354,15 @@ def register_browser_ops(app: App) -> None:
         b = await br.open_(app.who(caller).name, p.url, profile=p.profile)
         return br.card(b)
 
-    @r.op("browser.input", PaneInput, owned="id")
+    @r.op("browser.input", PaneInput)
     async def input_(p: PaneInput, caller):
         await br.input(p.id, p.events)
 
-    @r.op("browser.nav", PaneNav, owned="id")
+    @r.op("browser.nav", PaneNav)
     async def nav(p: PaneNav, caller):
         return await br.goto(p.id, p.url, p.action, "person")
 
-    @r.op("browser.view", PaneResize, owned="id")
+    @r.op("browser.view", PaneResize)
     async def view(p: PaneResize, caller):
         """The person's pane took the page: fit the viewport to it."""
         b = br.get(p.id)
@@ -370,31 +370,29 @@ def register_browser_ops(app: App) -> None:
             raise OpError("agent_has_control", "the agent holds this page")
         return await br.resize(p.id, p.width, p.height)
 
-    @r.op("browser.take", PaneRef, owned="id")
+    @r.op("browser.take", PaneRef)
     async def take(p: PaneRef, caller):
         br.take(p.id)
 
-    @r.op("browser.handback", PaneRef, owned="id")
+    @r.op("browser.handback", PaneRef)
     async def give_back(p: PaneRef, caller):
         await br.give_back(p.id)
 
-    @r.op("browser.give", PaneGive, owned="id")
+    @r.op("browser.give", PaneGive)
     async def give(p: PaneGive, caller):
         s = app.sessions.sessions.get(p.session) or next(
             (x for x in app.sessions.open_sessions() if x.handle == p.session), None
         )
         if s is None:
             raise OpError("unknown_session", f"no open session {p.session}")
-        if app.owner_of(s.log_id) != app.owner_of(p.id):
-            raise OpError("not_owner", "give a browser to a session of its owner")
         await br.give(p.id, s.log_id, s.handle)
         dock(s, p.id, "right")
 
-    @r.op("browser.reopen", PaneRef, owned="id")
+    @r.op("browser.reopen", PaneRef)
     async def reopen(p: PaneRef, caller):
         await br.reopen(p.id)
 
-    @r.op("browser.shut", PaneRef, owned="id")
+    @r.op("browser.shut", PaneRef)
     async def shut(p: PaneRef, caller):
         """Close a browser from its tab: Chromium stops, the profile stays."""
         await br.close(p.id)

@@ -380,8 +380,8 @@ park:
 A harness the block does not name never parks, and without the block nothing
 does. A block with a harness aegis does not know, or a value that is not a
 positive whole number of seconds, parks nothing, and `aegis doctor` names the
-mistake. Only an admin can change it, in the file or in the Parking section
-of the Settings page, which takes minutes and which members do not see.
+mistake. Change it in the file or in the Parking section of the Settings
+page, which takes minutes.
 
 Only Claude Code's and Cursor's resumes have been measured — Cursor's runs
 `session/load` on the same session id. Codex and OpenCode sessions park when

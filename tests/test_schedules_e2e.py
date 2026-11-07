@@ -6,7 +6,6 @@ import time
 
 import pytest
 
-from aegis.ops import Caller
 from aegis.schedule_log import Definition
 
 from .conftest import until
@@ -251,32 +250,6 @@ async def test_an_archived_target_pauses_the_schedule_at_once(world):
     (r,) = runs(world, "dead-end", "tick")
     assert r["out"] == "error" and "is archived" in r["err"]
     assert world.app.schedules.items["dead-end"].paused["by"] == "errors"
-
-
-async def test_a_closed_quota_gate_holds_the_tick_and_fires_it_when_it_opens(world):
-    from .test_quota_gate_app import LINES, seed
-
-    app = world.app
-    app.principals.add("ben", "member")
-    await app.registry.call(
-        "token.policy", {"name": "ben", "policy": LINES}, Caller("user")
-    )
-    t = frozen(world)
-    seed(world, session=63)
-    app.schedules.create(
-        "ben-brief",
-        Definition.model_validate(
-            {"clock": {"every": "5m"}, "fire": {"agent": "opus"}, "prompt": DONE}
-        ),
-        {"kind": "user", "principal": "ben"},
-        world.root,
-    )
-    await tick(world, t)
-    (held,) = runs(world, "ben-brief", "tick")
-    assert (held["out"], held["why"]) == ("held", "quota")
-    seed(world, session=40)
-    await app.schedules.step()
-    assert len(runs(world, "ben-brief", "fired")) == 1
 
 
 def gauge(world, session=10.0, weekly_projected=None) -> None:

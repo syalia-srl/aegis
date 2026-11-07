@@ -24,7 +24,7 @@ playwright install chromium
 ```
 
 Without them the + view shows no browser and `browser_open` answers
-browser_unavailable. Browsers do not run in multi-user mode yet.
+browser_unavailable.
 
 ## Opening one
 

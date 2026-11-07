@@ -130,10 +130,8 @@ def register_config_suggest(app: App) -> None:
         )
         await s.deliver(header(id, outcome), body)
 
-    @r.op("config.suggestion.apply", SuggestionRef, owned="log_id")
+    @r.op("config.suggestion.apply", SuggestionRef)
     async def apply(p: SuggestionRef, caller):
-        if not app.who(caller).is_admin:
-            raise OpError("not_for_members", "an admin applies a config change")
         s, e = pending(p)
         det = e["detail"]
         try:
@@ -161,7 +159,7 @@ def register_config_suggest(app: App) -> None:
         )
         return "ok"
 
-    @r.op("config.suggestion.decline", SuggestionRef, owned="log_id")
+    @r.op("config.suggestion.decline", SuggestionRef)
     async def decline(p: SuggestionRef, caller):
         s, _ = pending(p)
         await done(

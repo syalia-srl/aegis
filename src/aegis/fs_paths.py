@@ -6,6 +6,7 @@ names no "..", resolves (symlinks followed) inside the root, and is never inside
 the state root (it holds the admin token and live stores) or a .git directory
 (editing a repository's internals by hand only breaks it)."""
 
+from dataclasses import dataclass
 from pathlib import Path
 
 from .ops import OpError
@@ -36,3 +37,14 @@ def resolve(root: Path, state: Path, rel: str, *, must_exist: bool = True) -> Pa
     if must_exist and not (exists and real.exists()):
         raise OpError("not_found", f"no file {rel}")
     return real if exists else real / path.name
+
+
+@dataclass(frozen=True)
+class Place:
+    """Where the Files view's files are: the root it shows, the folder it
+    never reaches (``resolve``'s ``state``), and the folder whose ``trash/``
+    takes deletes (fs_trash)."""
+
+    root: Path
+    guard: Path
+    trash: Path

@@ -48,12 +48,10 @@ import json
 import tempfile
 import logging
 import os
-import pwd
 import re
 import time
 from collections import OrderedDict
 from pathlib import Path
-from collections.abc import Callable
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -61,7 +59,7 @@ from pydantic.json_schema import SkipJsonSchema
 
 from . import archive, attachments as att, commands, dictation, files, restarts, speech
 from . import pause
-from . import feedback, harness_versions, multiuser, self_update, setup
+from . import feedback, harness_versions, self_update, setup
 from . import layout as canvas
 from . import workflow_store
 from .agent_ops import (
@@ -134,23 +132,17 @@ from .workflow_ops import register_workflow_ops
 from .workflows import Workflows
 from .quota import Quota
 from .quota_gate import (
-    POOLS,
     Gate,
     continued,
-    decide,
-    pool_for,
-    pools_wire,
     refusal,
 )
 from .btws import SideNotes
 from .recaps import Recaps
 from .ops import Caller, NoParams, OpError, Principal, Registry as Ops
-from . import as_user, launch
+from . import launch
 from .opencode import sweep as opencode_sweep
 from .tokens import TokenStore
-from .as_user import Place
-from .member_view import MemberView
-from .users import MultiUser
+from .fs_paths import Place
 from .registry import Registry
 from .roots import Roots
 from .usage.ops import register_usage_ops
@@ -178,20 +170,6 @@ Permission = Literal["read", "write", "full", "auto"]
 
 class _Strict(BaseModel):
     model_config = {"extra": "forbid"}
-
-
-# The param that names a session by handle in each op that takes one
-# (App._hides): a member may not learn of another's session through it.
-HANDLE_FIELDS = {
-    "peer.read": "target",
-    "peer.handoff": "target",
-    "peer.deliver": "target",
-    "session.close": "handle",
-    "session.quiet": "handle",
-    "monitor.sessions": "sessions",
-    "schedule.test": "session",
-    "journal.search": "session",
-}
 
 
 class SpawnedFrom(_Strict):
@@ -432,26 +410,8 @@ class LinkName(_Strict):
     name: str
 
 
-class TokenAdd(_Strict):
-    name: str = Field(description="Who the token is: lowercase, e.g. ben or laptop")
-    role: Literal["admin", "member"] = "member"
-    linux_user: str | None = Field(
-        None, description="The Linux user it runs as, in multi-user mode; default: name"
-    )
-    no_linux_user: bool = Field(
-        False, description="An admin that runs as the server's own user"
-    )
-
-
 class TokenName(_Strict):
     name: str
-
-
-class TokenPolicy(_Strict):
-    name: str = Field(description="Whose policy; * sets the default for members.")
-    policy: dict | None = Field(
-        description="Pool -> {mode, lines} (quota_gate.py); null: use the default."
-    )
 
 
 class ArchiveParams(_Strict):
@@ -489,16 +449,8 @@ class App:
         cursor_bin: str = "cursor-agent",
         dictation_dir: Path | None = None,
         user: str | None = None,
-        multi_user: MultiUser | None = None,
     ) -> None:
         self.roots = roots
-        # The multi-user mode, fixed at start (users.py); a later edit of the
-        # key is logged once per value and waits for a restart.
-        self.multi_user = multi_user
-        self._mu_told: list[MultiUser | None] = []
-        launch.configure(multi_user)
-        # Threads that open files as one person's Linux user (as_user.py).
-        self.runners = as_user.Runners()
         self.server_name = server_name
         self.claude_bin = claude_bin
         self.opencode_bin = opencode_bin
@@ -531,16 +483,12 @@ class App:
             lambda: self.config.current().terminals,
             self.publish,
             lambda: self.terminal_cgroups,
-            acts_for=lambda owner: self.principals.acts_for(owner),
-            role_of=lambda owner: self.principals.role_of(owner),
-            multi_user=multi_user is not None,
         )
         self.browsers = Browsers(
             roots.state_root,
             self.publish,
             lambda channel: self.channels.subscribers(channel),
             self._browser_deliver,
-            multi_user=multi_user is not None,
         )
         self.tokens = Tokens()
         self.monitors = Monitors(self.sessions, roots.state_root / "monitors.json")
@@ -591,7 +539,6 @@ class App:
         self.journal = Journal(
             roots.state_root,
             self.publish,
-            user_of=self._linux_user_of_session,
             meta_of=self._meta_of_session,
             accounts=lambda: {
                 p["harness"]: f"{p['name']}:{p['account']}"
@@ -607,7 +554,7 @@ class App:
         reg.knowledge = self.knowledge
         # knowledge.know_how too.
         if self.config.current().knowledge["know_how"]:
-            reg.know_how = KnowHow(self._linux_user_of_session)
+            reg.know_how = KnowHow()
         self.skill_servers = SkillServers()
         reg.skill_servers = self.skill_servers
         reg.principal_of = lambda s: s.spec.owner or self.user
@@ -618,7 +565,6 @@ class App:
             lambda: {s.log_id: s.handle for s in self.sessions.open_sessions()},
             lambda name: self.channels.subscribers(name),
             roots.harness_cwd,
-            user_of=self._linux_user_of_session,
         )
         self.journal.on_live = self.repos.live
         self.schedules = Schedules(self)
@@ -666,26 +612,11 @@ class App:
         # user per server for now: whoever started it (links.py).
         self.user = user or getpass.getuser()
         # The tokens that may use this server, the admin's first (tokens.py).
-        self.principals = TokenStore(
-            roots.state_root, self.user, multi_user=multi_user is not None
-        )
-        for name, linux_user in self.principals.missing_users():
-            log.warning(
-                "aegis: token %s names Linux user %s, which does not exist",
-                name,
-                linux_user,
-            )
+        self.principals = TokenStore(roots.state_root, self.user)
         self.links = Links(roots.state_root, server_name, self.user, self.publish)
         self.links.answer = self.answer_link
         self.links.serve, self.links.rwatch = self.serve_link, self.watch_link
-        self.exits = Exits(
-            self.links,
-            lambda: (
-                None
-                if self.multi_user is None
-                else "an exit is off on a multi-user server"
-            ),
-        )
+        self.exits = Exits(self.links, lambda: None)
         launch.configure_exits(self.exits, self._exit_for)
         # Bytes each linked server took through this one as its exit (exit.py).
         self.exit_bytes: dict[str, int] = {}
@@ -701,13 +632,7 @@ class App:
         self.quota.listeners.append(self.on_quota)
         self.quota.listeners.append(self.journal.quota)
         self.quota.history = self.journal.usual_spend
-        reg.gate = self.gate
         reg.pause_hold = self.pause_hold
-        # Who each session's processes run as, in multi-user mode (users.py).
-        reg.multi_user = multi_user is not None
-        reg.acts_for = lambda name: self.principals.acts_for(name)
-        reg.role_of = lambda name: self.principals.role_of(name) if name else None
-        reg.runners = self.runners
         # Models that fell, and the one timer that releases held work when the
         # first of them is free again (cascade.py).
         self.cooling = Cooling()
@@ -719,7 +644,6 @@ class App:
         self.registry = Ops()
         self.registry.who = self.who
         self.registry.owner_of = self.owner_of
-        self.registry.hides = self._hides
         self.registry.permission_of = lambda log_id: (
             s.spec.permission if (s := self.sessions.sessions.get(log_id)) else None
         )
@@ -800,7 +724,7 @@ class App:
         with tempfile.TemporaryDirectory(prefix="aegis-opencode-probe-") as scratch:
             try:
                 proc = await launch.child(
-                    argv, user=None, via=launch.resolve_via(), cwd=scratch,
+                    argv, via=launch.resolve_via(), cwd=scratch,
                     env=None, stdin=asyncio.subprocess.DEVNULL,
                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
                 )  # fmt: skip
@@ -831,13 +755,8 @@ class App:
         for two servers one person alone uses, so the link must hold the
         admin's own token and nobody else may hold one (links.py, #684)."""
         me = self.server_name
-        if principal.name != self.principals.owner or not principal.is_admin:
+        if principal.name != self.principals.owner:
             return f"the link does not hold {me}'s admin token"
-        if self.principals.has_members():
-            return (
-                f"{me} has tokens besides its admin's; a trusted link needs "
-                "a server only its admin uses"
-            )
         if self.links.outbound(server) is not None:
             return (
                 f"{me} links a server named {server} itself; remove that "
@@ -868,9 +787,7 @@ class App:
         """Run a call a trusted linked server sent back down its link: as this
         server's admin acting through that link, the same caller a link socket
         is on the far server, so every op keeps one rule for linked calls."""
-        caller = Caller(
-            "user", link=server, principal=Principal(self.principals.owner, "admin")
-        )
+        caller = Caller("user", link=server, principal=Principal(self.principals.owner))
         log.info("call %s from linked server %s", op, server)
         try:
             return {"result": await self.registry.call(op, params, caller)}
@@ -887,13 +804,8 @@ class App:
 
     def serve_link(self, server: str, channel: str, since, merge: bool, send):
         """Subscribe a trusted linked server's browser here, down its link
-        (#969), as the same caller as ``answer_link``; the function that ends it."""
-        caller = Caller(
-            "user", link=server, principal=Principal(self.principals.owner, "admin")
-        )
-        sub = self.channels.subscribe(
-            channel, send, since, merge=merge, view=self.view_of(caller)
-        )
+        (#969); the function that ends it."""
+        sub = self.channels.subscribe(channel, send, since, merge=merge)
         return lambda: self.channels.unsubscribe(sub)
 
     def watch_link(self, server: str, key: str, log_id: str | None) -> None:
@@ -936,24 +848,18 @@ class App:
         return listed if isinstance(listed, list) else None
 
     def who(self, caller: Caller) -> Principal:
-        """The principal a caller acts as. An agent acts as its session's
-        owner, with the owner's role now: a revoked owner's agent is a member."""
+        """The principal a caller acts as: the token's, or the server's one
+        person for an agent and for the server's own calls, whoever a session
+        from before aegis 3.0 names as its owner."""
         if caller.principal is not None:
             return caller.principal
-        if caller.is_agent:
-            name = self.owner_of(caller.log_id or "") or self.user
-            return Principal(name, self.principals.role_of(name) or "member")
-        return Principal(self.user, "admin")  # the server's own calls
+        return Principal(self.user)
 
     def gate(self, owner: str | None, harness: str, model: str | None) -> Gate:
-        """Whether ``owner`` may start a harness on that pool now. A session
-        from before owners is the admin's."""
-        return decide(
-            self.principals.policy_of(owner or self.user),
-            pool_for(harness, model),
-            self.quota.snapshot(),
-            time.time(),
-        )
+        """Whether a harness may start on that pool now: always, since quota
+        lines per token left with multi-user mode (#958). A cascade's cooling
+        and the person's pause hold work on their own (start_spec)."""
+        return Gate("open")
 
     def start_spec(self, spec: SpawnSpec) -> tuple[SpawnSpec, Gate]:
         """The spec a start runs and the gate it passes. A cascade starts on
@@ -1018,27 +924,18 @@ class App:
         self._arm_cooling()
 
     def on_quota(self, snapshot: dict) -> None:
-        """After every reading, and every minute because pace moves with the
-        clock: pause each member's working session whose gate says stopped,
-        and continue each paused or holding one whose gate is open. Only open
-        continues, so a gauge between the lines leaves a paused session
-        paused and a stopped token cannot flap. Level-triggered, so a reading
+        """After every reading, and every minute: continue each session a
+        quota line paused or held before aegis 3.0 removed the lines (#958),
+        and wake what a cooling cascade held. Level-triggered, so a reading
         missed or a restart in between changes nothing."""
-        now = time.time()
         for s in list(self.sessions.sessions.values()):
             # A turn the restart guard declined waits for a person (restarts.py).
             if s.log_id in self._quota_busy or s.log_id in self.sessions.declined:
                 continue
             if self.pause_hold(s) is not None:
-                continue  # the person's pause outranks the gate (pause.py)
-            policy = self.principals.policy_of(s.spec.owner or self.user)
-            if policy is None:
-                continue
-            g = decide(policy, pool_for(s.spec.harness, s.spec.model), snapshot, now)
+                continue  # the person's pause outranks it (pause.py)
             holding = any(m.get("held_for") == "quota" for m in s.held)
-            if g.state == "stopped" and s.status == "working" and not s.quota_paused:
-                self._quota_task(s, self._pause(s, g))
-            elif g.state == "open" and (s.quota_paused or holding):
+            if s.quota_paused or holding:
                 self._quota_task(s, self._continue(s))
         self._release_held()
 
@@ -1068,16 +965,6 @@ class App:
                 )
 
         t.add_done_callback(done)
-
-    async def _pause(self, s, g: Gate) -> None:
-        """Interrupt a turn the owner's stop line cut; held until it opens."""
-        if not self._live(s) or s.status != "working":
-            return  # closed, or the turn ended since the reading
-        s.report({"kind": "quota_paused", "why": g.why})
-        s.quota_paused = g.why
-        self.sessions.metas.write(s.meta())
-        await s.interrupt(through_lock=True)  # the gate holds a node too
-        s._publish_now()
 
     async def _continue(self, s) -> None:
         """The gate is open again: one message saying so ahead of what the
@@ -1201,31 +1088,6 @@ class App:
     def _live(self, s) -> bool:
         return not s.archived and self.sessions.sessions.get(s.log_id) is s
 
-    def sees(self, who: Principal, owner: str | None) -> bool:
-        """Whether ``who`` may know of a thing ``owner`` owns: always outside
-        multi-user mode and for an admin; in it, a member sees its own only
-        (the spec's section 08). A thing from before owners is the admin's."""
-        if self.multi_user is None or who.is_admin:
-            return True
-        return (owner or self.user) == who.name
-
-    def view_of(self, caller: Caller) -> MemberView | None:
-        """What ``caller``'s next channel subscription may see: None for
-        everything, which is everyone outside multi-user mode and an admin."""
-        who = self.who(caller)
-        if self.multi_user is None or who.is_admin:
-            return None
-        return MemberView(self, who)
-
-    def own_log_ids(self, who: Principal) -> set[str] | None:
-        """The log ids of every session ``who`` may see, open or archived;
-        None for all of them (``sees``)."""
-        if self.multi_user is None or who.is_admin:
-            return None
-        metas = [s.meta() for s in self.sessions.sessions.values()]
-        metas += list(self.sessions.archived.values())
-        return {m["log_id"] for m in metas if self.sees(who, m.get("owner"))}
-
     def owner_of_handle(self, handle: str) -> str | None:
         """The owner of the session a handle or a log id names, open or
         archived; None when it names none here (or a session on another
@@ -1239,50 +1101,6 @@ class App:
         for log_id, m in self.sessions.archived.items():
             if local in (m.get("handle"), log_id):
                 return m.get("owner") or self.user
-        return None
-
-    def _hides(self, who: Principal, op: str, params) -> OpError | None:
-        """The not-found error an op gives for a thing ``who`` may not see,
-        named in its params; None when it names nothing hidden. A member
-        asking about another's thing gets the answer for no such thing."""
-        if self.multi_user is None or who.is_admin:
-            return None
-        log_id = getattr(params, "log_id", None)
-        if isinstance(log_id, str):
-            if log_id.startswith("t-"):
-                if (o := self.terminals.owner_of(log_id)) and not self.sees(who, o):
-                    return OpError("no_terminal", f"no open terminal {log_id}")
-            elif (o := self.owner_of(log_id)) is not None and not self.sees(who, o):
-                return OpError("no_session", f"no session {log_id!r}")
-        if op.startswith("term.") and isinstance(
-            tid := getattr(params, "id", None), str
-        ):
-            if (o := self.terminals.owner_of(tid)) and not self.sees(who, o):
-                return OpError("no_terminal", f"no open terminal {tid}")
-        field = HANDLE_FIELDS.get(op)
-        named = getattr(params, field, None) if field else None
-        for h in named if isinstance(named, list) else [named]:
-            if isinstance(h, str) and (o := self.owner_of_handle(h)) is not None:
-                if not self.sees(who, o):
-                    return OpError("no_session", f"no open session {h!r}")
-        fire = getattr(params, "fire", None)
-        target = getattr(fire, "session", None) if op.startswith("schedule.") else None
-        if isinstance(target, str) and (o := self.owner_of_handle(target)) is not None:
-            if not self.sees(who, o):
-                return OpError("no_session", f"no open session {target!r}")
-        run = getattr(params, "run", None)
-        if isinstance(run, str) and (st := self.workflows.runs.get(run)) is not None:
-            if not self.sees(who, self.owner_of(st.owner)):
-                return OpError("no_run", f"no workflow run {run!r}")
-        task_id = getattr(params, "task_id", None)
-        if isinstance(task_id, str) and (t := self.queues.tasks.get(task_id)):
-            if not self.sees(who, t.owner):
-                return OpError("no_task", f"no task {task_id!r}")
-        if op.startswith("schedule.") and op != "schedule.create":
-            name = getattr(params, "name", None)
-            if isinstance(name, str) and (s := self.schedules.items.get(name)):
-                if not self.sees(who, s.owner.get("principal")):
-                    return OpError("no_schedule", f"no schedule {name!r}")
         return None
 
     def owner_of(self, log_id: str) -> str | None:
@@ -1335,6 +1153,7 @@ class App:
         self.journal.start()
         self.repos.start()
         self.sessions.boot(restarts.started(self.roots.state_root))
+        self.push.subscriptions.keep_owner(self.principals.owner)
         await self.terminals.boot()
         if self.sessions.sign_in is not None:
             self.sessions.sign_in.boot()
@@ -1462,7 +1281,6 @@ class App:
         await self.repos.stop()
         await asyncio.to_thread(self.journal.stop)
         await asyncio.to_thread(self.knowledge.usage.stop)
-        self.runners.shutdown()
         restarts.stopped(self.roots.state_root, stopping_at)
 
     def _meta_of_session(self, log_id: str) -> dict:
@@ -1474,61 +1292,19 @@ class App:
             return {}
         return meta if isinstance(meta, dict) else {}
 
-    def _linux_user_of_session(self, log_id: str) -> str | None:
-        """The Linux user a session runs as (users.py): the live session's,
-        else its meta's, since the journal backfills closed sessions too."""
-        if self.multi_user is None:
-            return None
-        s = self.sessions.sessions.get(log_id)
-        if s is not None:
-            return s.spec.linux_user
-        try:
-            meta = json.loads(self.sessions.metas.path(log_id).read_text())
-        except (OSError, ValueError):
-            return None
-        return meta.get("linux_user") if isinstance(meta, dict) else None
-
-    def _deliver(self, s) -> Callable[[Path, str], Path] | None:
-        """How an upload reaches ``s``'s inbox in its user's home, as that
-        user: the server opens the staged file, the user's runner writes the
-        copy (attachments.commit). None for an inbox under the state root."""
-        user = self.sessions.user_for(s.spec)
-        if user is None:
-            return None
-        run, box = self.runners.get(user), s.inbox
-
-        def deliver(staged: Path, name: str) -> Path:
-            fd = os.open(staged, os.O_RDONLY | os.O_CLOEXEC)
-            try:
-                return run.call(att.write_into, box, name, fd)
-            finally:
-                os.close(fd)
-
-        return deliver
-
     def place_of(self, caller: Caller) -> Place:
-        """Where the files a person reaches are, and the runner that opens
-        them as their Linux user (as_user.py). Raises PermissionError for a
-        member with no user in multi-user mode."""
-        who = self.who(caller)
-        return self._place(self.principals.acts_for(who.name), who.role == "member")
+        """Where the files the Files view reaches are."""
+        return self._place()
 
     def place_of_session(self, log_id: str) -> Place:
-        """The place of a session's owner, as the user its process runs as."""
-        spec = self.sessions.open(log_id).spec
-        member = self.principals.role_of(spec.owner or self.user) != "admin"
-        return self._place(self.sessions.user_for(spec), member)
+        """Where a session's files are: the same place as everyone's."""
+        self.sessions.open(log_id)
+        return self._place()
 
-    def knowledge_reader(self, principal: str) -> tuple[as_user.Runner, list[str]]:
-        """What a staleness check of ``principal``'s memories reads with: the
-        runner that opens files as their Linux user (the server's own for
-        the owner, or outside multi-user mode), and the roots a quoted path
-        is looked for under, their Files root then their home. Raises
-        PermissionError for a member with no user."""
-        user = self.principals.acts_for(principal)
-        place = self._place(user, self.principals.role_of(principal) != "admin")
-        home = pwd.getpwnam(user).pw_dir if user else str(Path.home())
-        return place.run, list(dict.fromkeys([str(place.root), home]))
+    def knowledge_roots(self) -> list[str]:
+        """The roots a quoted path in a memory is looked for under: the Files
+        root, then the server user's home."""
+        return list(dict.fromkeys([str(self.roots.config_root), str(Path.home())]))
 
     async def knowledge_check(
         self, principal: str, items: list[Item] | None = None
@@ -1536,14 +1312,12 @@ class App:
         """Flag ``principal``'s memories (knowledge/checks.py), all of them
         when ``items`` is None. A principal nothing may read for is skipped
         and logged."""
-        try:
-            run, roots = self.knowledge_reader(principal)
-        except PermissionError as e:
-            log.warning("aegis: knowledge of %s not checked: %s", principal, e)
-            return
+        roots = self.knowledge_roots()
         whole = items is None
         some = await self.knowledge.items(principal) if items is None else items
-        await self.knowledge.check(principal, some, run, roots, everything=whole)
+        await self.knowledge.check(
+            principal, some, asyncio.to_thread, roots, everything=whole
+        )
 
     async def bounded_check(self, principal: str, items: list[Item] | None) -> None:
         """knowledge_check within ``KNOWLEDGE_CHECK_TIMEOUT_S``; a timeout or
@@ -1583,17 +1357,9 @@ class App:
                 await self.bounded_check(name, None)
             await asyncio.sleep(KNOWLEDGE_CHECK_S)
 
-    def _place(self, user: str | None, member: bool) -> Place:
-        root, state = self.roots.config_root, self.roots.state_root
-        run = self.runners.get(user)
-        if user is None:
-            return Place(root, state, state, run)
-        own = Path(pwd.getpwnam(user).pw_dir) / ".aegis"
-        # A member's view is its home; an admin with a user keeps the root.
-        # Neither may write the server's state, so both trash in their home.
-        if member:
-            return Place(own.parent, own / "trash", own, run)
-        return Place(root, state, own, run)
+    def _place(self) -> Place:
+        state = self.roots.state_root
+        return Place(self.roots.config_root, state, state)
 
     def _on_config(self, snap: Snapshot) -> None:
         """Every change to .aegis.yaml, however it was made: the page and the
@@ -1601,11 +1367,6 @@ class App:
         self.channels.publish("config", [{"set": snap.wire()}])
         if hasattr(self, "doctor_watch"):
             self.doctor_watch.kick()
-        if snap.multi_user != self.multi_user and snap.multi_user not in self._mu_told:
-            self._mu_told.append(snap.multi_user)
-            log.warning(
-                "multi_user changed in .aegis.yaml; restart the server to apply it"
-            )
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -1631,8 +1392,6 @@ class App:
         if source is not None:
             t["from"] = {"handle": source.handle, "id": source.log_id}
         if owner is not None:
-            # About a principal's own thing (a schedule): its browsers only,
-            # in multi-user mode (member_view.py).
             t["owner"] = owner
         self.channels.publish("toasts", [{"toast": t}])
         self.push.sender.on_toast(t)  # an agent's goes to subscribed devices
@@ -1722,9 +1481,6 @@ class App:
             return parent.group_key()
         src = self.sessions.sessions.get(from_session or "")
         if src is None or caller.is_agent:
-            return None
-        who = self.who(caller)
-        if not who.is_admin and src.spec.owner != who.name:
             return None
         return src.group_key()
 
@@ -1910,16 +1666,6 @@ class App:
                 *feedback.turn(arg, facts, feedback.issues_url(), iso_now())
             )
             return {"status": "delivered"}
-        if name == "multiuser":
-            # The agent runs the host work from the help page multi-user with
-            # the person; only an admin may start it, since it changes the server.
-            if not self.who(caller).is_admin:
-                raise OpError(
-                    "not_for_members", "/multiuser is for an admin of this server"
-                )
-            on = self.multi_user is not None
-            await s.deliver(*multiuser.turn(arg, on, multiuser.facts(on), iso_now()))
-            return {"status": "delivered"}
         if name == "setup":
             # The agent moves the person's habits into aegis from the help
             # page setup; anyone may run it, for what they own.
@@ -2064,7 +1810,7 @@ class App:
             return None  # a missing binary fails the launch as harness_not_found
         if s is not None and s.checked_version == (v.version or "?"):
             return None  # started once on this version already
-        may = self.who(caller).is_admin and v.version is not None
+        may = v.version is not None
         if untested is None:
             raise OpError(
                 "harness_untested", v.message(), data=v.wire() | {"may_always": may}
@@ -2073,8 +1819,6 @@ class App:
             return None
         if v.version is None:
             return "a version that could not be read cannot be allowed for good"
-        if not self.who(caller).is_admin:
-            return "only an admin can allow a version for good; it started this once"
         try:
             accept_version(self.config.path, v.harness, v.version)
         except OpError as e:
@@ -2114,11 +1858,6 @@ class App:
             return {**r, "server": self.server_name}
         if caller.link is not None:
             raise OpError("not_relayed", "a link is not relayed to another server")
-        if not self.who(caller).is_admin:
-            raise OpError(
-                "not_for_members",
-                "spawning on a linked server is for an admin of this one",
-            )
         link = self.links.get(far)
         if link is None:
             raise OpError("unknown_server", f"this server links no server named {far}")
@@ -2167,11 +1906,6 @@ class App:
         ``_spawn_far`` checks the rest when it starts."""
         if caller.link is not None:
             raise OpError("not_relayed", "a link is not relayed to another server")
-        if not self.who(caller).is_admin:
-            raise OpError(
-                "not_for_members",
-                "handing off to a linked server is for an admin of this one",
-            )
         link = self.links.get(far)
         if link is None:
             raise OpError("unknown_server", f"this server links no server named {far}")
@@ -2297,11 +2031,6 @@ class App:
         The far session's permission is at most the agent's, the far agent's
         preset read first. Nothing the far server wrote reaches the agent: its
         handle and log id are checked, its errors worded here (agent_ops)."""
-        if not self.who(caller).is_admin:
-            raise OpError(
-                "not_for_members",
-                "spawning on a linked server is for an admin's agents",
-            )
         link = self.links.get(far)
         if link is None:
             raise OpError("unknown_server", f"this server links no server named {far}")
@@ -2400,23 +2129,16 @@ class App:
         }
 
     def _archive_sources(self, only: str | None, who: Principal):
-        """Each server an archive listing reads, with how to fetch a page. A
-        member in multi-user mode reads its own sessions here, and no linked
-        server's: links are the admin's."""
-        member = self.multi_user is not None and not who.is_admin
-
-        def keep(m: dict) -> bool:
-            return self.sees(who, m.get("owner"))
+        """Each server an archive listing reads, with how to fetch a page."""
 
         async def local(query, limit, after, workers):
-            k = keep if member else None
-            items, total, last = self.sessions.archive(query, limit, after, workers, k)
-            return items, total, self.sessions.archived_workers(query, k), last
+            items, total, last = self.sessions.archive(
+                query, limit, after, workers, None
+            )
+            return items, total, self.sessions.archived_workers(query, None), last
 
         if only in (None, self.server_name):
             yield self.server_name, local
-        if member:
-            return
         # Links this server opened: a way back is reached by calls, and its
         # archive rows could not be read from here (links.Backlink).
         for link in self.links.links():
@@ -2507,9 +2229,8 @@ class App:
                 self._resolve_cwd(p.cwd, parent.spec.cwd if parent else None),
                 spawned_by=parent.log_id if parent else None,
                 group=self._group_for(parent, p.from_session, caller),
-                # A child is its parent's owner's, so a member's agent cannot
-                # hand work to anyone else; a person's session is theirs.
-                owner=parent.spec.owner if parent else self.who(caller).name,
+                # Every session is the server's one person's.
+                owner=self.who(caller).name,
             )
             if p.spawned_from is not None:
                 if not valid_handle(p.spawned_from.handle):
@@ -2668,7 +2389,6 @@ class App:
                             self.roots.state_root,
                             p.log_id,
                             p.attachments,
-                            deliver=self._deliver(s),
                         )
                     except files.FileError as e:
                         raise OpError(e.code, e.message) from e
@@ -2688,7 +2408,7 @@ class App:
             except (BrokenPipeError, ConnectionResetError) as e:
                 raise _dead(e) from e
 
-        @r.op("session.handoff", HandoffParams, agent=True, owned="log_id")
+        @r.op("session.handoff", HandoffParams, agent=True)
         async def handoff(p: HandoffParams, caller):
             """Continue your work in a new session and end this one: from this
             call nobody can write to it. The new session starts when your turn
@@ -2750,7 +2470,7 @@ class App:
                 old, p, capped=caller.is_agent, caller=caller
             )
 
-        @r.op("session.send", SendParams, owned="log_id")
+        @r.op("session.send", SendParams)
         async def send(p: SendParams, caller):
             # A page that got no answer in time sends again with the same nonce,
             # and a stalled socket can flush every copy at once (#350): each
@@ -2773,7 +2493,7 @@ class App:
                 first.add_done_callback(forget)
             return await asyncio.shield(first)
 
-        @r.op("attachment.begin", AttachBegin, owned="log_id")
+        @r.op("attachment.begin", AttachBegin)
         async def attachment_begin(p: AttachBegin, caller):
             """Start uploading a file to a session: its upload id. The file
             waits, staged, until a session.send names it (attachments.py)."""
@@ -2786,7 +2506,7 @@ class App:
                 raise OpError(e.code, e.message) from e
             return {"upload_id": uid}
 
-        @r.op("attachment.put", AttachPut, owned="log_id")
+        @r.op("attachment.put", AttachPut)
         async def attachment_put(p: AttachPut, caller):
             """One base64 chunk of an upload at ``offset``: the bytes now
             staged. No await between reading the staged size and appending,
@@ -2808,7 +2528,7 @@ class App:
                 raise OpError(e.code, e.message) from e
             return {"size": size}
 
-        @r.op("attachment.drop", AttachDrop, owned="log_id")
+        @r.op("attachment.drop", AttachDrop)
         async def attachment_drop(p: AttachDrop, caller):
             """Forget an upload the person removed before sending."""
             reg.open(p.log_id)
@@ -2824,12 +2544,12 @@ class App:
             n = s.read(p.ids)
             return {"read": n, "unread": len(s.unread)}
 
-        @r.op("recap.request", RecapParams, owned="log_id")
+        @r.op("recap.request", RecapParams)
         async def recap_request(p: RecapParams, caller):
             """A recap of where the session stands, for a person landing on its tab."""
             return await self.recaps.request(reg.open(p.log_id), p.force)
 
-        @r.op("btw.cancel", BtwCancelParams, owned="log_id")
+        @r.op("btw.cancel", BtwCancelParams)
         async def btw_cancel(p: BtwCancelParams, caller):
             """Cancel a running side note; its block keeps the question, folded."""
             return self.side_notes.cancel(reg.open(p.log_id), p.id)
@@ -2863,7 +2583,7 @@ class App:
                 raise OpError("speech_unavailable", str(e)) from e
             return {"base": f"/speech/{self.speech.id}/"}
 
-        @r.op("session.configure", ConfigureParams, owned="log_id")
+        @r.op("session.configure", ConfigureParams)
         async def configure(p: ConfigureParams, caller):
             s = reg.open(p.log_id)
             s.check_lock()
@@ -2902,7 +2622,7 @@ class App:
                 log.exception("aegis: the saved workflows could not be listed")
                 saved = []
             # /doctor only for an admin while the doctor finds a problem.
-            doctor = bool(self.doctor_watch.problems()) and self.who(caller).is_admin
+            doctor = bool(self.doctor_watch.problems())
             # A harness command keeps its name beside a skill of that name
             # unless the session is native (SpawnSpec.knowledge_native).
             taken = (
@@ -2955,7 +2675,7 @@ class App:
                 raise OpError("no_output", f"no output for {p.id!r}")
             return {"text": text}
 
-        @r.op("session.interrupt", LogParams, owned="log_id")
+        @r.op("session.interrupt", LogParams)
         async def interrupt(p: LogParams, caller):
             s = reg.open(p.log_id)
             try:
@@ -2963,18 +2683,18 @@ class App:
             except (BrokenPipeError, ConnectionResetError) as e:
                 raise _dead(e) from e
 
-        @r.op("session.stop", LogParams, owned="log_id")
+        @r.op("session.stop", LogParams)
         async def stop(p: LogParams, caller):
             s = reg.open(p.log_id)
             s.check_lock()
             await s.stop()
 
-        @r.op("session.restart", RestartParams, owned="log_id")
+        @r.op("session.restart", RestartParams)
         async def restart(p: RestartParams, caller):
             s = reg.open(p.log_id)
             return await self._launch(s, caller, p.untested, s.restart)
 
-        @r.op("session.warm", WarmParams, owned="log_id")
+        @r.op("session.warm", WarmParams)
         async def warm(p: WarmParams, caller):
             # A person's Wake (wake: true) is refused like a send that would
             # start the session (#479). Without it, someone started typing to
@@ -2990,7 +2710,7 @@ class App:
                 await s.ensure_running()
             return None
 
-        @r.op("session.kills", LogParams, owned="log_id")
+        @r.op("session.kills", LogParams)
         async def sleep_kills(p: LogParams, caller):
             """What Sleep would end with the process, one plain line each: what
             a park waits for, the stray processes included (park.kills). Asked
@@ -3004,7 +2724,7 @@ class App:
             )
             return park.kills(len(s.open_tasks), frozenset(s.timers), len(found))
 
-        @r.op("session.unquiet", LogParams, owned="log_id")
+        @r.op("session.unquiet", LogParams)
         async def unquiet(p: LogParams, caller):
             # A workflow's node has no tab while its run lives (spec §05):
             # the person reads it from the run's card or the Fleet.
@@ -3013,15 +2733,15 @@ class App:
             return reg.set_quiet(p.log_id, False)
 
         # The person's, never an agent's: autoclose is their word to close (#691).
-        @r.op("session.autoclose", AutocloseParams, owned="log_id")
+        @r.op("session.autoclose", AutocloseParams)
         async def autoclose(p: AutocloseParams, caller):
             return reg.set_autoclose(p.log_id, p.on)
 
-        @r.op("session.reopen", LogParams, owned="log_id")
+        @r.op("session.reopen", LogParams)
         async def reopen(p: LogParams, caller):
             return reg.reopen(p.log_id).wire()
 
-        @r.op("session.rename", RenameParams, agent=True, read=True, owned="log_id")
+        @r.op("session.rename", RenameParams, agent=True, read=True)
         async def rename(p: RenameParams, caller):
             """Rename your session: a handle (2 or 3 lowercase segments joined by
             hyphens) and a title, both saying what it works on. Set both in
@@ -3081,7 +2801,7 @@ class App:
                     return {}
                 return {"root_path": r}
 
-            return await place.run(rel)
+            return await asyncio.to_thread(rel)
 
         async def peek_path(s, row, index: int, pick: str | None, caller):
             """A path a reply named, resolved now: as written when absolute,
@@ -3101,7 +2821,7 @@ class App:
                 if "absolute" in tried
                 else f" under {self.roots.config_root} or {s.spec.cwd}"
             )
-            run = self.place_of_session(s.log_id).run
+            run = asyncio.to_thread
 
             def look() -> tuple[dict[str, Path], bool]:
                 found = {k: t for k, t in tried.items() if t.is_file()}
@@ -3121,7 +2841,9 @@ class App:
             else:
                 path = next(iter(found.values()))
             try:
-                (rec,) = await files.store_as(self.roots.state_root, [path], run)
+                (rec,) = await asyncio.to_thread(
+                    files.store_all, self.roots.state_root, [path]
+                )
             except files.FileError as e:
                 raise OpError(e.code, e.message) from e
             sent = {k: v for k, v in rec.items() if k != "kind"}
@@ -3153,8 +2875,8 @@ class App:
             if not path.is_absolute():
                 path = s.spec.cwd / path
             try:
-                (rec,) = await files.store_as(
-                    self.roots.state_root, [path], self.place_of_session(s.log_id).run
+                (rec,) = await asyncio.to_thread(
+                    files.store_all, self.roots.state_root, [path]
                 )
             except files.FileError as e:
                 raise OpError(e.code, e.message) from e
@@ -3189,7 +2911,7 @@ class App:
             """The servers this one links, with their state; never their tokens."""
             return [link.wire() for link in self.links.links()]
 
-        @r.op("link.add", LinkAdd, admin=True)
+        @r.op("link.add", LinkAdd)
         async def link_add(p: LinkAdd, caller):
             """Link another aegis server: connect once with its token, take the
             name it gives itself, and keep the link in links.json."""
@@ -3207,11 +2929,11 @@ class App:
             self.links.add(name, p.url, p.token, p.trusted)
             return {"name": name}
 
-        @r.op("link.remove", LinkName, admin=True)
+        @r.op("link.remove", LinkName)
         async def link_remove(p: LinkName, caller):
             self.links.remove(p.name)
 
-        @r.op("link.trust", LinkTrust, admin=True)
+        @r.op("link.trust", LinkTrust)
         async def link_trust(p: LinkTrust, caller):
             """Ask a link for trust (both ways, agents unrestricted), or stop
             asking. The link reconnects; the far server decides."""
@@ -3226,7 +2948,7 @@ class App:
                 for row in self.links.incoming()
             ]
 
-        @r.op("link.exit", LinkExit, admin=True)
+        @r.op("link.exit", LinkExit)
         async def link_exit(p: LinkExit, caller):
             """Make a link this server's exit, or stop exiting: what aegis
             starts from now on reaches the internet from there (exit.py)."""
@@ -3240,12 +2962,12 @@ class App:
             )
             return {"exit_via": p.name}
 
-        @r.op("server.paused", admin=True)
+        @r.op("server.paused")
         async def server_paused(p, caller):
             """The pause in force (pause.py), or null."""
             return {"paused": self.paused}
 
-        @r.op("server.pause", admin=True)
+        @r.op("server.pause")
         async def server_pause(p, caller):
             """Pause every session: end their processes, hold all new work."""
             ended = await self.pause_all(
@@ -3253,43 +2975,13 @@ class App:
             )
             return {"paused": self.paused, "ended": ended}
 
-        @r.op("server.resume", admin=True)
+        @r.op("server.resume")
         async def server_resume(p, caller):
             """Resume every session the pause held, and the work it held."""
             await self.resume_all()
             return {"paused": None}
 
-        @r.op("token.list", admin=True)
-        async def token_list(_, caller):
-            """The tokens that may use this server, the admin's first, the
-            policy of every member without its own, the pools a policy names,
-            and each member's gate on each pool now."""
-            snap, now = self.quota.snapshot(), time.time()
-
-            def gates(policy: dict | None) -> dict | None:
-                if policy is None:
-                    return None
-                return {pool: decide(policy, pool, snap, now).state for pool in POOLS}
-
-            rows = self.principals.rows()
-            for row in rows:
-                row["gates"] = gates(self.principals.policy_of(row["name"]))
-            default = self.principals.default_policy()
-            return {
-                "tokens": rows,
-                "default_policy": default,
-                "default_gates": gates(default or {}),
-                "pools": pools_wire(),
-                "multi_user": self.multi_user is not None,
-            }
-
-        @r.op("token.add", TokenAdd, admin=True)
-        async def token_add(p: TokenAdd, caller):
-            """Mint a token; the only time it is shown."""
-            token = self.principals.add(p.name, p.role, p.linux_user, p.no_linux_user)
-            return {"name": p.name, "role": p.role, "token": token}
-
-        @r.op("token.revoke", TokenName, admin=True)
+        @r.op("token.revoke", TokenName)
         async def token_revoke(p: TokenName, caller):
             """End a token. The admin's is replaced, and the new one returned
             to whoever revoked it, so that browser can sign in again. Its
@@ -3298,21 +2990,12 @@ class App:
             self.push.subscriptions.remove_owner(p.name)
             return {"token": token}
 
-        @r.op("token.policy", TokenPolicy, admin=True)
-        async def token_policy(p: TokenPolicy, caller):
-            """Set a member's quota policy, or with name * the default one.
-            The gate applies it at the next reading."""
-            if p.name == "*":
-                self.principals.set_default_policy(p.policy)
-            else:
-                self.principals.set_policy(p.name, p.policy)
-
         @r.op("server.version")
         async def server_version(_, caller):
             install = await self.updater.install()
             return await self.versions.wire() | {"install": install.wire()}
 
-        @r.op("server.update", admin=True)
+        @r.op("server.update")
         async def server_update(_, caller):
             """Upgrade aegis with the installer that owns it, check the new
             build, and restart onto it (self_update.py). Progress is on the

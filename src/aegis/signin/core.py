@@ -130,9 +130,8 @@ class SignIns:
 
     # -- what starts a card --------------------------------------------------
     def failed(self, s: "Session", harness: str = "claude-code") -> None:
-        """A turn of ``s`` failed to sign in. Members' sessions sign in with
-        their own account, which the server's must not replace."""
-        if s.spec.linux_user is not None or harness not in self._recipes():
+        """A turn of ``s`` failed to sign in."""
+        if harness not in self._recipes():
             return
         waiting = self.waiting.setdefault(harness, [])
         if s.log_id not in waiting:

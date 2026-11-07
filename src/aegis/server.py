@@ -32,7 +32,6 @@ if TYPE_CHECKING:
     from .api.workflows import Workflows
     from .app import App
     from .roots import Roots
-    from .users import MultiUser
 
 
 class StartError(Exception):
@@ -46,7 +45,22 @@ class StartError(Exception):
 @dataclass(frozen=True)
 class Prepared:
     roots: Roots
-    multi_user: MultiUser | None
+
+
+def _proc_status() -> str:
+    try:
+        return Path("/proc/self/status").read_text()
+    except OSError:
+        return ""
+
+
+def _ambient_caps(status: str) -> bool:
+    """Whether this process holds ambient capabilities, which every child
+    inherits: a systemd unit made for the multi-user mode grants them."""
+    for line in status.splitlines():
+        if line.startswith("CapAmb:"):
+            return int(line.split(":", 1)[1].strip() or "0", 16) != 0
+    return False
 
 
 def prepare(start: Path, root: Path | None = None) -> Prepared:
@@ -64,16 +78,25 @@ def prepare(start: Path, root: Path | None = None) -> Prepared:
                 f"  mv {roots.state_root} {roots.state_root.parent / 'legacy-state'}",
             ]
         )
+    from .tokens import OldStateError, refuse_old_state
+
+    try:
+        refuse_old_state(roots.state_root)
+    except OldStateError as e:
+        raise StartError([str(e)]) from None
+    if _ambient_caps(_proc_status()):
+        raise StartError(
+            [
+                "aegis holds ambient capabilities, which every agent would inherit: "
+                "its systemd unit was made for the multi-user mode, which aegis 3.0 "
+                "removed.",
+                "Write a new unit with `aegis service install` and restart the service.",
+            ]
+        )
     snap = Config(roots.config_root).current()
     if snap.multi_user_error:
         raise StartError([snap.multi_user_error])
-    if snap.multi_user is not None:
-        from .users import boot_problems
-
-        if problems := boot_problems(roots.state_root, snap.multi_user):
-            raise StartError(list(problems))
-        roots.state_root.mkdir(mode=0o700, parents=True, exist_ok=True)
-    return Prepared(roots, snap.multi_user)
+    return Prepared(roots)
 
 
 def allowed_hosts(host: str, port: int) -> set[str]:
@@ -164,7 +187,6 @@ class Server:
             p.roots,
             base_url=self.base_url,
             server_name=self._name or socket.gethostname(),
-            multi_user=p.multi_user,
             claude_bin=self._bins[0],
             opencode_bin=self._bins[1],
             codex_bin=self._bins[2],

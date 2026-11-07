@@ -39,8 +39,7 @@ def normalize(path: Path) -> tuple[Path, float | None]:
         r = launch.run(
             [ffmpeg, "-nostdin", "-v", "error", "-y", "-i", str(path), "-vn",
              "-ac", "1", "-ar", str(RATE), "-c:a", "libopus", "-b:a", BITRATE,
-             "-application", "voip", str(out)],
-            user=None, timeout=TIMEOUT_S,
+             "-application", "voip", str(out)], timeout=TIMEOUT_S,
         )  # fmt: skip
         if r.returncode != 0:
             raise subprocess.CalledProcessError(r.returncode, ffmpeg)
@@ -61,8 +60,7 @@ def duration(path: Path) -> float | None:
     try:
         r = launch.run(
             [ffprobe, "-v", "error", "-show_entries", "format=duration",
-             "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
-            user=None, text=True, timeout=30,
+             "-of", "default=noprint_wrappers=1:nokey=1", str(path)], text=True, timeout=30,
         )  # fmt: skip
         return round(float(r.stdout.strip()), 1)
     except (OSError, subprocess.SubprocessError, ValueError):

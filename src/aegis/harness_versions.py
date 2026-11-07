@@ -148,7 +148,6 @@ async def _run(exe: str) -> str | None:
             stdout=launch.PIPE,
             stderr=launch.DEVNULL,
             new_session=True,
-            user=None,
             via=None,
         )
     except OSError:

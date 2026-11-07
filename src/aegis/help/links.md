@@ -15,9 +15,8 @@ here, unless the link is [trusted](#trusted-links).
 ## Add a link
 
 From a shell on this machine, pipe the far server's token into
-`aegis link add <name> <url>`. The far server's admin token is in its state
-directory, in `.aegis/state/token` under its root; to give the link less, mint
-a member token there with `aegis token add <name>` and pipe that instead:
+`aegis link add <name> <url>`. The far server's token is in its state
+directory, in `.aegis/state/token` under its root:
 
 ```bash
 ssh far-host cat work/.aegis/state/token | aegis link add far http://far-host:8742
@@ -43,12 +42,10 @@ A linked server's sessions appear in the tab bar and the Fleet with the
 server's name beside the handle, and its archive merges into this one's.
 The new-tab page gains a server picker. Through the link a person here can
 read, prompt, interrupt, stop and close those sessions, and spawn new ones, as
-far as the far server's token allows. Only an admin here can act through a
-link; a member sees the far sessions but every call to them is refused.
+far as the far server's token allows.
 
-On the far server the link is one principal, the token it was given. That
-token's role and quota policy decide what the link may start there, and a
-session it starts is owned by it.
+On the far server the link acts with the token it was given, and a session it
+starts is owned by that server's person.
 
 ## What agents here can do there
 
@@ -83,13 +80,10 @@ ssh host cat work/.aegis/state/token | aegis link add host http://host:8742 --tr
 "Trusted (both ways)" box does the same when adding a link. The far server
 grants trust only when:
 
-- the link holds its admin token, the one in `.aegis/state/token`;
-- no other token exists there, a member's or a second admin's;
+- the link holds its token, the one in `.aegis/state/token`;
 - it does not itself link a server of this server's name.
 
-A refused link stays a plain link, and Settings shows why after its state
-(`trust refused: host has tokens besides its admin's`). Minting a token on
-the far server later ends the trust at its next call back.
+A refused link stays a plain link, and Settings shows why after its state.
 
 Over a trusted link, an agent on the far server reaches this one as an agent
 here reaches it: `session_spawn` with `agent@<this server>`, `peer_handoff`
@@ -152,8 +146,7 @@ What it does not cover:
 - A program that ignores the proxy variables goes out directly: a bare `ssh`, a
   raw socket, UDP. `curl`, `git` over HTTPS, `gh`, `npm`, `uv`, Python, Node's
   `fetch` and Claude Code all honour them. It is no guarantee for every packet.
-- Only a trusted link can be an exit, and a multi-user server cannot use one,
-  so the far server has only its admin's token.
+- Only a trusted link can be an exit.
 - The relay connects to public addresses only, so an agent cannot reach the far
   server's private network through it.
 

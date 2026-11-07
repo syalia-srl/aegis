@@ -49,7 +49,6 @@ def test_names_and_double_registration():
 
 
 async def test_agents_reach_only_agent_operations_and_carry_their_session():
-    from aegis.ops import Caller
 
     r = make()
 
@@ -70,64 +69,12 @@ async def test_agents_reach_only_agent_operations_and_carry_their_session():
     assert [o.tool_name for o in r.agent_ops()] == ["echo", "whoami"]
 
 
-ANA, BEN = Principal("ana", "admin"), Principal("ben", "member")
+def test_no_operation_or_principal_carries_a_role_or_an_owner_check():
+    import dataclasses
 
+    from aegis.ops import Operation
 
-class LogParams(BaseModel):
-    log_id: str
-
-
-def registry():
-    r = Registry()
-    r.owner_of = lambda log_id: {"s-ana": "ana", "s-ben": "ben"}.get(log_id)
-    r.who = lambda c: c.principal or BEN  # an agent here acts for ben
-
-    @r.op("admin.thing", admin=True)
-    async def admin_thing(p, caller):
-        return "done"
-
-    @r.op("session.poke", LogParams, owned="log_id", agent=True)
-    async def poke(p, caller):
-        return p.log_id
-
-    return r
-
-
-async def test_an_admin_op_refuses_a_member():
-    r = registry()
-    assert await r.call("admin.thing", {}, Caller("user", principal=ANA)) == "done"
-    with pytest.raises(OpError) as e:
-        await r.call("admin.thing", {}, Caller("user", principal=BEN))
-    assert e.value.code == "not_for_members"
-
-
-async def test_an_owned_op_lets_the_owner_and_an_admin_through():
-    r = registry()
-    assert (
-        await r.call("session.poke", {"log_id": "s-ben"}, Caller("user", principal=BEN))
-        == "s-ben"
-    )
-    assert (
-        await r.call("session.poke", {"log_id": "s-ben"}, Caller("user", principal=ANA))
-        == "s-ben"
-    )
-    with pytest.raises(OpError) as e:
-        await r.call("session.poke", {"log_id": "s-ana"}, Caller("user", principal=BEN))
-    assert e.value.code == "not_owner"
-
-
-async def test_an_agent_is_held_to_its_owners_role():
-    r = registry()
-    with pytest.raises(OpError) as e:
-        await r.call("session.poke", {"log_id": "s-ana"}, Caller("agent", "s-ben"))
-    assert e.value.code == "not_owner"
-
-
-async def test_an_unknown_session_reaches_the_handler():
-    r = registry()
-    assert (
-        await r.call(
-            "session.poke", {"log_id": "s-gone"}, Caller("user", principal=BEN)
-        )
-        == "s-gone"
-    )
+    fields = {f.name for f in dataclasses.fields(Operation)}
+    assert "admin" not in fields and "owned" not in fields
+    assert {f.name for f in dataclasses.fields(Principal)} == {"name"}
+    assert not hasattr(Registry(), "hides")

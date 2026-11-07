@@ -11,6 +11,8 @@ step's see for a person: it takes a run and a step, never a path.
 
 from __future__ import annotations
 
+import asyncio
+
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -190,9 +192,6 @@ def register_workflow_ops(app: App) -> None:
         st = wf.runs.get(run)
         if st is None:
             raise OpError("no_run", f"no workflow run {run!r}")
-        who = app.who(caller)
-        if not who.is_admin and app.owner_of(st.owner) != who.name:
-            raise OpError("not_owner", f"{run} belongs to {app.owner_of(st.owner)}")
         if caller.is_agent and not wf.owns(caller.log_id, st):
             raise OpError(
                 "not_yours", "only the session that armed a workflow can stop it"
@@ -291,14 +290,9 @@ def register_workflow_ops(app: App) -> None:
         """The saved workflows a person can run with /workflow <id> <text>:
         built in and the project's, each with its title, args schema,
         version, who saved it, and what is wrong with it if it does not lint."""
-        rows = app.saved.listing(wf._agents())
-        who = app.who(caller)
-        for row in rows:
-            if "saved_by" in row and not app.sees(who, saver(row["saved_by"])):
-                del row["saved_by"], row["saved_at"]
-        return rows
+        return app.saved.listing(wf._agents())
 
-    @r.op("workflow.read", WorkflowId, admin=True)
+    @r.op("workflow.read", WorkflowId)
     async def workflow_read(p: WorkflowId, caller):
         """A saved workflow for Settings → Workflows: its file's text, to
         export, and its steps as the card draws them. A person's: an agent
@@ -315,12 +309,7 @@ def register_workflow_ops(app: App) -> None:
     async def workflow_delete(p: WorkflowId, caller):
         """Delete a saved workflow from the project. A built-in one cannot be
         deleted. A schedule that fires it pauses."""
-        last = app.saved.last_save(p.id)
-        if last is not None and not app.sees(app.who(caller), saver(last["by"])):
-            raise OpError(
-                "no_workflow",
-                f"no saved workflow {p.id!r}; /workflow alone lists them",
-            )
+        app.saved.last_save(p.id)
         app.saved.delete(p.id, by(caller))
         app.schedules.workflow_changed(p.id)
         return {"deleted": p.id}
@@ -401,14 +390,13 @@ def register_workflow_ops(app: App) -> None:
         owned(p.run, caller)
         # The step's file is in its owner's working tree: checked and read as
         # the session that owns the run now (handoffs move it on).
-        owner = wf.owner(wf.runs[p.run])
-        user = app.sessions.user_for(owner.spec) if owner is not None else None
-        run = app.runners.get(user)
         path, fragment, line = wf.see_file(p.run, p.node, check=False)
-        if not await run(path.is_file):
+        if not await asyncio.to_thread(path.is_file):
             raise OpError("no_file", f"no file {path}")
         try:
-            (rec,) = await files.store_as(app.roots.state_root, [path], run)
+            (rec,) = await asyncio.to_thread(
+                files.store_all, app.roots.state_root, [path]
+            )
         except files.FileError as e:
             raise OpError(e.code, e.message) from e
         return {"files": [_sent_file(rec)], "fragment": fragment, "line": line}

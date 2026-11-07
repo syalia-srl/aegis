@@ -78,25 +78,6 @@ jobs:
   # out until they are fixed (#776). Until the fair release (#768), seven of
   # every twenty pushes to main went red on a flake, so a red PR said nothing.
 
-  # The multi-user mode against real Linux users: the server runs under
-  # systemd-run with its capabilities, and the tests create two members with
-  # sudo, which GitHub's runners allow without a password.
-  multiuser:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-      - uses: astral-sh/setup-uv@v10.1.0
-        with:
-          enable-cache: true
-      - run: uv sync --locked
-      - name: chromium for the Settings test
-        uses: ./.github/actions/chromium
-      - run: make test-multiuser
-
   # aegis's bench, on the PR's base and head on one runner so the machine
   # cancels out. Reports in the job summary and warns past 20% worse; it
   # never fails the run (scripts/bench_compare.py exits 0, and every step

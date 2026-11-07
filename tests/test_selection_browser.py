@@ -690,27 +690,6 @@ def test_a_bar_and_a_menu_whose_row_scrolled_away_close(server, page):  # noqa: 
     assert page.errors == []
 
 
-def test_another_members_session_offers_no_composer_items(server, page, browser):  # noqa: F811
-    from .test_browser import member_page
-
-    page.goto(server.url)
-    key = spawn(page, "/md alpha kiwi beta")
-    pg, base = member_page(browser, server)
-    pg.goto(f"{base}#s={key}")
-    pg.wait_for_selector(".row.prose .body")
-    select(pg, REPLY, "kiwi")
-    pg.wait_for_selector(".sbar")
-    assert [b.get_attribute("data-id") for b in pg.locator(".sbar button").all()] == [
-        "new",
-        "copy",
-    ]
-    pg.click(".row.prose .body", button="right")
-    assert menu_ids(pg) == ["new", "copy", "link"]
-    close_menu(pg)
-    pg.click(".row.user .body", button="right")
-    assert menu_ids(pg) == ["new", "copy", "link"]
-
-
 def test_a_full_answer_after_a_restart_leaves_no_menu_on_a_detached_row(server, page):  # noqa: F811
     page.goto(server.url)
     key = spawn(page, "/md alpha kiwi beta")

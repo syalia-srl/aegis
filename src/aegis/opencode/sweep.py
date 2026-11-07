@@ -12,8 +12,7 @@ no ``OWNER``: one is taken for orphaned when it has an ``AEGIS_SESSION``, the
 argv aegis starts it with, and was re-parented to init or a systemd user
 manager, which is where an orphan lands and never where aegis starts one.
 
-Only processes this server's user can read are seen: in the multi-user mode
-another user's child is left to the kernel.
+Only processes this server's user can read are seen.
 """
 
 from __future__ import annotations

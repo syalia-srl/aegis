@@ -183,7 +183,7 @@ def _detach(
         log.write(f"== {time.strftime('%Y-%m-%dT%H:%M:%S%z')} aegis serve --detach\n")
         log.flush()
         child = launch.detach(
-            cmd, cwd=roots.config_root, stdout=log, stderr=subprocess.STDOUT, user=None
+            cmd, cwd=roots.config_root, stdout=log, stderr=subprocess.STDOUT
         )
     pid_path.write_text(f"{child.pid}\n")
     deadline = time.monotonic() + DETACH_BOOT_S
@@ -341,7 +341,6 @@ def serve(
         cursor_bin=cursor,
         base_url=f"http://{local}:{port}",
         server_name=name or _socket.gethostname(),
-        multi_user=prepared.multi_user,
     )
     web = build_web(app, token, allowed, origin)
     typer.echo(f"aegis serving {roots.config_root}")
@@ -770,11 +769,6 @@ def service_install(
     yes: bool = typer.Option(
         False, "--yes", "-y", help="Take every default without asking."
     ),
-    multi_user: bool = typer.Option(
-        False,
-        "--multi-user",
-        help="Give the server the capabilities multi_user in .aegis.yaml needs.",
-    ),
 ) -> None:
     """Write a systemd unit for `aegis serve` and print the commands that
     install it. Never runs sudo."""
@@ -797,14 +791,7 @@ def service_install(
         path=os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
         memory_high=_ask_or(memory_high, "MemoryHigh", high, yes),
         memory_max=_ask_or(memory_max, "MemoryMax", top, yes),
-        multi_user=multi_user,
     )
-    if multi_user and unit.user == "root":
-        typer.echo(
-            "multi-user mode runs the server as an unprivileged user, never root",
-            err=True,
-        )
-        raise typer.Exit(1)
     for key, v in (("MemoryHigh", unit.memory_high), ("MemoryMax", unit.memory_max)):
         if parse_size(v, total) is None:
             typer.echo(f"{key}={v} is not a size systemd reads, such as 5.5G", err=True)
@@ -823,8 +810,7 @@ def service_install(
 
 token_app = typer.Typer(
     add_completion=False,
-    help="The tokens that may use this server: one per person, linked server "
-    "or job. A running server applies a change at its next request.",
+    help="The server's token. A running server applies a change at its next request.",
 )
 app.add_typer(token_app, name="token")
 
@@ -832,60 +818,11 @@ app.add_typer(token_app, name="token")
 def _token_store(root: Path | None):
     import getpass
 
-    from .config import Config
     from .roots import make_roots
     from .tokens import TokenStore
 
     roots = make_roots(start=Path.cwd(), root=root)
-    return TokenStore(
-        roots.state_root,
-        getpass.getuser(),
-        multi_user=Config(roots.config_root).current().multi_user is not None,
-    )
-
-
-@token_app.command("add")
-def token_add(
-    name: str = typer.Argument(..., help="Who it is: lowercase, e.g. ben or laptop."),
-    role: str = typer.Option("member", help="member or admin."),
-    linux_user: str | None = typer.Option(
-        None,
-        "--linux-user",
-        help="The Linux user it runs as, in multi-user mode; default: NAME.",
-    ),
-    no_linux_user: bool = typer.Option(
-        False,
-        "--no-linux-user",
-        help="An admin that runs as the server's own user, in multi-user mode.",
-    ),
-    root: Path | None = _ROOT_OPTION,
-) -> None:
-    """Mint a token and print it, alone on stdout: the only time it is shown."""
-    from .ops import OpError
-
-    try:
-        token = _token_store(root).add(name, role, linux_user, no_linux_user)
-    except OpError as e:
-        typer.echo(e.message, err=True)
-        raise typer.Exit(1) from e
-    typer.echo(token)
-
-
-@token_app.command("list")
-def token_list(root: Path | None = _ROOT_OPTION) -> None:
-    """Names, roles and quota policies, never tokens."""
-    from .quota_gate import describe
-
-    store = _token_store(root)
-    rows = store.rows()
-    for r in rows:
-        own = "" if r["policy"] is not None or r["role"] == "admin" else " (default)"
-        user = f"{r['linux_user'] or '-':<16} " if store.multi_user else ""
-        typer.echo(
-            f"{r['name']:<16} {r['role']:<7} {user}{describe(store.policy_of(r['name']))}{own}"
-            f"{'  (this server)' if r['owner'] else ''}"
-        )
-    typer.echo(f"{len(rows)} tokens")
+    return TokenStore(roots.state_root, getpass.getuser())
 
 
 @token_app.command("revoke")
@@ -893,7 +830,7 @@ def token_revoke(
     name: str = typer.Argument(..., help="Whose token to end."),
     root: Path | None = _ROOT_OPTION,
 ) -> None:
-    """End a token. Revoking the admin's prints its replacement."""
+    """Replace the server's token and print the new one."""
     from .ops import OpError
 
     try:
@@ -901,7 +838,7 @@ def token_revoke(
     except OpError as e:
         typer.echo(e.message, err=True)
         raise typer.Exit(1) from e
-    typer.echo(new if new else f"revoked {name}")
+    typer.echo(new)
 
 
 @app.command("call")
