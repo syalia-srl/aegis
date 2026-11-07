@@ -180,6 +180,8 @@ def register_schedule_ops(app: App) -> None:
             "log_id": s.log_id,
             "principal": who.name,
             "ceiling": s.spec.permission,
+            # Its runs stay where the maker's host put it (#959).
+            **({"tags": dict(s.spec.tags)} if s.spec.tags else {}),
         }
 
     def cwd(raw: str | None, caller: Caller) -> Path:
@@ -188,7 +190,7 @@ def register_schedule_ops(app: App) -> None:
 
     def mine(name: str, caller: Caller, far: FarOwner | None = None):
         s = sch.items.get(name)
-        if s is None:
+        if s is None or not app.owns_schedule(app.who(caller), name):
             raise OpError("no_schedule", f"no schedule {name!r}")
         o = s.owner
         made = o.get("far") or {}
@@ -235,7 +237,8 @@ def register_schedule_ops(app: App) -> None:
         """Every schedule on this server: its clock, layers and owner, its next
         tick, its live runs, and whether it is paused. An agent also gets each
         server's linked with trust, named `name@server` and with `server`."""
-        out = [w for w in sch.wire_all()]
+        me = app.who(caller)
+        out = [w for w in sch.wire_all() if app.owns_schedule(me, w["name"])]
         if caller.is_agent:
             out += await far_schedules()
         return out
@@ -370,7 +373,7 @@ def register_schedule_ops(app: App) -> None:
             )
         return {"outcome": await sch.fire_now(p.name), **sch.wire(p.name)}
 
-    @r.op("schedule.test", ScheduleTest, agent=True)
+    @r.op("schedule.test", ScheduleTest, agent=True, names=(("session", "session"),))
     async def schedule_test(p: ScheduleTest, caller):
         """Try a clock and a check without saving anything: the next three
         ticks, and whether the check would fire now and why. With `name@server`

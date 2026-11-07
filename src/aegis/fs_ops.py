@@ -405,13 +405,13 @@ def register_fs_ops(app: App) -> tuple[FsIndex, Tickets]:
         with log_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(line) + "\n")
 
-    @r.op("fs.find", NoParams, local=True)
+    @r.op("fs.find", NoParams, local=True, server=True)
     async def find(p: NoParams, caller: Caller):
         """Every listed file under the root with its mtime in ms, newest first."""
         entries = await index_of(app.place_of(caller)).entries()
         return {"files": [[rel, m] for rel, m in entries]}
 
-    @r.op("fs.read", FsPath, local=True)
+    @r.op("fs.read", FsPath, local=True, server=True)
     async def read(p: FsPath, caller: Caller):
         """A file's kind, size, mtime and hash, its text when it is text, and
         a ticket URL for every kind a browser element draws itself."""
@@ -424,14 +424,14 @@ def register_fs_ops(app: App) -> tuple[FsIndex, Tickets]:
             out["url"] = tickets.issue(p.path, place)
         return out
 
-    @r.op("fs.ticket", FsPath, local=True)
+    @r.op("fs.ticket", FsPath, local=True, server=True)
     async def ticket(p: FsPath, caller: Caller):
         """A ticket URL for one file, such as an image a Markdown file links to."""
         place = app.place_of(caller)
         await asyncio.to_thread(_file, place, p.path)
         return {"url": tickets.issue(p.path, place)}
 
-    @r.op("fs.open", FsPath, local=True)
+    @r.op("fs.open", FsPath, local=True, server=True)
     async def open_(p: FsPath, caller: Caller):
         """Open a file in the desktop's app for it, as file.open does for a
         sent file: only from a browser on the server's desktop."""
@@ -445,13 +445,13 @@ def register_fs_ops(app: App) -> tuple[FsIndex, Tickets]:
         except (files.FileError, OSError) as e:
             raise OpError("open_failed", str(e)) from e
 
-    @r.op("fs.stat", FsPath, local=True)
+    @r.op("fs.stat", FsPath, local=True, server=True)
     async def stat(p: FsPath, caller: Caller):
         """A file's size, mtime and kind, polled for the open file."""
         place = app.place_of(caller)
         return await asyncio.to_thread(_stat, place, p.path)
 
-    @r.op("fs.write", FsWrite, local=True)
+    @r.op("fs.write", FsWrite, local=True, server=True)
     async def write(p: FsWrite, caller: Caller):
         """Save a text file, only if it still has the hash ``base``; a null
         base creates it and refuses a file that exists."""
@@ -472,7 +472,7 @@ def register_fs_ops(app: App) -> tuple[FsIndex, Tickets]:
         await index_of(place).note(p.path)
         return {"hash": hashlib.sha256(data).hexdigest(), "mtime": _mtime(st)}
 
-    @r.op("fs.list", FsList, local=True)
+    @r.op("fs.list", FsList, local=True, server=True)
     async def list_(p: FsList, caller: Caller):
         """One folder's entries, folders first, each alphabetical; ignored
         ones only when asked for, except a folder holding a repository."""
@@ -480,7 +480,7 @@ def register_fs_ops(app: App) -> tuple[FsIndex, Tickets]:
         entries = await asyncio.to_thread(_folder, place, p.dir, p.ignored)
         return {"dir": p.dir, "entries": entries}
 
-    @r.op("fs.mkdir", FsPath, local=True)
+    @r.op("fs.mkdir", FsPath, local=True, server=True)
     async def mkdir(p: FsPath, caller: Caller):
         """Create a folder; refuses a name that exists."""
         place = app.place_of(caller)
@@ -489,7 +489,7 @@ def register_fs_ops(app: App) -> tuple[FsIndex, Tickets]:
         log(caller, "mkdir", p.path, 0)
         return {"path": p.path}
 
-    @r.op("fs.move", FsMove, local=True)
+    @r.op("fs.move", FsMove, local=True, server=True)
     async def move(p: FsMove, caller: Caller):
         """Rename or move a file or folder; refuses a target that exists."""
         place = app.place_of(caller)
@@ -501,7 +501,7 @@ def register_fs_ops(app: App) -> tuple[FsIndex, Tickets]:
         await idx.note(p.to)
         return {"path": p.to}
 
-    @r.op("fs.count", FsPath, local=True)
+    @r.op("fs.count", FsPath, local=True, server=True)
     async def count(p: FsPath, caller: Caller):
         """How many files and bytes a file or folder holds, every file
         counted, ignored ones included: what a delete would take."""
@@ -511,7 +511,7 @@ def register_fs_ops(app: App) -> tuple[FsIndex, Tickets]:
         )
         return {"files": files, "size": size}
 
-    @r.op("fs.delete", FsPath, local=True)
+    @r.op("fs.delete", FsPath, local=True, server=True)
     async def delete(p: FsPath, caller: Caller):
         """Move a file or folder into the trash: its id there and how many
         files it held."""
@@ -527,7 +527,7 @@ def register_fs_ops(app: App) -> tuple[FsIndex, Tickets]:
         index_of(place).removed(p.path)
         return {"trash_id": t["id"], "files": t["files"]}
 
-    @r.op("fs.restore", FsRestore, local=True)
+    @r.op("fs.restore", FsRestore, local=True, server=True)
     async def restore(p: FsRestore, caller: Caller):
         """Put a deleted entry back, or ``taken`` when something new is there."""
         place = app.place_of(caller)

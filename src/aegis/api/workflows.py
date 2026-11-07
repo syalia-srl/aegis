@@ -13,6 +13,7 @@ import builtins
 from typing import TYPE_CHECKING, Any, Literal
 
 from ..ops import Caller
+from ..policy import Refused
 from ._wait import until
 from .models import RunInfo
 from .sessions import Session
@@ -21,6 +22,14 @@ if TYPE_CHECKING:
     from ..server import Server
 
 ENDED = frozenset({"done", "failed", "stopped", "rejected"})
+
+
+def _may_write(srv: Server, log_id: str) -> None:
+    """Acting as a run's main agent is acting on its session: the caller
+    ``srv`` acts as must be allowed to change it (#959)."""
+    app = srv.app
+    if not app.sees(app.acting(srv._caller), log_id, "write"):
+        raise Refused(f"you may not act for session {log_id}")
 
 
 class RunNotFound(LookupError):
@@ -44,6 +53,7 @@ class Workflows:
         """Arm ``definition`` (the YAML a workflow_arm takes) with ``owner`` as
         its main agent. It runs once approved: pass ``approve`` to approve it
         now, as the person would on its card."""
+        _may_write(self._srv, owner.log_id)
         r = await self._srv.app.registry.call(
             "workflow.arm",
             {"definition": definition, "args": args or {}},
@@ -60,8 +70,14 @@ class Workflows:
         return WorkflowRun(self._srv, run)
 
     async def list(self) -> builtins.list[WorkflowRun]:
-        """Every run this server keeps, oldest id first."""
-        return [WorkflowRun(self._srv, r) for r in sorted(self._srv.app.workflows.runs)]
+        """Every run this server keeps that the caller may see, oldest id first."""
+        app = self._srv.app
+        me = app.acting(self._srv._caller)
+        return [
+            WorkflowRun(self._srv, r)
+            for r, st in sorted(app.workflows.runs.items())
+            if app.sees(me, st.owner)
+        ]
 
 
 class WorkflowRun:
@@ -129,8 +145,10 @@ class WorkflowRun:
             params["choice"] = choice
         if value is not None:
             params["value"] = value
+        owner = self._state().owner
+        _may_write(self._srv, owner)
         await self._srv.app.registry.call(
-            "workflow.answer", params, Caller("agent", log_id=self._state().owner)
+            "workflow.answer", params, Caller("agent", log_id=owner)
         )
         return await self.info()
 

@@ -194,7 +194,7 @@ def register_browser_ops(app: App) -> None:
                "title": b.meta.get("title", "")}  # fmt: skip
         return out | dock(s, b.id, p.dock)
 
-    @r.op("browser.goto", BrowserGoto, agent=True)
+    @r.op("browser.goto", BrowserGoto, agent=True, names=(("browser", "browser"),))
     async def goto(p: BrowserGoto, caller):
         """Load a URL in your browser, or go back, forward or reload."""
         if not p.url and not p.action:
@@ -203,7 +203,14 @@ def register_browser_ops(app: App) -> None:
         br.act(b, f"goto {p.url or p.action}")
         return await br.goto(b.id, p.url, p.action, "agent")
 
-    @r.op("browser.snapshot", BrowserRef, agent=True, read=True)
+    @r.op(
+        "browser.snapshot",
+        BrowserRef,
+        agent=True,
+        read=True,
+        names=(("browser", "browser"),),
+        access="read",
+    )
     async def snapshot(p: BrowserRef, caller):
         """The page as text: its accessibility tree, the roles and names you
         can target. Works while the person holds the page too."""
@@ -218,7 +225,7 @@ def register_browser_ops(app: App) -> None:
         holder = b.meta["holder"]
         return f"{b.page.url}  {title}\nholder: {holder}\n\n{tree}"
 
-    @r.op("browser.click", BrowserTarget, agent=True)
+    @r.op("browser.click", BrowserTarget, agent=True, names=(("browser", "browser"),))
     async def click(p: BrowserTarget, caller):
         """Click an element, after Playwright's waits. Returns the page after
         it and what the log saw: navigations, dialogs, console errors."""
@@ -235,7 +242,7 @@ def register_browser_ops(app: App) -> None:
             out["note"] = f"{n} elements matched; clicked the first"
         return out
 
-    @r.op("browser.type", BrowserType, agent=True)
+    @r.op("browser.type", BrowserType, agent=True, names=(("browser", "browser"),))
     async def type_(p: BrowserType, caller):
         """Fill a field with text, replacing what it held; submit presses
         Enter after it."""
@@ -253,7 +260,7 @@ def register_browser_ops(app: App) -> None:
             raise OpError("type_failed", str(e).splitlines()[0]) from None
         return await settle(b, rev)
 
-    @r.op("browser.press", BrowserPress, agent=True)
+    @r.op("browser.press", BrowserPress, agent=True, names=(("browser", "browser"),))
     async def press(p: BrowserPress, caller):
         """Press a key or chord on an element, or on whatever has focus."""
         b = agent_browser(p, caller)
@@ -271,7 +278,14 @@ def register_browser_ops(app: App) -> None:
             raise OpError("press_failed", str(e).splitlines()[0]) from None
         return await settle(b, rev)
 
-    @r.op("browser.screenshot", BrowserShot, agent=True, read=True)
+    @r.op(
+        "browser.screenshot",
+        BrowserShot,
+        agent=True,
+        read=True,
+        names=(("browser", "browser"),),
+        access="read",
+    )
     async def screenshot(p: BrowserShot, caller):
         """Save a PNG of the viewport, the whole page or one element, and
         return its path; read it with your file tool to see it."""
@@ -291,7 +305,14 @@ def register_browser_ops(app: App) -> None:
             raise OpError("screenshot_failed", str(e).splitlines()[0]) from None
         return {"path": str(path)}
 
-    @r.op("browser.events", BrowserEvents, agent=True, read=True)
+    @r.op(
+        "browser.events",
+        BrowserEvents,
+        agent=True,
+        read=True,
+        names=(("browser", "browser"),),
+        access="read",
+    )
     async def events(p: BrowserEvents, caller):
         """The browser's log after a revision: navigations, clicks and typing
         with the element each hit, console errors, failed requests, dialogs
@@ -302,7 +323,7 @@ def register_browser_ops(app: App) -> None:
             evs = [e for e in evs if e.get("who") == p.who]
         return {"rev": b.rev, "events": [event_line(e) for e in evs[-200:]]}
 
-    @r.op("browser.eval", BrowserEval, agent=True)
+    @r.op("browser.eval", BrowserEval, agent=True, names=(("browser", "browser"),))
     async def eval_(p: BrowserEval, caller):
         """Run a JavaScript expression in the page and return its JSON value."""
         b = agent_browser(p, caller)
@@ -314,14 +335,16 @@ def register_browser_ops(app: App) -> None:
         text = json.dumps(value, ensure_ascii=False, default=str)
         return text if len(text) <= 20_000 else text[:20_000] + "… (cut)"
 
-    @r.op("browser.resize", BrowserResize, agent=True)
+    @r.op("browser.resize", BrowserResize, agent=True, names=(("browser", "browser"),))
     async def resize(p: BrowserResize, caller):
         """Set the page's viewport, such as 390x844 for a phone-width test."""
         b = agent_browser(p, caller)
         br.act(b, f"resize {p.width}x{p.height}")
         return await br.resize(b.id, p.width, p.height)
 
-    @r.op("browser.handover", BrowserHandover, agent=True)
+    @r.op(
+        "browser.handover", BrowserHandover, agent=True, names=(("browser", "browser"),)
+    )
     async def handover(p: BrowserHandover, caller):
         """Give the page to the person, with what they should do (pass a
         captcha, sign in, try a step), then end your turn. You are woken with
@@ -333,7 +356,7 @@ def register_browser_ops(app: App) -> None:
             "End your turn; you are woken when they give the page back."
         )
 
-    @r.op("browser.close", BrowserRef, agent=True)
+    @r.op("browser.close", BrowserRef, agent=True, names=(("browser", "browser"),))
     async def close(p: BrowserRef, caller):
         """Stop your browser and remove its tab. Its profile, with its
         sign-ins, stays for the next open."""
@@ -354,15 +377,15 @@ def register_browser_ops(app: App) -> None:
         b = await br.open_(app.who(caller).name, p.url, profile=p.profile)
         return br.card(b)
 
-    @r.op("browser.input", PaneInput)
+    @r.op("browser.input", PaneInput, names=(("id", "browser"),))
     async def input_(p: PaneInput, caller):
         await br.input(p.id, p.events)
 
-    @r.op("browser.nav", PaneNav)
+    @r.op("browser.nav", PaneNav, names=(("id", "browser"),))
     async def nav(p: PaneNav, caller):
         return await br.goto(p.id, p.url, p.action, "person")
 
-    @r.op("browser.view", PaneResize)
+    @r.op("browser.view", PaneResize, names=(("id", "browser"),), access="read")
     async def view(p: PaneResize, caller):
         """The person's pane took the page: fit the viewport to it."""
         b = br.get(p.id)
@@ -370,15 +393,22 @@ def register_browser_ops(app: App) -> None:
             raise OpError("agent_has_control", "the agent holds this page")
         return await br.resize(p.id, p.width, p.height)
 
-    @r.op("browser.take", PaneRef)
+    @r.op("browser.take", PaneRef, names=(("id", "browser"),))
     async def take(p: PaneRef, caller):
         br.take(p.id)
 
-    @r.op("browser.handback", PaneRef)
+    @r.op("browser.handback", PaneRef, names=(("id", "browser"),))
     async def give_back(p: PaneRef, caller):
         await br.give_back(p.id)
 
-    @r.op("browser.give", PaneGive)
+    @r.op(
+        "browser.give",
+        PaneGive,
+        names=(
+            ("session", "session"),
+            ("id", "browser"),
+        ),
+    )
     async def give(p: PaneGive, caller):
         s = app.sessions.sessions.get(p.session) or next(
             (x for x in app.sessions.open_sessions() if x.handle == p.session), None
@@ -388,11 +418,11 @@ def register_browser_ops(app: App) -> None:
         await br.give(p.id, s.log_id, s.handle)
         dock(s, p.id, "right")
 
-    @r.op("browser.reopen", PaneRef)
+    @r.op("browser.reopen", PaneRef, names=(("id", "browser"),))
     async def reopen(p: PaneRef, caller):
         await br.reopen(p.id)
 
-    @r.op("browser.shut", PaneRef)
+    @r.op("browser.shut", PaneRef, names=(("id", "browser"),))
     async def shut(p: PaneRef, caller):
         """Close a browser from its tab: Chromium stops, the profile stays."""
         await br.close(p.id)

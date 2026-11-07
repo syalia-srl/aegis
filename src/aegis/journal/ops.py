@@ -134,7 +134,7 @@ def register_journal_ops(app: "App") -> None:
         entry names the session's handle when it was made; peer_read reads a
         session while it is open, under its current handle, which an entry
         made before a rename names as "(now ...)"."""
-        only = None
+        only = app.visible_ids(app.who(caller))
         hits, cut, _, _ = await asyncio.to_thread(run, p, only=only)
         handles = {k: s.handle for k, s in app.sessions.sessions.items()}
         return render.text(hits, cut, root, handles)
@@ -144,7 +144,7 @@ def register_journal_ops(app: "App") -> None:
         """The Journal view's rows: what journal.search finds, narrowed by the
         fuzzy box q, as fields to draw, and the server's day, which the view
         shows until the person picks one."""
-        only = None
+        only = app.visible_ids(app.who(caller))
         hits, cut, c, marks = await asyncio.to_thread(
             run, p, p.offset, p.counts, p.q or "", only
         )

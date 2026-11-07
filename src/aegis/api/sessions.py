@@ -28,6 +28,7 @@ from .models import (
 )
 
 if TYPE_CHECKING:
+    from ..policy import Action
     from ..server import Server
     from ..session import Session as _Live
 
@@ -71,17 +72,25 @@ class Sessions:
         r = await self._srv._call("session.spawn", params)
         return Session(self._srv, r["log_id"])
 
+    def _sees(self, log_id: str, action: Action) -> bool:
+        """Whether the caller this API acts as may ``action`` the session,
+        under the host policy (Server.as_who)."""
+        app = self._srv.app
+        return app.sees(app.acting(self._srv._caller), log_id, action)
+
     async def list(self) -> builtins.list[Session]:
-        """Every open session, oldest first."""
+        """Every open session the caller may see, oldest first."""
         return [
-            Session(self._srv, s.log_id) for s in self._srv.app.sessions.open_sessions()
+            Session(self._srv, s.log_id)
+            for s in self._srv.app.sessions.open_sessions()
+            if self._sees(s.log_id, "list")
         ]
 
     async def get(self, ref: str) -> Session:
         """The open session whose log id or handle is ``ref``."""
         reg = self._srv.app.sessions
         s = reg.sessions.get(ref) or reg.by_handle(ref)
-        if s is None or s.archived:
+        if s is None or s.archived or not self._sees(s.log_id, "read"):
             raise SessionNotFound(f"no open session {ref!r}")
         return Session(self._srv, s.log_id)
 
@@ -108,7 +117,14 @@ class Session:
             raise SessionNotFound(f"session {self.log_id} is closed")
         return s
 
+    def _readable(self) -> None:
+        """Refuse, as missing, a session the acting caller may not read."""
+        app = self._srv.app
+        if not app.sees(app.acting(self._srv._caller), self.log_id, "read"):
+            raise SessionNotFound(f"no open session {self.log_id!r}")
+
     def _rows(self) -> list[dict]:
+        self._readable()
         snap = self._srv.app.sessions.transcript(self.log_id)
         if snap is None:
             raise SessionNotFound(f"session {self.log_id} is closed")
@@ -117,6 +133,7 @@ class Session:
     # -- reading --------------------------------------------------------------
     async def info(self) -> SessionInfo:
         """The session's card, now."""
+        self._readable()
         return SessionInfo.model_validate(self._live().wire())
 
     async def entries(self) -> builtins.list[AnyEntry]:
@@ -167,6 +184,7 @@ class Session:
         """Each transcript entry once it settles, and ``TurnEnded`` when a turn
         ends. Starts with new entries, or with every entry when ``history``.
         An entry that changes after it settled arrives again with the same id."""
+        self._readable()
         app = self._srv.app
         q: asyncio.Queue[tuple[str, dict | None]] = asyncio.Queue()
         tsub = app.channels.subscribe(
