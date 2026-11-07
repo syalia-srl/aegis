@@ -207,7 +207,7 @@ def register_workflow_ops(app: App) -> None:
         out: dict = {"errors": [f"{e.path}: {e.message}" for e in errors]}
         return out | ({"id": got.id} if got is not None and not errors else {})
 
-    @r.op("workflow.arm", Arm, agent=True)
+    @r.op("workflow.arm", Arm, agent=True, names=(("run", "run"),))
     async def workflow_arm(p: Arm, caller):
         """Arm a workflow: a YAML tree in which every node says, in one sentence
         for the person, what it does. It is linted, drawn as a card under this
@@ -314,20 +314,20 @@ def register_workflow_ops(app: App) -> None:
         app.schedules.workflow_changed(p.id)
         return {"deleted": p.id}
 
-    @r.op("workflow.approve", RunName)
+    @r.op("workflow.approve", RunName, names=(("run", "run"),))
     async def workflow_approve(p: RunName, caller):
         owned(p.run, caller)
         wf.approve(p.run)
         await wf.tell_approved(p.run)
         return wf.wire(p.run)
 
-    @r.op("workflow.reject", RunName)
+    @r.op("workflow.reject", RunName, names=(("run", "run"),))
     async def workflow_reject(p: RunName, caller):
         owned(p.run, caller)
         await wf.reject(p.run)
         return wf.wire(p.run)
 
-    @r.op("workflow.stop", Stop, agent=True)
+    @r.op("workflow.stop", Stop, agent=True, names=(("run", "run"),))
     async def workflow_stop(p: Stop, caller):
         """Stop a workflow you armed. Its running nodes are interrupted and
         their sessions unlocked, so they can be read and talked to. With
@@ -342,7 +342,7 @@ def register_workflow_ops(app: App) -> None:
         # what it changed, and workflow_status for the rest.
         return wf.taken(p.run, p.node) if caller.is_agent else wf.wire(p.run)
 
-    @r.op("workflow.answer", Answer, agent=True)
+    @r.op("workflow.answer", Answer, agent=True, names=(("run", "run"),))
     async def workflow_answer(p: Answer, caller):
         """Answer what your workflow woke you for: a gate by: main
         (continue or abort, with an optional value), a worker's question
@@ -360,7 +360,7 @@ def register_workflow_ops(app: App) -> None:
         message. It never reaches a person."""
         return wf.ask(me(caller), p.question)
 
-    @r.op("workflow.note", Note, agent=True)
+    @r.op("workflow.note", Note, agent=True, names=(("run", "run"),))
     async def workflow_note(p: Note, caller):
         """Write one line into your workflow's story, the card the person
         reads: why you answered or decided as you did."""
@@ -369,7 +369,7 @@ def register_workflow_ops(app: App) -> None:
         return {"noted": True}
 
     # Not marked for agents: only a person answers a by: person gate.
-    @r.op("workflow.gate", GateAnswer)
+    @r.op("workflow.gate", GateAnswer, names=(("run", "run"),))
     async def workflow_gate(p: GateAnswer, caller):
         owned(p.run, caller)
         await wf.answer_gate(p.run, p.node, p.go, p.answer, by="person")
@@ -377,7 +377,7 @@ def register_workflow_ops(app: App) -> None:
 
     # Not marked for agents: only a person hands their gate to the main
     # agent, as only a person answers it.
-    @r.op("workflow.gate.delegate", NodeRef)
+    @r.op("workflow.gate.delegate", NodeRef, names=(("run", "run"),))
     async def workflow_delegate_gate(p: NodeRef, caller):
         owned(p.run, caller)
         await wf.delegate_gate(p.run, p.node)
@@ -385,7 +385,7 @@ def register_workflow_ops(app: App) -> None:
 
     # Not marked for agents: a person opens a step's see (spec §07). The
     # browser names a run and a step, never a path.
-    @r.op("workflow.see", NodeRef)
+    @r.op("workflow.see", NodeRef, names=(("run", "run"),), access="read")
     async def workflow_see(p: NodeRef, caller):
         owned(p.run, caller)
         # The step's file is in its owner's working tree: checked and read as
@@ -401,7 +401,7 @@ def register_workflow_ops(app: App) -> None:
             raise OpError(e.code, e.message) from e
         return {"files": [_sent_file(rec)], "fragment": fragment, "line": line}
 
-    @r.op("workflow.edit", EditDef, agent=True)
+    @r.op("workflow.edit", EditDef, agent=True, names=(("run", "run"),))
     async def workflow_edit(p: EditDef, caller):
         """Change your running workflow: send the whole definition with the
         same ids. Steps that started stay as they are, except a failed or
@@ -414,19 +414,26 @@ def register_workflow_ops(app: App) -> None:
         return {"run": p.run, "proposed": st.proposal["v"], "diff": st.proposal["diff"]}
 
     # Not marked for agents: only a person applies or rejects an edit.
-    @r.op("workflow.edit.apply", EditName)
+    @r.op("workflow.edit.apply", EditName, names=(("run", "run"),))
     async def workflow_apply_edit(p: EditName, caller):
         owned(p.run, caller)
         await wf.apply_edit(p.run, p.v)
         return wf.wire(p.run)
 
-    @r.op("workflow.edit.reject", EditName)
+    @r.op("workflow.edit.reject", EditName, names=(("run", "run"),))
     async def workflow_reject_edit(p: EditName, caller):
         owned(p.run, caller)
         wf.reject_edit(p.run, p.v)
         return wf.wire(p.run)
 
-    @r.op("workflow.status", RunName, agent=True, read=True)
+    @r.op(
+        "workflow.status",
+        RunName,
+        agent=True,
+        read=True,
+        names=(("run", "run"),),
+        access="read",
+    )
     async def workflow_status(p: RunName, caller):
         """A run's tree: each node's state, session, times and summary, and the story so far."""
         if p.run not in wf.runs:

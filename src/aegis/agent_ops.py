@@ -931,7 +931,14 @@ def register_agent_ops(app: App) -> None:
         )
         return {"task_id": t.id, "status": t.status, "position": app.queues.position(t)}
 
-    @r.op("queue.deliver", QueueDeliver)
+    @r.op(
+        "queue.deliver",
+        QueueDeliver,
+        names=(
+            ("target", "session"),
+            ("task_id", "task"),
+        ),
+    )
     async def queue_deliver(p: QueueDeliver, caller):
         """A task's result from a server linked with trust, for the agent here
         that enqueued it. Only that link may call it; the header is composed
@@ -969,7 +976,14 @@ def register_agent_ops(app: App) -> None:
         ):
             raise OpError("not_yours", f"{t.id} was not enqueued from {caller.link}")
 
-    @r.op("task.status", TaskId, agent=True, read=True)
+    @r.op(
+        "task.status",
+        TaskId,
+        agent=True,
+        read=True,
+        names=(("task_id", "task"),),
+        access="read",
+    )
     async def task_status(p: TaskId, caller):
         """A task's status, its worker, and its result once finished.
         `task-id@server` reads one on a server linked with trust."""
@@ -977,7 +991,7 @@ def register_agent_ops(app: App) -> None:
             return far["result"]
         return app.queues.status(task(p.task_id))
 
-    @r.op("task.cancel", TaskId, agent=True)
+    @r.op("task.cancel", TaskId, agent=True, names=(("task_id", "task"),))
     async def task_cancel(p: TaskId, caller):
         """Cancel a task you enqueued: drop it if pending, stop and archive its worker if running."""
         if (far := await far_task("task.cancel", p, caller)) is not None:
@@ -988,7 +1002,7 @@ def register_agent_ops(app: App) -> None:
         await app.queues.cancel(t)
         return app.queues.status(t)
 
-    @r.op("task.resume", TaskId, agent=True)
+    @r.op("task.resume", TaskId, agent=True, names=(("task_id", "task"),))
     async def task_resume(p: TaskId, caller):
         """Put a failed or cancelled task's worker back to work, with its conversation intact."""
         if (far := await far_task("task.resume", p, caller)) is not None:
@@ -1004,7 +1018,7 @@ def register_agent_ops(app: App) -> None:
             raise OpError("no_worker", str(e)) from e
         return app.queues.status(t)
 
-    @r.op("peer.handoff", Handoff, agent=True)
+    @r.op("peer.handoff", Handoff, agent=True, names=(("target", "session"),))
     async def peer_handoff(p: Handoff, caller):
         """Give another session context or an instruction; it arrives as a user turn
         headed `> from agent:<you>`. A busy target gets it when its turn ends, and
@@ -1072,7 +1086,7 @@ def register_agent_ops(app: App) -> None:
         did = "steered" if r.get("steered") else "held" if r.get("held") else "sent"
         return handoff_reply(did, f"{handle}@{server}", r.get("cannot_steer") is True)
 
-    @r.op("peer.deliver", Deliver)
+    @r.op("peer.deliver", Deliver, names=(("target", "session"),))
     async def peer_deliver(p: Deliver, caller):
         """A handoff from an agent on a server that links this one. Only a link
         socket may call it, and only in the name of the server it linked as."""
@@ -1117,7 +1131,14 @@ def register_agent_ops(app: App) -> None:
                 return reg.archived_entries(old)
         return target(handle).entries()
 
-    @r.op("peer.read", Read, agent=True, read=True)
+    @r.op(
+        "peer.read",
+        Read,
+        agent=True,
+        read=True,
+        names=(("target", "session"),),
+        access="read",
+    )
     async def peer_read(p: Read, caller):
         """The last entries of another session's transcript, one line each.
         `handle@server` reads a session on a server this one links with
@@ -1225,7 +1246,15 @@ def register_agent_ops(app: App) -> None:
         t = app.queues.tasks.get(s.worker["task_id"]) if s.worker else None
         return t is not None and t.enqueuer == me.log_id
 
-    @r.op("session.close", Close, agent=True)
+    @r.op(
+        "session.close",
+        Close,
+        agent=True,
+        names=(
+            ("handle", "session"),
+            ("log_id", "session"),
+        ),
+    )
     async def session_close(p: Close, caller):
         """Close a session: its tab goes away and it stays in the archive. A
         session you spawned, or whose queue task you enqueued, closes at once
@@ -1302,7 +1331,7 @@ def register_agent_ops(app: App) -> None:
         who = name(s.spec.spawned_by)
         return f"{who} started it" if who else "a person opened it"
 
-    @r.op("peer.close", PeerClose)
+    @r.op("peer.close", PeerClose, names=(("target", "session"),))
     async def peer_close(p: PeerClose, caller):
         """session_close from an agent on a server linked with trust, under
         the same rule as here: a session it started closes at once when done,
@@ -1343,7 +1372,15 @@ def register_agent_ops(app: App) -> None:
             "the archive"
         )
 
-    @r.op("session.quiet", Quiet, agent=True)
+    @r.op(
+        "session.quiet",
+        Quiet,
+        agent=True,
+        names=(
+            ("handle", "session"),
+            ("log_id", "session"),
+        ),
+    )
     async def session_quiet(p: Quiet, caller):
         """Hide a session's tab while it works: it stays in the Fleet, dimmed,
         and its tab comes back by itself when its turn ends done, review,

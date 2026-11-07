@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, ValidationError
 
 if TYPE_CHECKING:
-    from .policy import CallerInfo, HostPolicy
+    from .policy import CallerInfo, HostPolicy, SessionView
 
 
 class OpError(Exception):
@@ -69,6 +69,15 @@ class Caller:
 
 USER = Caller("user")
 
+# What a named id is, and the code an operation answers when the caller may
+# not read its session: the code it answers for one that does not exist.
+KINDS = {
+    "session": "no_session",
+    "task": "no_task",
+    "run": "no_run",
+    "browser": "unknown_browser",
+}
+
 # What a schedule's run with spawn: false may not call: each starts other work
 # (schedules.py). schedule.create is here so a run cannot start agents through
 # a schedule of its own.
@@ -89,6 +98,11 @@ class Operation:
     # Refused to a caller acting through a link: a far server never reads or
     # writes this server's files (fs_ops.py).
     local: bool = False
+    # The params that name something a session owns, as (field, kind) with
+    # kind one of KINDS, and whether the operation reads or writes it: the
+    # host policy's can decides (Registry.call, #959).
+    names: tuple[tuple[str, str], ...] = ()
+    access: str = "write"
 
     @property
     def tool_name(self) -> str:
@@ -146,6 +160,10 @@ class Registry:
         # The host policy (policy.py); set by the app. Without one, the
         # default guard runs and nothing wraps a handler.
         self.policy: HostPolicy | None = None
+        # The session a named id belongs to, None when it names none here, and
+        # a session as the policy sees it; both set by the app.
+        self.session_of: Callable[[str, str], str | None] = lambda kind, value: None
+        self.view_of: Callable[[str], SessionView | None] = lambda log_id: None
 
     def op(
         self,
@@ -156,6 +174,8 @@ class Registry:
         doc: str = "",
         read: bool = False,
         local: bool = False,
+        names: tuple[tuple[str, str], ...] = (),
+        access: str = "write",
     ) -> Callable[[Handler], Handler]:
         def register(handler: Handler) -> Handler:
             if name in self._ops:
@@ -169,6 +189,8 @@ class Registry:
                 doc or (handler.__doc__ or "").strip(),
                 read,
                 local,
+                names,
+                access,
             )
             return handler
 
@@ -176,6 +198,31 @@ class Registry:
 
     def names(self) -> list[str]:
         return sorted(self._ops)
+
+    def _check_named(
+        self, op: Operation, params: Any, who: Any, caller: Caller
+    ) -> None:
+        """Refuse a call naming a session ``who`` may not read as if it did not
+        exist, and one it may read but not change as refused. An agent's own
+        session counts as named."""
+        assert self.policy is not None
+        named = [
+            (kind, value, self.session_of(kind, value))
+            for field_, kind in op.names
+            if isinstance(value := getattr(params, field_, None), str) and value
+        ]
+        if caller.is_agent and caller.log_id:
+            named.append(("session", caller.log_id, caller.log_id))
+        for kind, value, log_id in named:
+            view = self.view_of(log_id) if log_id else None
+            if view is None:
+                continue  # not here: the handler answers for it
+            if not self.policy.can(who, "read", view):
+                raise OpError(KINDS[kind], f"no {kind} {value!r}")
+            if op.access == "write" and not self.policy.can(who, "write", view):
+                from .policy import Refused
+
+                raise Refused(f"you may read {value} but not change it")
 
     def caller_info(self, caller: Caller) -> CallerInfo:
         from .policy import CallerInfo
@@ -213,6 +260,8 @@ class Registry:
             params = op.params.model_validate(raw if raw is not None else {})
         except ValidationError as e:
             raise OpError("bad_params", str(e)) from e
+        if self.policy is not None:
+            self._check_named(op, params, who, caller)
         try:
             if self.policy is None:
                 return await op.handler(params, caller)

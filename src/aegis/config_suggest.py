@@ -130,7 +130,7 @@ def register_config_suggest(app: App) -> None:
         )
         await s.deliver(header(id, outcome), body)
 
-    @r.op("config.suggestion.apply", SuggestionRef)
+    @r.op("config.suggestion.apply", SuggestionRef, names=(("log_id", "session"),))
     async def apply(p: SuggestionRef, caller):
         s, e = pending(p)
         det = e["detail"]
@@ -159,7 +159,7 @@ def register_config_suggest(app: App) -> None:
         )
         return "ok"
 
-    @r.op("config.suggestion.decline", SuggestionRef)
+    @r.op("config.suggestion.decline", SuggestionRef, names=(("log_id", "session"),))
     async def decline(p: SuggestionRef, caller):
         s, _ = pending(p)
         await done(

@@ -106,7 +106,7 @@ def register_layout_ops(app: App) -> None:
         return reg.sessions[caller.log_id]
 
     # -- the person ------------------------------------------------------------
-    @r.op("layout.dock", LayoutDock)
+    @r.op("layout.dock", LayoutDock, names=(("log_id", "session"),))
     async def dock(p: LayoutDock, caller):
         s = reg.open(p.log_id)
         # place() lets the pane it places through, so an agent's dock= can
@@ -123,7 +123,7 @@ def register_layout_ops(app: App) -> None:
             raise _bad(e) from e
         return s.set_layout(new, "person")
 
-    @r.op("layout.undock", LayoutUndock)
+    @r.op("layout.undock", LayoutUndock, names=(("log_id", "session"),))
     async def undock(p: LayoutUndock, caller):
         s = reg.open(p.log_id)
         if p.pane == canvas.TRANSCRIPT:
@@ -132,7 +132,7 @@ def register_layout_ops(app: App) -> None:
             return s.layout
         return s.set_layout(canvas.trim(s.layout, p.pane), "person")
 
-    @r.op("layout.resize", LayoutResize)
+    @r.op("layout.resize", LayoutResize, names=(("log_id", "session"),))
     async def resize(p: LayoutResize, caller):
         s = reg.open(p.log_id)
         try:

@@ -558,7 +558,9 @@ def build_web(
         if hello.get("t") == "hello" and isinstance(given, str) and given:
             try:
                 principal = await app.identify(
-                    Credential(given, "link" if isinstance(via, str) else "browser", via)
+                    Credential(
+                        given, "link" if isinstance(via, str) else "browser", via
+                    )
                 )
             except Refused:
                 principal = None
