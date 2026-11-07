@@ -133,3 +133,29 @@ async def test_real_claude_starts_without_the_replaced_tools_but_the_kept_one(
     tools = {"Agent" if t == "Task" else t for t in init["tools"]}
     assert "Bash" in tools and "Agent" in tools
     assert not tools & (set(REPLACED_TOOLS) - {"Agent"})
+
+
+def test_without_harness_tools_claude_gets_an_empty_tools_list(tmp_path):
+    from dataclasses import replace
+
+    lean = replace(launch(tmp_path, ("http://127.0.0.1:1/mcp", "t")), harness_tools=False)
+    argv = ClaudeSession("claude", lean)._proc.argv
+    assert argv[argv.index("--tools") + 1] == "" and disallowed(argv) == []
+    assert "--strict-mcp-config" in argv
+
+
+def test_an_isolated_claude_has_its_own_config_dir_with_only_the_login(
+    tmp_path, monkeypatch
+):
+    from dataclasses import replace
+
+    creds = tmp_path / "person" / ".credentials.json"
+    creds.parent.mkdir()
+    creds.write_text("{}")
+    monkeypatch.setenv("CLAUDE_CREDS", str(creds))
+    home = tmp_path / "home"
+    home.mkdir()
+    s = ClaudeSession("claude", replace(launch(tmp_path, None), home=home))
+    assert s._proc.env["CLAUDE_CONFIG_DIR"] == str(home)
+    assert [p.name for p in home.iterdir()] == [".credentials.json"]
+    assert (home / ".credentials.json").resolve() == creds

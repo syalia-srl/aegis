@@ -133,6 +133,7 @@ def build_argv(
     add_dirs: tuple[Path, ...] = (),
     disallowed: tuple[str, ...] = (),
     mcp_names: tuple[str, ...] = (),
+    own_tools: bool = True,
 ) -> list[str]:
     argv = [
         claude_bin,
@@ -156,7 +157,11 @@ def build_argv(
     for folder in add_dirs:
         # Read access outside the cwd under every permission mode: the inbox.
         argv += ["--add-dir", str(folder)]
-    if disallowed:
+    if not own_tools:
+        # None of Claude Code's own tools; MCP tools stay (#983, measured on
+        # 2.1.296: the init line lists only the MCP servers' tools).
+        argv += ["--tools", ""]
+    elif disallowed:
         # One comma-joined value: the flag is variadic and would eat a
         # following positional.
         argv += ["--disallowedTools", ",".join(disallowed)]
