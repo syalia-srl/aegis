@@ -1551,11 +1551,16 @@ def register_agent_ops(app: App) -> None:
         from .browsers import available
         from .mcp import primer
 
-        tools = ", ".join(op.tool_name for op in r.agent_ops())
-        browsers = available()
-        head = (
-            primer(s, reg.server_name, reg.roots.config_root, browsers=browsers)
-            if s
-            else "aegis"
+        given = r.tools_of(s.log_id) if s else None
+        tools = ", ".join(
+            op.tool_name
+            for op in r.agent_ops()
+            if given is None or op.tool_name in given
         )
+        if s is None:
+            head = "aegis"
+        elif not s.spec.primer:
+            head = s.spec.priming or "aegis"
+        else:
+            head = primer(s, reg.server_name, reg.roots.config_root, browsers=available())
         return f"{head}\n\nTools: {tools}. help_search finds how to use any of these."
