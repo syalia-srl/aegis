@@ -144,9 +144,12 @@ class CodexProcess:
                 mcp[0] if mcp else None,
                 person_excludes(),
                 native=self._launch.knowledge_native,
+                servers=self._launch.extra_mcp,
             ),
             cwd=self._launch.cwd,
-            env=session_env(self._launch, child_env(os.environ, mcp)),
+            env=session_env(
+                self._launch, child_env(os.environ, mcp, self._launch.extra_mcp)
+            ),
             stdin=launch.PIPE,
             stdout=launch.PIPE,
             stderr=launch.PIPE,

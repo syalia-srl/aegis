@@ -19,6 +19,7 @@ class Pi:
     # Notices still ride on aegis tool results until a run with a real model
     # shows how pi's steer reads one.
     steers_notices = False
+    mcp_transports = frozenset({"http", "stdio"})
     # pi names MCP tools as Claude Code does (measured: mcp__aegis__meta).
     tool_prefix = f"mcp__{SERVER}__"
 

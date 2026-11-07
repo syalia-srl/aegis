@@ -198,7 +198,7 @@ class CursorProcess:
         does), and an answered error on load falls back to a new session."""
         params: dict[str, Any] = {
             "cwd": str(self._launch.cwd),
-            "mcpServers": mcp_servers(self._launch.mcp),
+            "mcpServers": mcp_servers(self._launch.mcp, self._launch.extra_mcp),
         }
         result: dict | None = None
         if resume:

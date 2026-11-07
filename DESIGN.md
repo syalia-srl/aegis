@@ -383,6 +383,18 @@ child of the agent inherits the token and can act as the agent. That is accepted
 those children already run as the same user with the agent's files, and the
 token still dies with the harness process.
 
+**A session's other MCP servers are composed at each start (#960).**
+`App.mcp_for` reads the config in force, so an edit applies at the next start:
+the agent's `mcp:` names, from the file's map or `Server(mcp=...)`, then the
+policy's `mcp`, with `${VAR}` expanded from aegis's environment. Anything it
+cannot give (an unset variable, an unknown or doubled name, a transport the
+harness lacks) refuses the start into the transcript, as a refused policy
+spawn does. `Launch.mcp` stays aegis's own endpoint, which every driver treats
+apart (its token, `aegis call`'s variables, Claude's replaced tools), and the
+rest travel in `Launch.extra_mcp`. A driver that writes them into an argv or a
+file swaps each header and env value for a variable of the child's environment
+(`mcp_servers.by_ref`), as the session token already is.
+
 **A harness is a module behind one interface.** `Session` asks a `Process`
 (`harness.py`) to start, send, interrupt, set and end, and the fold reads each
 stored line through the parser its `src` tag names. Claude Code

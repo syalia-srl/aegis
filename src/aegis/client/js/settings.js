@@ -249,6 +249,7 @@ export class Settings {
       this.queues(),
       this.fieldSection("generators"),
       this.terminals(),
+      this.mcp(),
       this.fieldSection("memory"),
       this.fieldSection("context"),
       this.fieldSection("nudges"),
@@ -1020,7 +1021,7 @@ export class Settings {
   agents() {
     const v = this.wire.vocab;
     const head = h("div", { className: "set-section-head" }, h("h3", { textContent: "Agents" }), button("Add agent", "set-add-agent", () => {
-      this.doc.agents.push({ name: "", harness: v.harnesses[0], model: "", models: [], effort: "", permission: "", priming: null, keep_harness_tools: [] });
+      this.doc.agents.push({ name: "", harness: v.harnesses[0], model: "", models: [], effort: "", permission: "", priming: null, keep_harness_tools: [], mcp: [] });
       this.touch();
       this.draw();
       this.box.querySelector(".set-agent:last-of-type input[name=name]")?.focus();
@@ -1099,7 +1100,7 @@ export class Settings {
       this.draw();
     }, "link danger");
     const fold = h("details", { className: "set-priming", open: !!a.priming }, h("summary", { textContent: a.priming ? "Priming" : "Add a priming" }), priming);
-    card.append(name, h("div", { className: "picks" }, harness, effort, permission), casc, h("div", { className: "set-card-foot" }, fold, this.keepFold(a), this.exitFold(a), star, del));
+    card.append(name, h("div", { className: "picks" }, harness, effort, permission), casc, h("div", { className: "set-card-foot" }, fold, this.keepFold(a), this.mcpFold(a), this.exitFold(a), star, del));
     if (isDefault) card.classList.add("is-default");
     return card;
   }
@@ -1127,6 +1128,33 @@ export class Settings {
     });
     const fold = h("details", { className: "set-priming set-keep", open: keep.length > 0 }, summary, h("p", { className: "set-none", textContent: "Claude Code sessions start without these, since aegis has its own; an agent whose work needs one keeps it." }), h("div", { className: "set-tools" }, ...toggles));
     fold.dataset.key = "agents.*.keep_harness_tools";
+    return fold;
+  }
+
+  // The MCP servers this agent attaches (#960): one toggle per server the
+  // mcp: map defines, and any the agent names that it does not.
+  mcpFold(a) {
+    a.mcp ||= [];
+    const on = a.mcp;
+    const names = [...new Set([...(this.doc.mcp || []).map((m) => m.name).filter(Boolean), ...on])];
+    if (!names.length) return null;
+    const summary = h("summary");
+    const say = () => (summary.textContent = on.length ? `MCP ${on.join(", ")}` : "Attach an MCP server");
+    say();
+    const toggles = names.map((n) => {
+      const b = button(n, null, () => {
+        const i = on.indexOf(n);
+        if (i < 0) on.push(n);
+        else on.splice(i, 1);
+        b.setAttribute("aria-pressed", String(i < 0));
+        say();
+        this.touch();
+      }, "set-tool");
+      b.setAttribute("aria-pressed", String(on.includes(n)));
+      return b;
+    });
+    const fold = h("details", { className: "set-priming set-mcp", open: on.length > 0 }, summary, h("p", { className: "set-none", textContent: "Its sessions get these servers beside aegis's own, and call their tools without asking." }), h("div", { className: "set-tools" }, ...toggles));
+    fold.dataset.key = "agents.*.mcp";
     return fold;
   }
 
@@ -1257,6 +1285,93 @@ export class Settings {
     const body = rows.length
       ? h("div", { className: "set-queues", id: "set-terminals" }, ...rows)
       : h("p", { className: "set-none", id: "set-terminals", textContent: "No terminal profiles. The + view still offers a login shell." });
+    return h("section", {}, head, body);
+  }
+
+  // The mcp: map (#960): a server is a URL with headers or a command with
+  // args and env. Test connects to it as the form holds it, saved or not.
+  mcp() {
+    this.doc.mcp ||= [];
+    this.mcpTests ||= {};
+    // A new entry's kind before any field says it; the document has no key for it.
+    this.mcpKinds ||= new WeakMap();
+    const lines = (m) => Object.entries(m || {}).map(([k, v]) => `${k}=${v}`).join("\n");
+    const parse = (text) =>
+      Object.fromEntries(
+        text.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => {
+          const i = l.indexOf("=");
+          return i < 0 ? [l, ""] : [l.slice(0, i).trim(), l.slice(i + 1).trim()];
+        }),
+      );
+    const keys = { url: "mcp.*.url", headers: "mcp.*.headers", command: "mcp.*.command", args: "mcp.*.args", env: "mcp.*.env" };
+    const rows = this.doc.mcp.map((m, i) => {
+      const row = h("div", { className: "set-queue set-mcp-row" });
+      row.dataset.row = `mcp.${m.name}`;
+      const kind = this.mcpKinds.get(m) || (m.command ? "command" : "url");
+      const name = h("input", { name: "name", value: m.name, spellcheck: false, placeholder: "server", className: "set-name" });
+      const pick = select("kind", ["url", "command"], kind, (x) => (x === "url" ? "URL" : "command"));
+      const fields = kind === "url"
+        ? [
+            h("input", { name: "url", value: m.url, spellcheck: false, placeholder: "https://host/mcp", className: "pick set-cmd" }),
+            h("textarea", { name: "headers", value: lines(m.headers), rows: 2, spellcheck: false, placeholder: "Header=value, one a line; ${VAR} reads aegis's environment" }),
+          ]
+        : [
+            h("input", { name: "command", value: m.command, spellcheck: false, placeholder: "command", className: "pick set-cmd" }),
+            h("textarea", { name: "args", value: (m.args || []).join("\n"), rows: 2, spellcheck: false, placeholder: "one argument a line" }),
+            h("textarea", { name: "env", value: lines(m.env), rows: 2, spellcheck: false, placeholder: "NAME=value, one a line; ${VAR} reads aegis's environment" }),
+          ];
+      const result = h("p", { className: "set-none set-mcp-test", textContent: this.mcpTests[i] || "" });
+      for (const el of [name, ...fields]) {
+        el.setAttribute("aria-label", `MCP server ${el.name}`);
+        if (keys[el.name]) el.dataset.key = keys[el.name];
+        el.addEventListener("input", () => {
+          const v = el.value;
+          if (el.name === "name") {
+            for (const a of this.doc.agents) if (a.mcp) a.mcp = a.mcp.map((n) => (n === m.name ? v : n));
+            row.dataset.row = `mcp.${v}`;
+          }
+          m[el.name] = el.name === "headers" || el.name === "env" ? parse(v) : el.name === "args" ? v.split("\n").map((x) => x.trim()).filter(Boolean) : v;
+          this.touch();
+        });
+      }
+      pick.setAttribute("aria-label", "MCP server kind");
+      pick.addEventListener("input", () => {
+        this.mcpKinds.set(m, pick.value);
+        Object.assign(m, pick.value === "url" ? { command: "", args: [], env: {} } : { url: "", headers: {} });
+        this.touch();
+        this.draw();
+      });
+      const test = button("Test", null, async () => {
+        result.textContent = "Connecting…";
+        try {
+          const r = await this.call("mcp.test", { entry: m });
+          const n = r.tools.length;
+          this.mcpTests[i] = `${n} ${n === 1 ? "tool" : "tools"}${n ? `: ${r.tools.join(", ")}` : ""}`;
+        } catch (e) {
+          this.mcpTests[i] = e.message;
+        }
+        result.textContent = this.mcpTests[i];
+      }, "link");
+      const del = button("Remove", null, () => {
+        this.doc.mcp.splice(i, 1);
+        for (const a of this.doc.agents) if (a.mcp) a.mcp = a.mcp.filter((n) => n !== m.name);
+        this.mcpTests = {};
+        this.touch();
+        this.draw();
+      }, "link danger");
+      const filled = kind === "url" ? Object.keys(m.headers || {}).length : (m.args || []).length + Object.keys(m.env || {}).length;
+      const more = h("details", { className: "set-priming", open: !!filled }, h("summary", { textContent: kind === "url" ? "Headers" : "Arguments and environment" }), ...fields.slice(1));
+      row.append(h("div", { className: "set-queue-line" }, name, pick, fields[0], test, del), more, result);
+      return row;
+    });
+    const head = h("div", { className: "set-section-head" }, h("h3", { textContent: "MCP servers" }), button("Add MCP server", "set-add-mcp", () => {
+      this.doc.mcp.push({ name: "", url: "", headers: {}, command: "", args: [], env: {} });
+      this.touch();
+      this.draw();
+    }, "link"));
+    const body = rows.length
+      ? h("div", { className: "set-queues", id: "set-mcp" }, ...rows)
+      : h("p", { className: "set-none", id: "set-mcp", textContent: "No MCP servers. An agent attaches one by name, and its sessions get it beside aegis's own." });
     return h("section", {}, head, body);
   }
 

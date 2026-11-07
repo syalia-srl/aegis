@@ -19,10 +19,14 @@ it off for its own server, so its tools are called, and shown, by name.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..claude.control import Catalog, Model, _doc
+
+if TYPE_CHECKING:
+    from ..policy import McpServer
 
 PERMISSIONS: dict[str, dict[str, str]] = {
     "read": {
@@ -42,12 +46,17 @@ NATIVE = {"skill": "deny"}
 
 
 def rules(
-    permission: str, read_dirs: tuple[Path, ...] = (), native: bool = False
+    permission: str,
+    read_dirs: tuple[Path, ...] = (),
+    native: bool = False,
+    servers: tuple[str, ...] = (),
 ) -> dict[str, Any]:
-    """Action -> effect, or for a path rule resource -> effect."""
+    """Action -> effect, or for a path rule resource -> effect. The tools of
+    each server in ``servers`` run without asking, as aegis's own (#960)."""
     out: dict[str, Any] = {
         **PERMISSIONS[permission],
         **ALWAYS,
+        **{f"{name}_*": "allow" for name in servers},
         **(NATIVE if native else {}),
     }
     if read_dirs and out.get("external_directory") == "deny":
@@ -61,11 +70,14 @@ def rules(
 
 
 def ruleset(
-    permission: str, read_dirs: tuple[Path, ...] = (), native: bool = False
+    permission: str,
+    read_dirs: tuple[Path, ...] = (),
+    native: bool = False,
+    servers: tuple[str, ...] = (),
 ) -> list[dict]:
     """The rules as OpenCode 2 lists them, in the order they apply."""
     out = []
-    for action, effect in rules(permission, read_dirs, native).items():
+    for action, effect in rules(permission, read_dirs, native, servers).items():
         by_resource = effect if isinstance(effect, dict) else {"*": effect}
         for resource, e in by_resource.items():
             out.append({"action": action, "resource": resource, "effect": e})
@@ -77,23 +89,40 @@ def child_config(
     permission: str,
     read_dirs: tuple[Path, ...] = (),
     native: bool = False,
+    servers: Sequence[McpServer] = (),
 ) -> dict[str, Any]:
-    cfg: dict[str, Any] = {"permissions": ruleset(permission, read_dirs, native)}
+    """The child's config. It travels in OPENCODE_CONFIG_CONTENT, an
+    environment variable, so the servers' values go in as they are."""
+    names = tuple(s.name for s in servers)
+    cfg: dict[str, Any] = {"permissions": ruleset(permission, read_dirs, native, names)}
+    entries: dict[str, dict] = {}
     if mcp is not None:
         from ..mcp import HEADER
 
         url, token = mcp
-        cfg["mcp"] = {
-            "servers": {
-                "aegis": {
-                    "type": "remote",
-                    "url": url,
-                    "headers": {HEADER: token},
-                    "oauth": False,
-                    "codemode": False,
-                }
-            }
+        entries["aegis"] = {
+            "type": "remote",
+            "url": url,
+            "headers": {HEADER: token},
+            "oauth": False,
+            "codemode": False,
         }
+    for s in servers:
+        if s.transport == "http":
+            entries[s.name] = {
+                "type": "remote",
+                "url": s.url,
+                "headers": dict(s.headers),
+                "oauth": False,
+            }
+        else:
+            entries[s.name] = {
+                "type": "local",
+                "command": [s.command, *s.args],
+                "environment": dict(s.env),
+            }
+    if entries:
+        cfg["mcp"] = {"servers": entries}
     return cfg
 
 

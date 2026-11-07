@@ -37,7 +37,7 @@ an unknown id, or ``FAKE_CURSOR_FAIL_LOAD=1``, answers an error, so the
 driver falls back to a new session.
 
 ``FAKE_CURSOR_LOG=<file>`` gets ``START <pid>`` and one line per request
-method. ``FAKE_CURSOR_HANG=1`` ignores a closed stdin, so only a signal ends
+method, and ``mcp <names>`` for each session/new and session/load. ``FAKE_CURSOR_HANG=1`` ignores a closed stdin, so only a signal ends
 it. ``AEGIS_FAKE_HARNESS_VERSION`` overrides ``--version``, shared with the
 other fakes.
 """
@@ -454,6 +454,9 @@ def turn(rid: int, p: dict) -> None:
 def handle(msg: dict):
     method, p = msg.get("method"), msg.get("params") or {}
     log(str(method))
+    if method in ("session/new", "session/load"):
+        # The names only: the log is a file, and a value must not reach one.
+        log("mcp " + " ".join(m.get("name", "") for m in p.get("mcpServers") or []))
     if method == "initialize":
         return {"protocolVersion": 1, "agentCapabilities": {}, "authMethods": []}
     if method == "session/new":

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import signal
 import time
 from collections import deque
@@ -76,6 +77,8 @@ REPLACED_TOOLS = {
 # autoMemoryEnabled); the canary pins both (tests/canary).
 NATIVE_TOOLS = {"Skill": "skill_read, skill_search"}
 NO_AUTO_MEMORY = {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}
+
+
 # aegis decides which of its own tools a session may call (ops.Registry.call),
 # so Claude Code lets each one through in every mode. Measured on 2.1.291:
 # plan mode refuses an MCP call even when --allowedTools or a settings rule
@@ -83,32 +86,40 @@ NO_AUTO_MEMORY = {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}
 # PreToolUse hook's allow passes all three, while plan mode still refuses
 # writes (#305). From 2.1.301 plan mode refuses the hook's allow too, unless
 # the tool is annotated readOnlyHint, which every aegis tool is (mcp.py, #442).
-ALLOW_AEGIS = json.dumps(
-    {
-        "hooks": {
-            "PreToolUse": [
-                {
-                    "matcher": "mcp__aegis__.*",
-                    "hooks": [
-                        {
-                            "type": "command",
-                            "command": "echo '"
-                            + json.dumps(
-                                {
-                                    "hookSpecificOutput": {
-                                        "hookEventName": "PreToolUse",
-                                        "permissionDecision": "allow",
+# The servers a session gets beside aegis's (#960) are let through the same way.
+def allow_mcp(names: tuple[str, ...] = ()) -> str:
+    servers = "|".join(re.escape(n) for n in ("aegis", *names))
+    return json.dumps(
+        {
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": f"mcp__({servers})__.*"
+                        if names
+                        else "mcp__aegis__.*",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": "echo '"
+                                + json.dumps(
+                                    {
+                                        "hookSpecificOutput": {
+                                            "hookEventName": "PreToolUse",
+                                            "permissionDecision": "allow",
+                                        }
                                     }
-                                }
-                            )
-                            + "'",
-                        }
-                    ],
-                }
-            ]
+                                )
+                                + "'",
+                            }
+                        ],
+                    }
+                ]
+            }
         }
-    }
-)
+    )
+
+
+ALLOW_AEGIS = allow_mcp()
 
 
 def build_argv(
@@ -121,6 +132,7 @@ def build_argv(
     system_prompt: str | None = None,
     add_dirs: tuple[Path, ...] = (),
     disallowed: tuple[str, ...] = (),
+    mcp_names: tuple[str, ...] = (),
 ) -> list[str]:
     argv = [
         claude_bin,
@@ -139,7 +151,7 @@ def build_argv(
         "--mcp-config",
         mcp_config,
         "--settings",
-        ALLOW_AEGIS,
+        allow_mcp(mcp_names),
     ]
     for folder in add_dirs:
         # Read access outside the cwd under every permission mode: the inbox.
