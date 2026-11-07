@@ -1179,6 +1179,24 @@ class App:
                 return m.get("owner") or self.user
         return None
 
+    def narrows(self) -> bool:
+        """Whether the policy hides anything: it overrides can."""
+        return type(self.policy).can is not HostPolicy.can
+
+    def sees(self, principal: Principal, log_id: str, action: str = "list") -> bool:
+        """Whether ``principal`` may ``action`` the session ``log_id``; a
+        session that does not exist here hides nothing."""
+        view = self.view_of(log_id)
+        return view is None or self.policy.can(principal.who, action, view)
+
+    def visible_ids(self, principal: Principal) -> set[str] | None:
+        """The log ids, open or archived, ``principal`` may list; None for
+        every one, when the policy hides nothing."""
+        if not self.narrows():
+            return None
+        ids = set(self.sessions.sessions) | set(self.sessions.archived)
+        return {i for i in ids if self.sees(principal, i)}
+
     def session_of(self, kind: str, value: str) -> str | None:
         """The log id of the session a named id belongs to (ops.KINDS): a
         session by log id or handle, ``@server`` naming this one; a task's
@@ -2253,11 +2271,17 @@ class App:
     def _archive_sources(self, only: str | None, who: Principal):
         """Each server an archive listing reads, with how to fetch a page."""
 
+        keep = None
+        if self.narrows():
+
+            def keep(m: dict) -> bool:
+                return self.sees(who, m.get("log_id") or "")
+
         async def local(query, limit, after, workers):
             items, total, last = self.sessions.archive(
-                query, limit, after, workers, None
+                query, limit, after, workers, keep
             )
-            return items, total, self.sessions.archived_workers(query, None), last
+            return items, total, self.sessions.archived_workers(query, keep), last
 
         if only in (None, self.server_name):
             yield self.server_name, local

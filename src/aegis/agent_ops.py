@@ -1169,7 +1169,10 @@ def register_agent_ops(app: App) -> None:
         peer_handoff. A server linked with trust lists its sessions in full,
         with `server`."""
         out = []
+        me = app.who(caller)
         for s in reg.open_sessions():
+            if not app.sees(me, s.log_id):
+                continue
             w = s.wire()
             out.append(
                 {
@@ -1438,7 +1441,9 @@ def register_agent_ops(app: App) -> None:
             except canvas.LayoutError as e:
                 raise OpError("bad_params", str(e)) from e
         try:
-            recs = await asyncio.to_thread(files.store_all, app.roots.state_root, paths)
+            recs = await asyncio.to_thread(
+                files.store_all, app.roots.state_root, paths, s.log_id
+            )
         except files.FileError as e:
             # Agents write files after a cd in the shell, which does not carry
             # over, then send the bare name (seen in the first smoke test).

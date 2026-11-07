@@ -395,7 +395,7 @@ def register_workflow_ops(app: App) -> None:
             raise OpError("no_file", f"no file {path}")
         try:
             (rec,) = await asyncio.to_thread(
-                files.store_all, app.roots.state_root, [path]
+                files.store_all, app.roots.state_root, [path], wf.runs[p.run].owner
             )
         except files.FileError as e:
             raise OpError(e.code, e.message) from e
