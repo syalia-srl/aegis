@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from .ops import Operation
 
 Action = Literal["list", "read", "write"]
+EventKind = Literal["start", "turn_end", "entry", "stop", "close", "file"]
 
 
 class Refused(OpError):
@@ -112,7 +113,7 @@ class Catalog:
 class Event:
     """Something that happened, for ``on_event``."""
 
-    kind: Literal["start", "turn_end", "entry", "stop", "close", "file"]
+    kind: EventKind
     log_id: str
     data: dict = field(default_factory=dict)
 

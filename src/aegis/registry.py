@@ -145,6 +145,10 @@ class Registry(Host):
             _admit_all
         )
         self.resume_hook: Callable[[Session], Awaitable[None]] | None = None
+        # The host policy's tools for a starting process, and what happened
+        # to a session for its on_event (App.tools_for, App.event); set by App.
+        self.tools_for: Callable[[Session], None] = lambda s: None
+        self.event: Callable[[str, str, dict], None] = lambda kind, log_id, data: None
         self.load = None  # load.LoadSampler, set by App
         # knowledge.Knowledge, and whose knowledge a session's sends are
         # hinted from (its owner, else the admin); both set by App.
@@ -188,6 +192,7 @@ class Registry(Host):
 
     # -- the Host a session asks ----------------------------------------------
     def spawn_args(self, session: Session) -> tuple[tuple[str, str] | None, str | None]:
+        self.tools_for(session)
         priming = session.spec.priming
         if self.mcp_url is None or self.tokens is None:
             return None, priming
@@ -225,6 +230,7 @@ class Registry(Host):
         return self.cgroups.path(session.log_id) if self.cgroups is not None else None
 
     def turn_ended(self, session: Session) -> None:
+        self.event("turn_end", session.log_id, {})
         if self.queues is not None:
             self.queues.turn_ended(session)
         if self.quota is not None:
@@ -387,6 +393,11 @@ class Registry(Host):
                 log.exception("aegis: could not archive %s on its close", s.handle)
 
     def recorded(self, session: Session, record: dict, events: list | None) -> None:
+        self.event(
+            "entry",
+            session.log_id,
+            {"kind": record.get("kind"), "seq": record.get("seq")},
+        )
         if record.get("kind") == "plan" and self.nudges is not None:
             # Before the plan_update's result reads its notices, so it never
             # answers with the stale-plan warning it just ended.
@@ -401,6 +412,7 @@ class Registry(Host):
             )
 
     def exited(self, session: Session, code: int, stderr_tail: list[str]) -> None:
+        self.event("stop", session.log_id, {"code": code})
         if self.tokens is not None:
             self.tokens.drop(session.log_id)
         if self.queues is not None:
@@ -971,9 +983,11 @@ class Registry(Host):
         s.host_env = env
         self._publish("sessions", [{"upsert": s.wire()}])
         s.launch_by = launch_by
+        self.event("start", log_id, {})
         try:
             await s.start()
         except (OSError, TimeoutError):
+            self.event("close", log_id, {})
             del self.sessions[log_id]
             s.store.close()
             self.store_path(log_id).unlink(missing_ok=True)
@@ -1008,6 +1022,7 @@ class Registry(Host):
             self.secrets.drop(log_id)
             secret_store.remove_all_provided(s.entries())
         s.report({"kind": "close"})
+        self.event("close", log_id, {})
         del self.sessions[log_id]
         s.archived = True
         s.artifacts.flush_all()  # a page's last coalesced write, before the store shuts

@@ -1454,6 +1454,7 @@ def register_agent_ops(app: App) -> None:
                 else ""
             )
             raise OpError(e.code, e.message + hint) from e
+        app.event("file", s.log_id, {"file_ids": [r["file_id"] for r in recs]})
         # The source stays in the store: the fold keys by it and never copies
         # it into an entry.
         sent = [

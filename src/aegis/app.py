@@ -139,6 +139,7 @@ from .quota_gate import (
 from .btws import SideNotes
 from .recaps import Recaps
 from . import host_tokens
+from .policy_events import EventPump
 from .policy import (
     Action,
     Credential,
@@ -146,6 +147,8 @@ from .policy import (
     Refused,
     SessionView,
     SpawnRequest,
+    Event,
+    EventKind,
     StandalonePolicy,
 )
 from .ops import Caller, NoParams, OpError, Principal, Registry as Ops
@@ -631,6 +634,9 @@ class App:
         # the sync App.who finds it (Registry.call awaits ensure_who first).
         self.whos: dict[str, Any] = {}
         self.host_secret = host_tokens.load_or_create_secret(roots.state_root)
+        # The aegis tools each running session got from the policy (tools_for).
+        self.tools_of: dict[str, frozenset[str] | None] = {}
+        self.events = EventPump(self.policy)
         self.links = Links(roots.state_root, server_name, self.user, self.publish)
         self.links.answer = self.answer_link
         self.links.serve, self.links.rwatch = self.serve_link, self.watch_link
@@ -665,6 +671,9 @@ class App:
         self.registry.policy = self.policy
         self.sessions.admit = self.admit
         self.sessions.resume_hook = self.admit_resume
+        self.sessions.tools_for = self.tools_for
+        self.sessions.event = self.event
+        self.registry.tools_of = self.tools_of.get
         self.registry.session_of = lambda kind, value: self.session_of(kind, value)
         self.registry.view_of = lambda log_id: self.view_of(log_id)
         self.registry.owner_of = self.owner_of
@@ -1290,6 +1299,20 @@ class App:
         if changes:
             await s.configure(**changes)
 
+    def tools_for(self, s) -> None:
+        """Ask the policy which aegis tools a starting process gets."""
+        view = self.view_of(s.log_id)
+        if view is None:
+            return
+        got = self.policy.tools(self.whos.get(view.owner), view)
+        self.tools_of[s.log_id] = None if got is None else frozenset(got)
+
+    def event(self, kind: EventKind, log_id: str, data: dict) -> None:
+        """Tell the policy's on_event what happened to a session."""
+        view = self.view_of(log_id)
+        who = self.whos.get(view.owner) if view is not None else None
+        self.events.emit(who, Event(kind, log_id, data))
+
     def narrows(self) -> bool:
         """Whether the policy hides anything: it overrides can."""
         return type(self.policy).can is not HostPolicy.can
@@ -1488,6 +1511,7 @@ class App:
 
     async def shutdown(self) -> None:
         stopping_at = restarts.stopping(self.roots.state_root)
+        await self.events.close()
         await self.push.sender.stop()
         await self.schedules.stop()
         await self.workflows.stop()
