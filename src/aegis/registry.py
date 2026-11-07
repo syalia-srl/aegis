@@ -201,6 +201,10 @@ class Registry(Host):
         priming = session.spec.priming
         if self.mcp_url is None or self.tokens is None:
             return None, priming
+        endpoint = (self.mcp_url, self.tokens.mint(session.log_id))
+        if not session.spec.primer:
+            # A product agent (#983): the host's prompt alone.
+            return endpoint, priming
         from .browsers import available
         from .mcp import primer
 
@@ -212,7 +216,7 @@ class Registry(Host):
         )
         if priming:
             prompt += "\n\n" + priming
-        return (self.mcp_url, self.tokens.mint(session.log_id)), prompt
+        return endpoint, prompt
 
     def mcp_servers(self, session: Session) -> tuple[McpServer, ...]:
         return self.mcp_for(session)
