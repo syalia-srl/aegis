@@ -7825,24 +7825,26 @@ def test_spawn_on_a_linked_server_from_the_new_tab(linked, page):
     assert not page.errors
 
 
-def test_settings_shows_a_trusted_link_on_both_servers(
+def test_settings_shows_a_link_on_both_servers(
     tmp_path: Path, fake_claude: str, fake_opencode: str, page
 ):
-    """A trusted link says so on the server that holds it, and the far server
-    lists it under the servers that link it, at desktop and phone width."""
+    """A link is linked on the server that holds it, with no trust box and an
+    exit button, and the far server lists it under the servers that link it,
+    at desktop and phone width."""
     pair = Linked(tmp_path, fake_claude, fake_opencode).start()
     try:
         open_settings(page, pair.alpha.url)
         page.wait_for_function(
             "document.querySelector('#set-servers .link-beta')"
-            "?.textContent.includes('trusted, both ways')",
+            "?.textContent.includes('Exit here')",
             timeout=10000,
         )
-        assert page.locator("#set-link-trusted").count() == 1
+        assert page.locator("#set-link-trusted").count() == 0
+        assert "trust" not in page.inner_text("#set-servers").lower()
         open_settings(page, pair.beta.url)
         page.wait_for_selector("#set-servers .set-incoming.link-alpha", timeout=10000)
         row = page.inner_text("#set-servers .set-incoming.link-alpha")
-        assert "links here" in row and "trusted · both ways" in row
+        assert "links here" in row and "linked" in row
         page.set_viewport_size({"width": 390, "height": 844})
         wide = page.evaluate(
             "[...document.querySelectorAll('#set-servers *')]"
@@ -7854,10 +7856,10 @@ def test_settings_shows_a_trusted_link_on_both_servers(
         pair.stop()
 
 
-def test_a_trusted_far_server_shows_and_drives_the_near_servers_sessions(
+def test_a_far_server_shows_and_drives_the_near_servers_sessions(
     tmp_path: Path, fake_claude: str, fake_opencode: str, browser, page
 ):
-    """Over a trusted link the far server's page shows the near server's
+    """Over a link the far server's page shows the near server's
     sessions under its band and drives them (#969), at desktop and phone width."""
     pair = Linked(tmp_path, fake_claude, fake_opencode).start()
     try:

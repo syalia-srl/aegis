@@ -422,14 +422,11 @@ def test_a_far_transcript_cannot_aim_a_card_at_another_link(  # noqa: F811
     gamma.start()
     try:
         token = (gamma.root / ".aegis" / "state" / "token").read_text().strip()
-        for near, name, extra in (
-            (pair.beta, "beta", ["--trusted"]),
-            (pair.alpha, "alpha", []),
-        ):
+        for near, name in ((pair.beta, "beta"), (pair.alpha, "alpha")):
             link = subprocess.run(
                 [sys.executable, "-m", "aegis", "link", "add", "gamma",
                  f"http://127.0.0.1:{gamma.port}", "--root", str(near.root),
-                 "--as", name, *extra],
+                 "--as", name],
                 input=token + "\n", capture_output=True, text=True, timeout=30,
             )  # fmt: skip
             assert link.returncode == 0, link.stdout + link.stderr
