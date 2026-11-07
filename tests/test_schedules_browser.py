@@ -354,7 +354,7 @@ def test_a_card_for_a_far_schedule_unpauses_it_on_the_far_server(  # noqa: F811
 ):
     """Alpha's agent makes it on beta: the card is in alpha's transcript, and
     Unpause reaches beta, where the schedule lives. Alpha has none of that name."""
-    pair = Linked(tmp_path, fake_claude, fake_opencode, trusted=True).start()
+    pair = Linked(tmp_path, fake_claude, fake_opencode).start()
     try:
         page.goto(pair.alpha.url)
         page.wait_for_function("document.querySelector('#a2')")
@@ -387,7 +387,7 @@ def test_a_far_transcript_cannot_aim_a_card_at_this_server(  # noqa: F811
     """Beta's agent makes a schedule on alpha, over the way back. Read through
     alpha, the card in beta's transcript offers no Unpause, though the schedule
     waits on alpha: a far transcript's word never picks where a click goes."""
-    pair = Linked(tmp_path, fake_claude, fake_opencode, trusted=True).start()
+    pair = Linked(tmp_path, fake_claude, fake_opencode).start()
     try:
         spec = SPEC | {"name": "nightly-tests@alpha"}
         lid = beta_session(pair, browser, "/mcp schedule_create " + json.dumps(spec))
