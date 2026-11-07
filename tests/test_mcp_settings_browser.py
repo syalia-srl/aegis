@@ -32,6 +32,7 @@ def test_settings_adds_an_mcp_server(settings_server, browser, width):  # noqa: 
     page.fill(f"{new} input[name=name]", "echo")
     pick(page, f"{ROW} pick-chip[name=kind]", "command")
     page.fill(f"{ROW} input[name=command]", sys.executable)
+    page.click(f"{ROW} .set-priming summary")
     page.fill(f"{ROW} textarea[name=args]", str(ECHO))
     page.click(f"{ROW} button:has-text('Test')")
     page.wait_for_function(

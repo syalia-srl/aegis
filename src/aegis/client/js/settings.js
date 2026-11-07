@@ -1359,7 +1359,9 @@ export class Settings {
         this.touch();
         this.draw();
       }, "link danger");
-      row.append(h("div", { className: "set-queue-line" }, name, pick, fields[0], test, del), ...fields.slice(1), result);
+      const filled = kind === "url" ? Object.keys(m.headers || {}).length : (m.args || []).length + Object.keys(m.env || {}).length;
+      const more = h("details", { className: "set-priming", open: !!filled }, h("summary", { textContent: kind === "url" ? "Headers" : "Arguments and environment" }), ...fields.slice(1));
+      row.append(h("div", { className: "set-queue-line" }, name, pick, fields[0], test, del), more, result);
       return row;
     });
     const head = h("div", { className: "set-section-head" }, h("h3", { textContent: "MCP servers" }), button("Add MCP server", "set-add-mcp", () => {
