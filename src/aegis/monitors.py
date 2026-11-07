@@ -263,7 +263,7 @@ def monitor_items(
 class Monitors:
     def __init__(self, registry: Registry, path: Path) -> None:
         self._registry = registry
-        # A server linked with trust's session list, or None when it cannot
+        # A linked server's session list, or None when it cannot
         # be read (app.py sets it), for a monitor watching sessions there.
         self.far_list: Callable[[str], Awaitable[list | None]] | None = None
         self._path = path
@@ -457,7 +457,7 @@ class Monitors:
 
     @staticmethod
     def _far_row(r: dict, listed: list | None, now: float) -> dict:
-        """A watched session on a server linked with trust, read from that
+        """A watched session on a linked server, read from that
         server's session list. A list that could not be read keeps the last
         reading, so a link that drops never releases the waiter."""
         if listed is None:

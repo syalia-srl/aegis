@@ -215,6 +215,54 @@ async def test_a_hello_without_both_ways_is_named_too_old(pair):
     assert "3.0.0 or newer" in frame["message"]
 
 
+async def test_the_first_link_keeps_working_after_a_second_is_refused(pair):
+    alpha, beta = pair
+    await until(lambda: beta.app.links.joined("alpha"), timeout=10, what="the way back")
+    beta.app.links.add("alpha", alpha.base, alpha.token)
+    await until(
+        lambda: beta.app.links.outbound("alpha").state == "refused",
+        timeout=10,
+        what="the refusal",
+    )
+    # Calls go both ways over the link alpha opened, and keep going.
+    assert isinstance(await beta.app.links.get("alpha").call("session.list"), list)
+    assert isinstance(await alpha.app.links.get("beta").call("session.list"), list)
+    await asyncio.sleep(1.5)
+    assert alpha.app.links.joined("beta") and beta.app.links.joined("alpha")
+
+
+async def test_two_servers_linking_each_other_at_start_keep_one_link(
+    tmp_path, fake_claude
+):
+    beta = Node(tmp_path / "beta", "beta", fake_claude)
+    alpha = Node(tmp_path / "alpha", "alpha", fake_claude)
+    for near, far in ((alpha, beta), (beta, alpha)):
+        state = near.root / ".aegis" / "state"
+        state.mkdir(parents=True)
+        links.LinkStore(state / "links.json").save(
+            [{"name": far.name, "url": far.base, "token": far.token}]
+        )
+    await beta.start()
+    await alpha.start()
+    try:
+
+        def states() -> list[str]:
+            pairs = ((alpha, "beta"), (beta, "alpha"))
+            return sorted(n.app.links.outbound(f).state for n, f in pairs)
+
+        # One side may try before the other listens, and retries.
+        await until(
+            lambda: states() == ["linked", "refused"],
+            timeout=20,
+            what="one link both ways",
+        )
+        assert alpha.app.links.joined("beta") and beta.app.links.joined("alpha")
+        assert isinstance(await beta.app.links.get("alpha").call("session.list"), list)
+    finally:
+        await alpha.stop()
+        await beta.stop()
+
+
 def test_a_welcome_without_both_ways_is_named_too_old():
     why = links.too_old({"server": "old", "build": {"version": "2.17.0"}})
     assert "old runs aegis 2.17.0" in why and "3.0.0 or newer" in why

@@ -39,7 +39,7 @@ async def linked(tmp_path, fake_claude):
 async def test_a_link_opens_the_way_back(linked):
     alpha, beta = linked
     (w,) = alpha.app.links.wire()
-    assert w["state"] == "linked" and "linked" not in w and "granted" not in w
+    assert w["state"] == "linked" and "trusted" not in w and "granted" not in w
     incoming = await beta.app.registry.call("link.incoming", {})
     assert [(i["name"], i["state"]) for i in incoming] == [("alpha", "linked")]
     # The way back is listed for beta's browsers, marked as one (#969).

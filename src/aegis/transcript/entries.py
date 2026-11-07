@@ -840,7 +840,7 @@ class Fold:
                 "name": str(rec.get("name")),
                 "action": str(rec.get("action")),
             }
-            # On another server: the agent named it across a trusted link.
+            # On another server: the agent named it across a link.
             if rec.get("server"):
                 det["server"] = str(rec["server"])
             return self._upsert(
