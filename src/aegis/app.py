@@ -145,6 +145,7 @@ from .policy import (
     HostPolicy,
     Refused,
     SessionView,
+    SpawnRequest,
     StandalonePolicy,
 )
 from .ops import Caller, NoParams, OpError, Principal, Registry as Ops
@@ -662,6 +663,8 @@ class App:
         self.registry.who = self.who
         self.registry.ensure_who = self.ensure_who
         self.registry.policy = self.policy
+        self.sessions.admit = self.admit
+        self.sessions.resume_hook = self.admit_resume
         self.registry.session_of = lambda kind, value: self.session_of(kind, value)
         self.registry.view_of = lambda log_id: self.view_of(log_id)
         self.registry.owner_of = self.owner_of
@@ -1185,6 +1188,107 @@ class App:
             if local in (m.get("handle"), log_id):
                 return m.get("owner") or self.user
         return None
+
+    def offers(self, caller: Caller, **fields: str) -> bool:
+        """Whether the policy's catalog offers ``caller`` every field given:
+        agent, harness, model, effort or permission. For the pickers."""
+        cat = self.policy.catalog(self.who(caller).who)
+        allowed = {
+            "agent": cat.agents,
+            "harness": cat.harnesses,
+            "model": cat.models,
+            "effort": cat.efforts,
+            "permission": cat.permissions,
+        }
+        return all((a := allowed[k]) is None or v in a for k, v in fields.items())
+
+    def _offered(self, who: Any, req: SpawnRequest) -> None:
+        """Refuse a request outside what the policy's catalog offers ``who``."""
+        cat = self.policy.catalog(who)
+        for allowed, value, what in (
+            (cat.agents, req.agent, "agent"),
+            (cat.harnesses, req.harness, "harness"),
+            (cat.models, req.model, "model"),
+            (cat.efforts, req.effort, "effort"),
+            (cat.permissions, req.permission, "permission"),
+        ):
+            if allowed is not None and value not in allowed:
+                raise Refused(f"the {what} {value!r} is not offered to you")
+        if cat.folders is not None and not any(
+            Path(req.cwd).is_relative_to(f) for f in cat.folders
+        ):
+            raise Refused(f"the folder {req.cwd} is not offered to you")
+
+    async def admit(self, spec: SpawnSpec) -> tuple[SpawnSpec, dict]:
+        """A new session's start as the policy has it (Registry.spawn): the
+        parent's tags when the spec has none, the owner's who restored, the
+        request checked against the catalog and passed through spawn. Returns
+        the spec to run and the environment the host adds. Raises Refused."""
+        tags = dict(spec.tags)
+        if not tags:
+            parent = self.sessions.sessions.get(spec.spawned_by or spec.continues or "")
+            if parent is not None:
+                tags = dict(parent.spec.tags)
+        who = await self.who_of_key(spec.owner or self.user)
+        req = SpawnRequest(
+            agent=spec.agent,
+            harness=spec.harness,
+            model=spec.model,
+            effort=spec.effort,
+            permission=spec.permission,
+            cwd=spec.cwd,
+            env={},
+            system_prompt=None,
+            tags=tags,
+        )
+        self._offered(who, req)
+        req = await self.policy.spawn(who, req)
+        priming = spec.priming
+        if req.system_prompt:
+            priming = (
+                f"{priming}\n\n{req.system_prompt}" if priming else req.system_prompt
+            )
+        spec = dataclasses.replace(
+            spec,
+            agent=req.agent,
+            harness=req.harness,
+            model=req.model,
+            effort=req.effort,
+            permission=req.permission,
+            cwd=Path(req.cwd),
+            priming=priming,
+            tags=dict(req.tags),
+        )
+        return spec, dict(req.env)
+
+    async def admit_resume(self, s) -> None:
+        """A stopped session's process is about to start again: the policy's
+        spawn may refuse it, refresh the environment it adds, and change its
+        model, effort and permission; the rest was fixed at spawn."""
+        who = await self.who_of_key(s.spec.owner or self.user)
+        spec = s.spec
+        req = await self.policy.spawn(
+            who,
+            SpawnRequest(
+                agent=spec.agent,
+                harness=spec.harness,
+                model=spec.model,
+                effort=spec.effort,
+                permission=spec.permission,
+                cwd=spec.cwd,
+                env={},
+                system_prompt=None,
+                tags=dict(spec.tags),
+            ),
+        )
+        s.host_env = dict(req.env)
+        changes = {
+            k: getattr(req, k)
+            for k in ("model", "effort", "permission")
+            if getattr(req, k) != getattr(spec, k)
+        }
+        if changes:
+            await s.configure(**changes)
 
     def narrows(self) -> bool:
         """Whether the policy hides anything: it overrides can."""
@@ -2328,12 +2432,25 @@ class App:
             """The agents you can spawn, each a preset of harness, model, effort
             and permission. session_spawn starts one and can override those."""
             agents, default = self._agents()
+            agents = [
+                a
+                for a in agents
+                if self.offers(
+                    caller,
+                    agent=a.name,
+                    harness=a.harness,
+                    model=a.model,
+                    effort=a.effort,
+                    permission=a.permission,
+                )
+            ]
             return {
                 "agents": [a.as_dict() for a in agents],
                 "default": default,
                 "harnesses": [
                     {"name": h, "supported": h in SUPPORTED_HARNESSES}
                     for h in HARNESSES
+                    if self.offers(caller, harness=h)
                 ],
                 "models": model_suggestions(agents),
                 "cwd": str(self.roots.harness_cwd),

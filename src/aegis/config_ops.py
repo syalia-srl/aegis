@@ -107,6 +107,8 @@ def register_config_ops(app: App) -> None:
         rows = []
         for f in await detected():
             for m in f.models:
+                if not app.offers(caller, harness=f.harness, model=m.value):
+                    continue
                 used = [
                     {"agent": a.name, "at": a.models.index(v)}
                     for a in agents

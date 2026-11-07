@@ -180,6 +180,8 @@ def register_schedule_ops(app: App) -> None:
             "log_id": s.log_id,
             "principal": who.name,
             "ceiling": s.spec.permission,
+            # Its runs stay where the maker's host put it (#959).
+            **({"tags": dict(s.spec.tags)} if s.spec.tags else {}),
         }
 
     def cwd(raw: str | None, caller: Caller) -> Path:
