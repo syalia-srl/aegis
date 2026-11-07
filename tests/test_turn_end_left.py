@@ -19,8 +19,9 @@ async def test_done_lists_the_pending_repo_work(world, monkeypatch):  # noqa: F8
     assert s.wire()["attention"] == "done"
 
 
-async def test_done_with_nothing_left_and_review_say_nothing_more(  # noqa: F811
-    world, monkeypatch
+async def test_done_with_nothing_left_and_review_say_nothing_more(
+    world,  # noqa: F811
+    monkeypatch,
 ):
     s = await named(world)
     asked = []
