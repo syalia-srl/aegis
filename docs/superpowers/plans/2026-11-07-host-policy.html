@@ -105,14 +105,14 @@ details.task ol.steps>li::marker{font-family:var(--font-mono);color:var(--accent
   <div class="chrome">
     <span>aegis</span>
     <span class="tab">plan · host policy</span>
-    <span class="st"><span class="pill acc">for review</span><span class="pill">2026-11-07</span><span class="pill">#959 · #957</span></span>
+    <span class="st"><span class="pill acc">done</span><span class="pill">2026-11-07</span><span class="pill">#959 · #957</span></span>
   </div>
   <div class="progress"><span id="pcount">0 of 0 done</span><div class="track" id="ptrack"></div></div>
 </div>
 
 <main>
 <h1>Host policy</h1>
-<div class="meta"><span>docs/superpowers/plans/2026-11-07-host-policy.html</span><span>·</span><span>implements #959</span><span>·</span><span>spec: docs/superpowers/specs/2026-11-06-embeddable-aegis-design.html, section 04</span><span>·</span><span>execution: not chosen yet</span></div>
+<div class="meta"><span>docs/superpowers/plans/2026-11-07-host-policy.html</span><span>·</span><span>implements #959</span><span>·</span><span>spec: docs/superpowers/specs/2026-11-06-embeddable-aegis-design.html, section 04</span><span>·</span><span>execution: native, one fresh reviewer at the end</span></div>
 
 <h2 id="goal">Goal, architecture, stack</h2>
 <p><b>Goal:</b> <code>Server(root, policy=...)</code> takes a <code>HostPolicy</code>, and aegis asks it at every decision: who a token is, who owns what on disk, whether an operation may run, which sessions a caller sees, what a spawn runs, which aegis tools a harness gets, and what happened. <code>aegis serve</code> runs <code>StandalonePolicy</code> and behaves as it does today.</p>
@@ -170,7 +170,7 @@ details.task ol.steps>li::marker{font-family:var(--font-mono);color:var(--accent
 
 <h2 id="tasks">Tasks</h2>
 
-<details class="task" id="task-1" data-state="pending">
+<details class="task" id="task-1" data-state="done">
 <summary><span class="num">1</span><span><span class="ttl">The policy types, StandalonePolicy, and a policy on App and Server</span><span class="files">policy.py · ops.py · app.py · server.py · cli.py · __init__.py · tests/test_policy.py</span></span><span class="state">pending</span></summary>
 <div class="body">
 <h4>files</h4>
@@ -246,7 +246,7 @@ async def test_a_server_takes_a_policy(tmp_path):
 </div>
 </details>
 
-<details class="task" id="task-2" data-state="pending">
+<details class="task" id="task-2" data-state="done">
 <summary><span class="num">2</span><span><span class="ttl">Callers: identify, key and restore, and minted tokens</span><span class="files">host_tokens.py · web.py · app.py · ops.py · server.py · queues.py · schedules.py · tests/test_policy_callers.py</span></span><span class="state">pending</span></summary>
 <div class="body">
 <h4>files</h4>
@@ -317,7 +317,7 @@ async def test_a_task_whose_owner_cannot_be_restored_fails_with_the_hosts_messag
 </div>
 </details>
 
-<details class="task" id="task-3" data-state="pending">
+<details class="task" id="task-3" data-state="done">
 <summary><span class="num">3</span><span><span class="ttl">guard and around in Registry.call</span><span class="files">ops.py · policy.py · app.py · tests/test_policy_ops.py</span></span><span class="state">pending</span></summary>
 <div class="body">
 <h4>files</h4>
@@ -372,7 +372,7 @@ async def test_around_refusing_term_spawn_refuses_it_for_people_and_agents(app_w
 </div>
 </details>
 
-<details class="task" id="task-4" data-state="pending">
+<details class="task" id="task-4" data-state="done">
 <summary><span class="num">4</span><span><span class="ttl">can on every operation that names a session</span><span class="files">ops.py · app.py · agent_ops.py · browser_ops.py · artifact_ops.py · workflow_ops.py · schedule_ops.py · … · tests/test_policy_names.py</span></span><span class="state">pending</span></summary>
 <div class="body">
 <h4>files</h4>
@@ -431,7 +431,7 @@ async def test_a_readable_unwritable_session_refuses_writes_and_serves_reads(hid
 </div>
 </details>
 
-<details class="task" id="task-5" data-state="pending">
+<details class="task" id="task-5" data-state="done">
 <summary><span class="num">5</span><span><span class="ttl">can on lists, channels and sent files</span><span class="files">channels.py · app.py · web.py · files.py · agent_ops.py · journal/ops.py · tests/test_policy_lists.py</span></span><span class="state">pending</span></summary>
 <div class="body">
 <h4>files</h4>
@@ -472,7 +472,7 @@ async def test_a_session_that_becomes_hidden_is_removed_from_a_live_subscription
 </div>
 </details>
 
-<details class="task" id="task-6" data-state="pending">
+<details class="task" id="task-6" data-state="done">
 <summary><span class="num">6</span><span><span class="ttl">spawn, catalog and tags at every start</span><span class="files">session.py · registry.py · agents.py · app.py · queues.py · schedules.py · workflows.py · config_ops.py · secret_ops.py · tests/test_policy_spawn.py</span></span><span class="state">pending</span></summary>
 <div class="body">
 <h4>files</h4>
@@ -536,7 +536,7 @@ async def test_a_worker_of_a_hidden_persons_agent_keeps_owner_and_tags(hidden, f
 </div>
 </details>
 
-<details class="task" id="task-7" data-state="pending">
+<details class="task" id="task-7" data-state="done">
 <summary><span class="num">7</span><span><span class="ttl">tools per session, and on_event</span><span class="files">registry.py · mcp.py · ops.py · app.py · policy.py · tests/test_policy_tools.py</span></span><span class="state">pending</span></summary>
 <div class="body">
 <h4>files</h4>
@@ -593,7 +593,7 @@ async def test_a_raising_or_slow_on_event_never_delays_a_turn(app_with, fake_cla
 </div>
 </details>
 
-<details class="task" id="task-8" data-state="pending">
+<details class="task" id="task-8" data-state="done">
 <summary><span class="num">8</span><span><span class="ttl">Code API callers, docs, and the whole branch</span><span class="files">server.py · api/* · help/library.md · changelog.d · PR</span></span><span class="state">pending</span></summary>
 <div class="body">
 <h4>files</h4>
