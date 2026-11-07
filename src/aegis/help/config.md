@@ -1,7 +1,7 @@
 ---
 title: Configuration
 kind: concept
-when: adding or changing agents, the default agent, queues, recaps, side notes, the per-session memory cap, notices about disk, memory, CPU and quota, an agent's status and stalled monitors, when aegis nudges a silent agent, parking idle sessions, untested harness versions, search embeddings for skills and memories, the disks the Host rows list or the network readings in .aegis.yaml, or picking a theme
+when: adding or changing agents, settings that differ per server (hosts:), the default agent, queues, recaps, side notes, the per-session memory cap, notices about disk, memory, CPU and quota, an agent's status and stalled monitors, when aegis nudges a silent agent, parking idle sessions, untested harness versions, search embeddings for skills and memories, the disks the Host rows list or the network readings in .aegis.yaml, or picking a theme
 hints:
   - Add an agent with its own harness, model and effort in .aegis.yaml. #add-an-agent
   - A cascade starts on a cheap model and moves up when the task needs it. #cascades
@@ -527,6 +527,42 @@ false to turn that off. It is read when aegis starts.
 `exit_via:` names a trusted link: what aegis starts reaches the internet from
 that server's address. `exit:` on an agent names another link, or `off` for the
 machine's own route. See [links](links#exit-through-a-trusted-link).
+
+## Per-host overrides
+
+When several servers serve checkouts of one repository, they read one
+`.aegis.yaml` from git. What differs per server goes under `hosts:`, in a block
+named after the server: its `aegis serve --name`, else its hostname. Each server
+applies the top level, then its own block, and ignores the others.
+
+```yaml
+agents:
+  opus: {harness: claude-code, model: opus, effort: high, permission: full}
+  fable: {harness: claude-code, model: fable, effort: high, permission: full}
+max_workers: 4
+
+hosts:
+  laptop:
+    exit_via: always-on
+    agents:
+      opus: {effort: medium}
+      fable: null
+  always-on:
+    max_workers: 8
+```
+
+A mapping in a block merges into the shared one key by key, so
+`opus: {effort: medium}` changes one field of one agent. Any other value,
+a list included, replaces the shared one. A `null` removes the shared key on
+that server: above, `laptop` has no `fable`. Commit the file as it is: nothing
+per server is left as an edit git has to step around.
+
+A block can set any key but `multi_user:`, which aegis reads before it knows the
+server's name. `aegis doctor` says which block it applied, and refuses a block
+that sets `multi_user:` or a `hosts:` that is not a mapping of mappings; such a
+file applies no block at all. The Settings page edits the shared layer and keeps
+the `hosts:` block as it is; Exit here, on a link's row, writes this server's
+block.
 
 ## Terminals
 

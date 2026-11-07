@@ -20,6 +20,7 @@ import os
 import platform
 import shlex
 import shutil
+import socket
 import tempfile
 import time
 from asyncio.subprocess import PIPE, STDOUT
@@ -41,7 +42,9 @@ from .config import (
     Finding,
     QueueDoc,
     Snapshot,
+    host_block,
     load,
+    overlay,
 )
 from .harness import harness_for
 from .links import LinkStore
@@ -230,6 +233,21 @@ def _notices(cfg: dict) -> list[Finding]:
         for name in cfg.get("undeclared", [])
     ]
     return out
+
+
+def _hosts(data: dict, host: str) -> list[Finding]:
+    """Which ``hosts:`` block applies here. The doctor runs without the
+    server, so it takes the name ``aegis serve`` takes without ``--name``."""
+    if "hosts" not in data:
+        return []
+    block, error = host_block(data, host)
+    if error:
+        return [Finding("error", "hosts", f"{error}; no block is applied")]
+    if block is None:
+        names = ", ".join(map(str, data["hosts"] or {})) or "none"
+        return [Finding("ok", "hosts", f"no block for {host} (blocks: {names})")]
+    keys = ", ".join(map(str, block))
+    return [Finding("ok", "hosts", f"applies hosts.{host}: {keys}")]
 
 
 def _unknown_keys(data: dict) -> list[Finding]:
@@ -740,8 +758,10 @@ async def doctor(
     out = [
         Finding("ok", "file", f"{path}, found from {start}" if walked else str(path))
     ]
-    out += _unknown_keys(data)
-    snap = Snapshot.parse(path, None, data)
+    host = socket.gethostname()
+    out += _hosts(data, host)
+    out += _unknown_keys(overlay(data, host))
+    snap = Snapshot.parse(path, None, data, host)
     used = {a.harness for a in snap.agents if a.harness in HARNESSES}
     accepted = snap.harness_versions["accepted"]
     found = {

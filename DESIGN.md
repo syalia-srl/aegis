@@ -222,7 +222,12 @@ edits every key the readers take: the blocks that are values over defaults are
 drawn from `fields()`, a schema the wire carries, and the rest have controls of
 their own. `tests/test_config_coverage.py` takes the keys from the readers'
 declarations, so a key added to a reader fails until the form's document and
-the page carry it. Its `context:`
+the page carry it. The file is often shared through git by several servers, so
+what differs per server is committed under `hosts:`, a block per server name
+(`config.overlay`): the runtime fields read the merged mapping and the form's
+document the shared one, so a save never copies one server's values into all.
+An uncommitted edit was the alternative, and a git reset of a fraction of a
+second dropped it (#950). Its `context:`
 block is the one section with defaults: a wrong one keeps them all in force
 and `aegis doctor` names the mistake, because a typo there must never stop a
 `turn_end`.
