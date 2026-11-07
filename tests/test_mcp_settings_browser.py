@@ -22,9 +22,7 @@ ROW = '.set-queue[data-row="mcp.echo"]'
 
 
 @pytest.mark.parametrize("width", [1280, 390])
-def test_settings_adds_tests_and_attaches_an_mcp_server(
-    settings_server, browser, width
-):
+def test_settings_adds_an_mcp_server(settings_server, browser, width):  # noqa: F811
     errors: list = []
     page = browser.new_context(viewport={"width": width, "height": 900}).new_page()
     page.on("pageerror", lambda e: errors.append(str(e)))
