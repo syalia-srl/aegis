@@ -85,17 +85,7 @@ ON_RUNNER = {
 # Functions that touch only the server's state, or run outside the mode.
 SERVER = {
     "fs_ops.py": {"register_fs_ops.log", "open_"},
-    "files.py": {
-        "store",
-        "store_all",
-        "find",
-        "session_of",
-        "open_natively",
-        "headers",
-        "classify",
-    },
-    # A dropped snapshot's file and the record of its session (#959).
-    "artifact_ops.py": {"register_artifact_ops.land"},
+    "files.py": {"store", "store_all", "find", "open_natively", "headers", "classify"},
     "attachments.py": {
         "_staged",
         "_file",

@@ -21,7 +21,6 @@ import fastmcp
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from fastmcp.server.dependencies import get_http_headers
-from fastmcp.server.middleware import Middleware
 from fastmcp.tools import Tool
 from fastmcp.tools import ToolResult
 from mcp.types import ToolAnnotations
@@ -148,27 +147,9 @@ SHELL_FORM = (
 READ_ONLY = ToolAnnotations(readOnlyHint=True)
 
 
-class _ToolsOfSession(Middleware):
-    """A session lists only the aegis tools the host policy gave it (#959);
-    Registry.call refuses the rest when called by name."""
-
-    def __init__(self, registry: Registry, tokens: Tokens) -> None:
-        self._registry, self._tokens = registry, tokens
-
-    async def on_list_tools(self, context, call_next):
-        tools = await call_next(context)
-        headers = get_http_headers(include_all=True) or {}
-        log_id = self._tokens.resolve(headers.get(HEADER.lower()))
-        allowed = self._registry.tools_of(log_id) if log_id else None
-        if allowed is None:
-            return tools
-        return [t for t in tools if t.name in allowed]
-
-
 def build_mcp(registry: Registry, tokens: Tokens, sessions: Sessions | None = None):
     """The fastmcp server and its ASGI app, routed at ``/mcp``."""
     server = FastMCP("aegis")
-    server.add_middleware(_ToolsOfSession(registry, tokens))
     for op in registry.agent_ops():
         doc = (op.doc or op.name) + SHELL_FORM.format(name=op.tool_name)
         # Read-only to the harness: aegis decides which of its tools a session

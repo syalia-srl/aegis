@@ -35,9 +35,6 @@ EXCERPT_LINES = 40
 EXCERPT_BYTES = 4096
 SNIFF_BYTES = 4096
 
-# The session each sent file came from, by file id (session_of); beside the
-# files store, so a file's own folder holds only that file.
-SESSIONS = "file-sessions"
 _ID = re.compile(r"[A-Za-z0-9_-]{16,64}")
 _TEXT_APPS = ("json", "yaml", "xml", "javascript", "toml", "x-sh", "sql")
 
@@ -148,9 +145,7 @@ def check(src: Path) -> int:
     return size
 
 
-def store_all(
-    state_root: Path, srcs: list[Path], log_id: str | None = None
-) -> list[dict]:
+def store_all(state_root: Path, srcs: list[Path]) -> list[dict]:
     """Copy every one of ``srcs``, or none: all are checked before the first
     copy, and a copy that fails anyway removes the ones made before it, so a
     failed send leaves nothing in the state root."""
@@ -159,21 +154,17 @@ def store_all(
     done: list[dict] = []
     try:
         for src in srcs:
-            done.append(store(state_root, src, log_id=log_id))
+            done.append(store(state_root, src))
     except FileError:
         for rec in done:
             shutil.rmtree(state_root / "files" / rec["file_id"], ignore_errors=True)
-            (state_root / SESSIONS / rec["file_id"]).unlink(missing_ok=True)
         raise
     return done
 
 
-def store(
-    state_root: Path, src: Path, name: str | None = None, log_id: str | None = None
-) -> dict:
+def store(state_root: Path, src: Path, name: str | None = None) -> dict:
     """Copy ``src`` under a fresh id, as ``name`` (its own name by default); the
-    store record's body, without caption. ``log_id``, the session that sent it,
-    is kept in ``<state>/file-sessions`` (session_of), for the host policy (#959)."""
+    store record's body, without caption."""
     size = check(src)
     name = name or src.name
     mime, preview = classify(src)
@@ -191,10 +182,6 @@ def store(
         raise FileError("unreadable", f"cannot read {src}: {e}", src) from e
     folder = root / file_id
     folder.mkdir()
-    if log_id:
-        sessions = state_root / SESSIONS
-        sessions.mkdir(exist_ok=True)
-        (sessions / file_id).write_text(log_id)
     dest = folder / name
     os.replace(part, dest)
     return {
@@ -206,16 +193,6 @@ def store(
         "preview": preview,
         "excerpt": excerpt(dest) if preview in ("markdown", "text") else None,
     }
-
-
-def session_of(state_root: Path, file_id: str) -> str | None:
-    """The session that sent a file; None for one sent before aegis 3.0."""
-    if not _ID.fullmatch(file_id):
-        return None
-    try:
-        return (state_root / SESSIONS / file_id).read_text() or None
-    except OSError:
-        return None
 
 
 def find(state_root: Path, file_id: str, name: str) -> Path | None:

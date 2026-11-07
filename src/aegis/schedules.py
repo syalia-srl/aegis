@@ -28,8 +28,6 @@ run and every held tick, so a missed hook or a restart changes only how soon.
 
 from __future__ import annotations
 
-import dataclasses
-
 import asyncio
 import contextlib
 import hashlib
@@ -404,8 +402,6 @@ class Schedules:
         spec = resolve(
             agents, default, s.d.fire.agent, {}, cwd, owner=s.owner.get("principal")
         )
-        if tags := s.owner.get("tags"):
-            spec = dataclasses.replace(spec, tags=dict(tags))
         ceiling = s.owner.get("ceiling")
         if ceiling and PERMISSION_ORDER.index(spec.permission) > PERMISSION_ORDER.index(
             ceiling

@@ -15,7 +15,6 @@ child process reads, and two servers would share it (spec 2026-10-23).
 from __future__ import annotations
 
 import asyncio
-import copy
 import contextlib
 import socket
 from collections.abc import Iterable, Iterator
@@ -23,7 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .ops import Caller, Principal
+from .ops import Caller
 
 if TYPE_CHECKING:
     from .api.ops import Ops
@@ -31,7 +30,6 @@ if TYPE_CHECKING:
     from .api.schedules import Schedules
     from .api.sessions import Sessions
     from .api.workflows import Workflows
-    from .policy import HostPolicy
     from .app import App
     from .roots import Roots
 
@@ -124,7 +122,6 @@ class Server:
         codex: str = "codex",
         cursor: str = "cursor-agent",
         origins: Iterable[str] = (),
-        policy: HostPolicy | None = None,
     ) -> None:
         # Required: nothing below the CLI reads the working directory (test_no_cwd).
         self._root = Path(root)
@@ -133,7 +130,6 @@ class Server:
         self._name = name
         self._bins = (claude, opencode, codex, cursor)
         self._origins = list(origins)
-        self._policy = policy
         self._app: App | None = None
         self._uvicorn: Any = None
         self._task: asyncio.Task | None = None
@@ -195,7 +191,6 @@ class Server:
             opencode_bin=self._bins[1],
             codex_bin=self._bins[2],
             cursor_bin=self._bins[3],
-            policy=self._policy,
         )
         web = build_web(
             self._app, self.token, allowed_hosts(self._host, port), self._origins
@@ -260,24 +255,6 @@ class Server:
         from .api.ops import Ops
 
         return Ops(self)
-
-    def as_who(self, who: Any) -> Server:
-        """This server's API acting as ``who``, one of the host policy's
-        callers: ``srv.as_who(who).sessions.spawn()`` starts a session that
-        is theirs, and lists show what the policy lets them see. ``srv``
-        itself acts as the server's own caller."""
-        if self._caller is None:
-            raise RuntimeError("the Server is not running: use it in `async with`")
-        key = self.app._host_key(who)
-        self.app.whos[key] = who
-        acting = copy.copy(self)
-        acting._caller = Caller("user", principal=Principal(key, who))
-        return acting
-
-    def token_for(self, who: Any, ttl: float = 3600) -> str:
-        """A signed token for ``who``, valid ``ttl`` seconds and across a
-        restart, that the host's page passes to the client."""
-        return self.app.token_for(who, ttl)
 
     async def _call(self, name: str, params: dict | None = None) -> Any:
         """Run operation ``name`` as the server's admin person."""

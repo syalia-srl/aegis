@@ -196,7 +196,7 @@ def commit(
             path, took = recordings.normalize(path)
             if took is None:
                 took = round(int(mark.read_text()) / 1000, 1)
-        rec = files.store(state_root, path, name=path.name, log_id=log_id)
+        rec = files.store(state_root, path, name=path.name)
         name = f"{stamp}-{path.name}"
         dest = _move(path, box, name)
         shutil.rmtree(path.parent)

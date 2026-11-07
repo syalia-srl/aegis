@@ -20,7 +20,7 @@ import logging
 import re
 import secrets
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from pathlib import Path
 
 
@@ -37,7 +37,6 @@ from .notice_sources import Item
 from .notices import TEXT_MAX
 from .ops import OpError
 from .roots import Roots
-from .policy import EventKind, Refused
 from .session import Host, Session, SpawnSpec
 from .transcript.entries import Fold, fold_records, tool_output
 from .transcript.store import Store, read_store
@@ -89,7 +88,7 @@ def _public(meta: dict) -> dict:
     """A stored meta as a browser may see it: the agent's priming and its raw
     standing stay on the server, like ``Session.wire`` keeps them. It carries
     the harness's label as the wire does, for the side panel's model line."""
-    out = {k: v for k, v in meta.items() if k not in ("priming", "standing", "tags")}
+    out = {k: v for k, v in meta.items() if k not in ("priming", "standing")}
     harness = harness_for(
         meta.get("harness") or "claude-code",
         "claude",
@@ -99,10 +98,6 @@ def _public(meta: dict) -> dict:
     )
     out["harness_label"] = harness.label
     return out
-
-
-async def _admit_all(spec: SpawnSpec) -> tuple[SpawnSpec, dict]:
-    return spec, {}
 
 
 class Registry(Host):
@@ -140,18 +135,6 @@ class Registry(Host):
         self.quota = None
         self.notices = None  # notices.Notices, set by App
         self.sign_in = None  # signin.core.SignIns, set by App
-        # The host policy's say on a start (App.admit, App.admit_resume, #959):
-        # the spec to run and the environment it adds; set by the app.
-        self.admit: Callable[[SpawnSpec], Awaitable[tuple[SpawnSpec, dict]]] = (
-            _admit_all
-        )
-        self.resume_hook: Callable[[Session], Awaitable[None]] | None = None
-        # The host policy's tools for a starting process, and what happened
-        # to a session for its on_event (App.tools_for, App.event); set by App.
-        self.tools_for: Callable[[Session], None] = lambda s: None
-        self.event: Callable[[EventKind, str, dict], None] = lambda kind, log_id, data: (
-            None
-        )
         self.load = None  # load.LoadSampler, set by App
         # knowledge.Knowledge, and whose knowledge a session's sends are
         # hinted from (its owner, else the admin); both set by App.
@@ -195,7 +178,6 @@ class Registry(Host):
 
     # -- the Host a session asks ----------------------------------------------
     def spawn_args(self, session: Session) -> tuple[tuple[str, str] | None, str | None]:
-        self.tools_for(session)
         priming = session.spec.priming
         if self.mcp_url is None or self.tokens is None:
             return None, priming
@@ -215,10 +197,6 @@ class Registry(Host):
     def cgroup(self, session: Session) -> Path | None:
         return self.cgroups.create(session.log_id) if self.cgroups else None
 
-    async def admit_resume(self, session: Session) -> None:
-        if self.resume_hook is not None:
-            await self.resume_hook(session)
-
     def released(self, session: Session) -> None:
         if self.cgroups is not None:
             self.cgroups.release(session.log_id)
@@ -233,7 +211,6 @@ class Registry(Host):
         return self.cgroups.path(session.log_id) if self.cgroups is not None else None
 
     def turn_ended(self, session: Session) -> None:
-        self.event("turn_end", session.log_id, {})
         if self.queues is not None:
             self.queues.turn_ended(session)
         if self.quota is not None:
@@ -396,11 +373,6 @@ class Registry(Host):
                 log.exception("aegis: could not archive %s on its close", s.handle)
 
     def recorded(self, session: Session, record: dict, events: list | None) -> None:
-        self.event(
-            "entry",
-            session.log_id,
-            {"kind": record.get("kind"), "seq": record.get("seq")},
-        )
         if record.get("kind") == "plan" and self.nudges is not None:
             # Before the plan_update's result reads its notices, so it never
             # answers with the stale-plan warning it just ended.
@@ -415,7 +387,6 @@ class Registry(Host):
             )
 
     def exited(self, session: Session, code: int, stderr_tail: list[str]) -> None:
-        self.event("stop", session.log_id, {"code": code})
         if self.tokens is not None:
             self.tokens.drop(session.log_id)
         if self.queues is not None:
@@ -880,14 +851,11 @@ class Registry(Host):
                 continue
             try:
                 await s._flush_held()
-            except Exception as e:
+            except Exception:
                 # _flush_held empties held before it sends: put the batch back.
-                if isinstance(e, Refused):
-                    log.warning("aegis: %s stays stopped: %s", s.handle, e.message)
-                else:
-                    log.exception(
-                        "aegis: could not continue %s after the restart", s.handle
-                    )
+                log.exception(
+                    "aegis: could not continue %s after the restart", s.handle
+                )
                 s.held = msgs
                 self.metas.write(s.meta())
                 # Not continued after all: a worker's queue tries, and fails
@@ -965,7 +933,6 @@ class Registry(Host):
         workflow: dict | None = None,
         launch_by: str = "agent",
     ) -> Session:
-        spec, env = await self.admit(spec)
         log_id = mint_log_id()
         if self.knowledge_native(spec.owner):
             spec = dataclasses.replace(spec, knowledge_native=True)
@@ -986,14 +953,11 @@ class Registry(Host):
             }
         )
         self.sessions[log_id] = s
-        s.host_env, s.admitted = env, True
         self._publish("sessions", [{"upsert": s.wire()}])
         s.launch_by = launch_by
-        self.event("start", log_id, {})
         try:
             await s.start()
         except (OSError, TimeoutError):
-            self.event("close", log_id, {})
             del self.sessions[log_id]
             s.store.close()
             self.store_path(log_id).unlink(missing_ok=True)
@@ -1028,7 +992,6 @@ class Registry(Host):
             self.secrets.drop(log_id)
             secret_store.remove_all_provided(s.entries())
         s.report({"kind": "close"})
-        self.event("close", log_id, {})
         del self.sessions[log_id]
         s.archived = True
         s.artifacts.flush_all()  # a page's last coalesced write, before the store shuts

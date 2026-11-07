@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
@@ -84,8 +84,6 @@ class Launch:
     knowledge_native: bool = False
     # The linked server this process reaches the internet through (exit.py).
     via: str | None = None
-    # What a host's spawn adds to the child's environment (#959).
-    env: Mapping[str, str] = field(default_factory=dict)
 
 
 SESSION_VAR = "AEGIS_SESSION"
@@ -106,11 +104,7 @@ def session_env(
     None (inherit) when there is no base either."""
     if launch.log_id is None:
         return None if base is None else dict(base)
-    env = {
-        **(os.environ if base is None else base),
-        **launch.env,
-        SESSION_VAR: launch.log_id,
-    }
+    env = {**(os.environ if base is None else base), SESSION_VAR: launch.log_id}
     if launch.mcp is not None:
         # `aegis call` reads these: the same endpoint and token as the MCP tools.
         env[URL_VAR], env[TOKEN_VAR] = launch.mcp

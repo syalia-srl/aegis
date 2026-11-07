@@ -360,7 +360,7 @@ def register_usage_ops(app: "App") -> None:
     last: dict[tuple[str, str], dict] = {}
     asked: dict[tuple[str, str], float] = {}
 
-    @r.op("usage.read", ReadParams, agent=True, read=True, server=True)
+    @r.op("usage.read", ReadParams, agent=True, read=True)
     async def usage_read(p: ReadParams, caller):
         """What work cost on this server, from the usage tables aegis fills as
         each turn ends: cost at API prices, tokens, agent seconds, turns,
@@ -386,7 +386,7 @@ def register_usage_ops(app: "App") -> None:
         servers = await far(app, caller, who, {key: params}, last, asked)
         return await asyncio.to_thread(across, app, q, who, servers)
 
-    @r.op("usage.import", ImportParams, agent=True, server=True)
+    @r.op("usage.import", ImportParams, agent=True)
     async def usage_import(p: ImportParams, caller):
         """Count once the sessions Claude Code ran outside aegis: each
         person's ~/.claude/projects, as mode
@@ -410,7 +410,7 @@ def register_usage_ops(app: "App") -> None:
 
         return await asyncio.wrap_future(app.journal.run(job))
 
-    @r.op("usage.page", PageParams, server=True)
+    @r.op("usage.page", PageParams)
     async def usage_page(p: PageParams, caller):
         """The usage page's panels: tiles, trend, owners, repo by purpose,
         when, driven by, harness and model, outcomes and the footer."""

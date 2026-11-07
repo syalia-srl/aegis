@@ -30,8 +30,6 @@ dispatches again on every change.
 
 from __future__ import annotations
 
-import dataclasses
-
 import asyncio
 import json
 import logging
@@ -379,9 +377,6 @@ class Queues:
             spec = resolve(
                 agents, None, q["agent"], {}, Path(t.cwd), owner=t.owner, group=group
             )
-            if enqueuer is not None:
-                # A worker stays where its enqueuer's host put it (#959).
-                spec = dataclasses.replace(spec, tags=dict(enqueuer.spec.tags))
         except OpError as e:
             self._fail(t, f"the queue's agent {q['agent']!r} cannot start: {e.message}")
             return

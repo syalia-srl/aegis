@@ -52,7 +52,7 @@ import re
 import time
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 from pydantic.json_schema import SkipJsonSchema
@@ -138,19 +138,6 @@ from .quota_gate import (
 )
 from .btws import SideNotes
 from .recaps import Recaps
-from . import host_tokens
-from .policy_events import EventPump
-from .policy import (
-    Action,
-    Credential,
-    HostPolicy,
-    Refused,
-    SessionView,
-    SpawnRequest,
-    Event,
-    EventKind,
-    StandalonePolicy,
-)
 from .ops import Caller, NoParams, OpError, Principal, Registry as Ops
 from . import launch
 from .opencode import sweep as opencode_sweep
@@ -462,7 +449,6 @@ class App:
         cursor_bin: str = "cursor-agent",
         dictation_dir: Path | None = None,
         user: str | None = None,
-        policy: HostPolicy | None = None,
     ) -> None:
         self.roots = roots
         self.server_name = server_name
@@ -627,16 +613,6 @@ class App:
         self.user = user or getpass.getuser()
         # The tokens that may use this server, the admin's first (tokens.py).
         self.principals = TokenStore(roots.state_root, self.user)
-        # What the embedding program decides (policy.py); aegis serve's own.
-        self.policy = policy if policy is not None else StandalonePolicy()
-        self.policy.attach(self)
-        # The host's who for each key aegis met, from identify or restore, so
-        # the sync App.who finds it (Registry.call awaits ensure_who first).
-        self.whos: dict[str, Any] = {}
-        self.host_secret = host_tokens.load_or_create_secret(roots.state_root)
-        # The aegis tools each running session got from the policy (tools_for).
-        self.tools_of: dict[str, frozenset[str] | None] = {}
-        self.events = EventPump(self.policy)
         self.links = Links(roots.state_root, server_name, self.user, self.publish)
         self.links.answer = self.answer_link
         self.links.serve, self.links.rwatch = self.serve_link, self.watch_link
@@ -667,16 +643,6 @@ class App:
         reg.start_pending_handoff = self.start_pending_handoff
         self.registry = Ops()
         self.registry.who = self.who
-        self.registry.ensure_who = self.ensure_who
-        self.registry.policy = self.policy
-        self.registry.narrows = self.narrows
-        self.sessions.admit = self.admit
-        self.sessions.resume_hook = self.admit_resume
-        self.sessions.tools_for = self.tools_for
-        self.sessions.event = self.event
-        self.registry.tools_of = self.tools_of.get
-        self.registry.session_of = lambda kind, value: self.session_of(kind, value)
-        self.registry.view_of = lambda log_id: self.view_of(log_id)
         self.registry.owner_of = self.owner_of
         self.registry.permission_of = lambda log_id: (
             s.spec.permission if (s := self.sessions.sessions.get(log_id)) else None
@@ -882,90 +848,12 @@ class App:
         return listed if isinstance(listed, list) else None
 
     def who(self, caller: Caller) -> Principal:
-        """The principal a caller acts as: the token's; for an agent, its
-        session's owner, with the who ensure_who restored; the server's own
-        caller otherwise."""
+        """The principal a caller acts as: the token's, or the server's one
+        person for an agent and for the server's own calls, whoever a session
+        from before aegis 3.0 names as its owner."""
         if caller.principal is not None:
             return caller.principal
-        if (
-            caller.is_agent
-            and caller.log_id
-            and not isinstance(self.policy, StandalonePolicy)
-        ):
-            # Standalone, every agent acts as the server's one person, whoever
-            # a session from before aegis 3.0 names as its owner (#958).
-            key = self.owner_of(caller.log_id)
-            if key is not None and key != self.user:
-                return Principal(key, self.whos.get(key))
         return Principal(self.user)
-
-    async def ensure_who(self, caller: Caller) -> None:
-        """Restore the who behind an agent's call when no one has met it yet
-        (after a restart): Registry.call awaits this before anything else."""
-        if isinstance(self.policy, StandalonePolicy):
-            return
-        if caller.is_agent and caller.principal is None and caller.log_id:
-            key = self.owner_of(caller.log_id)
-            if key is not None and key != self.user and key not in self.whos:
-                await self.who_of_key(key)
-
-    async def who_of_key(self, key: str) -> Any:
-        """The who a stored owner key names, restored by the policy when it is
-        not known yet; None for the server's own key. Raises Refused."""
-        if key == self.user:
-            return None
-        if key not in self.whos:
-            self.whos[key] = await self.policy.restore(key)
-        return self.whos[key]
-
-    async def identify(self, cred: Credential) -> Principal:
-        """Who a token is. The server's own token is the server's own caller
-        and a minted token the who it was minted for, unless it came over a
-        link, which the policy always decides. Raises Refused."""
-        if cred.via != "link":
-            if self.principals.resolve(cred.token) is not None:
-                return Principal(self.user)
-            key = host_tokens.verify(self.host_secret, cred.token)
-            if key is not None:
-                return Principal(key, await self.who_of_key(key))
-            if cred.token.startswith(host_tokens.PREFIX):
-                raise Refused("this token has expired or is not valid")
-        who = await self.policy.identify(cred)
-        key = self._host_key(who)
-        self.whos[key] = who
-        return Principal(key, who)
-
-    def _host_key(self, who: Any) -> str:
-        """A host's key for ``who``. Under a host policy it may not be the
-        server's own key, which means the server itself (who None)."""
-        key = self.policy.key(who)
-        if key == self.user and not isinstance(self.policy, StandalonePolicy):
-            raise Refused(f"{key!r} is the server's own key; key(who) must differ")
-        return key
-
-    def checks_itself(self, token: object) -> bool:
-        """Whether aegis can check ``token`` again on its own: the server's
-        token or a minted one. A host's raw token is checked once, at the
-        hello, since its identify may cost a lookup."""
-        return isinstance(token, str) and (
-            self.principals.resolve(token) is not None
-            or token.startswith(host_tokens.PREFIX)
-        )
-
-    def still_valid(self, token: object, principal: Principal) -> bool:
-        """Whether a token aegis checks itself still names ``principal``: the
-        server's token while not revoked, a minted one until it expires."""
-        if not isinstance(token, str):
-            return False
-        if token.startswith(host_tokens.PREFIX):
-            return host_tokens.verify(self.host_secret, token) == principal.name
-        return self.principals.resolve(token) is not None
-
-    def token_for(self, who: Any, ttl: float = 3600) -> str:
-        """A token the host's page passes to the client for ``who``."""
-        key = self._host_key(who)
-        self.whos[key] = who
-        return host_tokens.mint(self.host_secret, key, ttl)
 
     def gate(self, owner: str | None, harness: str, model: str | None) -> Gate:
         """Whether a harness may start on that pool now: always, since quota
@@ -1215,211 +1103,6 @@ class App:
                 return m.get("owner") or self.user
         return None
 
-    def offers(self, caller: Caller, **fields: str) -> bool:
-        """Whether the policy's catalog offers ``caller`` every field given:
-        agent, harness, model, effort or permission. For the pickers."""
-        cat = self.policy.catalog(self.who(caller).who)
-        allowed = {
-            "agent": cat.agents,
-            "harness": cat.harnesses,
-            "model": cat.models,
-            "effort": cat.efforts,
-            "permission": cat.permissions,
-        }
-        return all((a := allowed[k]) is None or v in a for k, v in fields.items())
-
-    def _offered(self, who: Any, req: SpawnRequest) -> None:
-        """Refuse a request outside what the policy's catalog offers ``who``."""
-        cat = self.policy.catalog(who)
-        for allowed, value, what in (
-            (cat.agents, req.agent, "agent"),
-            (cat.harnesses, req.harness, "harness"),
-            (cat.models, req.model, "model"),
-            (cat.efforts, req.effort, "effort"),
-            (cat.permissions, req.permission, "permission"),
-        ):
-            if allowed is not None and value not in allowed:
-                raise Refused(f"the {what} {value!r} is not offered to you")
-        if cat.folders is not None and not any(
-            Path(req.cwd).is_relative_to(f) for f in cat.folders
-        ):
-            raise Refused(f"the folder {req.cwd} is not offered to you")
-
-    async def admit(self, spec: SpawnSpec) -> tuple[SpawnSpec, dict]:
-        """A new session's start as the policy has it (Registry.spawn): the
-        parent's tags when the spec has none, the owner's who restored, the
-        request checked against the catalog and passed through spawn. Returns
-        the spec to run and the environment the host adds. Raises Refused."""
-        tags = dict(spec.tags)
-        if not tags:
-            parent = self.sessions.sessions.get(spec.spawned_by or spec.continues or "")
-            if parent is not None:
-                tags = dict(parent.spec.tags)
-        who = await self.who_of_key(spec.owner or self.user)
-        req = SpawnRequest(
-            agent=spec.agent,
-            harness=spec.harness,
-            model=spec.model,
-            effort=spec.effort,
-            permission=spec.permission,
-            cwd=spec.cwd,
-            env={},
-            system_prompt=None,
-            tags=tags,
-        )
-        self._offered(who, req)
-        req = await self.policy.spawn(who, req)
-        priming = spec.priming
-        if req.system_prompt:
-            priming = (
-                f"{priming}\n\n{req.system_prompt}" if priming else req.system_prompt
-            )
-        spec = dataclasses.replace(
-            spec,
-            agent=req.agent,
-            harness=req.harness,
-            model=req.model,
-            effort=req.effort,
-            permission=req.permission,
-            cwd=Path(req.cwd),
-            priming=priming,
-            tags=dict(req.tags),
-        )
-        return spec, dict(req.env)
-
-    async def admit_resume(self, s) -> None:
-        """A stopped session's process is about to start again: the policy's
-        spawn may refuse it, refresh the environment it adds, and change its
-        model, effort and permission; the rest was fixed at spawn."""
-        who = await self.who_of_key(s.spec.owner or self.user)
-        spec = s.spec
-        req = await self.policy.spawn(
-            who,
-            SpawnRequest(
-                agent=spec.agent,
-                harness=spec.harness,
-                model=spec.model,
-                effort=spec.effort,
-                permission=spec.permission,
-                cwd=spec.cwd,
-                env={},
-                system_prompt=None,
-                tags=dict(spec.tags),
-            ),
-        )
-        s.host_env = dict(req.env)
-        changes = {
-            k: getattr(req, k)
-            for k in ("model", "effort", "permission")
-            if getattr(req, k) != getattr(spec, k)
-        }
-        if changes:
-            await s.configure(**changes)
-
-    def tools_for(self, s) -> None:
-        """Ask the policy which aegis tools a starting process gets."""
-        view = self.view_of(s.log_id)
-        if view is None:
-            return
-        got = self.policy.tools(self.whos.get(view.owner), view)
-        self.tools_of[s.log_id] = None if got is None else frozenset(got)
-
-    def listens(self) -> bool:
-        """Whether the policy overrides on_event."""
-        return type(self.policy).on_event is not HostPolicy.on_event
-
-    def event(self, kind: EventKind, log_id: str, data: dict) -> None:
-        """Tell the policy's on_event what happened to a session."""
-        if kind == "close":
-            self.tools_of.pop(log_id, None)
-        if not self.listens():
-            return
-        view = self.view_of(log_id)
-        owner = view.owner if view is not None else None
-        who = self.whos.get(owner) if owner is not None else None
-        self.events.emit(who, Event(kind, log_id, data, owner))
-
-    def narrows(self) -> bool:
-        """Whether the policy hides anything: it overrides can."""
-        return type(self.policy).can is not HostPolicy.can
-
-    def sees(self, principal: Principal, log_id: str, action: Action = "list") -> bool:
-        """Whether ``principal`` may ``action`` the session ``log_id``; a
-        session that does not exist here hides nothing."""
-        view = self.view_of(log_id)
-        return view is None or self.policy.can(principal.who, action, view)
-
-    def acting(self, caller: Caller | None) -> Principal:
-        """Who a library call acts as (Server.as_who); the server's own
-        caller when it names none."""
-        return self.who(caller or Caller("user"))
-
-    def owns_schedule(self, principal: Principal, name: str) -> bool:
-        """Whether ``principal`` may see and change schedule ``name``: always
-        when the policy hides nothing or for the server's own caller, else
-        only its maker's person (#959)."""
-        if not self.narrows() or principal.who is None:
-            return True
-        s = self.schedules.items.get(name)
-        return s is not None and s.owner.get("principal") == principal.name
-
-    def visible_ids(self, principal: Principal) -> set[str] | None:
-        """The log ids, open or archived, ``principal`` may list; None for
-        every one, when the policy hides nothing."""
-        if not self.narrows():
-            return None
-        ids = set(self.sessions.sessions) | set(self.sessions.archived)
-        return {i for i in ids if self.sees(principal, i)}
-
-    def session_of(self, kind: str, value: str) -> str | None:
-        """The log id of the session a named id belongs to (ops.KINDS): a
-        session by log id or handle, ``@server`` naming this one; a task's
-        worker, else whoever enqueued it; a run's main agent; a browser's
-        session. None when it names nothing here."""
-        if kind == "session":
-            local, _, server = value.partition("@")
-            if server and server != self.server_name:
-                return None
-            s = self.sessions.by_handle(local) or self.sessions.sessions.get(local)
-            if s is not None:
-                return s.log_id
-            for log_id, m in self.sessions.archived.items():
-                if local in (m.get("handle"), log_id):
-                    return log_id
-            return None
-        if kind == "task":
-            t = self.queues.tasks.get(value)
-            return (t.worker or t.enqueuer) if t is not None else None
-        if kind == "run":
-            st = self.workflows.runs.get(value)
-            return st.owner if st is not None else None
-        if kind == "browser":
-            b = self.browsers.open.get(value)
-            return b.meta.get("session") if b is not None else None
-        if kind == "monitor":
-            m = self.monitors.items.get(value)
-            return m.owner if m is not None else None
-        return None
-
-    def view_of(self, log_id: str) -> SessionView | None:
-        """A session, open or archived, as the policy's hooks see it; None
-        for no such session."""
-        s = self.sessions.sessions.get(log_id)
-        meta = s.meta() if s is not None else self.sessions.archived.get(log_id)
-        if meta is None:
-            return None
-        return SessionView(
-            log_id=log_id,
-            owner=meta.get("owner") or self.user,
-            agent=str(meta.get("agent") or ""),
-            harness=str(meta.get("harness") or "claude-code"),
-            model=str(meta.get("model") or ""),
-            cwd=str(meta.get("cwd") or ""),
-            spawned_from=meta.get("spawned_from"),
-            archived=bool(meta.get("archived")),
-            tags=dict(meta.get("tags") or {}),
-        )
-
     def owner_of(self, log_id: str) -> str | None:
         """A session's owner by log id, None for no such session. One from
         before owners existed is the admin's."""
@@ -1554,7 +1237,6 @@ class App:
 
     async def shutdown(self) -> None:
         stopping_at = restarts.stopping(self.roots.state_root)
-        await self.events.close()
         await self.push.sender.stop()
         await self.schedules.stop()
         await self.workflows.stop()
@@ -2449,17 +2131,11 @@ class App:
     def _archive_sources(self, only: str | None, who: Principal):
         """Each server an archive listing reads, with how to fetch a page."""
 
-        keep = None
-        if self.narrows():
-
-            def keep(m: dict) -> bool:
-                return self.sees(who, m.get("log_id") or "")
-
         async def local(query, limit, after, workers):
             items, total, last = self.sessions.archive(
-                query, limit, after, workers, keep
+                query, limit, after, workers, None
             )
-            return items, total, self.sessions.archived_workers(query, keep), last
+            return items, total, self.sessions.archived_workers(query, None), last
 
         if only in (None, self.server_name):
             yield self.server_name, local
@@ -2499,25 +2175,12 @@ class App:
             """The agents you can spawn, each a preset of harness, model, effort
             and permission. session_spawn starts one and can override those."""
             agents, default = self._agents()
-            agents = [
-                a
-                for a in agents
-                if self.offers(
-                    caller,
-                    agent=a.name,
-                    harness=a.harness,
-                    model=a.model,
-                    effort=a.effort,
-                    permission=a.permission,
-                )
-            ]
             return {
                 "agents": [a.as_dict() for a in agents],
                 "default": default,
                 "harnesses": [
                     {"name": h, "supported": h in SUPPORTED_HARNESSES}
                     for h in HARNESSES
-                    if self.offers(caller, harness=h)
                 ],
                 "models": model_suggestions(agents),
                 "cwd": str(self.roots.harness_cwd),
@@ -2745,9 +2408,7 @@ class App:
             except (BrokenPipeError, ConnectionResetError) as e:
                 raise _dead(e) from e
 
-        @r.op(
-            "session.handoff", HandoffParams, agent=True, names=(("log_id", "session"),)
-        )
+        @r.op("session.handoff", HandoffParams, agent=True)
         async def handoff(p: HandoffParams, caller):
             """Continue your work in a new session and end this one: from this
             call nobody can write to it. The new session starts when your turn
@@ -2809,7 +2470,7 @@ class App:
                 old, p, capped=caller.is_agent, caller=caller
             )
 
-        @r.op("session.send", SendParams, names=(("log_id", "session"),))
+        @r.op("session.send", SendParams)
         async def send(p: SendParams, caller):
             # A page that got no answer in time sends again with the same nonce,
             # and a stalled socket can flush every copy at once (#350): each
@@ -2832,7 +2493,7 @@ class App:
                 first.add_done_callback(forget)
             return await asyncio.shield(first)
 
-        @r.op("attachment.begin", AttachBegin, names=(("log_id", "session"),))
+        @r.op("attachment.begin", AttachBegin)
         async def attachment_begin(p: AttachBegin, caller):
             """Start uploading a file to a session: its upload id. The file
             waits, staged, until a session.send names it (attachments.py)."""
@@ -2845,7 +2506,7 @@ class App:
                 raise OpError(e.code, e.message) from e
             return {"upload_id": uid}
 
-        @r.op("attachment.put", AttachPut, names=(("log_id", "session"),))
+        @r.op("attachment.put", AttachPut)
         async def attachment_put(p: AttachPut, caller):
             """One base64 chunk of an upload at ``offset``: the bytes now
             staged. No await between reading the staged size and appending,
@@ -2867,7 +2528,7 @@ class App:
                 raise OpError(e.code, e.message) from e
             return {"size": size}
 
-        @r.op("attachment.drop", AttachDrop, names=(("log_id", "session"),))
+        @r.op("attachment.drop", AttachDrop)
         async def attachment_drop(p: AttachDrop, caller):
             """Forget an upload the person removed before sending."""
             reg.open(p.log_id)
@@ -2876,21 +2537,19 @@ class App:
             except files.FileError as e:
                 raise OpError(e.code, e.message) from e
 
-        @r.op("session.read", ReadParams, names=(("log_id", "session"),), access="read")
+        @r.op("session.read", ReadParams)
         async def read(p: ReadParams, caller):
             """A person read these agent messages, on any browser."""
             s = reg.open(p.log_id)
             n = s.read(p.ids)
             return {"read": n, "unread": len(s.unread)}
 
-        @r.op(
-            "recap.request", RecapParams, names=(("log_id", "session"),), access="read"
-        )
+        @r.op("recap.request", RecapParams)
         async def recap_request(p: RecapParams, caller):
             """A recap of where the session stands, for a person landing on its tab."""
             return await self.recaps.request(reg.open(p.log_id), p.force)
 
-        @r.op("btw.cancel", BtwCancelParams, names=(("log_id", "session"),))
+        @r.op("btw.cancel", BtwCancelParams)
         async def btw_cancel(p: BtwCancelParams, caller):
             """Cancel a running side note; its block keeps the question, folded."""
             return self.side_notes.cancel(reg.open(p.log_id), p.id)
@@ -2924,13 +2583,13 @@ class App:
                 raise OpError("speech_unavailable", str(e)) from e
             return {"base": f"/speech/{self.speech.id}/"}
 
-        @r.op("session.configure", ConfigureParams, names=(("log_id", "session"),))
+        @r.op("session.configure", ConfigureParams)
         async def configure(p: ConfigureParams, caller):
             s = reg.open(p.log_id)
             s.check_lock()
             return await self._configure(s, p.model, p.effort, p.permission)
 
-        @r.op("commands.list", LogParams, names=(("log_id", "session"),), access="read")
+        @r.op("commands.list", LogParams)
         async def commands_list(p: LogParams, caller):
             """What the composer's menu offers this session."""
             s = reg.open(p.log_id)
@@ -2996,33 +2655,18 @@ class App:
                 "complete": bool(cat and cat.commands),
             }
 
-        @r.op(
-            "transcript.detail",
-            DetailParams,
-            names=(("log_id", "session"),),
-            access="read",
-        )
+        @r.op("transcript.detail", DetailParams)
         async def detail(p: DetailParams, caller):
             """The whole entries for rows the wire sent without their detail."""
             return reg.detail(p.log_id, p.ids)
 
-        @r.op(
-            "transcript.search",
-            SearchParams,
-            names=(("log_id", "session"),),
-            access="read",
-        )
+        @r.op("transcript.search", SearchParams)
         async def search(p: SearchParams, caller):
             """The entries whose detail the wire left out hold ``q``: the find
             bar searches the rest in the browser (js/find.js)."""
             return {"ids": reg.search(p.log_id, p.q)}
 
-        @r.op(
-            "transcript.output",
-            OutputParams,
-            names=(("log_id", "session"),),
-            access="read",
-        )
+        @r.op("transcript.output", OutputParams)
         async def output(p: OutputParams, caller):
             """A tool row's whole output, for its copy button: the entry holds
             only the tail. A thread, because it parses the whole store."""
@@ -3031,7 +2675,7 @@ class App:
                 raise OpError("no_output", f"no output for {p.id!r}")
             return {"text": text}
 
-        @r.op("session.interrupt", LogParams, names=(("log_id", "session"),))
+        @r.op("session.interrupt", LogParams)
         async def interrupt(p: LogParams, caller):
             s = reg.open(p.log_id)
             try:
@@ -3039,18 +2683,18 @@ class App:
             except (BrokenPipeError, ConnectionResetError) as e:
                 raise _dead(e) from e
 
-        @r.op("session.stop", LogParams, names=(("log_id", "session"),))
+        @r.op("session.stop", LogParams)
         async def stop(p: LogParams, caller):
             s = reg.open(p.log_id)
             s.check_lock()
             await s.stop()
 
-        @r.op("session.restart", RestartParams, names=(("log_id", "session"),))
+        @r.op("session.restart", RestartParams)
         async def restart(p: RestartParams, caller):
             s = reg.open(p.log_id)
             return await self._launch(s, caller, p.untested, s.restart)
 
-        @r.op("session.warm", WarmParams, names=(("log_id", "session"),))
+        @r.op("session.warm", WarmParams)
         async def warm(p: WarmParams, caller):
             # A person's Wake (wake: true) is refused like a send that would
             # start the session (#479). Without it, someone started typing to
@@ -3066,7 +2710,7 @@ class App:
                 await s.ensure_running()
             return None
 
-        @r.op("session.kills", LogParams, names=(("log_id", "session"),), access="read")
+        @r.op("session.kills", LogParams)
         async def sleep_kills(p: LogParams, caller):
             """What Sleep would end with the process, one plain line each: what
             a park waits for, the stray processes included (park.kills). Asked
@@ -3080,7 +2724,7 @@ class App:
             )
             return park.kills(len(s.open_tasks), frozenset(s.timers), len(found))
 
-        @r.op("session.unquiet", LogParams, names=(("log_id", "session"),))
+        @r.op("session.unquiet", LogParams)
         async def unquiet(p: LogParams, caller):
             # A workflow's node has no tab while its run lives (spec §05):
             # the person reads it from the run's card or the Fleet.
@@ -3089,24 +2733,15 @@ class App:
             return reg.set_quiet(p.log_id, False)
 
         # The person's, never an agent's: autoclose is their word to close (#691).
-        @r.op("session.autoclose", AutocloseParams, names=(("log_id", "session"),))
+        @r.op("session.autoclose", AutocloseParams)
         async def autoclose(p: AutocloseParams, caller):
             return reg.set_autoclose(p.log_id, p.on)
 
-        @r.op("session.reopen", LogParams, names=(("log_id", "session"),))
+        @r.op("session.reopen", LogParams)
         async def reopen(p: LogParams, caller):
             return reg.reopen(p.log_id).wire()
 
-        @r.op(
-            "session.rename",
-            RenameParams,
-            agent=True,
-            read=True,
-            names=(
-                ("log_id", "session"),
-                ("handle", "session"),
-            ),
-        )
+        @r.op("session.rename", RenameParams, agent=True, read=True)
         async def rename(p: RenameParams, caller):
             """Rename your session: a handle (2 or 3 lowercase segments joined by
             hyphens) and a title, both saying what it works on. Set both in
@@ -3224,7 +2859,7 @@ class App:
             saved = s.fold().entry(row["id"])["detail"]["path_peeks"][str(index)]
             return [saved["files"][0] | await root_path(path, caller)]
 
-        @r.op("file.peek", PeekParams, names=(("log_id", "session"),), access="read")
+        @r.op("file.peek", PeekParams)
         async def file_peek(p: PeekParams, caller):
             """Copy the file a Read, Write or Edit row used, as it is now, and
             open it inside that row. The person's way to see a file the agent
@@ -3254,7 +2889,7 @@ class App:
                 | await root_path(path, caller)
             ]
 
-        @r.op("path.stat", StatParams, names=(("log_id", "session"),), access="read")
+        @r.op("path.stat", StatParams)
         async def path_stat(p: StatParams, caller):
             """What each path a reply named is now: file, dir, missing, repo or
             code, one per entry of its detail.paths, at most refs.MAX. The
@@ -3271,12 +2906,12 @@ class App:
             )
             return {"kinds": kinds + ["code"] * (len(paths) - len(head))}
 
-        @r.op("link.list", server=True)
+        @r.op("link.list")
         async def link_list(_, caller):
             """The servers this one links, with their state; never their tokens."""
             return [link.wire() for link in self.links.links()]
 
-        @r.op("link.add", LinkAdd, server=True)
+        @r.op("link.add", LinkAdd)
         async def link_add(p: LinkAdd, caller):
             """Link another aegis server: connect once with its token, take the
             name it gives itself, and keep the link in links.json."""
@@ -3294,17 +2929,17 @@ class App:
             self.links.add(name, p.url, p.token, p.trusted)
             return {"name": name}
 
-        @r.op("link.remove", LinkName, server=True)
+        @r.op("link.remove", LinkName)
         async def link_remove(p: LinkName, caller):
             self.links.remove(p.name)
 
-        @r.op("link.trust", LinkTrust, server=True)
+        @r.op("link.trust", LinkTrust)
         async def link_trust(p: LinkTrust, caller):
             """Ask a link for trust (both ways, agents unrestricted), or stop
             asking. The link reconnects; the far server decides."""
             self.links.trust(p.name, p.trusted)
 
-        @r.op("link.incoming", server=True)
+        @r.op("link.incoming")
         async def link_incoming(_, caller):
             """The servers that linked this one with trust, so their agents
             reach this one over their link, and what each took as an exit."""
@@ -3313,7 +2948,7 @@ class App:
                 for row in self.links.incoming()
             ]
 
-        @r.op("link.exit", LinkExit, server=True)
+        @r.op("link.exit", LinkExit)
         async def link_exit(p: LinkExit, caller):
             """Make a link this server's exit, or stop exiting: what aegis
             starts from now on reaches the internet from there (exit.py)."""
@@ -3332,7 +2967,7 @@ class App:
             """The pause in force (pause.py), or null."""
             return {"paused": self.paused}
 
-        @r.op("server.pause", server=True)
+        @r.op("server.pause")
         async def server_pause(p, caller):
             """Pause every session: end their processes, hold all new work."""
             ended = await self.pause_all(
@@ -3340,13 +2975,13 @@ class App:
             )
             return {"paused": self.paused, "ended": ended}
 
-        @r.op("server.resume", server=True)
+        @r.op("server.resume")
         async def server_resume(p, caller):
             """Resume every session the pause held, and the work it held."""
             await self.resume_all()
             return {"paused": None}
 
-        @r.op("token.revoke", TokenName, server=True)
+        @r.op("token.revoke", TokenName)
         async def token_revoke(p: TokenName, caller):
             """End a token. The admin's is replaced, and the new one returned
             to whoever revoked it, so that browser can sign in again. Its
@@ -3360,7 +2995,7 @@ class App:
             install = await self.updater.install()
             return await self.versions.wire() | {"install": install.wire()}
 
-        @r.op("server.update", server=True)
+        @r.op("server.update")
         async def server_update(_, caller):
             """Upgrade aegis with the installer that owns it, check the new
             build, and restart onto it (self_update.py). Progress is on the

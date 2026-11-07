@@ -41,7 +41,7 @@ class TermResize(TermRef):
 def register_term_ops(app: App) -> None:
     r, terms = app.registry, app.terminals
 
-    @r.op("term.profiles", server=True)
+    @r.op("term.profiles")
     async def profiles(_, caller):
         """The terminal profiles the + picker offers, the built-in shell first."""
         keys = ("cmd", "cwd", "restart", "error")
@@ -50,30 +50,30 @@ def register_term_ops(app: App) -> None:
             for n, p in terms.profiles().items()
         ]
 
-    @r.op("term.spawn", TermSpawn, server=True)
+    @r.op("term.spawn", TermSpawn)
     async def spawn(p: TermSpawn, caller):
         """Start a terminal from a profile, in its folder or in ``cwd``; the
         caller owns it."""
         t = await terms.spawn(p.profile, owner=app.who(caller).name, cwd=p.cwd)
         return terms.card(t)
 
-    @r.op("term.input", TermInput, server=True)
+    @r.op("term.input", TermInput)
     async def input_(p: TermInput, caller):
         terms.get(p.id).input(p.data)
 
-    @r.op("term.resize", TermResize, server=True)
+    @r.op("term.resize", TermResize)
     async def resize(p: TermResize, caller):
         terms.get(p.id).resize(p.cols, p.rows)
 
-    @r.op("term.restart", TermRef, server=True)
+    @r.op("term.restart", TermRef)
     async def restart(p: TermRef, caller):
         await terms.restart(p.id)
 
-    @r.op("term.close", TermRef, server=True)
+    @r.op("term.close", TermRef)
     async def close(p: TermRef, caller):
         await terms.close(p.id)
 
-    @r.op("term.closed", server=True)
+    @r.op("term.closed")
     async def closed(_, caller):
         """Closed terminals on this server, newest first, for the archive."""
         return terms.closed()

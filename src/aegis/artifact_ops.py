@@ -153,7 +153,7 @@ def register_artifact_ops(app: App) -> None:
             raise _err(e) from e
         try:
             (rec,) = await asyncio.to_thread(
-                files.store_all, app.roots.state_root, [path], s.log_id
+                files.store_all, app.roots.state_root, [path]
             )
         except files.FileError as e:
             raise OpError(e.code, e.message) from e
@@ -177,9 +177,6 @@ def register_artifact_ops(app: App) -> None:
             ):  # a failed probe, a late submit, an interrupt: nothing is served
                 shutil.rmtree(
                     app.roots.state_root / "files" / rec["file_id"], ignore_errors=True
-                )
-                (app.roots.state_root / files.SESSIONS / rec["file_id"]).unlink(
-                    missing_ok=True
                 )
         return {"id": a.id, "url": url, "started": started, "watching": watching > 0}
 
@@ -333,7 +330,7 @@ def register_artifact_ops(app: App) -> None:
             raise _err(e) from e
         return s
 
-    @r.op("artifact.state", PageState, names=(("log_id", "session"),))
+    @r.op("artifact.state", PageState)
     async def state(p: PageState, caller):
         s = page(p)
         _sized(p.state, "state")
@@ -343,7 +340,7 @@ def register_artifact_ops(app: App) -> None:
             raise _err(e) from e
         return "ok"
 
-    @r.op("artifact.emit", PageEmit, names=(("log_id", "session"),))
+    @r.op("artifact.emit", PageEmit)
     async def emit(p: PageEmit, caller):
         s = page(p)
         s.check_lock()  # a person does not steer a workflow's node
@@ -359,7 +356,7 @@ def register_artifact_ops(app: App) -> None:
         )
         return "ok"
 
-    @r.op("artifact.submit", PageSubmit, names=(("log_id", "session"),))
+    @r.op("artifact.submit", PageSubmit)
     async def submit(p: PageSubmit, caller):
         s = page(p)
         s.check_lock()  # a person does not steer a workflow's node
@@ -378,7 +375,7 @@ def register_artifact_ops(app: App) -> None:
         )
         return "ok"
 
-    @r.op("artifact.upload", PageUpload, names=(("log_id", "session"),))
+    @r.op("artifact.upload", PageUpload)
     async def upload(p: PageUpload, caller):
         """Move a file the page uploaded (attachment.begin and .put) into the
         session's inbox and wake the agent with its path. It counts as an
@@ -411,7 +408,7 @@ def register_artifact_ops(app: App) -> None:
         )
         return sent
 
-    @r.op("artifact.error", PageError, names=(("log_id", "session"),))
+    @r.op("artifact.error", PageError)
     async def error(p: PageError, caller):
         s = page(p)
         s.check_lock()  # a person does not steer a workflow's node
@@ -423,7 +420,7 @@ def register_artifact_ops(app: App) -> None:
         )
         return "ok"
 
-    @r.op("artifact.probed", Probed, names=(("log_id", "session"),))
+    @r.op("artifact.probed", Probed)
     async def probed(p: Probed, caller):
         s = reg.open(p.log_id)
         return (
