@@ -370,7 +370,7 @@ def register_schedule_ops(app: App) -> None:
             )
         return {"outcome": await sch.fire_now(p.name), **sch.wire(p.name)}
 
-    @r.op("schedule.test", ScheduleTest, agent=True)
+    @r.op("schedule.test", ScheduleTest, agent=True, names=(("session", "session"),))
     async def schedule_test(p: ScheduleTest, caller):
         """Try a clock and a check without saving anything: the next three
         ticks, and whether the check would fire now and why. With `name@server`

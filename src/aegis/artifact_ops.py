@@ -330,7 +330,7 @@ def register_artifact_ops(app: App) -> None:
             raise _err(e) from e
         return s
 
-    @r.op("artifact.state", PageState)
+    @r.op("artifact.state", PageState, names=(("log_id", "session"),))
     async def state(p: PageState, caller):
         s = page(p)
         _sized(p.state, "state")
@@ -340,7 +340,7 @@ def register_artifact_ops(app: App) -> None:
             raise _err(e) from e
         return "ok"
 
-    @r.op("artifact.emit", PageEmit)
+    @r.op("artifact.emit", PageEmit, names=(("log_id", "session"),))
     async def emit(p: PageEmit, caller):
         s = page(p)
         s.check_lock()  # a person does not steer a workflow's node
@@ -356,7 +356,7 @@ def register_artifact_ops(app: App) -> None:
         )
         return "ok"
 
-    @r.op("artifact.submit", PageSubmit)
+    @r.op("artifact.submit", PageSubmit, names=(("log_id", "session"),))
     async def submit(p: PageSubmit, caller):
         s = page(p)
         s.check_lock()  # a person does not steer a workflow's node
@@ -375,7 +375,7 @@ def register_artifact_ops(app: App) -> None:
         )
         return "ok"
 
-    @r.op("artifact.upload", PageUpload)
+    @r.op("artifact.upload", PageUpload, names=(("log_id", "session"),))
     async def upload(p: PageUpload, caller):
         """Move a file the page uploaded (attachment.begin and .put) into the
         session's inbox and wake the agent with its path. It counts as an
@@ -408,7 +408,7 @@ def register_artifact_ops(app: App) -> None:
         )
         return sent
 
-    @r.op("artifact.error", PageError)
+    @r.op("artifact.error", PageError, names=(("log_id", "session"),))
     async def error(p: PageError, caller):
         s = page(p)
         s.check_lock()  # a person does not steer a workflow's node
@@ -420,7 +420,7 @@ def register_artifact_ops(app: App) -> None:
         )
         return "ok"
 
-    @r.op("artifact.probed", Probed)
+    @r.op("artifact.probed", Probed, names=(("log_id", "session"),))
     async def probed(p: Probed, caller):
         s = reg.open(p.log_id)
         return (

@@ -655,6 +655,8 @@ class App:
         self.registry.who = self.who
         self.registry.ensure_who = self.ensure_who
         self.registry.policy = self.policy
+        self.registry.session_of = lambda kind, value: self.session_of(kind, value)
+        self.registry.view_of = lambda log_id: self.view_of(log_id)
         self.registry.owner_of = self.owner_of
         self.registry.permission_of = lambda log_id: (
             s.spec.permission if (s := self.sessions.sessions.get(log_id)) else None
@@ -1175,6 +1177,33 @@ class App:
         for log_id, m in self.sessions.archived.items():
             if local in (m.get("handle"), log_id):
                 return m.get("owner") or self.user
+        return None
+
+    def session_of(self, kind: str, value: str) -> str | None:
+        """The log id of the session a named id belongs to (ops.KINDS): a
+        session by log id or handle, ``@server`` naming this one; a task's
+        worker, else whoever enqueued it; a run's main agent; a browser's
+        session. None when it names nothing here."""
+        if kind == "session":
+            local, _, server = value.partition("@")
+            if server and server != self.server_name:
+                return None
+            s = self.sessions.by_handle(local) or self.sessions.sessions.get(local)
+            if s is not None:
+                return s.log_id
+            for log_id, m in self.sessions.archived.items():
+                if local in (m.get("handle"), log_id):
+                    return log_id
+            return None
+        if kind == "task":
+            t = self.queues.tasks.get(value)
+            return (t.worker or t.enqueuer) if t is not None else None
+        if kind == "run":
+            st = self.workflows.runs.get(value)
+            return st.owner if st is not None else None
+        if kind == "browser":
+            b = self.browsers.open.get(value)
+            return b.meta.get("session") if b is not None else None
         return None
 
     def view_of(self, log_id: str) -> SessionView | None:
@@ -2501,7 +2530,9 @@ class App:
             except (BrokenPipeError, ConnectionResetError) as e:
                 raise _dead(e) from e
 
-        @r.op("session.handoff", HandoffParams, agent=True)
+        @r.op(
+            "session.handoff", HandoffParams, agent=True, names=(("log_id", "session"),)
+        )
         async def handoff(p: HandoffParams, caller):
             """Continue your work in a new session and end this one: from this
             call nobody can write to it. The new session starts when your turn
@@ -2563,7 +2594,7 @@ class App:
                 old, p, capped=caller.is_agent, caller=caller
             )
 
-        @r.op("session.send", SendParams)
+        @r.op("session.send", SendParams, names=(("log_id", "session"),))
         async def send(p: SendParams, caller):
             # A page that got no answer in time sends again with the same nonce,
             # and a stalled socket can flush every copy at once (#350): each
@@ -2586,7 +2617,7 @@ class App:
                 first.add_done_callback(forget)
             return await asyncio.shield(first)
 
-        @r.op("attachment.begin", AttachBegin)
+        @r.op("attachment.begin", AttachBegin, names=(("log_id", "session"),))
         async def attachment_begin(p: AttachBegin, caller):
             """Start uploading a file to a session: its upload id. The file
             waits, staged, until a session.send names it (attachments.py)."""
@@ -2599,7 +2630,7 @@ class App:
                 raise OpError(e.code, e.message) from e
             return {"upload_id": uid}
 
-        @r.op("attachment.put", AttachPut)
+        @r.op("attachment.put", AttachPut, names=(("log_id", "session"),))
         async def attachment_put(p: AttachPut, caller):
             """One base64 chunk of an upload at ``offset``: the bytes now
             staged. No await between reading the staged size and appending,
@@ -2621,7 +2652,7 @@ class App:
                 raise OpError(e.code, e.message) from e
             return {"size": size}
 
-        @r.op("attachment.drop", AttachDrop)
+        @r.op("attachment.drop", AttachDrop, names=(("log_id", "session"),))
         async def attachment_drop(p: AttachDrop, caller):
             """Forget an upload the person removed before sending."""
             reg.open(p.log_id)
@@ -2630,19 +2661,21 @@ class App:
             except files.FileError as e:
                 raise OpError(e.code, e.message) from e
 
-        @r.op("session.read", ReadParams)
+        @r.op("session.read", ReadParams, names=(("log_id", "session"),), access="read")
         async def read(p: ReadParams, caller):
             """A person read these agent messages, on any browser."""
             s = reg.open(p.log_id)
             n = s.read(p.ids)
             return {"read": n, "unread": len(s.unread)}
 
-        @r.op("recap.request", RecapParams)
+        @r.op(
+            "recap.request", RecapParams, names=(("log_id", "session"),), access="read"
+        )
         async def recap_request(p: RecapParams, caller):
             """A recap of where the session stands, for a person landing on its tab."""
             return await self.recaps.request(reg.open(p.log_id), p.force)
 
-        @r.op("btw.cancel", BtwCancelParams)
+        @r.op("btw.cancel", BtwCancelParams, names=(("log_id", "session"),))
         async def btw_cancel(p: BtwCancelParams, caller):
             """Cancel a running side note; its block keeps the question, folded."""
             return self.side_notes.cancel(reg.open(p.log_id), p.id)
@@ -2676,13 +2709,13 @@ class App:
                 raise OpError("speech_unavailable", str(e)) from e
             return {"base": f"/speech/{self.speech.id}/"}
 
-        @r.op("session.configure", ConfigureParams)
+        @r.op("session.configure", ConfigureParams, names=(("log_id", "session"),))
         async def configure(p: ConfigureParams, caller):
             s = reg.open(p.log_id)
             s.check_lock()
             return await self._configure(s, p.model, p.effort, p.permission)
 
-        @r.op("commands.list", LogParams)
+        @r.op("commands.list", LogParams, names=(("log_id", "session"),), access="read")
         async def commands_list(p: LogParams, caller):
             """What the composer's menu offers this session."""
             s = reg.open(p.log_id)
@@ -2748,18 +2781,33 @@ class App:
                 "complete": bool(cat and cat.commands),
             }
 
-        @r.op("transcript.detail", DetailParams)
+        @r.op(
+            "transcript.detail",
+            DetailParams,
+            names=(("log_id", "session"),),
+            access="read",
+        )
         async def detail(p: DetailParams, caller):
             """The whole entries for rows the wire sent without their detail."""
             return reg.detail(p.log_id, p.ids)
 
-        @r.op("transcript.search", SearchParams)
+        @r.op(
+            "transcript.search",
+            SearchParams,
+            names=(("log_id", "session"),),
+            access="read",
+        )
         async def search(p: SearchParams, caller):
             """The entries whose detail the wire left out hold ``q``: the find
             bar searches the rest in the browser (js/find.js)."""
             return {"ids": reg.search(p.log_id, p.q)}
 
-        @r.op("transcript.output", OutputParams)
+        @r.op(
+            "transcript.output",
+            OutputParams,
+            names=(("log_id", "session"),),
+            access="read",
+        )
         async def output(p: OutputParams, caller):
             """A tool row's whole output, for its copy button: the entry holds
             only the tail. A thread, because it parses the whole store."""
@@ -2768,7 +2816,7 @@ class App:
                 raise OpError("no_output", f"no output for {p.id!r}")
             return {"text": text}
 
-        @r.op("session.interrupt", LogParams)
+        @r.op("session.interrupt", LogParams, names=(("log_id", "session"),))
         async def interrupt(p: LogParams, caller):
             s = reg.open(p.log_id)
             try:
@@ -2776,18 +2824,18 @@ class App:
             except (BrokenPipeError, ConnectionResetError) as e:
                 raise _dead(e) from e
 
-        @r.op("session.stop", LogParams)
+        @r.op("session.stop", LogParams, names=(("log_id", "session"),))
         async def stop(p: LogParams, caller):
             s = reg.open(p.log_id)
             s.check_lock()
             await s.stop()
 
-        @r.op("session.restart", RestartParams)
+        @r.op("session.restart", RestartParams, names=(("log_id", "session"),))
         async def restart(p: RestartParams, caller):
             s = reg.open(p.log_id)
             return await self._launch(s, caller, p.untested, s.restart)
 
-        @r.op("session.warm", WarmParams)
+        @r.op("session.warm", WarmParams, names=(("log_id", "session"),))
         async def warm(p: WarmParams, caller):
             # A person's Wake (wake: true) is refused like a send that would
             # start the session (#479). Without it, someone started typing to
@@ -2803,7 +2851,7 @@ class App:
                 await s.ensure_running()
             return None
 
-        @r.op("session.kills", LogParams)
+        @r.op("session.kills", LogParams, names=(("log_id", "session"),), access="read")
         async def sleep_kills(p: LogParams, caller):
             """What Sleep would end with the process, one plain line each: what
             a park waits for, the stray processes included (park.kills). Asked
@@ -2817,7 +2865,7 @@ class App:
             )
             return park.kills(len(s.open_tasks), frozenset(s.timers), len(found))
 
-        @r.op("session.unquiet", LogParams)
+        @r.op("session.unquiet", LogParams, names=(("log_id", "session"),))
         async def unquiet(p: LogParams, caller):
             # A workflow's node has no tab while its run lives (spec §05):
             # the person reads it from the run's card or the Fleet.
@@ -2826,15 +2874,24 @@ class App:
             return reg.set_quiet(p.log_id, False)
 
         # The person's, never an agent's: autoclose is their word to close (#691).
-        @r.op("session.autoclose", AutocloseParams)
+        @r.op("session.autoclose", AutocloseParams, names=(("log_id", "session"),))
         async def autoclose(p: AutocloseParams, caller):
             return reg.set_autoclose(p.log_id, p.on)
 
-        @r.op("session.reopen", LogParams)
+        @r.op("session.reopen", LogParams, names=(("log_id", "session"),))
         async def reopen(p: LogParams, caller):
             return reg.reopen(p.log_id).wire()
 
-        @r.op("session.rename", RenameParams, agent=True, read=True)
+        @r.op(
+            "session.rename",
+            RenameParams,
+            agent=True,
+            read=True,
+            names=(
+                ("log_id", "session"),
+                ("handle", "session"),
+            ),
+        )
         async def rename(p: RenameParams, caller):
             """Rename your session: a handle (2 or 3 lowercase segments joined by
             hyphens) and a title, both saying what it works on. Set both in
@@ -2952,7 +3009,7 @@ class App:
             saved = s.fold().entry(row["id"])["detail"]["path_peeks"][str(index)]
             return [saved["files"][0] | await root_path(path, caller)]
 
-        @r.op("file.peek", PeekParams)
+        @r.op("file.peek", PeekParams, names=(("log_id", "session"),), access="read")
         async def file_peek(p: PeekParams, caller):
             """Copy the file a Read, Write or Edit row used, as it is now, and
             open it inside that row. The person's way to see a file the agent
@@ -2982,7 +3039,7 @@ class App:
                 | await root_path(path, caller)
             ]
 
-        @r.op("path.stat", StatParams)
+        @r.op("path.stat", StatParams, names=(("log_id", "session"),), access="read")
         async def path_stat(p: StatParams, caller):
             """What each path a reply named is now: file, dir, missing, repo or
             code, one per entry of its detail.paths, at most refs.MAX. The

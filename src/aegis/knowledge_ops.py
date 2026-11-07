@@ -980,7 +980,7 @@ def register_knowledge_ops(app: App) -> None:
         """How an import's sources are read: in a thread."""
         return asyncio.to_thread
 
-    @r.op("knowledge.import", ImportItems, agent=True)
+    @r.op("knowledge.import", ImportItems, agent=True, names=(("log_id", "session"),))
     async def knowledge_import(p: ImportItems, caller):
         """Move the skills, memories and procedure docs the person ticked on
         the /setup page into aegis, one commit each. In the turn the
@@ -1217,7 +1217,7 @@ def register_knowledge_ops(app: App) -> None:
                 "again since; nothing was undone.",
             )
 
-    @r.op("knowledge.card.approve", CardRef)
+    @r.op("knowledge.card.approve", CardRef, names=(("log_id", "session"),))
     async def card_approve(p: CardRef, caller):
         s, e, owner = pending_card(p, ("new",), caller)
         d = e["detail"]
@@ -1253,7 +1253,7 @@ def register_knowledge_ops(app: App) -> None:
             )
         return "ok"
 
-    @r.op("knowledge.card.discard", CardRef)
+    @r.op("knowledge.card.discard", CardRef, names=(("log_id", "session"),))
     async def card_discard(p: CardRef, caller):
         s, e, owner = pending_card(p, ("new",), caller)
         d = e["detail"]
@@ -1283,7 +1283,7 @@ def register_knowledge_ops(app: App) -> None:
             )
         return "ok"
 
-    @r.op("knowledge.card.undo", CardRef)
+    @r.op("knowledge.card.undo", CardRef, names=(("log_id", "session"),))
     async def card_undo(p: CardRef, caller):
         s, e, owner = pending_card(p, ("changed", "deleted", "saved"), caller)
         d = e["detail"]
@@ -1311,7 +1311,7 @@ def register_knowledge_ops(app: App) -> None:
             )
         return "ok"
 
-    @r.op("knowledge.card.unimport", CardItem)
+    @r.op("knowledge.card.unimport", CardItem, names=(("log_id", "session"),))
     async def card_unimport(p: CardItem, caller):
         """Undo one item of an import card: its import commit is reverted,
         so it leaves aegis. Its original is wherever it then was."""
