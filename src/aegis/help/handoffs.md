@@ -16,17 +16,16 @@ one, and close the ones it started. A person can do the same from the browser.
 `session_list` returns the open sessions on this server: each one's handle,
 state, what it needs from the person (its attention and line), what it waits
 on, its plan, what it is doing now, its model and its spend. Then it lists the
-sessions of every linked server that is up as `handle@server`, with their
-state alone, or in full over a [trusted link](links#trusted-links).
+sessions of every linked server that is up, in full, as `handle@server`
+([links](links#what-agents-can-do-across-a-link)).
 `agents_list` shows the agents you can start sessions from.
 
 ## Read a peer
 
 `peer_read` with `target` (a handle) returns up to the last 30 lines of that
 session's transcript, or up to 200 with `last=200`. Tool calls are left out unless you pass `tools=true`. Reading
-changes nothing and wakes nobody. A session on a linked server cannot be read
-by an agent; a person reads it in the browser. Over a trusted link,
-`handle@server` reads it.
+changes nothing and wakes nobody. `handle@server` reads a session on a linked
+server.
 
 ## Hand work over
 
@@ -115,15 +114,12 @@ waits on them as their parent.
 
 ## Peers on a linked server
 
-A session on a server this one links is addressed `handle@server`. An agent
-can reach it in two ways: `peer_handoff` to `handle@server`, and
-`session_spawn` with `agent@server`, which that server's quota policy for the
-link decides. Reading, sending to and enqueueing on another server are for
-people, in the browser. Nothing on a linked server can reach a session here:
-a link only goes one way, unless it is trusted ([links](links#trusted-links)):
-then agents on both servers spawn, hand off to, read, wait on and close each
-other's sessions and enqueue on each other's queues. A handoff from
-another server arrives headed `> from agent:<handle>@<server> (<user>)`.
+A session on a server this one links is addressed `handle@server`. A link goes
+both ways, and agents on both servers spawn (`session_spawn` with
+`agent@server`, which that server's quota gate decides), hand off to, read,
+wait on and close each other's sessions and enqueue on each other's queues
+([links](links#what-agents-can-do-across-a-link)). A handoff from another
+server arrives headed `> from agent:<handle>@<server> (<user>)`.
 
 ## Close a session
 

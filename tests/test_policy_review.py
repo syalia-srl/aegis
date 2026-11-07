@@ -60,7 +60,6 @@ async def world(tmp_path: Path, fake_claude: str):
     "op,params",
     [
         ("link.add", {"name": "far", "url": "ws://127.0.0.1:1/ws", "token": "t"}),
-        ("link.trust", {"name": "far", "trusted": True}),
         ("config.write", {"text": "x"}),
         ("server.pause", {}),
         ("token.revoke", {}),
@@ -79,7 +78,7 @@ async def test_a_hosts_caller_cannot_run_a_server_wide_operation(world, op, para
 
 def test_every_server_wide_op_is_flagged(world):
     flagged = {o.name for o in world.app.registry._ops.values() if o.server}
-    for name in ("link.add", "link.trust", "config.write", "term.spawn", "fs.write"):
+    for name in ("link.add", "config.write", "term.spawn", "fs.write"):
         assert name in flagged
 
 

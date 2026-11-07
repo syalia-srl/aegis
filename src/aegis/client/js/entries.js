@@ -278,7 +278,7 @@ export function refreshApprovals() {
 }
 
 function fillApproval(card) {
-  // Set when the agent made it on another server, across a trusted link.
+  // Set when the agent made it on another server, across a link.
   const where = card.dataset.server;
   const s = approvals.schedule(card.dataset.name, where);
   const bar = el("div", "fbar");

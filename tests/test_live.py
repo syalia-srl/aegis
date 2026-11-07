@@ -1514,7 +1514,7 @@ async def test_a_real_agent_hands_off_across_a_link(tmp_path: Path, fake_claude)
 async def test_a_real_agent_reaches_back_over_a_trusted_link(
     tmp_path: Path, fake_claude
 ):
-    """A real Haiku on beta, which alpha links with trust, finds alpha's session
+    """A real Haiku on beta, which alpha links, finds alpha's session
     in session_list, hands off to it as handle@alpha over the link alpha opened,
     and reads it back with peer_read (#684)."""
     from .test_links import Node, inbox
@@ -1528,7 +1528,7 @@ async def test_a_real_agent_reaches_back_over_a_trusted_link(
     )
     await beta.start()
     try:
-        alpha.app.links.add("beta", beta.base, beta.token, trusted=True)
+        alpha.app.links.add("beta", beta.base, beta.token)
         await until(
             lambda: beta.app.links.get("alpha") is not None,
             timeout=10,

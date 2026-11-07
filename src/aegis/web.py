@@ -58,7 +58,7 @@ from . import exit as exit_
 from . import files, fs_paths
 from .app import App
 from .channels import Sub
-from .links import PROTO, Backlink
+from .links import BOTH_WAYS_SINCE, PROTO, Backlink
 from .ops import Caller, OpError
 from .policy import Credential, Refused
 from .policy_view import PolicyView
@@ -524,7 +524,7 @@ def build_web(
         return StreamingResponse(body(), headers=headers)
 
     async def tunnel(websocket: WebSocket) -> None:
-        """One stream of a trusted link's exit (exit.py). A program's, like a
+        """One stream of a link's exit (exit.py). A program's, like a
         link's socket: a browser always sends an ``Origin``."""
         host = websocket.headers.get("host", "")
         if websocket.headers.get("origin") is not None or (
@@ -541,7 +541,7 @@ def build_web(
             )
             if principal is None:
                 return "bad token"
-            return app.trust_refusal(principal, via) if via else "no link named"
+            return None if via else "no link named"
 
         await exit_.relay(
             websocket,
@@ -598,6 +598,18 @@ def build_web(
             )
             await websocket.close(code=BAD_PROTO)
             return
+        if isinstance(via, str):
+            # A link goes both ways from 3.0 (links.py); one per pair of servers.
+            code, why = (
+                ("too_old", f"{via} runs an aegis from before 3.0; a link needs "
+                 f"aegis {BOTH_WAYS_SINCE} or newer on both servers")
+                if not isinstance(link, dict) or link.get("both_ways") is not True
+                else ("refused", app.link_refusal(via))
+            )  # fmt: skip
+            if why is not None:
+                await websocket.send_json({"t": "error", "code": code, "message": why})
+                await websocket.close(code=BAD_PROTO)
+                return
 
         # On the server's desktop: a loopback socket (a proxy's public name
         # is a browser elsewhere) on a server with somewhere to open a file.
@@ -618,25 +630,17 @@ def build_web(
         out: asyncio.Queue[dict] = asyncio.Queue()
         # This socket's subscriptions forwarded down links: <bid>:<channel>.
         bid = secrets.token_hex(6)
-        # A link asking for trust (#684): granted, it is also this server's way
-        # back to the server that opened it (links.Backlink).
-        asked = isinstance(link, dict) and link.get("trusted") is True
-        refused = app.trust_refusal(principal, str(via)) if asked else None
+        # A link is also this server's way back to the server that opened it
+        # (links.Backlink).
         back: Backlink | None = None
-        if asked and refused is None:
+        if isinstance(via, str):
 
             def still() -> str | None:
                 if recheck and not app.still_valid(given, principal):
                     return "the link's token was revoked"
-                return app.trust_refusal(principal, str(via))
+                return None
 
-            back = Backlink(
-                str(via),
-                out.put_nowait,
-                still,
-                app.links.detach,
-                views=isinstance(link, dict) and link.get("views") is True,
-            )
+            back = Backlink(via, out.put_nowait, still, app.links.detach)
 
         async def writer() -> None:
             while True:
@@ -715,12 +719,7 @@ def build_web(
                 # Whose a session with no owner is: the admin's (tokens.py).
                 "owner": app.principals.owner,
             }
-            | (
-                {"trusted": back is not None}
-                | ({"trust_refused": refused} if refused else {})
-                if asked
-                else {}
-            )
+            | ({"both_ways": True} if back is not None else {})
         )
         if back is not None:
             app.links.attach(back)

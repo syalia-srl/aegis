@@ -171,7 +171,7 @@ request in `handoff_pending`, both in the meta: the lock starts at the call, and
 `Registry.turn_ended` starts the new session, so its tail holds the turn's last
 message. Boot starts a pending handoff whose turn already ended. A handoff across
 a link goes through `_spawn_far` and archives the old session once the far side
-takes the first message, since a plain link says nothing of the far turn; its
+takes the first message, since the near server does not follow the far turn; its
 `continued_by` holds `handle@server`. Children and a run cannot follow across a
 link, so they refuse it.
 
@@ -814,10 +814,9 @@ sessions it watches.
 A person's `/spawn` makes nobody's child, but its first message carries the
 last turns of the tab it was typed in and that tab's handle, so the new agent
 can find the referent of a three-word task (`agent_ops.spawn_opening`).
-Across a plain link an agent never enqueues on or reads another server, and
-across a trusted one it does all of it (`agent_ops.across`): it hands off,
-to `handle@server`, and an admin's agent spawns, as the link's token there, so
-the far server's quota policy for that token decides (`app._spawn_far`). Its
+Across a link an agent does all of it (`agent_ops.across`): it hands off to
+`handle@server`, and it spawns, as the link's token there, so the far server's
+quota gate decides (`app._spawn_far`). Its
 permission is capped at the agent's, and the far session records where it came
 from as `spawned_from`, provenance the far side cannot check and never trusts.
 
@@ -851,55 +850,28 @@ top. The cooling table is in memory per server; one timer at its earliest
 end calls `App._release_held`, the same release `on_quota` ends with, so held
 queue tasks, schedule ticks and workflow nodes start when a model is free again.
 
-**A link is a client, and nothing travels from a linked server into an agent.**
-Alex's laptop must never run what someone else's token wrote, so a link only
-asks: it sends calls and subscriptions, and reads back `welcome`, `reply`,
-`snapshot`, `patch` and `error`, dropping anything else with a log line. It runs
-no request handler, so the linked server has no operation to call here and no
-route to this server's agents. The linked server is treated as hostile: an agent
-here sees only strings this server composed from far values it checked, a
-handle that passes `valid_handle`, a state from a fixed set, whether a handoff
-was held, and errors this server words from an allowlist of codes. Never a
-title, a transcript, a reply or an error message the far side wrote.
-`tests/test_links.py::test_a_hostile_far_server_puts_no_text_into_an_agent_here`
-holds it against a far server that puts a marker in everything. The same goes
-for the browser: a linked server's sent file reaches this origin only through
-`/via`, under headers this server decides from the file's name
-(`files.via_headers`), and the client rebuilds every far file link from a path
-of that one shape, since a page or a `javascript:` URL running on this origin
-holds the cookie that drives every agent here. A far server's workflow run
-reaches the client over its link the same way as its sessions, and the client
-routes a card's calls by the server its row came from, so a far run id can
-never take a row of this server's or another server's run and steer a call
-there. A socket with no `Origin` is a
-program, never a browser, and only such a socket may say it is a link; a link
-socket keys subscriptions by `sid` and is not relayed on. "A link" means any
-holder of the token that says so: per-link credentials come with per-user
-tokens. Before a second person gets a token on a linked server, that server must run
-each person's sessions apart and let only a session's owner write to it, or one
-person could steer another's session into handing off (the links spec).
+**A link federates two servers** (#985). One socket, opened by the near server,
+carries both directions: the near server sends calls and subscriptions and reads
+`welcome`, `reply`, `snapshot`, `patch` and `error`, and it also answers the far
+server's `rcall` with `rreply`, running the call as a person acting through a
+link (`App.answer_link`), the same caller a link socket is on the far side, so
+every op keeps one rule for linked calls. The far server keeps a
+`links.Backlink` for the socket, which agents and the router find by name like
+any link, so a laptop behind NAT is reached without accepting a connection.
+Any other frame is dropped with a log line. Open-source aegis has no protection
+between linked servers, as it has none between people on one: linking servers
+is federating them, and a host that needs a wall between servers refuses links
+in its policy (`HostPolicy.identify` refuses a link credential by default). Both
+servers need 3.0: the hello says `both_ways` and the welcome says it back, and a
+server that lacks it fails the link as `too_old`, in either direction. One link
+joins a pair: a server refuses the hello of a server it links itself
+(`App.link_refusal`), checks that again before every call back, and ends the way
+back with an `unlink` frame when it fails or the link's token is revoked; the
+near server closes the socket, and its next hello names why.
 
-**A trusted link is a client both ways, between servers one person alone
-uses** (#684). A link added with `--trusted` asks for it in its `hello`, and the
-far server grants it in `welcome` only to its admin's own token while no other
-token exists there and it links no server of that name (`App.trust_refusal`).
-Granted, the near server's link also answers `rcall` with `rreply`, running the
-call as its admin acting through a link (`App.answer_link`), the same caller a
-link socket is on the far side, so every op keeps one rule for linked calls;
-and the far server keeps a `links.Backlink` for the socket, which agents and the
-router find by name like any link. The far server checks the rule again before
-every call back and ends the trust with a `trust` frame when it fails. A way
-back also carries live views (#969) when the near server said `views` in its
-hello: the far server lists it on `links` marked `back`, and a browser there
-subscribes down it as `rsub`, `runsub` and `rwatch`; the near server serves them
-as the `answer_link` caller (`App.serve_link`) and sends each frame back as
-`rframe`. An older near server's way back refuses them (`not_both_ways`).
-Nothing is relayed to a third server, and the archive and files merge outbound
-links alone. On a
-plain link an `rcall` is dropped like any unknown frame. Text does travel over
-a trusted link: `session_list` passes the other server's entries whole,
-`peer_read` reads across it, and `agent_ops.far_error` passes its errors
-through, since the far server is this person's own. Acting goes the same way:
+Across the link, agents act as at home (`agent_ops.across`): `session_list`
+passes the other server's entries whole, `peer_read` reads across it, and
+`agent_ops.far_error` passes the far server's errors through after its name.
 `queue@server` enqueues there with the agent as the task's `far_enqueuer`, and
 the result comes back through the link-only `queue.deliver`; `session_close`
 goes through the link-only `peer.close`, which applies the local two-step rule
@@ -909,20 +881,35 @@ is down. A schedule tool's `name@server` runs the operation on the far server,
 which keeps every rule because the near server names the calling agent in
 `from_agent`: a link call with one is an agent, born paused and refused an
 unpause or a fire while it waits, and a link call without one is a person, which
-is how a card's Unpause in a browser arrives. A server without the field refuses
-it, so a newer server's agent never passes as a person on an older one. Ownership
-goes by the far session's log id, which survives a rename. The approval card
-stays in the near session's transcript and names the server; the client honours
-that name only for a session on its own server (`cardServer` in `app.js`), since
-a far transcript could otherwise aim a person's Unpause at another server.
+is how a card's Unpause in a browser arrives. Ownership goes by the far
+session's log id, which survives a rename. The approval card stays in the near
+session's transcript and names the server; the client honours that name only
+for a session on its own server (`cardServer` in `app.js`), since a far
+transcript could otherwise aim a person's Unpause at another server.
 
-**A trusted link can be an exit** (#862, `exit.py`). A child named to exit gets the
+The way back also carries live views (#969): the far server lists it on `links`
+marked `back`, and a browser there subscribes down it as `rsub`, `runsub` and
+`rwatch`; the near server serves them as the `answer_link` caller
+(`App.serve_link`) and sends each frame back as `rframe`. Nothing is relayed to
+a third server, and the archive and files merge outbound links alone.
+
+The browser keeps its own wall, because it is about this origin, not about
+servers: a linked server's sent file reaches this origin only through `/via`,
+under headers this server decides from the file's name (`files.via_headers`),
+and the client rebuilds every far file link from a path of that one shape, since
+a page or a `javascript:` URL running on this origin holds the cookie that
+drives every agent here. A far server's workflow run reaches the client over its
+link the same way as its sessions, and the client routes a card's calls by the
+server its row came from, so a far run id can never take a row of this server's
+or another server's run and steer a call there. A socket with no `Origin` is a
+program, never a browser, and only such a socket may say it is a link; a link
+socket keys subscriptions by `sid` and is not relayed on.
+
+**Any link can be an exit** (#862, `exit.py`). A child named to exit gets the
 proxy variables for a listener on loopback, which opens one websocket per stream
-to the far server's `/tunnel`; the relay there connects to the target. It is
-limited to trusted links, because plain HTTP through a relay is text from a linked
-server reaching an agent, and a trusted link's token already runs a shell there.
-The relay asks `App.trust_refusal` for every stream and connects only to public
-addresses, checked after resolving the name. A dead exit answers 502 and nothing
+to the far server's `/tunnel`; the relay there connects to the target. A link's
+token already runs a shell there, so the relay adds no power. It asks
+`App.link_refusal` for every stream and connects only to public addresses, checked after resolving the name. A dead exit answers 502 and nothing
 falls back to the near server's own address. It covers what honours the proxy
 variables and nothing else.
 

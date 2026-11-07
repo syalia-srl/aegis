@@ -514,14 +514,13 @@ export class Settings {
       return b;
     };
     const since = (t) => new Date(t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    const trust = (l) => (!l.trusted || l.state !== "linked" ? "" : l.granted ? " · trusted, both ways" : l.trust_error ? ` · trust refused: ${l.trust_error}` : "");
     const state = (l) =>
       l.state === "linked"
-        ? `linked${l.rtt_ms != null ? ` · ${l.rtt_ms} ms` : ""}${trust(l)}`
+        ? `linked${l.rtt_ms != null ? ` · ${l.rtt_ms} ms` : ""}`
         : l.state === "offline"
           ? `offline since ${since(l.since)}`
           : `${l.state}${l.error ? `: ${l.error}` : ""}`;
-    // The servers that linked this one with trust (links.py, Backlink).
+    // The servers that linked this one (links.py, Backlink).
     if (this.incoming === undefined) {
       this.incoming = [];
       this.conn
@@ -541,7 +540,7 @@ export class Settings {
           h("td", {}, h("b", { textContent: l.name })),
           h("td", { className: "m", textContent: l.url }),
           h("td", {}, h("span", { className: `set-pill ${l.state === "linked" ? "ok" : "bad"}`, textContent: state(l) })),
-          h("td", {}, !this.server && l.trusted && l.granted ? exitButton(l.name === this.doc?.exit_via ? "Stop exit" : "Exit here", null, () => this.exitVia(l.name === this.doc?.exit_via ? null : l.name)) : null, button("Remove", null, () => this.unlink(l.name))),
+          h("td", {}, !this.server && l.state === "linked" ? exitButton(l.name === this.doc?.exit_via ? "Stop exit" : "Exit here", null, () => this.exitVia(l.name === this.doc?.exit_via ? null : l.name)) : null, button("Remove", null, () => this.unlink(l.name))),
         ),
       ),
       ...this.incoming.map((l) =>
@@ -550,23 +549,16 @@ export class Settings {
           { className: `set-link set-incoming link-${l.name}` },
           h("td", {}, h("b", { textContent: l.name })),
           h("td", { className: "m", textContent: "links here" }),
-          h("td", {}, h("span", { className: `set-pill ${l.state === "linked" ? "ok" : "bad"}`, textContent: l.exit_bytes ? `exit · ${Math.round(l.exit_bytes / 1e6)} MB` : l.state === "linked" ? "trusted · both ways" : l.state })),
+          h("td", {}, h("span", { className: `set-pill ${l.state === "linked" ? "ok" : "bad"}`, textContent: l.exit_bytes ? `exit · ${Math.round(l.exit_bytes / 1e6)} MB` : l.state === "linked" ? "linked" : l.state })),
           h("td"),
         ),
       ),
     ];
     const url = h("input", { className: "set-in", id: "set-link-url", placeholder: "https://dev.example", spellcheck: false });
     const token = h("input", { className: "set-in", id: "set-link-token", placeholder: "its token; kept in links.json, never in .aegis.yaml", type: "password" });
-    const trusted = h("input", { type: "checkbox", id: "set-link-trusted" });
-    const trustBox = h(
-      "label",
-      { className: "set-link-trust", title: "Only for a server you alone use. Its agents will be able to start sessions and read here." },
-      trusted,
-      h("span", { textContent: "Trusted (both ways)" }),
-    );
-    const add = button("Link", "set-link-add", () => this.link(url.value.trim(), token.value.trim(), trusted.checked), "btn primary");
+    const add = button("Link", "set-link-add", () => this.link(url.value.trim(), token.value.trim()), "btn primary");
     const via = this.doc?.exit_via;
-    const exitLine = h("p", { className: "set-none", id: "set-exit", textContent: via ? `What aegis starts reaches the internet through ${via}.` : "What aegis starts uses this machine's route. A trusted link's row can make it the exit." });
+    const exitLine = h("p", { className: "set-none", id: "set-exit", textContent: via ? `What aegis starts reaches the internet through ${via}.` : "What aegis starts uses this machine's route. A linked server's row can make it the exit." });
     exitLine.dataset.key = "exit_via";
     const picker =
       this.links.length > 0 &&
@@ -584,10 +576,10 @@ export class Settings {
       "section",
       { className: "set-servers", id: "set-servers" },
       h("h3", { textContent: "Servers" }),
-      h("p", { className: "set-none", textContent: "A linked server's sessions show in the Fleet and the tab bar. Nothing on it can reach this machine, unless the link is trusted: only for a server you alone use." }),
+      h("p", { className: "set-none", textContent: "A link joins two servers both ways: each one's sessions show in the other's Fleet and tab bar, and agents on each act on the other as at home." }),
       h("table", { className: "tbl" }, ...rows),
       exitLine,
-      h("div", { className: "set-linkrow" }, url, token, trustBox, add),
+      h("div", { className: "set-linkrow" }, url, token, add),
       this.linkError && h("p", { className: "err-text", id: "set-link-error", textContent: this.linkError }),
       picker,
     );
@@ -634,10 +626,10 @@ export class Settings {
     );
   }
 
-  async link(url, token, trusted) {
+  async link(url, token) {
     this.linkError = "";
     try {
-      await this.conn.call("link.add", { url, token, ...(trusted ? { trusted } : {}) });
+      await this.conn.call("link.add", { url, token });
     } catch (e) {
       this.linkError = e.message;
     }
