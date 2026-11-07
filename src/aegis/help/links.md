@@ -6,11 +6,11 @@ hints:
   - Link another aegis server and start sessions on it from this one. #add-a-link
 ---
 
-A link makes this server a client of another aegis server. The people on this
-server then see and drive that server's sessions in the same browser, and the
-agents here can start sessions there and hand them work. A link goes one way:
-the far server can never reach this one, and nothing on it can reach a session
-here, unless the link is [trusted](#trusted-links).
+A link joins two aegis servers both ways. The people on each see and drive the
+other's sessions in the same browser, and the agents on each act on the other as
+at home: they start sessions there, read them, hand them work, enqueue, wait and
+use its schedules. Linking servers federates them, so link only servers you
+use. aegis has no protection between linked servers.
 
 ## Add a link
 
@@ -21,6 +21,9 @@ directory, in `.aegis/state/token` under its root:
 ```bash
 ssh far-host cat work/.aegis/state/token | aegis link add far http://far-host:8742
 ```
+
+One server opens the link and the other reaches back over the same socket, so
+the server behind NAT or a VPN, such as a laptop, is the one that adds it.
 
 aegis connects once and checks that the far server calls itself by that
 name, which is its `aegis serve --name` (the host name by default). Pass
@@ -34,84 +37,49 @@ never their tokens, and `aegis link remove <name>` ends one.
 
 Links are kept in this server's state directory with owner-only permissions,
 because each holds a token. They are never in `.aegis.yaml`, which may be in
-git. Both servers need aegis 2.4.0 or newer.
+git. Both servers need aegis 3.0.0 or newer.
 
-## What people here can do there
+One link joins a pair of servers. If the far server already links this one, it
+refuses the second link and says so; remove one of the two.
+
+## What people can do across a link
 
 A linked server's sessions appear in the tab bar and the Fleet with the
 server's name beside the handle, and its archive merges into this one's.
 The new-tab page gains a server picker. Through the link a person here can
-read, prompt, interrupt, stop and close those sessions, and spawn new ones, as
-far as the far server's token allows.
+read, prompt, interrupt, stop and close those sessions, and spawn new ones
+(`/spawn agent@server`). The same holds from the far server's browser: it shows
+this server's sessions, with this server's name beside the handle, while the
+link is up, and its Settings lists this server under Servers as one that
+links here. From the far side, this server's archive and the files sent here
+are not shown.
 
-On the far server the link acts with the token it was given, and a session it
-starts is owned by that server's person.
+## What agents can do across a link
 
-## What agents here can do there
+A session on a linked server is addressed `handle@server`, and agents on both
+servers act on it as at home:
 
-A session on a linked server is addressed `handle@server`. An agent here can:
+- `session_spawn` with `agent@server`, at most at the agent's own permission,
+  when that server's quota gate is open;
+- `peer_handoff` to `handle@server`; it arrives headed
+  `> from agent:<handle>@<server> (<user>)`;
+- `session_list` lists the other server's sessions in full (title, attention,
+  plan, cwd) with `server`, and `peer_read` reads `handle@server`;
+- `queue_enqueue` with `queue@server`, whose result comes back to the inbox,
+  and `task_status`, `task_cancel` and `task_resume` with `task-id@server`;
+- `monitor_sessions` on `handle@server`, and `session_close` on
+  `handle@server`, which closes a session the agent started there at once when
+  it is done and any other on a second call with the token, as at home;
+- every `schedule_*` tool with `name@server`: the schedule lives and ticks on
+  that server, and it [waits for a person](schedules#an-agent-s-schedule-waits-for-you) as at home.
 
-- start a session there with `session_spawn` and `agent@server`, at most at
-  its own permission, when that server's quota policy for the link allows it;
-- hand off to a session there with `peer_handoff` and `handle@server`; it
-  arrives headed `> from agent:<handle>@<server> (<user>)`;
-- see those sessions in `session_list`, by handle and state only.
+An error the other server returns reaches the agent in its own words, after the
+server's name. Nothing is relayed: a call that came over a link never goes on to
+a third server, so servers that must reach each other link directly.
 
-It cannot read a session there, enqueue there, close one there, wait on one
-with `monitor_sessions` or touch a schedule there; those calls are refused and
-say so. Over a
-[trusted link](#trusted-links) it can do all of them. Text a far server
-wrote, such as titles, messages or error text, never reaches an agent here.
-Only an admin's agents act through a link.
+## Exit through a link
 
-## Trusted links
-
-When one person alone uses both servers, such as a laptop and a host they
-own, a trusted link joins them both ways over the one socket the laptop
-opens. The host then reaches the laptop without a connection of its own, so
-it works behind NAT or a VPN.
-
-```bash
-ssh host cat work/.aegis/state/token | aegis link add host http://host:8742 --trusted
-```
-
-`aegis link trust <name>` asks an existing link for trust, and
-`aegis link trust <name> --off` stops asking. In Settings, Servers, the
-"Trusted (both ways)" box does the same when adding a link. The far server
-grants trust only when:
-
-- the link holds its token, the one in `.aegis/state/token`;
-- it does not itself link a server of this server's name.
-
-A refused link stays a plain link, and Settings shows why after its state.
-
-Over a trusted link, an agent on the far server reaches this one as an agent
-here reaches it: `session_spawn` with `agent@<this server>`, `peer_handoff`
-to `handle@<this server>`, and `session_list` lists this server's sessions.
-Agents on both servers also read across it as at home: `session_list` gives
-the other server's sessions in full (title, attention, plan, cwd) with
-`server`, `peer_read` reads `handle@server`, and an error the other server
-returns reaches the agent in its own words. They act across it as at home
-too: `queue_enqueue` with `queue@server` (the result comes back to the
-inbox), `task_status`, `task_cancel` and `task_resume` with `task-id@server`,
-`monitor_sessions` on `handle@server`, and `session_close` on
-`handle@server`, which closes a session the agent started there at once when
-it is done and any other on a second call with the token, as at home. Every
-`schedule_*` tool takes `name@server` too: the schedule lives and ticks on that
-server, and it [waits for a person](schedules#an-agent-s-schedule-waits-for-you) as at home.
-A person in the far server's browser sees this server's sessions in its tab bar
-and Fleet, with this server's name beside the handle, and reads, prompts,
-interrupts, stops, closes and spawns there (`/spawn agent@<this server>`) as
-through a link of its own, while the link is up. Files sent there and its
-archive are not shown from the far side: those still go one way. Both servers
-need aegis 3.0.0 or newer for this; an older near server is reached by
-calls alone. Nothing is relayed: a call
-that came over a link never goes on to a third server. The far server's
-Settings lists this server under Links here.
-
-## Exit through a trusted link
-
-A server can send what it starts out to the internet through a trusted link,
+A server can send what it starts out to the internet through a link,
 from the far server's address, with no VPN and no change to the machine's
 routes. Name the link in `.aegis.yaml`:
 
@@ -146,13 +114,12 @@ What it does not cover:
 - A program that ignores the proxy variables goes out directly: a bare `ssh`, a
   raw socket, UDP. `curl`, `git` over HTTPS, `gh`, `npm`, `uv`, Python, Node's
   `fetch` and Claude Code all honour them. It is no guarantee for every packet.
-- Only a trusted link can be an exit.
 - The relay connects to public addresses only, so an agent cannot reach the far
   server's private network through it.
 
 When the link is down, a connection through the exit fails with a 502 that says
 why, and nothing falls back to this machine's address. `aegis doctor` flags a
-name that is not a trusted link.
+name that is not a link.
 
 The near server must reach the far server's aegis URL without the VPN: a far
 server only on an overlay network cannot replace that overlay. The far server
@@ -166,9 +133,10 @@ where its service may be used.
 ## When a link is down
 
 A link is linked, connecting, offline, unauthorized (the far server refused
-the token; it does not retry, and a new token needs a new link) or mismatch
-(a different name or an incompatible version). An offline link reconnects on
-its own, backing off up to 30 seconds, a mismatched one tries again every 30
-seconds, and a dropped link fails every call in flight. The Fleet and the
+the token; it does not retry, and a new token needs a new link), mismatch
+(a different name or an incompatible protocol), too_old (one of the servers runs
+an aegis older than 3.0.0) or refused (the far server already links this one). An offline link reconnects on
+its own, backing off up to 30 seconds, a mismatched, too_old or refused one
+tries again every 30 seconds, and a dropped link fails every call in flight. The Fleet and the
 Settings page show a server that is down as offline since the time it went
 down.

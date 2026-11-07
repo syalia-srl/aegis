@@ -126,19 +126,14 @@ own token, so no tool asks who is calling.
   calls is one Bash call, and a result piped into `wc` or `jq` never enters
   the agent's context.
 
-The same works across machines. `aegis link add vps https://dev.example` makes
-this server a client of another aegis. The far server's sessions appear in your
-Fleet and your tab bar with a server tag, and they take prompts, interrupts and
-closes from here. An agent here hands work to one there with
-`peer_handoff(target="knuth@vps")`. The link goes one way: the far server can
-never reach the one that linked it, so a shared server cannot touch your laptop.
-Both servers need aegis 2.4.0 or newer; an older far server refuses the link
-with an HTTP 403, and `aegis link add` says so.
-
-Between two servers only you use, `aegis link add vps <url> --trusted` makes
-the link reach both ways over the same socket, so a laptop behind NAT can be
-reached from the server without a connection of its own. Agents on either side
-then read, spawn, enqueue on and wait on the other's sessions as at home.
+The same works across machines. `aegis link add vps https://dev.example` joins
+this server and another aegis, both ways over one socket, so a laptop behind
+NAT can be reached from the server without a connection of its own. Each
+server's sessions appear in the other's Fleet and tab bar with a server tag,
+and take prompts, interrupts and closes from there. Agents on either side
+spawn, read, hand off to, enqueue on and wait on the other's sessions as at
+home, as in `peer_handoff(target="knuth@vps")`. Linking servers federates them,
+so link only servers you use. Both servers need aegis 3.0.0 or newer.
 
 ## Skills and memories every session finds
 

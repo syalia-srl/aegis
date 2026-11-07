@@ -73,7 +73,7 @@ yourself starts at once.
 
 ### On another server
 
-Over a [trusted link](links#trusted-links), every `schedule_*` tool takes a
+Across a [link](links#what-agents-can-do-across-a-link), every `schedule_*` tool takes a
 schedule on the other server as `name@server`, as `queue_enqueue` does with
 `queue@server`. Put one there when the clock must keep ticking while this
 machine sleeps:
@@ -86,7 +86,7 @@ The schedule lives and ticks on that server, and it fires there. A
 `fire.cwd`, a `fire.session` and an agent's name are that server's; with no
 `cwd`, a fire starts in that server's working directory. A reply names the
 schedule `name@server` and adds `server`. `schedule_list` gives this server's
-schedules and then each trusted server's, in the same form, and leaves out a
+schedules and then each linked server's, in the same form, and leaves out a
 server that cannot answer now. `schedule_test` takes `name@server` to try a clock
 and a check there, and that schedule need not exist yet.
 
