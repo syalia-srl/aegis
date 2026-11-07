@@ -143,3 +143,43 @@ agents get: dicts, lists and strings.
 The signatures are in `src/aegis/api/ops.pyi`, so an editor completes them
 and a type checker checks them. After changing an operation's parameters,
 run `make ops-stubs` and commit the file. A test fails while it is stale.
+
+## Host policy
+
+A program that embeds aegis decides who may do what through a host policy:
+`Server(root, policy=MyPolicy())`, where `MyPolicy` subclasses
+`aegis.HostPolicy` and overrides the hooks it needs. Each hook's default
+allows. `aegis serve` runs `StandalonePolicy`: one caller, the holder of the
+server's token, who may do everything, and linked servers as before.
+
+aegis calls each hook with a `who`: the object your `identify` returned, kept
+as it is and never read. For an agent's call, `who` is the person whose
+session it is. `who` is `None` for the server's own caller: its token, `srv`
+without `srv.as_who(...)`, and aegis's own work.
+
+| Hook | When aegis asks |
+|---|---|
+| `identify(cred)` | A browser's hello, an HTTP request or a linked server's hello brings a token aegis does not read itself. Return a who, or raise `Refused`. The server's own token and a token from `srv.token_for(...)` never reach it, except over a link. The default refuses links. |
+| `key(who)`, `restore(key)` | aegis stores `key(who)` wherever it keeps an owner (sessions, schedules, queue tasks, workflow runs), and calls `restore` to get the who back with nobody connected, such as after a restart. A `restore` that raises `Refused` stops that work with your message. |
+| `guard(op, who, caller)` | Before every operation. The default keeps aegis's own checks (operations closed to agents, read-permission sessions, schedule runs with `spawn: false`, operations closed to links); call `super().guard(...)` to keep them. |
+| `can(who, action, session)` | `action` is `"list"`, `"read"` or `"write"`. Before a session appears in the tab bar, `session_list`, the archive or the journal; before its transcript is read or subscribed to; before a sent file of its is served; and before anything is sent to it or changed on it. |
+| `catalog(who)` | What the pickers offer: agents, harnesses, models, efforts, permissions, folders. A start outside it is refused. |
+| `spawn(who, req)` | Before any session starts: a spawn, a handoff, a queue worker, a schedule or workflow run, and a stopped session waking. Return the `SpawnRequest` to run, rewritten with `req.replace(...)`, or raise `Refused`. On a wake only model, effort and permission change. `env` reaches the process and is never written to disk. |
+| `tools(who, session)` | When a harness starts: the names of the aegis tools it gets, or `None` for all. The rest are hidden from its tool list and refused when called. |
+| `mcp(who, session)` | Extra MCP servers for the session. Defined now; aegis calls it from the release that gives each harness its MCP servers. |
+| `around(op, who, params, call)` | Around every operation, after the checks above: refuse, change `params`, call `await call(params)`, change the result. |
+| `on_event(who, event)` | After a session starts, writes an entry, ends a turn, stops, closes or sends a file. Events arrive in order, and a slow or failing hook never holds up a turn. |
+
+A session the caller may not read answers as missing, with the code a
+session, task or run that does not exist gets, so nobody learns it exists; one they may read but not
+change answers `refused`. A session carries `tags`, strings your `spawn` sets
+with `req.replace(tags=...)`; every session it starts inherits them, so `can`
+can decide from the session alone.
+
+`srv.token_for(who, ttl=3600)` mints a signed token for your page to hand the
+client: it holds the caller's key and an expiry, needs no table, and survives
+a restart until it expires. `srv.as_who(who)` is the same API acting as that
+person: `await srv.as_who(who).sessions.spawn()` starts a session of theirs.
+
+Terminals are not agents: `spawn` does not see them. A host that wants no
+shells refuses `term.*` operations in `around`.

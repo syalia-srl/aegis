@@ -15,6 +15,7 @@ child process reads, and two servers would share it (spec 2026-10-23).
 from __future__ import annotations
 
 import asyncio
+import copy
 import contextlib
 import socket
 from collections.abc import Iterable, Iterator
@@ -22,7 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .ops import Caller
+from .ops import Caller, Principal
 
 if TYPE_CHECKING:
     from .api.ops import Ops
@@ -259,6 +260,19 @@ class Server:
         from .api.ops import Ops
 
         return Ops(self)
+
+    def as_who(self, who: Any) -> Server:
+        """This server's API acting as ``who``, one of the host policy's
+        callers: ``srv.as_who(who).sessions.spawn()`` starts a session that
+        is theirs, and lists show what the policy lets them see. ``srv``
+        itself acts as the server's own caller."""
+        if self._caller is None:
+            raise RuntimeError("the Server is not running: use it in `async with`")
+        key = self.app.policy.key(who)
+        self.app.whos[key] = who
+        acting = copy.copy(self)
+        acting._caller = Caller("user", principal=Principal(key, who))
+        return acting
 
     def token_for(self, who: Any, ttl: float = 3600) -> str:
         """A signed token for ``who``, valid ``ttl`` seconds and across a
