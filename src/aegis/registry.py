@@ -477,6 +477,8 @@ class Registry(Host):
         return None if self.cascade is None else self.cascade(session, text)
 
     def notice_blocks(self, session: Session, at: str) -> str:
+        if not session.spec.notices:
+            return ""
         blocks = "" if self.notices is None else self.notices.pending(session, at)
         menus = "" if self.know_how is None else self.know_how.pending(session)
         return "\n\n".join(b for b in (blocks, menus) if b)
