@@ -163,3 +163,11 @@ def test_without_harness_tools_only_mcp_tools_are_allowed():
     allowed = [r["action"] for r in cfg["permissions"] if r["effect"] == "allow"]
     assert cfg["permissions"][0] == {"action": "*", "resource": "*", "effect": "deny"}
     assert allowed == ["aegis_*", "echo_*"]
+
+
+def test_an_isolated_session_reads_no_config_of_the_persons(tmp_path):
+    from aegis.opencode.config import isolated_env
+
+    env = isolated_env(tmp_path)
+    assert env["XDG_CONFIG_HOME"] == str(tmp_path)
+    assert env["OPENCODE_DISABLE_PROJECT_CONFIG"] == env["OPENCODE_DISABLE_CLAUDE_CODE"] == "1"
