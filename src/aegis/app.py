@@ -52,7 +52,7 @@ import re
 import time
 from collections import OrderedDict
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 from pydantic.json_schema import SkipJsonSchema
@@ -138,7 +138,8 @@ from .quota_gate import (
 )
 from .btws import SideNotes
 from .recaps import Recaps
-from .policy import HostPolicy, SessionView, StandalonePolicy
+from . import host_tokens
+from .policy import Credential, HostPolicy, Refused, SessionView, StandalonePolicy
 from .ops import Caller, NoParams, OpError, Principal, Registry as Ops
 from . import launch
 from .opencode import sweep as opencode_sweep
@@ -618,6 +619,10 @@ class App:
         # What the embedding program decides (policy.py); aegis serve's own.
         self.policy = policy if policy is not None else StandalonePolicy()
         self.policy.attach(self)
+        # The host's who for each key aegis met, from identify or restore, so
+        # the sync App.who finds it (Registry.call awaits ensure_who first).
+        self.whos: dict[str, Any] = {}
+        self.host_secret = host_tokens.load_or_create_secret(roots.state_root)
         self.links = Links(roots.state_root, server_name, self.user, self.publish)
         self.links.answer = self.answer_link
         self.links.serve, self.links.rwatch = self.serve_link, self.watch_link
@@ -648,6 +653,7 @@ class App:
         reg.start_pending_handoff = self.start_pending_handoff
         self.registry = Ops()
         self.registry.who = self.who
+        self.registry.ensure_who = self.ensure_who
         self.registry.owner_of = self.owner_of
         self.registry.permission_of = lambda log_id: (
             s.spec.permission if (s := self.sessions.sessions.get(log_id)) else None
@@ -853,12 +859,74 @@ class App:
         return listed if isinstance(listed, list) else None
 
     def who(self, caller: Caller) -> Principal:
-        """The principal a caller acts as: the token's, or the server's one
-        person for an agent and for the server's own calls, whoever a session
-        from before aegis 3.0 names as its owner."""
+        """The principal a caller acts as: the token's; for an agent, its
+        session's owner, with the who ensure_who restored; the server's own
+        caller otherwise."""
         if caller.principal is not None:
             return caller.principal
+        if caller.is_agent and caller.log_id:
+            key = self.owner_of(caller.log_id)
+            if key is not None and key != self.user:
+                return Principal(key, self.whos.get(key))
         return Principal(self.user)
+
+    async def ensure_who(self, caller: Caller) -> None:
+        """Restore the who behind an agent's call when no one has met it yet
+        (after a restart): Registry.call awaits this before anything else."""
+        if caller.is_agent and caller.principal is None and caller.log_id:
+            key = self.owner_of(caller.log_id)
+            if key is not None and key != self.user and key not in self.whos:
+                await self.who_of_key(key)
+
+    async def who_of_key(self, key: str) -> Any:
+        """The who a stored owner key names, restored by the policy when it is
+        not known yet; None for the server's own key. Raises Refused."""
+        if key == self.user:
+            return None
+        if key not in self.whos:
+            self.whos[key] = await self.policy.restore(key)
+        return self.whos[key]
+
+    async def identify(self, cred: Credential) -> Principal:
+        """Who a token is. The server's own token is the server's own caller
+        and a minted token the who it was minted for, unless it came over a
+        link, which the policy always decides. Raises Refused."""
+        if cred.via != "link":
+            if self.principals.resolve(cred.token) is not None:
+                return Principal(self.user)
+            key = host_tokens.verify(self.host_secret, cred.token)
+            if key is not None:
+                return Principal(key, await self.who_of_key(key))
+            if cred.token.startswith(host_tokens.PREFIX):
+                raise Refused("this token has expired or is not valid")
+        who = await self.policy.identify(cred)
+        key = self.policy.key(who)
+        self.whos[key] = who
+        return Principal(key, who)
+
+    def checks_itself(self, token: object) -> bool:
+        """Whether aegis can check ``token`` again on its own: the server's
+        token or a minted one. A host's raw token is checked once, at the
+        hello, since its identify may cost a lookup."""
+        return isinstance(token, str) and (
+            self.principals.resolve(token) is not None
+            or token.startswith(host_tokens.PREFIX)
+        )
+
+    def still_valid(self, token: object, principal: Principal) -> bool:
+        """Whether a token aegis checks itself still names ``principal``: the
+        server's token while not revoked, a minted one until it expires."""
+        if not isinstance(token, str):
+            return False
+        if token.startswith(host_tokens.PREFIX):
+            return host_tokens.verify(self.host_secret, token) == principal.name
+        return self.principals.resolve(token) is not None
+
+    def token_for(self, who: Any, ttl: float = 3600) -> str:
+        """A token the host's page passes to the client for ``who``."""
+        key = self.policy.key(who)
+        self.whos[key] = who
+        return host_tokens.mint(self.host_secret, key, ttl)
 
     def gate(self, owner: str | None, harness: str, model: str | None) -> Gate:
         """Whether a harness may start on that pool now: always, since quota

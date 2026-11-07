@@ -130,7 +130,9 @@ class McpServer:
     env: dict[str, str] = field(default_factory=dict)
 
     @classmethod
-    def http(cls, name: str, url: str, headers: dict[str, str] | None = None) -> McpServer:
+    def http(
+        cls, name: str, url: str, headers: dict[str, str] | None = None
+    ) -> McpServer:
         return cls(name, "http", url=url, headers=dict(headers or {}))
 
     @classmethod
@@ -141,7 +143,9 @@ class McpServer:
         args: tuple[str, ...] | list[str] = (),
         env: dict[str, str] | None = None,
     ) -> McpServer:
-        return cls(name, "stdio", command=command, args=tuple(args), env=dict(env or {}))
+        return cls(
+            name, "stdio", command=command, args=tuple(args), env=dict(env or {})
+        )
 
 
 Call = Callable[["BaseModel"], Awaitable[Any]]
@@ -158,13 +162,14 @@ class HostPolicy:
         self._app = app
 
     async def identify(self, cred: Credential) -> Any:
-        """The who a raw token is, or raise Refused. The default accepts the
-        Server's own token, as one caller, and refuses links."""
+        """The who a raw token is, or raise Refused. aegis asks only for a
+        token it cannot read itself: the Server's own token is the Server's
+        own caller (who None) and a ``token_for`` token is the who it was
+        minted for, except over a link, which always comes here. The default
+        refuses links and every other token."""
         if cred.via == "link":
             raise Refused("this server takes no calls from linked servers")
-        if self._app.principals.resolve(cred.token) is None:
-            raise Refused("unknown token")
-        return self.OWNER
+        raise Refused("unknown token")
 
     def key(self, who: Any) -> str:
         """What aegis stores as the owner of what ``who`` starts."""

@@ -260,6 +260,11 @@ class Server:
 
         return Ops(self)
 
+    def token_for(self, who: Any, ttl: float = 3600) -> str:
+        """A signed token for ``who``, valid ``ttl`` seconds and across a
+        restart, that the host's page passes to the client."""
+        return self.app.token_for(who, ttl)
+
     async def _call(self, name: str, params: dict | None = None) -> Any:
         """Run operation ``name`` as the server's admin person."""
         if self._caller is None:
