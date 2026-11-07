@@ -34,7 +34,9 @@ asyncio.run(main())
 `.aegis.yaml` (required, since a library never guesses from the working
 directory), `port` (0, the default, takes a free one),
 `host`, `name`, and the harness binaries (`claude`, `opencode`, `codex`,
-`cursor`). Entering the block runs the startup checks, boots aegis and
+`cursor`). `mcp` takes a name-to-`McpServer` map: an agent attaches one by
+name in its `mcp:` list, as it attaches the file's (see
+[config](config#mcp-servers)). Entering the block runs the startup checks, boots aegis and
 listens. Leaving it shuts aegis down as a stopped `aegis serve` does.
 
 - It always listens, on loopback unless you pass `host`. The agents it
@@ -166,7 +168,7 @@ without `srv.as_who(...)`, and aegis's own work.
 | `catalog(who)` | What the pickers offer: agents, harnesses, models, efforts, permissions, folders. A start outside it is refused. |
 | `spawn(who, req)` | Before any session starts: a spawn, a handoff, a queue worker, a schedule or workflow run, and a stopped session waking. Return the `SpawnRequest` to run, rewritten with `req.replace(...)`, or raise `Refused`. On a wake only model, effort and permission change. `env` reaches the process and is never written to disk. |
 | `tools(who, session)` | When a harness starts: the names of the aegis tools it gets, or `None` for all. The rest are hidden from its tool list and refused when called. |
-| `mcp(who, session)` | Extra MCP servers for the session. Defined now; aegis calls it from the release that gives each harness its MCP servers. |
+| `mcp(who, session)` | When a harness starts: a list of `McpServer.http(name, url, headers)` or `McpServer.stdio(name, command, args, env)` it gets after its agent's own. `${VAR}` is read from aegis's environment; a name another source also uses refuses the start. |
 | `around(op, who, params, call)` | Around every operation, after the checks above: refuse, change `params`, call `await call(params)`, change the result. |
 | `on_event(who, event)` | After a session starts, writes an entry, ends a turn, stops, closes or sends a file. Events arrive in order, and a slow or failing hook never holds up a turn. |
 
