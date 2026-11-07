@@ -23,8 +23,9 @@ ALIASES = {"agents.*.provider": "agents.*.harness"}
 # Keys the form leaves out on purpose. multi_user changes what the host must
 # provide (a service user, capabilities) and applies at the next start, so a
 # click in the browser could leave a server that refuses to boot. It is set by
-# hand or by the setup page (#548).
-HOST_ONLY = {"multi_user.env_file"}
+# hand or by the setup page (#548). hosts holds what differs per server, and
+# the form edits the shared layer every server reads (#950).
+HOST_ONLY = {"multi_user.env_file", "hosts.*"}
 
 # A file that sets every key, none to its default.
 FULL = """\
@@ -100,6 +101,7 @@ def reader_keys() -> list[str]:
         "recap": ["agent"],
         "btw": ["agent"],
         "multi_user": ["env_file"],
+        "hosts": ["*"],  # a server's name
     }
     scalars = {
         "default_agent",

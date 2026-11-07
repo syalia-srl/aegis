@@ -125,7 +125,9 @@ routes. Name the link in `.aegis.yaml`:
 exit_via: host
 ```
 
-or press Exit here on its row in Settings, Servers. Sessions, queue workers,
+or press Exit here on its row in Settings, Servers, which writes it in this
+server's block under `hosts:`, so the other servers reading the same file in git
+keep their own route ([config](config#per-host-overrides)). Sessions, queue workers,
 workflow steps, monitors, skill tools, terminals and browsers started after that
 go through a listener on loopback: each gets the proxy variables, Chromium its
 launch setting, and `git` over SSH a `GIT_SSH_COMMAND`, unless you set one. A running process keeps the

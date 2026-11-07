@@ -89,7 +89,7 @@ from .cascade import Cooling, Fall, classify, pick
 from .cgroups import SessionCgroups
 from .channels import Channels, Throttle
 from .claude.process import PERMISSION_MODE, ControlError
-from .config import Config, Snapshot, accept_version, write
+from .config import Config, Snapshot, accept_version, write_host
 from .harness import harness_for
 from .config_ops import register_config_ops
 from .doctor_watch import DoctorWatch
@@ -544,7 +544,7 @@ class App:
         )
         self.tokens = Tokens()
         self.monitors = Monitors(self.sessions, roots.state_root / "monitors.json")
-        self.config = Config(roots.config_root, self._on_config)
+        self.config = Config(roots.config_root, self._on_config, server_name)
         self._config_task: asyncio.Task | None = None
         self._versions_task: asyncio.Task | None = None
         self._knowledge_task: asyncio.Task | None = None
@@ -3233,9 +3233,11 @@ class App:
             snap = self.config.current()
             if p.name is not None and self.links.outbound(p.name) is None:
                 raise OpError("not_found", f"no link named {p.name}")
-            doc = snap.doc.model_copy(update={"exit_via": p.name})
-            if problems := write(self.config.path, doc, snap.stamp):
-                raise OpError("bad_config", problems[0].message)
+            # An exit is this server's alone: the far one cannot exit through
+            # itself, so it goes in this server's hosts: block (config.py).
+            write_host(
+                self.config.path, self.server_name, "exit_via", p.name, snap.stamp
+            )
             return {"exit_via": p.name}
 
         @r.op("server.paused", admin=True)
