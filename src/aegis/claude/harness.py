@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 import os
 
 from ..harness import Launch, session_env
+from ..mcp_servers import by_ref
 from . import login
 from . import control
 from .control import Catalog
@@ -37,18 +38,23 @@ _SETTERS = {
 
 class ClaudeSession:
     def __init__(self, bin: str, launch: Launch) -> None:
+        from ..mcp import mcp_config as build
+
         mcp_config = None
         disallowed: tuple[str, ...] = ()
+        url = launch.mcp[0] if launch.mcp is not None else None
+        if url is not None or launch.extra_mcp:
+            mcp_config = build(url, launch.extra_mcp)
         if launch.mcp is not None:
-            from ..mcp import mcp_config as build
-
-            mcp_config = build(launch.mcp[0])
             # Without aegis's tools there is nothing to replace them with.
             keep = set(launch.keep_harness_tools)
             disallowed = tuple(t for t in REPLACED_TOOLS if t not in keep)
             if launch.knowledge_native:
                 disallowed += tuple(NATIVE_TOOLS)
         env = session_env(launch)
+        if launch.extra_mcp:
+            refs = by_ref(launch.extra_mcp)[1]
+            env = {**(os.environ if env is None else env), **refs}
         if launch.knowledge_native:
             env = {**(os.environ if env is None else env), **NO_AUTO_MEMORY}
         argv = build_argv(
@@ -61,6 +67,7 @@ class ClaudeSession:
             system_prompt=launch.system_prompt,
             add_dirs=launch.read_dirs,
             disallowed=disallowed,
+            mcp_names=tuple(m.name for m in launch.extra_mcp),
         )
         self._proc = ClaudeProcess(
             argv,

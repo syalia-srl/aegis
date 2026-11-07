@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import secrets
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 import fastmcp
@@ -29,6 +30,7 @@ from fastmcp.utilities.logging import configure_logging
 from pydantic import PrivateAttr
 
 from .harness import HEADER, SHELL_HEADER
+from .mcp_servers import by_ref
 from .ops import Caller, Operation, OpError, Registry
 
 # fastmcp logs every ToolError with its traceback, and every refused op is one
@@ -44,6 +46,7 @@ configure_logging(level=fastmcp.settings.log_level)
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from .policy import McpServer
     from .registry import Registry as Sessions
     from .session import Session
 
@@ -74,21 +77,25 @@ class Tokens:
         return self._by_token.get(token or "")
 
 
-def mcp_config(url: str) -> str:
-    """Claude Code's --mcp-config for aegis. The session's token is named,
-    not written: Claude expands ${AEGIS_SESSION_TOKEN} from its environment
-    (harness.session_env), and an argv is readable by every user on the host."""
-    return json.dumps(
-        {
-            "mcpServers": {
-                "aegis": {
-                    "type": "http",
-                    "url": url,
-                    "headers": {HEADER: "${AEGIS_SESSION_TOKEN}"},
-                }
-            }
+def mcp_config(url: str | None, servers: Sequence[McpServer] = ()) -> str:
+    """Claude Code's --mcp-config for aegis and ``servers``. The session's
+    token is named, not written: Claude expands ${AEGIS_SESSION_TOKEN} from its
+    environment (harness.session_env), and an argv is readable by every user on
+    the host. So is each server's header and env value (mcp_servers.by_ref);
+    the caller puts the values in the child's environment."""
+    entries: dict[str, dict] = {}
+    if url is not None:
+        entries["aegis"] = {
+            "type": "http",
+            "url": url,
+            "headers": {HEADER: "${AEGIS_SESSION_TOKEN}"},
         }
-    )
+    for s in by_ref(servers)[0]:
+        if s.transport == "http":
+            entries[s.name] = {"type": "http", "url": s.url, "headers": s.headers}
+        else:
+            entries[s.name] = {"command": s.command, "args": list(s.args), "env": s.env}
+    return json.dumps({"mcpServers": entries})
 
 
 class OpTool(Tool):

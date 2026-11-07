@@ -31,9 +31,13 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..claude.control import Catalog, Model, _doc
+from ..mcp_servers import ref_name
+
+if TYPE_CHECKING:
+    from ..policy import McpServer
 
 TOKEN_ENV = "AEGIS_SESSION_TOKEN"
 SERVER = "aegis_session"
@@ -70,34 +74,76 @@ def split_model(model: str) -> tuple[str, str]:
     return provider, model_id
 
 
+def _server_vars(s: McpServer) -> dict[str, str]:
+    """The variables of Codex's environment that hold ``s``'s values. Codex
+    forwards a stdio server's ``env_vars`` under their own names, so those
+    keep their keys; a header goes through its reference (mcp_servers.by_ref)."""
+    if s.transport == "stdio":
+        return dict(s.env)
+    return {ref_name(s.name, k): v for k, v in s.headers.items()}
+
+
 def argv(
-    bin: str, mcp_url: str | None, exclude: Sequence[str] = (), native: bool = False
+    bin: str,
+    mcp_url: str | None,
+    exclude: Sequence[str] = (),
+    native: bool = False,
+    servers: Sequence[McpServer] = (),
 ) -> list[str]:
     """``exclude`` is the person's own shell exclude list, kept. ``native``
-    turns Codex's own skills and memories off."""
+    turns Codex's own skills and memories off. ``servers`` (#960) are written
+    by variable name only; child_env sets the values."""
     out = [bin, "app-server"]
     for feature in (*DISABLED, *(NATIVE_DISABLED if native else ())):
         out += ["--disable", feature]
     if native:
         for kv in NATIVE:
             out += ["-c", kv]
+    hidden = list(exclude)
     if mcp_url is not None:
         from ..mcp import HEADER
 
-        hidden = [*dict.fromkeys([*exclude, TOKEN_ENV])]
+        hidden.append(TOKEN_ENV)
         out += [
             "-c", f"mcp_servers.{SERVER}.url={json.dumps(mcp_url)}",
             "-c", f'mcp_servers.{SERVER}.env_http_headers={{"{HEADER}"="{TOKEN_ENV}"}}',
             "-c", f'mcp_servers.{SERVER}.default_tools_approval_mode="approve"',
-            "-c", f"shell_environment_policy.exclude={json.dumps(hidden)}",
         ]  # fmt: skip
+    for s in servers:
+        key = f"mcp_servers.{s.name}"
+        names = list(_server_vars(s))
+        hidden += names
+        if s.transport == "stdio":
+            out += [
+                "-c", f"{key}.command={json.dumps(s.command)}",
+                "-c", f"{key}.args={json.dumps(list(s.args))}",
+                "-c", f"{key}.env_vars={json.dumps(names)}",
+            ]  # fmt: skip
+        else:
+            headers = ",".join(
+                f"{json.dumps(k)}={json.dumps(ref_name(s.name, k))}" for k in s.headers
+            )
+            out += [
+                "-c", f"{key}.url={json.dumps(s.url)}",
+                "-c", f"{key}.env_http_headers={{{headers}}}",
+            ]  # fmt: skip
+        out += ["-c", f'{key}.default_tools_approval_mode="approve"']
+    if mcp_url is not None or servers:
+        hidden = [*dict.fromkeys(hidden)]
+        out += ["-c", f"shell_environment_policy.exclude={json.dumps(hidden)}"]
     return out + ["-c", 'approval_policy="never"']
 
 
-def child_env(base: Mapping[str, str], mcp: tuple[str, str] | None) -> dict[str, str]:
+def child_env(
+    base: Mapping[str, str],
+    mcp: tuple[str, str] | None,
+    servers: Sequence[McpServer] = (),
+) -> dict[str, str]:
     env = {k: v for k, v in base.items() if k != TOKEN_ENV}
     if mcp is not None:
         env[TOKEN_ENV] = mcp[1]
+    for s in servers:
+        env |= _server_vars(s)
     return env
 
 
