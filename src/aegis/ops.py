@@ -14,7 +14,7 @@ an action that is not an operation (DESIGN.md, "One registry, every caller").
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
@@ -32,10 +32,12 @@ class OpError(Exception):
 
 @dataclass(frozen=True)
 class Principal:
-    """Who a token is (tokens.py): the server's owner, whose name a session
-    records as its owner."""
+    """Who a caller is: ``name`` is what aegis stores as an owner, the host
+    policy's ``key(who)``, and ``who`` the host's own object for it, never
+    read by aegis (policy.py). ``who`` is None for the server's own caller."""
 
     name: str
+    who: Any = field(default=None, compare=False)
 
 
 @dataclass(frozen=True)
@@ -94,6 +96,10 @@ class NoParams(BaseModel):
     model_config = {"extra": "forbid"}
 
 
+async def _nothing(caller: Caller) -> None:
+    return None
+
+
 class Registry:
     def __init__(self) -> None:
         self._ops: dict[str, Operation] = {}
@@ -105,6 +111,9 @@ class Registry:
         self.owner_of: Callable[[str], str | None] = lambda log_id: None
         # A session's schedule meta by log id (session.py); set by the app.
         self.schedule_of: Callable[[str], dict | None] = lambda log_id: None
+        # Makes sure the who behind a caller is known before the call runs
+        # (App.ensure_who); set by the app.
+        self.ensure_who: Callable[[Caller], Awaitable[None]] = _nothing
 
     def op(
         self,
@@ -142,6 +151,7 @@ class Registry:
         op = self._ops.get(name)
         if op is None:
             raise OpError("unknown_op", f"no operation named {name!r}")
+        await self.ensure_who(caller)
         if caller.is_agent and not op.agent:
             raise OpError("not_for_agents", f"{name} is not open to agents")
         if (

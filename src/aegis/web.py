@@ -60,6 +60,7 @@ from .app import App
 from .channels import Sub
 from .links import PROTO, Backlink
 from .ops import Caller, OpError
+from .policy import Credential, Refused
 from .version import running
 from .tokens import load_or_create_token  # noqa: F401 — cli and tests import it from here
 
@@ -259,8 +260,14 @@ def build_web(
     # ``token`` is the admin's (tokens.py); any token the store knows signs in.
     app.principals.use_admin(token)
 
-    def valid(given: object) -> bool:
-        return app.principals.resolve(given) is not None
+    async def valid(given: object) -> bool:
+        if not isinstance(given, str) or not given:
+            return False
+        try:
+            await app.identify(Credential(given, "browser"))
+        except Refused:
+            return False
+        return True
 
     def signed_in(response: Response, request, given: str) -> Response:
         """``response`` carrying the cookie with the token that was presented:
@@ -283,7 +290,7 @@ def build_web(
         cookie, and the address bar loses it; a wrong one says so."""
         given = request.query_params.get("token")
         if given is not None:
-            if valid(given):
+            if await valid(given):
                 return signed_in(RedirectResponse("/", status_code=303), request, given)
             return RedirectResponse("/?refused=1", status_code=303)
         # The build the page belongs to, which the welcome repeats: a page
@@ -301,7 +308,7 @@ def build_web(
         except ValueError:
             body = None
         given = body.get("token") if isinstance(body, dict) else None
-        if not isinstance(given, str) or not valid(given):
+        if not isinstance(given, str) or not await valid(given):
             return JSONResponse({"error": "bad_token"}, status_code=401)
         return signed_in(Response(status_code=204), request, given)
 
@@ -547,8 +554,15 @@ def build_web(
         given = hello.get("token")
         if not isinstance(given, str) and not program:
             given = websocket.cookies.get(cookie)
-        principal = app.principals.resolve(given)
-        if hello.get("t") != "hello" or principal is None:
+        principal = None
+        if hello.get("t") == "hello" and isinstance(given, str) and given:
+            try:
+                principal = await app.identify(
+                    Credential(given, "link" if isinstance(via, str) else "browser", via)
+                )
+            except Refused:
+                principal = None
+        if principal is None:
             await websocket.close(code=BAD_TOKEN)
             return
         if hello.get("proto") != PROTO:
@@ -572,6 +586,9 @@ def build_web(
             link=via if isinstance(via, str) else None,
             principal=principal,
         )
+        # A host's raw token was checked at the hello; the server's own and a
+        # minted one are checked again at each message (App.checks_itself).
+        recheck = app.checks_itself(given)
         out: asyncio.Queue[dict] = asyncio.Queue()
         # This socket's subscriptions forwarded down links: <bid>:<channel>.
         bid = secrets.token_hex(6)
@@ -583,7 +600,7 @@ def build_web(
         if asked and refused is None:
 
             def still() -> str | None:
-                if app.principals.resolve(given) != principal:
+                if recheck and not app.still_valid(given, principal):
                     return "the link's token was revoked"
                 return app.trust_refusal(principal, str(via))
 
@@ -600,7 +617,7 @@ def build_web(
                 msg = await out.get()
                 # A revoked token reads nothing more, even on a socket that
                 # sends nothing (the reader checks the ones that do).
-                if app.principals.resolve(given) != principal:
+                if recheck and not app.still_valid(given, principal):
                     await websocket.close(code=BAD_TOKEN)
                     return
                 await websocket.send_text(json.dumps(msg, ensure_ascii=False))
@@ -699,7 +716,7 @@ def build_web(
                 msg = await websocket.receive_json()
                 # A token revoked while this socket was open stops here, at its
                 # next message, not at its next connection.
-                if app.principals.resolve(given) != principal:
+                if recheck and not app.still_valid(given, principal):
                     await websocket.close(code=BAD_TOKEN)
                     break
                 t = msg.get("t") if isinstance(msg, dict) else None
