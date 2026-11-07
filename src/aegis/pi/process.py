@@ -36,6 +36,7 @@ from .. import launch
 from ..claude.control import Catalog
 from ..claude.process import ControlError
 from ..harness import Launch, session_env
+from ..mcp_servers import by_ref
 from .config import (
     AGENT_DIR_VAR,
     EFFORTS,
@@ -156,8 +157,14 @@ class PiProcess:
         if self._session_dir is not None:
             self._session_dir.mkdir(parents=True, exist_ok=True)
         env = session_env(self._launch) or dict(os.environ)
+        servers = self._launch.extra_mcp
+        env |= by_ref(servers)[1]
         env[AGENT_DIR_VAR] = str(
-            agent_dir(self._root, self._launch.mcp[0] if self._launch.mcp else None)
+            agent_dir(
+                self._root,
+                self._launch.mcp[0] if self._launch.mcp else None,
+                servers=servers,
+            )
         )
         launch_now = dataclasses.replace(
             self._launch,

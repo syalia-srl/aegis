@@ -37,7 +37,7 @@ from .notice_sources import Item
 from .notices import TEXT_MAX
 from .ops import OpError
 from .roots import Roots
-from .policy import EventKind, Refused
+from .policy import EventKind, McpServer, Refused
 from .session import Host, Session, SpawnSpec
 from .transcript.entries import Fold, fold_records, tool_output
 from .transcript.store import Store, read_store
@@ -149,6 +149,8 @@ class Registry(Host):
         # The host policy's tools for a starting process, and what happened
         # to a session for its on_event (App.tools_for, App.event); set by App.
         self.tools_for: Callable[[Session], None] = lambda s: None
+        # The MCP servers a starting session gets beside aegis's (App.mcp_for).
+        self.mcp_for: Callable[[Session], tuple[McpServer, ...]] = lambda s: ()
         self.event: Callable[[EventKind, str, dict], None] = lambda kind, log_id, data: (
             None
         )
@@ -211,6 +213,9 @@ class Registry(Host):
         if priming:
             prompt += "\n\n" + priming
         return (self.mcp_url, self.tokens.mint(session.log_id)), prompt
+
+    def mcp_servers(self, session: Session) -> tuple[McpServer, ...]:
+        return self.mcp_for(session)
 
     def cgroup(self, session: Session) -> Path | None:
         return self.cgroups.create(session.log_id) if self.cgroups else None

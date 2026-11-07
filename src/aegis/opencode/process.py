@@ -198,6 +198,7 @@ class OpenCodeProcess:
                     self.permission,
                     self._launch.read_dirs,
                     self._launch.knowledge_native,
+                    self._launch.extra_mcp,
                 )
             ),
             "OPENCODE_SERVER_PASSWORD": password,
