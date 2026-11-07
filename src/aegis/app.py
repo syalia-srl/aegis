@@ -804,13 +804,8 @@ class App:
 
     def serve_link(self, server: str, channel: str, since, merge: bool, send):
         """Subscribe a trusted linked server's browser here, down its link
-        (#969), as the same caller as ``answer_link``; the function that ends it."""
-        caller = Caller(
-            "user", link=server, principal=Principal(self.principals.owner, "admin")
-        )
-        sub = self.channels.subscribe(
-            channel, send, since, merge=merge, view=self.view_of(caller)
-        )
+        (#969); the function that ends it."""
+        sub = self.channels.subscribe(channel, send, since, merge=merge)
         return lambda: self.channels.unsubscribe(sub)
 
     def watch_link(self, server: str, key: str, log_id: str | None) -> None:

@@ -59,7 +59,7 @@ WATCH_EVERY_S = 1.0
 TOP_KEYS = (
     "agents", "queues", "default_agent", "recap", "btw", "context", "usage",
     "session_memory_max", "terminals", "terminal_memory_max", "park", "network",
-    "host", "workflows", "harness_versions", "notices", "nudges", "multi_user",
+    "host", "workflows", "harness_versions", "notices", "nudges",
     "knowledge", "exit_via", "max_workers",
 )  # fmt: skip
 AGENT_KEYS = (
