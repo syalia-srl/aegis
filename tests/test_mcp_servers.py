@@ -6,10 +6,15 @@ from __future__ import annotations
 import pytest
 from ruamel.yaml import YAML
 
+from aegis.app import App
+from aegis.claude.harness import ClaudeCode
 from aegis.config import AgentDoc, ConfigDoc, doc_from, stamp_of, validate, write
 from aegis.mcp_servers import by_ref, expand, parse
 from aegis.ops import OpError
-from aegis.policy import McpServer
+from aegis.policy import McpServer, StandalonePolicy
+from aegis.roots import make_roots
+
+from .conftest import until
 
 AGENT = {
     "harness": "claude-code",
@@ -115,3 +120,141 @@ def test_the_mcp_block_round_trips_and_one_edit_keeps_the_rest(tmp_path):
         FILE.replace("${NOTES_TOKEN}", "${OTHER}")
     )
     assert "# the notes service" in text and "headers: {Authorization:" in text
+
+
+# -- what each start gets (task 2) ---------------------------------------------
+
+START = """\
+default_agent: clerk
+mcp:
+  notes: {url: "http://notes/mcp", headers: {Authorization: "Bearer ${NOTES_TOKEN}"}}
+  phone: {command: uv, args: [run, phone]}
+agents:
+  clerk: {harness: claude-code, model: opus, effort: low, permission: full, mcp: [notes, prog]}
+"""
+
+
+class Host(StandalonePolicy):
+    def __init__(self, servers=()):
+        self.servers = list(servers)
+
+    def mcp(self, who, session):
+        return list(self.servers)
+
+
+async def started(tmp_path, fake_claude, policy=None, config=START, **mcp):
+    (tmp_path / ".aegis.yaml").write_text(config)
+    app = App(
+        make_roots(tmp_path, None),
+        claude_bin=fake_claude,
+        policy=policy or Host(),
+        mcp={"prog": McpServer.stdio("prog", "x")} | mcp,
+    )
+    r = await app.registry.call("session.spawn", {"agent": "clerk"})
+    return app, app.sessions.sessions[r["log_id"]]
+
+
+async def stopped(app, s):
+    await s.send("/md hi")
+    await until(lambda: s.resume_id is not None, timeout=10, what="a first turn")
+    await app.registry.call("session.stop", {"log_id": s.log_id})
+    await until(lambda: not s.running, what="the stop")
+
+
+@pytest.fixture(autouse=True)
+def notes_token(monkeypatch):
+    monkeypatch.setenv("NOTES_TOKEN", "t1")
+
+
+async def test_a_start_gets_the_agents_servers_then_the_policys(tmp_path, fake_claude):
+    host = Host([McpServer.http("host", "http://h/mcp")])
+    app, s = await started(tmp_path, fake_claude, host)
+    try:
+        got = app.mcp_for(s)
+        assert [m.name for m in got] == ["notes", "prog", "host"]
+        assert got[0].headers == {"Authorization": "Bearer t1"}
+    finally:
+        await app.shutdown()
+
+
+async def test_a_name_from_two_sources_refuses_the_start(tmp_path, fake_claude):
+    app, s = await started(tmp_path, fake_claude)
+    try:
+        app.policy.servers = [McpServer.http("notes", "http://other")]
+        with pytest.raises(OpError) as e:
+            app.mcp_for(s)
+        assert e.value.code == "mcp_conflict"
+        assert ".aegis.yaml" in e.value.message and "the host policy" in e.value.message
+        app.policy.servers = [McpServer.http("aegis", "http://other")]
+        with pytest.raises(OpError, match="named aegis"):
+            app.mcp_for(s)
+    finally:
+        await app.shutdown()
+
+
+async def test_an_unknown_name_refuses_the_start(tmp_path, fake_claude):
+    app, s = await started(tmp_path, fake_claude)
+    try:
+        app.mcp = {}
+        with pytest.raises(OpError) as e:
+            app.mcp_for(s)
+        assert e.value.code == "unknown_mcp"
+        assert e.value.message == (
+            "agent clerk names MCP server prog, which is not defined"
+        )
+    finally:
+        await app.shutdown()
+
+
+async def test_an_unset_variable_refuses_the_start_and_says_so(
+    tmp_path, fake_claude, monkeypatch
+):
+    app, s = await started(tmp_path, fake_claude)
+    try:
+        await stopped(app, s)
+        monkeypatch.delenv("NOTES_TOKEN")
+        with pytest.raises(OpError) as e:
+            await app.registry.call("session.send", {"log_id": s.log_id, "text": "hi"})
+        assert e.value.code == "mcp_env"
+        assert not s.running
+        assert any(
+            x["kind"] == "error" and "${NOTES_TOKEN}" in x["summary"]
+            for x in s.entries()
+        )
+    finally:
+        await app.shutdown()
+
+
+async def test_a_transport_the_harness_cannot_take_refuses_by_name(
+    tmp_path, fake_claude, monkeypatch
+):
+    app, s = await started(tmp_path, fake_claude)
+    try:
+        monkeypatch.setattr(ClaudeCode, "mcp_transports", frozenset({"http"}))
+        with pytest.raises(OpError) as e:
+            app.mcp_for(s)
+        assert e.value.code == "mcp_transport"
+        assert "prog" in e.value.message and "stdio" in e.value.message
+    finally:
+        await app.shutdown()
+
+
+async def test_an_edited_entry_applies_at_the_next_start(tmp_path, fake_claude):
+    app, s = await started(tmp_path, fake_claude)
+    try:
+        await stopped(app, s)
+        launches = []
+        real = s.harness.process
+        s.harness.process = lambda launch: launches.append(launch) or real(launch)
+        (tmp_path / ".aegis.yaml").write_text(
+            START.replace("http://notes/", "http://new/")
+        )
+        await until(
+            lambda: app.config.current().mcp["notes"].url == "http://new/mcp",
+            what="the config reload",
+        )
+        await s.send("/md again")
+        await until(lambda: s.running, what="the restart")
+        assert launches[0].extra_mcp[0].url == "http://new/mcp"
+    finally:
+        await app.shutdown()

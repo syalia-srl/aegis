@@ -63,6 +63,7 @@ from .harness import Launch, Process, harness_for
 from .meta import MetaStore
 from .names import default_title
 from .ops import OpError
+from .policy import McpServer
 from .park import TIMER_TOOLS
 from .transcript.entries import EMPTY_STANDING, Fold, fold_records
 from .transcript.store import Store, read_store
@@ -137,6 +138,11 @@ class Host:
     def cgroup(self, session: "Session") -> Path | None:
         """The cgroup a new process starts in (cgroups.py), or None."""
         return None
+
+    def mcp_servers(self, session: "Session") -> tuple[McpServer, ...]:
+        """The MCP servers a new process gets beside aegis's (#960); raises
+        OpError when one cannot be given, which refuses the start."""
+        return ()
 
     async def admit_resume(self, session: "Session") -> None:
         """Ask the host policy before a stopped session's process starts again
@@ -834,6 +840,16 @@ class Session:
                     }
                 )
                 raise
+        try:
+            extra_mcp = self._host.mcp_servers(self)
+        except OpError as e:
+            self._record(
+                {
+                    "kind": "harness_error",
+                    "text": f"This session cannot start: {e.message}",
+                }
+            )
+            raise
         mcp, system_prompt = self._host.spawn_args(self)
         inbox = await asyncio.to_thread(
             attachments.ensure_inbox, self.state_root, self.log_id
@@ -859,6 +875,7 @@ class Session:
                 keep_harness_tools=self.spec.keep_harness_tools,
                 knowledge_native=self.spec.knowledge_native,
                 env=self.host_env,
+                extra_mcp=extra_mcp,
             )
         )
         # Before the start: a harness can speak while it starts (OpenCode's

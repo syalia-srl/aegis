@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from .claude.control import Catalog
+    from .policy import McpServer
     from .session import SpawnSpec
 
 
@@ -86,6 +87,9 @@ class Launch:
     via: str | None = None
     # What a host's spawn adds to the child's environment (#959).
     env: Mapping[str, str] = field(default_factory=dict)
+    # The MCP servers beside aegis's own, values expanded (App.mcp_for, #960);
+    # a driver that writes them into an argv or a file calls mcp_servers.by_ref.
+    extra_mcp: tuple[McpServer, ...] = ()
 
 
 SESSION_VAR = "AEGIS_SESSION"
@@ -152,6 +156,8 @@ class Harness(Protocol):
     # new request.
     steers_notices: bool
     bin: str
+    # The transports of the MCP servers it can take besides aegis's (#960).
+    mcp_transports: frozenset[str]
 
     def process(self, launch: Launch) -> Process: ...
     async def probe(self, spec: SpawnSpec, stderr_path: Path) -> Catalog: ...

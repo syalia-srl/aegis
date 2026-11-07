@@ -18,7 +18,7 @@ import asyncio
 import copy
 import contextlib
 import socket
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from .api.schedules import Schedules
     from .api.sessions import Sessions
     from .api.workflows import Workflows
-    from .policy import HostPolicy
+    from .policy import HostPolicy, McpServer
     from .app import App
     from .roots import Roots
 
@@ -125,6 +125,7 @@ class Server:
         cursor: str = "cursor-agent",
         origins: Iterable[str] = (),
         policy: HostPolicy | None = None,
+        mcp: Mapping[str, McpServer] | None = None,
     ) -> None:
         # Required: nothing below the CLI reads the working directory (test_no_cwd).
         self._root = Path(root)
@@ -134,6 +135,7 @@ class Server:
         self._bins = (claude, opencode, codex, cursor)
         self._origins = list(origins)
         self._policy = policy
+        self._mcp = mcp
         self._app: App | None = None
         self._uvicorn: Any = None
         self._task: asyncio.Task | None = None
@@ -196,6 +198,7 @@ class Server:
             codex_bin=self._bins[2],
             cursor_bin=self._bins[3],
             policy=self._policy,
+            mcp=self._mcp,
         )
         web = build_web(
             self._app, self.token, allowed_hosts(self._host, port), self._origins

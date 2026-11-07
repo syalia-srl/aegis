@@ -118,6 +118,7 @@ class ClaudeCode:
     label = "Claude Code"
     steers_mid_turn = True  # a user message read at the next tool boundary
     steers_notices = True
+    mcp_transports = frozenset({"http", "stdio"})
     tool_prefix = "mcp__aegis__"
 
     def __init__(self, bin: str) -> None:

@@ -51,6 +51,7 @@ import os
 import re
 import time
 from collections import OrderedDict
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal
 
@@ -58,7 +59,7 @@ from pydantic import BaseModel, Field, model_validator
 from pydantic.json_schema import SkipJsonSchema
 
 from . import archive, attachments as att, commands, dictation, files, restarts, speech
-from . import pause
+from . import mcp_servers, pause
 from . import feedback, harness_versions, self_update, setup
 from . import layout as canvas
 from . import workflow_store
@@ -144,6 +145,7 @@ from .policy import (
     Action,
     Credential,
     HostPolicy,
+    McpServer,
     Refused,
     SessionView,
     SpawnRequest,
@@ -453,8 +455,12 @@ class App:
         dictation_dir: Path | None = None,
         user: str | None = None,
         policy: HostPolicy | None = None,
+        mcp: Mapping[str, McpServer] | None = None,
     ) -> None:
         self.roots = roots
+        # The servers a program passes as Server(mcp=...): agents attach them by
+        # name, as the mcp: map's (#960).
+        self.mcp = dict(mcp or {})
         self.server_name = server_name
         self.claude_bin = claude_bin
         self.opencode_bin = opencode_bin
@@ -663,6 +669,7 @@ class App:
         self.sessions.admit = self.admit
         self.sessions.resume_hook = self.admit_resume
         self.sessions.tools_for = self.tools_for
+        self.sessions.mcp_for = self.mcp_for
         self.sessions.event = self.event
         self.registry.tools_of = self.tools_of.get
         self.registry.session_of = lambda kind, value: self.session_of(kind, value)
@@ -1316,6 +1323,60 @@ class App:
             return
         got = self.policy.tools(self.whos.get(view.owner), view)
         self.tools_of[s.log_id] = None if got is None else frozenset(got)
+
+    def mcp_for(self, s) -> tuple[McpServer, ...]:
+        """The MCP servers a starting session gets beside aegis's, in order:
+        its agent's mcp: list, from the file's map or the program's, then the
+        policy's mcp. Read at each start from the config in force, so an edit
+        applies at the next start. Raises OpError to refuse the start."""
+        snap = self.config.current()
+        agent = next((a for a in snap.agents if a.name == s.spec.agent), None)
+        chosen: dict[str, tuple[McpServer, str]] = {}
+
+        def add(m: McpServer, source: str) -> None:
+            if m.name == mcp_servers.RESERVED or m.name in chosen:
+                held = "aegis" if m.name == mcp_servers.RESERVED else chosen[m.name][1]
+                raise OpError(
+                    "mcp_conflict",
+                    f"two MCP servers are named {m.name}: {held} and {source}",
+                )
+            chosen[m.name] = (m, source)
+
+        for name in agent.mcp if agent is not None else ():
+            filed, program = snap.mcp.get(name), self.mcp.get(name)
+            if filed is not None and program is not None:
+                raise OpError(
+                    "mcp_conflict",
+                    f"two MCP servers are named {name}: .aegis.yaml and Server(mcp=...)",
+                )
+            if filed is None and program is None:
+                broken = snap.mcp_errors.get(name)
+                raise OpError(
+                    "unknown_mcp",
+                    f"MCP server {name}: {broken}"
+                    if broken
+                    else f"agent {s.spec.agent} names MCP server {name}, "
+                    "which is not defined",
+                )
+            if filed is not None:
+                add(filed, ".aegis.yaml")
+            elif program is not None:
+                add(program, "Server(mcp=...)")
+        view = self.view_of(s.log_id)
+        if view is not None:
+            for m in self.policy.mcp(self.whos.get(view.owner), view):
+                add(m, "the host policy")
+        takes = s.harness.mcp_transports
+        out = []
+        for m, _ in chosen.values():
+            if m.transport not in takes:
+                raise OpError(
+                    "mcp_transport",
+                    f"{s.harness.label} cannot take MCP server {m.name} over "
+                    f"{m.transport}",
+                )
+            out.append(mcp_servers.expand(m, os.environ))
+        return tuple(out)
 
     def listens(self) -> bool:
         """Whether the policy overrides on_event."""
