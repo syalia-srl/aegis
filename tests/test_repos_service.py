@@ -372,3 +372,40 @@ async def test_nothing_is_scheduled_after_stop(world, repo):
     world.repos.request(str(repo))
     world.repos.refresh("L1")
     assert not world.repos._probe_due and not world.repos._build_due
+
+
+def test_pending_names_what_the_session_left_in_its_repos(
+    world, repo, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(gh.shutil, "which", lambda name: "/bin/gh")
+    monkeypatch.setattr(gh, "prs", lambda top, b, user=None: [])
+    wt = tmp_path / "wt"
+    run(repo, "worktree", "add", "-q", "-b", "topic", str(wt))
+    wt = wt.resolve()
+    (wt / "b.py").write_text("b\n")
+    run(wt, "add", "b.py")
+    run(wt, "commit", "-q", "-m", "add b")
+    (wt / "c.py").write_text("c\n")
+    world.wrote("L1", wt, "b.py", main=repo)
+    world.wrote("L1", wt, "c.py", main=repo)
+    world.committed("L1", wt, run(wt, "rev-parse", "HEAD"), "add b", branch="topic")
+    assert world.repos.pending("L1") == [
+        "worktree wt (topic) is still there",
+        "1 uncommitted file(s) you wrote in wt (topic): c.py",
+        "1 unpushed commit(s) in wt (topic)",
+        "branch topic in wt has your commits and no pull request",
+    ]
+
+
+def test_pending_probes_again_instead_of_reading_the_last_probe(world, repo):
+    (repo / "c.py").write_text("c\n")
+    world.wrote("L1", repo, "c.py")
+    assert world.repos.pending("L1") == [
+        "1 uncommitted file(s) you wrote in repo (main): c.py"
+    ]
+    run(repo, "add", "c.py")
+    run(repo, "commit", "-q", "-m", "add c")
+    run(repo, "push", "-q")
+    world.committed("L1", repo, run(repo, "rev-parse", "HEAD"), "add c")
+    # The probe cached above still says c.py is dirty: pending must not read it.
+    assert world.repos.pending("L1") == []

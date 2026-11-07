@@ -20,8 +20,9 @@ JS = Path(__file__).parents[1] / "src" / "aegis" / "client" / "js" / "settings.j
 
 # Spelled another way in the file, edited by the control of the key it names.
 ALIASES = {"agents.*.provider": "agents.*.harness"}
-# Keys the form leaves out on purpose.
-HOST_ONLY: set[str] = set()
+# Keys the form leaves out on purpose. hosts holds what differs per server, and
+# the form edits the shared layer every server reads (#950).
+HOST_ONLY = {"hosts.*"}
 
 # A file that sets every key, none to its default.
 FULL = """\
@@ -96,6 +97,7 @@ def reader_keys() -> list[str]:
         "notices": notices,
         "recap": ["agent"],
         "btw": ["agent"],
+        "hosts": ["*"],  # a server's name
     }
     scalars = {
         "default_agent",

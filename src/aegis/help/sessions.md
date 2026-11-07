@@ -194,7 +194,12 @@ Two calls keep the person informed without reading the transcript:
   Archive button, so aegis refuses done while the plan has items not done,
   or while a monitor, queue task, background task or workflow will still
   wake the agent: it finishes or trims the plan, cancels what it no longer
-  waits on, or passes review.
+  waits on, or passes review. A done it accepts also lists what the session
+  left in the repos it worked in, as the Repos row counts it but probed again
+  that moment: a worktree still there, uncommitted files it wrote, unpushed
+  commits, a branch with its commits and no pull request, an open pull
+  request. The agent resolves what is its work and calls done again, and
+  ignores the rest; done is never refused for it.
 
 The mark on the tab and the card comes from `turn_end`, except working,
 waiting and error, which aegis sees for itself; a turn with no `turn_end`

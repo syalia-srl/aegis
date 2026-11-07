@@ -222,7 +222,12 @@ edits every key the readers take: the blocks that are values over defaults are
 drawn from `fields()`, a schema the wire carries, and the rest have controls of
 their own. `tests/test_config_coverage.py` takes the keys from the readers'
 declarations, so a key added to a reader fails until the form's document and
-the page carry it. Its `context:`
+the page carry it. The file is often shared through git by several servers, so
+what differs per server is committed under `hosts:`, a block per server name
+(`config.overlay`): the runtime fields read the merged mapping and the form's
+document the shared one, so a save never copies one server's values into all.
+An uncommitted edit was the alternative, and a git reset of a fraction of a
+second dropped it (#950). Its `context:`
 block is the one section with defaults: a wrong one keeps them all in force
 and `aegis doctor` names the mistake, because a typo there must never stop a
 `turn_end`.
@@ -291,6 +296,9 @@ session and the person should not have to read it to learn the task goes on.
 For the same reason it refuses done while a monitor, a callback queue task, a
 background task or an approved run will still wake the session
 (`Registry.wakers`, #608); its children do not count, since they do not wake it.
+A done it accepts names, in its answer, what the session left in its repos
+(`Repos.pending`, #977): a nudge, not a gate, since a worktree or a draft
+branch may be left on purpose.
 Both are aegis records in the
 store, so the fold derives a session's `standing` and a refold gives the same
 card; the meta keeps it, so boot still reads no store. `attention.py` holds the

@@ -15,6 +15,13 @@ first and writes nothing on a problem, and edits the document in place in
 ruamel's round-trip mode, so comments, key order, each agent's form
 (``harness:``, ``provider:`` or a nested ``provider:`` map) and keys aegis does
 not read survive.
+
+``hosts:`` holds what differs per server, under each server's name (``overlay``).
+The file is shared through git by every server that checks the repository out,
+so a server's own settings live in it, committed, rather than as an edit no
+commit may touch: a git command that resets the tree for a moment used to drop
+them. The runtime fields read the merged mapping; ``doc``, what Settings edits,
+stays the shared layer, so a save never copies one server's values into all.
 """
 
 from __future__ import annotations
@@ -60,8 +67,11 @@ TOP_KEYS = (
     "agents", "queues", "default_agent", "recap", "btw", "context", "usage",
     "session_memory_max", "terminals", "terminal_memory_max", "park", "network",
     "host", "workflows", "harness_versions", "notices", "nudges",
-    "knowledge", "exit_via", "max_workers",
+    "knowledge", "exit_via", "max_workers", "hosts",
 )  # fmt: skip
+# Read once at boot, before the server knows its name (cli.serve), so a host's
+# block cannot set them.
+NOT_PER_HOST = ("hosts",)
 AGENT_KEYS = (
     "harness", "provider", "model", "models", "effort", "permission", "priming",
     "keep_harness_tools", "exit",
@@ -626,6 +636,41 @@ def stamp_from(token: str | None) -> Stamp | None:
     return (a, b, c)
 
 
+def _merge(base: dict, over: dict) -> dict:
+    out = dict(base)
+    for k, v in over.items():
+        if v is None:
+            out.pop(k, None)
+        elif isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = _merge(out[k], v)
+        else:
+            out[k] = v
+    return out
+
+
+def host_block(data: dict, name: str | None) -> tuple[dict | None, str | None]:
+    """The block under ``hosts.<name>``, or None; and why ``hosts:`` cannot be
+    applied, or None."""
+    hosts = data.get("hosts")
+    if hosts is None or name is None:
+        return None, None
+    if not isinstance(hosts, dict) or not all(
+        isinstance(b, dict) or b is None for b in hosts.values()
+    ):
+        return None, "hosts: must map each server's name to a mapping of settings"
+    block = hosts.get(name)
+    if block and (bad := [k for k in NOT_PER_HOST if k in block]):
+        return None, f"hosts.{name}: {', '.join(bad)} cannot differ per server"
+    return block or None, None
+
+
+def overlay(data: dict, name: str | None) -> dict:
+    """``data`` with this server's ``hosts:`` block applied: a mapping merges
+    key by key, any other value replaces, and a null removes the shared key."""
+    block, error = host_block(data, name)
+    return data if block is None or error else _merge(data, block)
+
+
 def load(path: Path) -> tuple[dict | None, str | None]:
     """The file's top-level mapping, or why it has none."""
     try:
@@ -906,7 +951,10 @@ class Snapshot:
     error: str | None = None
 
     @classmethod
-    def parse(cls, path: Path, stamp: Stamp | None, data: dict) -> Snapshot:
+    def parse(
+        cls, path: Path, stamp: Stamp | None, data: dict, server: str | None = None
+    ) -> Snapshot:
+        raw, data = data, overlay(data, server)
         d = data.get("default_agent")
         mem, mem_error = session_memory_max_from(data.get("session_memory_max"))
         terms, terms_error = terminals_from(data.get("terminals"))
@@ -933,7 +981,7 @@ class Snapshot:
             max_workers=workers,
             max_workers_error=workers_error,
             unknown_keys=tuple(str(k) for k in data if k not in TOP_KEYS),
-            doc=doc_from(data),
+            doc=doc_from(raw),
             context=context_from(data.get("context")),
             usage=usage_from(data.get("usage")),
             notices=notices_from(data.get("notices")),
@@ -982,8 +1030,10 @@ class Config:
         self,
         config_root: Path,
         on_change: Callable[[Snapshot], None] = lambda s: None,
+        host: str | None = None,
     ) -> None:
         self.path = config_root / CONFIG_FILE
+        self.host = host
         self._on_change = on_change
         self._snap = self._read(stamp_of(self.path), Snapshot(self.path))
 
@@ -993,7 +1043,7 @@ class Config:
         data, error = load(self.path)
         if data is None:
             return replace(last, exists=True, stamp=stamp, error=error)
-        return Snapshot.parse(self.path, stamp, data)
+        return Snapshot.parse(self.path, stamp, data, self.host)
 
     def current(self) -> Snapshot:
         """The config in force: one ``stat``, and a re-read when it moved."""
@@ -1413,6 +1463,42 @@ def write(path: Path, doc: ConfigDoc, expected: Stamp | None) -> list[Finding]:
     tmp.write_text(buf.getvalue())
     os.replace(tmp, path)
     return []
+
+
+def write_host(
+    path: Path, host: str, key: str, value: object, expected: Stamp | None
+) -> None:
+    """Make ``key`` read as ``value`` on ``host`` alone, in its ``hosts:``
+    block. None clears it there: the block's entry goes, or becomes a null
+    when the shared layer sets the key. The shared key is never touched, since
+    every other server reads it. Names may hold dots, so this walks the
+    mappings rather than ``_set_at``'s dotted path."""
+    if stamp_of(path) != expected:
+        raise OpError("stale", f"{path} changed on disk since it was read; reload it")
+    if error := load(path)[1]:
+        raise OpError("bad_config", f"{error}; fix it in an editor first")
+    rt = YAML()
+    rt.preserve_quotes = True
+    data = rt.load(path.read_text())
+    if value is None and data.get(key) is None:
+        hosts = data.get("hosts")
+        if isinstance(hosts, dict) and isinstance(hosts.get(host), dict):
+            hosts[host].pop(key, None)
+            if not hosts[host]:
+                del hosts[host]
+            if not hosts:
+                del data["hosts"]
+    else:
+        if not isinstance(data.get("hosts"), dict):
+            data["hosts"] = CommentedMap()
+        if not isinstance(data["hosts"].get(host), dict):
+            data["hosts"][host] = CommentedMap()
+        data["hosts"][host][key] = value
+    buf = StringIO()
+    rt.dump(data, buf)
+    tmp = path.with_name(f".{path.name}.tmp")
+    tmp.write_text(buf.getvalue())
+    os.replace(tmp, path)
 
 
 def write_text(path: Path, text: str, expected: Stamp | None) -> list[Finding]:
