@@ -15,6 +15,7 @@ import builtins
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Literal
 
+from ..ops import Caller
 from ._wait import until
 from .models import (
     UNSETTLED,
@@ -28,6 +29,7 @@ from .models import (
 )
 
 if TYPE_CHECKING:
+    from ..policy import Action
     from ..server import Server
     from ..session import Session as _Live
 
@@ -71,17 +73,25 @@ class Sessions:
         r = await self._srv._call("session.spawn", params)
         return Session(self._srv, r["log_id"])
 
+    def _sees(self, log_id: str, action: Action) -> bool:
+        """Whether the caller this API acts as may ``action`` the session,
+        under the host policy (Server.as_who)."""
+        app = self._srv.app
+        return app.sees(app.who(self._srv._caller or Caller("user")), log_id, action)
+
     async def list(self) -> builtins.list[Session]:
-        """Every open session, oldest first."""
+        """Every open session the caller may see, oldest first."""
         return [
-            Session(self._srv, s.log_id) for s in self._srv.app.sessions.open_sessions()
+            Session(self._srv, s.log_id)
+            for s in self._srv.app.sessions.open_sessions()
+            if self._sees(s.log_id, "list")
         ]
 
     async def get(self, ref: str) -> Session:
         """The open session whose log id or handle is ``ref``."""
         reg = self._srv.app.sessions
         s = reg.sessions.get(ref) or reg.by_handle(ref)
-        if s is None or s.archived:
+        if s is None or s.archived or not self._sees(s.log_id, "read"):
             raise SessionNotFound(f"no open session {ref!r}")
         return Session(self._srv, s.log_id)
 
