@@ -509,6 +509,8 @@ body{background:#000}
 #a2 .wcur{display:inline-block;width:2px;height:1.05em;vertical-align:-.18em;margin-left:1px;background:var(--accent);animation:a2cur .9s steps(1) infinite}
 @keyframes a2cur{50%{opacity:0}}
 #a2 #working .meta{display:block;margin-left:0}
+/* A phone has no Esc; its way to interrupt is the stop button (#974). */
+@media (pointer:coarse){#a2 #working .wesc{display:none}}
 #a2 .wtok{transition:color .4s,text-shadow .4s}
 #a2 .wtok.flash{color:var(--ink);text-shadow:0 0 6px var(--accent)}
 @media (prefers-reduced-motion:reduce){#a2 #working-g svg,#a2 #working-verb span,#a2 .wcur{animation:none}#a2 .wtok{transition:none}}
