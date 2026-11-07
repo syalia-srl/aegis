@@ -711,7 +711,7 @@ def across(app: App, server: str, caller: Caller):
     servers trust carries (links.py, #684); the refusal otherwise."""
     if caller.link is not None:
         raise OpError("not_relayed", "a link is not relayed to another server")
-    if not app.links.trusted(server):
+    if not app.links.joined(server):
         raise OpError("not_across_links", f"{server} is another server; {ACROSS}")
     link = app.links.get(server)
     assert link is not None
@@ -723,7 +723,7 @@ def from_trusted(app: App, caller: Caller, sender: FarAgent) -> str:
     if (
         caller.link is None
         or sender.server != caller.link
-        or not app.links.trusted(caller.link)
+        or not app.links.joined(caller.link)
     ):
         raise OpError(
             "not_a_link", "only a trusted link, for its own server, says this"
@@ -950,7 +950,7 @@ def register_agent_ops(app: App) -> None:
         """A task's result from a server linked with trust, for the agent here
         that enqueued it. Only that link may call it; the header is composed
         here from values checked here."""
-        if caller.link is None or not app.links.trusted(caller.link):
+        if caller.link is None or not app.links.joined(caller.link):
             raise OpError("not_a_link", "only a trusted link delivers a task's result")
         if not (QUEUE_NAME.match(p.queue) and TASK_ID.match(p.task_id)):
             raise OpError("bad_sender", "a queue and a task id, one word each")
@@ -1086,8 +1086,8 @@ def register_agent_ops(app: App) -> None:
                 },
             )
         except OpError as e:
-            if e.code in FAR_ERRORS or app.links.trusted(server):
-                raise far_error(e, server, handle, app.links.trusted(server)) from None
+            if e.code in FAR_ERRORS or app.links.joined(server):
+                raise far_error(e, server, handle, app.links.joined(server)) from None
             raise OpError("far_error", f"{server} refused the handoff") from None
         r = r if isinstance(r, dict) else {}
         did = "steered" if r.get("steered") else "held" if r.get("held") else "sent"
@@ -1151,7 +1151,7 @@ def register_agent_ops(app: App) -> None:
         `handle@server` reads a session on a server this one links with
         trust."""
         handle, server = split_address(p.target, app.server_name)
-        if server is not None and caller.link is None and app.links.trusted(server):
+        if server is not None and caller.link is None and app.links.joined(server):
             link = app.links.get(server)
             assert link is not None  # trusted() found it
             try:
@@ -1216,7 +1216,7 @@ def register_agent_ops(app: App) -> None:
                 listed = await link.call("session.list")
             except OpError:
                 continue
-            trusted = app.links.trusted(link.name)
+            trusted = app.links.joined(link.name)
             for e in listed if isinstance(listed, list) else []:
                 if not isinstance(e, dict) or "server" in e:
                     continue

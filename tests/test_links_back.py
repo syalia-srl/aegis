@@ -1,8 +1,8 @@
-"""Trusted links (#684): two servers one person alone uses, reaching each other
-both ways over the one socket the near server opened (links.py, Backlink).
+"""The way back (#684, #985): two linked servers reach each other both ways over
+the one socket the near server opened (links.py, Backlink).
 
-Alpha links beta with trust, as in test_links.py. Beta grants it while only its
-admin holds a token, and its agents then reach alpha as ``handle@alpha``.
+Alpha links beta, as in test_links.py, and beta's agents then reach alpha as
+``handle@alpha``.
 """
 
 import asyncio
@@ -19,16 +19,11 @@ from .conftest import until
 from .test_links import Browser, Node, inbox, mcp, turn
 
 
-async def _granted(alpha: Node, beta: Node) -> None:
+async def _joined(alpha: Node, beta: Node) -> None:
     await until(
-        lambda: (
-            (link := alpha.app.links.get("beta")) is not None
-            and link.state == "linked"
-            and link.granted
-            and beta.app.links.get("alpha") is not None
-        ),
+        lambda: alpha.app.links.joined("beta") and beta.app.links.joined("alpha"),
         timeout=10,
-        what="the trusted link",
+        what="the link both ways",
     )
 
 
@@ -36,19 +31,18 @@ async def _granted(alpha: Node, beta: Node) -> None:
 async def trusted(tmp_path, fake_claude):
     beta = await Node(tmp_path / "beta", "beta", fake_claude).start()
     alpha = await Node(tmp_path / "alpha", "alpha", fake_claude).start()
-    alpha.app.links.add("beta", beta.base, beta.token, trusted=True)
-    await _granted(alpha, beta)
+    alpha.app.links.add("beta", beta.base, beta.token)
+    await _joined(alpha, beta)
     yield alpha, beta
     await alpha.stop()
     await beta.stop()
 
 
-# -- granting -----------------------------------------------------------------------
-async def test_a_trusted_link_is_granted_and_opens_the_way_back(trusted):
+# -- the link -------------------------------------------------------------------------
+async def test_a_link_opens_the_way_back(trusted):
     alpha, beta = trusted
     (w,) = alpha.app.links.wire()
-    assert w["trusted"] and w["granted"] and w["trust_error"] == ""
-    assert alpha.app.links.trusted("beta") and beta.app.links.trusted("alpha")
+    assert w["state"] == "linked" and "trusted" not in w and "granted" not in w
     incoming = await beta.app.registry.call("link.incoming", {})
     assert [(i["name"], i["state"]) for i in incoming] == [("alpha", "linked")]
     # The way back is listed for beta's browsers, marked as one (#969).
@@ -57,45 +51,13 @@ async def test_a_trusted_link_is_granted_and_opens_the_way_back(trusted):
     ]
 
 
-async def test_a_plain_link_opens_no_way_back(tmp_path, fake_claude):
-    beta = await Node(tmp_path / "beta", "beta", fake_claude).start()
-    alpha = await Node(tmp_path / "alpha", "alpha", fake_claude).start()
-    try:
-        alpha.app.links.add("beta", beta.base, beta.token)
-        await until(lambda: alpha.app.links.get("beta").state == "linked")
-        link = alpha.app.links.get("beta")
-        assert not link.trusted and not link.granted
-        assert beta.app.links.get("alpha") is None
-        # An rcall down a plain link is dropped: nothing here answers it.
-        link._receive(json.dumps({"t": "rcall", "id": 1, "op": "session.list"}))
-        assert not link._answering
-    finally:
-        await alpha.stop()
-        await beta.stop()
-
-
-async def test_link_trust_asks_and_stops_asking(tmp_path, fake_claude):
-    beta = await Node(tmp_path / "beta", "beta", fake_claude).start()
-    alpha = await Node(tmp_path / "alpha", "alpha", fake_claude).start()
-    try:
-        alpha.app.links.add("beta", beta.base, beta.token)
-        await until(lambda: alpha.app.links.get("beta").state == "linked")
-        await alpha.app.registry.call("link.trust", {"name": "beta", "trusted": True})
-        await _granted(alpha, beta)
-        await alpha.app.registry.call("link.trust", {"name": "beta", "trusted": False})
-        await until(
-            lambda: (
-                (link := alpha.app.links.get("beta")) is not None
-                and link.state == "linked"
-                and not link.trusted
-                and beta.app.links.get("alpha") is None
-            ),
-            timeout=10,
-            what="the link back to one way",
-        )
-    finally:
-        await alpha.stop()
-        await beta.stop()
+async def test_an_unlink_frame_closes_the_socket(trusted):
+    alpha, _ = trusted
+    link = alpha.app.links.get("beta")
+    attempts = link.attempts
+    link._receive(json.dumps({"t": "unlink", "reason": "revoked"}))
+    assert not link.back
+    await until(lambda: link.attempts > attempts, timeout=10, what="the reconnect")
 
 
 # -- the way back ---------------------------------------------------------------------
@@ -203,16 +165,6 @@ async def test_a_view_back_fails_when_the_link_drops(trusted):
         assert err["error"]["code"] == "server_offline"
 
 
-def test_a_way_back_from_an_older_server_is_still_not_watched():
-    """A near server from before #969 does not say ``views`` in its hello: it
-    would answer an rsub as a bad call, so the far server refuses the view."""
-    sent: list[dict] = []
-    back = links.Backlink("alpha", sent.append, lambda: None, views=False)
-    got: list[dict] = []
-    back.sub("s1", "sessions", None, got.append)
-    assert got[0]["error"]["code"] == "not_both_ways" and not sent
-
-
 async def test_a_call_back_is_not_relayed_to_a_third_server(
     trusted, tmp_path, fake_claude
 ):
@@ -238,28 +190,6 @@ async def test_the_way_back_goes_when_the_link_does(trusted):
     far = await beta.spawn()
     out = await turn(far, mcp("peer_handoff", target="anyone@alpha", context="x"))
     assert "unknown_server" in out
-
-
-def test_aegis_link_add_trusted_names_the_refusal(tmp_path, monkeypatch):
-    async def refuse(*a, **k):
-        raise links.LinkError("trust_refused", "beta has tokens besides its admin's")
-
-    monkeypatch.setattr(links, "probe", refuse)
-    r = CliRunner().invoke(
-        cli,
-        [
-            "link",
-            "add",
-            "beta",
-            "http://127.0.0.1:9",
-            "--trusted",
-            "--root",
-            str(tmp_path),
-        ],
-        input="tok\n",
-    )
-    assert r.exit_code == 1
-    assert "not linked: beta has tokens besides its admin's" in r.output
 
 
 # -- reading across ---------------------------------------------------------------------

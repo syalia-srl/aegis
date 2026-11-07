@@ -248,7 +248,7 @@ def register_schedule_ops(app: App) -> None:
         none, as in session_list."""
         out = []
         for link in app.links.up():
-            if not app.links.trusted(link.name):
+            if not app.links.joined(link.name):
                 continue
             try:
                 listed = await link.call("schedule.list")

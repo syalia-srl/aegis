@@ -290,13 +290,9 @@ class Exit:
         link = self.links.outbound(self.name)
         if link is None:
             return "no such link"
-        if not link.trusted:
-            return "the link is not trusted"
         if link.state != "linked":
             since = time.strftime("%H:%M", time.localtime(link.since))
             return f"link {link.state} since {since}"
-        if not link.granted:
-            return link.trust_error or "the far server did not grant trust"
         return None
 
     async def _serve(

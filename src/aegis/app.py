@@ -403,16 +403,6 @@ class LinkAdd(_Strict):
     name: str | None = Field(
         None, description="What it must call itself; omitted: whatever it does."
     )
-    trusted: bool = Field(
-        False,
-        description="Ask for a trusted link: both ways, agents unrestricted. "
-        "Refused unless the far server is used by its admin alone.",
-    )
-
-
-class LinkTrust(_Strict):
-    name: str
-    trusted: bool
 
 
 class LinkExit(_Strict):
@@ -784,17 +774,14 @@ class App:
                 )
         return None
 
-    def trust_refusal(self, principal: Principal, server: str) -> str | None:
-        """Why this server will not trust ``server``'s link, or None: trust is
-        for two servers one person alone uses, so the link must hold the
-        admin's own token and nobody else may hold one (links.py, #684)."""
+    def link_refusal(self, server: str) -> str | None:
+        """Why this server will not take ``server``'s link, or None: one link
+        joins a pair of servers both ways, so it refuses a second (links.py)."""
         me = self.server_name
-        if principal.name != self.principals.owner:
-            return f"the link does not hold {me}'s admin token"
         if self.links.outbound(server) is not None:
             return (
-                f"{me} links a server named {server} itself; remove that "
-                "link to trust this one"
+                f"{me} links a server named {server} itself; remove one of "
+                "the two links"
             )
         return None
 
@@ -818,7 +805,7 @@ class App:
         self.exit_bytes[server] = self.exit_bytes.get(server, 0) + n
 
     async def answer_link(self, server: str, op: str, params) -> dict:
-        """Run a call a trusted linked server sent back down its link: as this
+        """Run a call a linked server sent back down its link: as this
         server's admin acting through that link, the same caller a link socket
         is on the far server, so every op keeps one rule for linked calls."""
         caller = Caller("user", link=server, principal=Principal(self.principals.owner))
@@ -837,23 +824,23 @@ class App:
             }
 
     def serve_link(self, server: str, channel: str, since, merge: bool, send):
-        """Subscribe a trusted linked server's browser here, down its link
+        """Subscribe a linked server's browser here, down its link
         (#969); the function that ends it."""
         sub = self.channels.subscribe(channel, send, since, merge=merge)
         return lambda: self.channels.unsubscribe(sub)
 
     def watch_link(self, server: str, key: str, log_id: str | None) -> None:
-        """Which session a page on a trusted linked server shows (park.py)."""
+        """Which session a page on a linked server shows (park.py)."""
         self.watchers.watch(f"link:{server}:{key}", log_id)
 
     async def _far_callback(self, t, outcome: str, body: str) -> None:
-        """A task an agent on a server linked with trust enqueued here
+        """A task an agent on a linked server enqueued here
         finished: its result goes back to that agent over the link."""
         far = t.far_enqueuer or {}
         server = str(far.get("server"))
         link = self.links.get(server)
-        if link is None or not self.links.trusted(server):
-            log.warning("the result of %s has no trusted link to %s", t.id, server)
+        if link is None or not self.links.joined(server):
+            log.warning("the result of %s has no link to %s", t.id, server)
             return
         try:
             await link.call(
@@ -870,10 +857,10 @@ class App:
             log.warning("%s refused the result of %s: %s", server, t.id, e.message)
 
     async def _far_list(self, server: str) -> list | None:
-        """A trusted server's open sessions, for a monitor here; None when
+        """A linked server's open sessions, for a monitor here; None when
         they cannot be read now."""
         link = self.links.get(server)
-        if link is None or not self.links.trusted(server):
+        if link is None or not self.links.joined(server):
             return None
         try:
             listed = await link.call("session.list")
@@ -2360,7 +2347,7 @@ class App:
         try:
             listed = await link.call("agents.list", {})
         except OpError as e:
-            raise far_error(e, far, trusted=self.links.trusted(far)) from None
+            raise far_error(e, far, trusted=self.links.joined(far)) from None
         # What the far server says of its agents only lowers the permission.
         presets = listed.get("agents") if isinstance(listed, dict) else None
         agent = name or (listed.get("default") if isinstance(listed, dict) else None)
@@ -2398,7 +2385,7 @@ class App:
                 "session.spawn", {k: v for k, v in params.items() if v is not None}
             )
         except OpError as e:
-            raise far_error(e, far, trusted=self.links.trusted(far)) from None
+            raise far_error(e, far, trusted=self.links.joined(far)) from None
         if not isinstance(r, dict):
             raise OpError("far_error", f"{far} answered the spawn with something else")
         handle, log_id = r.get("handle"), r.get("log_id")
@@ -3281,9 +3268,7 @@ class App:
             """Link another aegis server: connect once with its token, take the
             name it gives itself, and keep the link in links.json."""
             try:
-                welcome = await probe(
-                    p.url, p.token, self.server_name, self.user, p.trusted
-                )
+                welcome = await probe(p.url, p.token, self.server_name, self.user)
             except LinkError as e:
                 raise OpError("link_refused", e.message) from e
             name = str(welcome.get("server"))
@@ -3291,22 +3276,16 @@ class App:
                 raise OpError(
                     "bad_link", f"that server calls itself {name}, not {p.name}"
                 )
-            self.links.add(name, p.url, p.token, p.trusted)
+            self.links.add(name, p.url, p.token)
             return {"name": name}
 
         @r.op("link.remove", LinkName, server=True)
         async def link_remove(p: LinkName, caller):
             self.links.remove(p.name)
 
-        @r.op("link.trust", LinkTrust, server=True)
-        async def link_trust(p: LinkTrust, caller):
-            """Ask a link for trust (both ways, agents unrestricted), or stop
-            asking. The link reconnects; the far server decides."""
-            self.links.trust(p.name, p.trusted)
-
         @r.op("link.incoming", server=True)
         async def link_incoming(_, caller):
-            """The servers that linked this one with trust, so their agents
+            """The servers that linked this one, so their agents
             reach this one over their link, and what each took as an exit."""
             return [
                 {**row, "exit_bytes": self.exit_bytes.get(row["name"], 0)}

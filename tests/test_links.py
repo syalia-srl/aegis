@@ -161,6 +161,65 @@ async def test_a_link_comes_up_and_names_the_far_server(pair):
     assert "token" not in w
 
 
+async def raw_hello(node: Node, link: dict) -> dict:
+    """The first frame a link hello gets back, from a socket with no Origin."""
+    async with connect(
+        links.ws_url(node.base),
+        additional_headers={"Authorization": f"Bearer {node.token}"},
+    ) as ws:
+        hello = {"t": "hello", "token": node.token, "proto": PROTO, "link": link}
+        await ws.send(json.dumps(hello))
+        return json.loads(await asyncio.wait_for(ws.recv(), 5))
+
+
+async def test_every_link_opens_the_way_back(pair):
+    alpha, beta = pair
+    await until(lambda: beta.app.links.joined("alpha"), timeout=10, what="the way back")
+    assert alpha.app.links.joined("beta")
+
+
+async def test_an_old_trusted_field_is_ignored(tmp_path, fake_claude):
+    beta = await Node(tmp_path / "beta", "beta", fake_claude).start()
+    alpha = await Node(tmp_path / "alpha", "alpha", fake_claude).start()
+    try:
+        links.LinkStore(alpha.app.roots.state_root / "links.json").save(
+            [{"name": "beta", "url": beta.base, "token": beta.token, "trusted": False}]
+        )
+        await until(
+            lambda: beta.app.links.joined("alpha"), timeout=10, what="the way back"
+        )
+        assert "trusted" not in alpha.app.links.wire()[0]
+    finally:
+        await alpha.stop()
+        await beta.stop()
+
+
+async def test_a_second_link_between_one_pair_is_refused_by_name(pair):
+    alpha, beta = pair
+    await until(lambda: beta.app.links.joined("alpha"), timeout=10, what="the way back")
+    beta.app.links.add("alpha", alpha.base, alpha.token)
+    await until(
+        lambda: beta.app.links.outbound("alpha").state == "refused",
+        timeout=10,
+        what="the refusal",
+    )
+    assert "links a server named beta itself" in beta.app.links.outbound("alpha").error
+    assert alpha.app.links.get("beta").state == "linked"
+
+
+async def test_a_hello_without_both_ways_is_named_too_old(pair):
+    _, beta = pair
+    # A near server from 2.x: its hello carries link but not both_ways.
+    frame = await raw_hello(beta, {"server": "old", "user": "u"})
+    assert frame["t"] == "error" and frame.get("code") == "too_old"
+    assert "3.0.0 or newer" in frame["message"]
+
+
+def test_a_welcome_without_both_ways_is_named_too_old():
+    why = links.too_old({"server": "old", "build": {"version": "2.17.0"}})
+    assert "old runs aegis 2.17.0" in why and "3.0.0 or newer" in why
+
+
 async def test_a_browser_on_alpha_calls_and_subscribes_on_beta(pair):
     alpha, beta = pair
     async with Browser(alpha) as b:
@@ -287,7 +346,11 @@ async def test_beta_cannot_call_or_subscribe_down_the_link(
 
     async def hostile(ws):
         await ws.recv()  # the hello
-        await ws.send(json.dumps({"t": "welcome", "proto": PROTO, "server": "evil"}))
+        await ws.send(
+            json.dumps(
+                {"t": "welcome", "proto": PROTO, "server": "evil", "both_ways": True}
+            )
+        )
         for frame in (
             {"t": "call", "id": 1, "op": "session.spawn", "params": {"agent": "opus"}},
             {"t": "sub", "channel": "sessions"},
@@ -799,18 +862,6 @@ async def test_only_a_link_names_where_a_spawn_came_from(pair):
     assert e.value.code == "not_a_link"
 
 
-async def test_beta_has_no_route_to_alpha(pair):
-    alpha, beta = pair
-    here, far = await alpha.spawn(), await beta.spawn()
-    out = await turn(
-        far, mcp("peer_handoff", target=f"{here.handle}@alpha", context="hello?")
-    )
-    assert out.startswith("mcp error:") and "unknown_server" in out
-    listed = json.loads((await turn(far, mcp("session_list"))).removeprefix("mcp ok: "))
-    assert all(e.get("server") in (None, "beta") for e in listed)
-    assert not inbox(here)
-
-
 async def test_peer_deliver_is_only_for_link_sockets(pair):
     alpha, beta = pair
     far = await beta.spawn()
@@ -864,7 +915,11 @@ async def hostile_far(port: int):
 
     async def handler(ws):
         await ws.recv()
-        await ws.send(json.dumps({"t": "welcome", "proto": PROTO, "server": "evil"}))
+        await ws.send(
+            json.dumps(
+                {"t": "welcome", "proto": PROTO, "server": "evil", "both_ways": True}
+            )
+        )
         async for raw in ws:
             m = json.loads(raw)
             if m.get("t") != "call":
