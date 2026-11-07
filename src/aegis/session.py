@@ -138,6 +138,11 @@ class Host:
         """The cgroup a new process starts in (cgroups.py), or None."""
         return None
 
+    async def admit_resume(self, session: "Session") -> None:
+        """Ask the host policy before a stopped session's process starts again
+        (#959); raises policy.Refused to keep it stopped."""
+        return None
+
     def released(self, session: "Session") -> None:
         """The session's process ended: empty and remove its cgroup."""
 
@@ -285,6 +290,9 @@ class SpawnSpec:
     # spawn, so the menu and the process never disagree; the switch reaches
     # new sessions.
     knowledge_native: bool = False
+    # A host's strings for this session (policy.SpawnRequest.tags), copied to
+    # every session it starts; shown to no one (#959).
+    tags: dict[str, str] = dataclasses.field(default_factory=dict)
 
     def record(self) -> dict:
         """The fields a spawn record and a meta carry."""
@@ -318,6 +326,8 @@ class SpawnSpec:
             d["cascade"] = list(self.cascade)
         if self.knowledge_native:
             d["knowledge_native"] = True
+        if self.tags:
+            d["tags"] = dict(self.tags)
         return d
 
     @classmethod
@@ -342,6 +352,7 @@ class SpawnSpec:
             keep_harness_tools=tuple(d.get("keep_harness_tools") or ()),
             cascade=_cascade_of(d.get("cascade")),
             knowledge_native=bool(d.get("knowledge_native")),
+            tags=dict(d.get("tags") or {}),
         )
 
 
@@ -547,6 +558,9 @@ class Session:
         self.last_verdict: harness_versions.Verdict | None = None
         # The link the last launch exits through (exit.py); None for direct.
         self.exit_via: str | None = None
+        # The environment a host's spawn added (policy.SpawnRequest.env): kept
+        # in memory only, never in the meta, and asked for again on a resume.
+        self.host_env: dict[str, str] = {}
         # The last launch's version when it was outside the tested range, for
         # the panel's warning colour (#456); None in range or before a launch.
         self.untested_version: dict | None = None
@@ -803,6 +817,8 @@ class Session:
 
         await self._check_version()
         resume = self.resume_id
+        if resume is not None:
+            await self._host.admit_resume(self)
         mcp, system_prompt = self._host.spawn_args(self)
         inbox = await asyncio.to_thread(
             attachments.ensure_inbox, self.state_root, self.log_id
@@ -827,6 +843,7 @@ class Session:
                 log_id=self.log_id,
                 keep_harness_tools=self.spec.keep_harness_tools,
                 knowledge_native=self.spec.knowledge_native,
+                env=self.host_env,
             )
         )
         # Before the start: a harness can speak while it starts (OpenCode's

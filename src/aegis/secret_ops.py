@@ -334,7 +334,8 @@ def register_secret_ops(app: App) -> ss.SecretStore:
     @r.op("harness.status", read=True)
     async def harness_status_op(p, caller):
         """Each harness with a sign-in: installed, its version, signed in and until when."""
-        return await harness_status(_sign_ins().recipes())
+        rows = await harness_status(_sign_ins().recipes())
+        return [r for r in rows if app.offers(caller, harness=str(r["harness"]))]
 
     @r.op("signin.start", SignInStart, names=(("log_id", "session"),))
     async def sign_in_start(p: SignInStart, caller):

@@ -20,7 +20,7 @@ import logging
 import re
 import secrets
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 
@@ -100,6 +100,10 @@ def _public(meta: dict) -> dict:
     return out
 
 
+async def _admit_all(spec: SpawnSpec) -> tuple[SpawnSpec, dict]:
+    return spec, {}
+
+
 class Registry(Host):
     def __init__(
         self,
@@ -135,6 +139,12 @@ class Registry(Host):
         self.quota = None
         self.notices = None  # notices.Notices, set by App
         self.sign_in = None  # signin.core.SignIns, set by App
+        # The host policy's say on a start (App.admit, App.admit_resume, #959):
+        # the spec to run and the environment it adds; set by the app.
+        self.admit: Callable[[SpawnSpec], Awaitable[tuple[SpawnSpec, dict]]] = (
+            _admit_all
+        )
+        self.resume_hook: Callable[[Session], Awaitable[None]] | None = None
         self.load = None  # load.LoadSampler, set by App
         # knowledge.Knowledge, and whose knowledge a session's sends are
         # hinted from (its owner, else the admin); both set by App.
@@ -196,6 +206,10 @@ class Registry(Host):
 
     def cgroup(self, session: Session) -> Path | None:
         return self.cgroups.create(session.log_id) if self.cgroups else None
+
+    async def admit_resume(self, session: Session) -> None:
+        if self.resume_hook is not None:
+            await self.resume_hook(session)
 
     def released(self, session: Session) -> None:
         if self.cgroups is not None:
@@ -933,6 +947,7 @@ class Registry(Host):
         workflow: dict | None = None,
         launch_by: str = "agent",
     ) -> Session:
+        spec, env = await self.admit(spec)
         log_id = mint_log_id()
         if self.knowledge_native(spec.owner):
             spec = dataclasses.replace(spec, knowledge_native=True)
@@ -953,6 +968,7 @@ class Registry(Host):
             }
         )
         self.sessions[log_id] = s
+        s.host_env = env
         self._publish("sessions", [{"upsert": s.wire()}])
         s.launch_by = launch_by
         try:
