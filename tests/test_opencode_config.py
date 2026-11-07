@@ -137,3 +137,29 @@ def test_opencode_catalog_keeps_prices():
     assert (paid.price_in, paid.price_out) == (1.25, 10)
     assert (unpriced.price_in, unpriced.price_out) == (None, None)
     assert paid.wire()["price_in"] == 1.25 and paid.wire()["price_out"] == 10
+
+
+def test_every_extra_server_runs_outside_code_mode():
+    from aegis.policy import McpServer
+
+    cfg = child_config(
+        None,
+        "full",
+        servers=(McpServer.http("notes", "http://n/mcp"), McpServer.stdio("echo", "uv")),
+    )
+    servers = cfg["mcp"]["servers"]
+    assert servers["notes"]["codemode"] is False and servers["echo"]["codemode"] is False
+
+
+def test_without_harness_tools_only_mcp_tools_are_allowed():
+    from aegis.policy import McpServer
+
+    cfg = child_config(
+        ("http://a/mcp", "tok"),
+        "full",
+        servers=(McpServer.stdio("echo", "uv"),),
+        harness_tools=False,
+    )
+    allowed = [r["action"] for r in cfg["permissions"] if r["effect"] == "allow"]
+    assert cfg["permissions"][0] == {"action": "*", "resource": "*", "effect": "deny"}
+    assert allowed == ["aegis_*", "echo_*"]
