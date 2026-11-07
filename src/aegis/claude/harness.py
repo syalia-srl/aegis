@@ -36,6 +36,19 @@ _SETTERS = {
 }
 
 
+def isolated_env(home: Path) -> dict[str, str]:
+    """An isolated session's environment (#983): ``home`` as Claude Code's
+    config dir, holding a link to the person's sign-in and nothing else of
+    theirs (no CLAUDE.md, skills, plugins or settings). An empty dir without
+    the link starts signed out."""
+    from ..quota.claude import credentials_path
+
+    link, login_file = home / ".credentials.json", credentials_path()
+    if login_file.exists() and not link.is_symlink():
+        link.symlink_to(login_file)
+    return {"CLAUDE_CONFIG_DIR": str(home)}
+
+
 class ClaudeSession:
     def __init__(self, bin: str, launch: Launch) -> None:
         from ..mcp import mcp_config as build
@@ -57,6 +70,8 @@ class ClaudeSession:
             env = {**(os.environ if env is None else env), **refs}
         if launch.knowledge_native:
             env = {**(os.environ if env is None else env), **NO_AUTO_MEMORY}
+        if launch.home is not None:
+            env = {**(os.environ if env is None else env), **isolated_env(launch.home)}
         argv = build_argv(
             bin,
             launch.model,
@@ -68,6 +83,7 @@ class ClaudeSession:
             add_dirs=launch.read_dirs,
             disallowed=disallowed,
             mcp_names=tuple(m.name for m in launch.extra_mcp),
+            own_tools=launch.harness_tools,
         )
         self._proc = ClaudeProcess(
             argv,
