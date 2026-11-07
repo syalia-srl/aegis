@@ -20,9 +20,29 @@ if TYPE_CHECKING:
     from .api.sessions import Session, SessionNotFound
     from .api.workflows import WorkflowRun
     from .ops import OpError
+    from .policy import (
+        Catalog,
+        Credential,
+        Event,
+        HostPolicy,
+        McpServer,
+        Refused,
+        SessionView,
+        SpawnRequest,
+        StandalonePolicy,
+    )
     from .server import Server, StartError
 
 __all__ = [
+    "Catalog",
+    "Credential",
+    "Event",
+    "HostPolicy",
+    "McpServer",
+    "Refused",
+    "SessionView",
+    "SpawnRequest",
+    "StandalonePolicy",
     "OpError",
     "Schedule",
     "Server",
@@ -36,6 +56,15 @@ __all__ = [
 
 _WHERE = {
     "OpError": ".ops",
+    "Catalog": ".policy",
+    "Credential": ".policy",
+    "Event": ".policy",
+    "HostPolicy": ".policy",
+    "McpServer": ".policy",
+    "Refused": ".policy",
+    "SessionView": ".policy",
+    "SpawnRequest": ".policy",
+    "StandalonePolicy": ".policy",
     "Server": ".server",
     "StartError": ".server",
     "Session": ".api.sessions",
