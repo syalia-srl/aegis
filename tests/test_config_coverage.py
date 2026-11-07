@@ -30,7 +30,7 @@ FULL = """\
 default_agent: opus
 exit_via: far
 agents:
-  opus: {exit: "off", harness: claude-code, model: opus, effort: high, permission: full, priming: Be brief., keep_harness_tools: [Agent], mcp: [notes, phone]}
+  opus: {exit: "off", harness: claude-code, model: opus, effort: high, permission: full, priming: Be brief., keep_harness_tools: [Agent], mcp: [notes, phone], harness_tools: false, isolated: true, primer: false, notices: false}
   quick: {harness: claude-code, models: [haiku, sonnet], effort: low, permission: read}
 queues:
   general: {agent: opus, priority: 3, quiet: false}

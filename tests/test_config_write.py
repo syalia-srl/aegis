@@ -382,3 +382,17 @@ def test_a_file_without_models_keeps_its_old_list_indentation(tmp_path):
     doc.agents[0].effort = "low"
     assert write(p, doc, stamp_of(p)) == []
     assert "keep_harness_tools:\n    - Agent" in p.read_text()
+
+
+def test_the_product_switches_survive_a_save_and_defaults_are_not_written(tmp_path):
+    p, doc = setup(
+        tmp_path,
+        "agents:\n  p: {harness: opencode, model: opencode-go/m, effort: high,"
+        " permission: full, isolated: true, notices: false}\n",
+    )
+    assert (doc.agents[0].isolated, doc.agents[0].notices) == (True, False)
+    doc.agents[0].notices = True
+    assert write(p, doc, stamp_of(p)) == []
+    node = safe(p)["agents"]["p"]
+    assert node["isolated"] is True
+    assert not {"notices", "harness_tools", "primer"} & set(node)
