@@ -18,6 +18,7 @@ class Codex:
     steers_mid_turn = True  # turn/steer
     steers_notices = False  # not yet run with a real model
     mcp_transports = frozenset({"http", "stdio"})
+    contains = frozenset()
     # The name Codex shows the model for aegis's server (config.SERVER).
     tool_prefix = f"mcp__{SERVER}__"
 

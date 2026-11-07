@@ -16,6 +16,7 @@ uses it, because how a token reaches the CLI is the harness's business
 from __future__ import annotations
 
 import os
+import tempfile
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -90,6 +91,28 @@ class Launch:
     # The MCP servers beside aegis's own, values expanded (App.mcp_for, #960);
     # a driver that writes them into an argv or a file calls mcp_servers.by_ref.
     extra_mcp: tuple[McpServer, ...] = ()
+    # False: none of the harness's own tools, only MCP tools (#983).
+    harness_tools: bool = True
+    # An isolated session's own config directory (isolated_dirs); None reads
+    # the person's, as every other session does.
+    home: Path | None = None
+
+
+# The switches a driver may guarantee (Harness.contains, #983).
+CONTAINS = ("harness_tools", "isolated")
+
+
+def isolated_dirs(state_root: Path, harness: str, log_id: str) -> tuple[Path, Path]:
+    """An isolated session's working folder and its harness's config dir. The
+    folder is empty and outside any project, since harnesses look up from
+    their cwd for project config (a state root inside a project would not do),
+    and keeps its path across starts for the harnesses that key a resume by
+    cwd. The config dir is one per harness, under the state root."""
+    cwd = Path(tempfile.gettempdir()) / f"aegis-{os.getuid()}" / log_id
+    cwd.mkdir(mode=0o700, parents=True, exist_ok=True)
+    home = state_root / "harness-home" / harness
+    home.mkdir(parents=True, exist_ok=True)
+    return cwd, home
 
 
 SESSION_VAR = "AEGIS_SESSION"
@@ -158,6 +181,9 @@ class Harness(Protocol):
     bin: str
     # The transports of the MCP servers it can take besides aegis's (#960).
     mcp_transports: frozenset[str]
+    # The product-agent switches it guarantees, out of CONTAINS (#983); a
+    # start asking for one it lacks is refused.
+    contains: frozenset[str]
 
     def process(self, launch: Launch) -> Process: ...
     async def probe(self, spec: SpawnSpec, stderr_path: Path) -> Catalog: ...

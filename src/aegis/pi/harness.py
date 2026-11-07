@@ -20,6 +20,7 @@ class Pi:
     # shows how pi's steer reads one.
     steers_notices = False
     mcp_transports = frozenset({"http", "stdio"})
+    contains = frozenset()
     # pi names MCP tools as Claude Code does (measured: mcp__aegis__meta).
     tool_prefix = f"mcp__{SERVER}__"
 
