@@ -110,7 +110,7 @@ and Fleet, with this server's name beside the handle, and reads, prompts,
 interrupts, stops, closes and spawns there (`/spawn agent@<this server>`) as
 through a link of its own, while the link is up. Files sent there and its
 archive are not shown from the far side: those still go one way. Both servers
-need aegis 2.23.0 or newer for this; an older near server is reached by
+need aegis 3.0.0 or newer for this; an older near server is reached by
 calls alone. Nothing is relayed: a call
 that came over a link never goes on to a third server. The far server's
 Settings lists this server under Links here.
