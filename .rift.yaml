@@ -73,7 +73,8 @@ rules:
       sub: ['_', '.']
     require:
       in: "src/aegis/**/*.py"
-      wrap: '@r\.op\("${entity}"[^\n]*agent=True'
+      # A decorator ruff wraps continues on indented lines (names=, #959).
+      wrap: '@r\.op\(\s*"${entity}"(?:(?!\n\s*(?:@|async def |def ))[\s\S])*?agent=True'
 
   - name: "every aegis command is named on a help page"
     extract:
