@@ -139,7 +139,14 @@ from .quota_gate import (
 from .btws import SideNotes
 from .recaps import Recaps
 from . import host_tokens
-from .policy import Credential, HostPolicy, Refused, SessionView, StandalonePolicy
+from .policy import (
+    Action,
+    Credential,
+    HostPolicy,
+    Refused,
+    SessionView,
+    StandalonePolicy,
+)
 from .ops import Caller, NoParams, OpError, Principal, Registry as Ops
 from . import launch
 from .opencode import sweep as opencode_sweep
@@ -1183,7 +1190,7 @@ class App:
         """Whether the policy hides anything: it overrides can."""
         return type(self.policy).can is not HostPolicy.can
 
-    def sees(self, principal: Principal, log_id: str, action: str = "list") -> bool:
+    def sees(self, principal: Principal, log_id: str, action: Action = "list") -> bool:
         """Whether ``principal`` may ``action`` the session ``log_id``; a
         session that does not exist here hides nothing."""
         view = self.view_of(log_id)
