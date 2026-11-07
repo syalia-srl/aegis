@@ -126,6 +126,7 @@ class ClaudeCode:
     steers_mid_turn = True  # a user message read at the next tool boundary
     steers_notices = True
     mcp_transports = frozenset({"http", "stdio"})
+    contains = frozenset({"harness_tools", "isolated"})
     tool_prefix = "mcp__aegis__"
 
     def __init__(self, bin: str) -> None:

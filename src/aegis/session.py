@@ -59,7 +59,7 @@ from .claude.stream import (
     Title,
     ToolCall,
 )
-from .harness import Launch, Process, harness_for
+from .harness import CONTAINS, Launch, Process, harness_for, isolated_dirs
 from .meta import MetaStore
 from .names import default_title
 from .ops import OpError
@@ -247,6 +247,10 @@ class Archived(Exception):
     """A message was sent to an archived session."""
 
 
+# The product-agent switches and their defaults (SpawnSpec, #983).
+SWITCHES = {"harness_tools": True, "isolated": False, "primer": True, "notices": True}
+
+
 @dataclass(frozen=True)
 class SpawnSpec:
     """What a session's process runs with, fixed at spawn and recorded in the
@@ -299,6 +303,11 @@ class SpawnSpec:
     # A host's strings for this session (policy.SpawnRequest.tags), copied to
     # every session it starts; shown to no one (#959).
     tags: dict[str, str] = dataclasses.field(default_factory=dict)
+    # A product agent's switches (policy.SpawnRequest, #983), fixed at spawn.
+    harness_tools: bool = True
+    isolated: bool = False
+    primer: bool = True
+    notices: bool = True
 
     def record(self) -> dict:
         """The fields a spawn record and a meta carry."""
@@ -334,6 +343,9 @@ class SpawnSpec:
             d["knowledge_native"] = True
         if self.tags:
             d["tags"] = dict(self.tags)
+        for k, default in SWITCHES.items():
+            if getattr(self, k) != default:
+                d[k] = getattr(self, k)
         return d
 
     @classmethod
@@ -359,6 +371,7 @@ class SpawnSpec:
             cascade=_cascade_of(d.get("cascade")),
             knowledge_native=bool(d.get("knowledge_native")),
             tags=dict(d.get("tags") or {}),
+            **{k: bool(d.get(k, default)) for k, default in SWITCHES.items()},
         )
 
 
@@ -850,6 +863,22 @@ class Session:
                 }
             )
             raise
+        if missing := [
+            k
+            for k in CONTAINS
+            if k not in self.harness.contains
+            and getattr(self.spec, k) != SWITCHES[k]
+        ]:
+            text = f"{self.harness.label} cannot run with {', '.join(missing)} yet"
+            self._record(
+                {"kind": "harness_error", "text": f"This session cannot start: {text}"}
+            )
+            raise OpError("unsupported", text)
+        cwd, home = self.spec.cwd, None
+        if self.spec.isolated:
+            cwd, home = await asyncio.to_thread(
+                isolated_dirs, self.state_root, self.harness.name, self.log_id
+            )
         mcp, system_prompt = self._host.spawn_args(self)
         inbox = await asyncio.to_thread(
             attachments.ensure_inbox, self.state_root, self.log_id
@@ -858,7 +887,7 @@ class Session:
         proc = self.harness.process(
             Launch(
                 via=self.exit_via,
-                cwd=self.spec.cwd,
+                cwd=cwd,
                 model=self.spec.model,
                 effort=self.spec.effort,
                 permission=self.spec.permission,
@@ -876,6 +905,8 @@ class Session:
                 knowledge_native=self.spec.knowledge_native,
                 env=self.host_env,
                 extra_mcp=extra_mcp,
+                harness_tools=self.spec.harness_tools,
+                home=home,
             )
         )
         # Before the start: a harness can speak while it starts (OpenCode's

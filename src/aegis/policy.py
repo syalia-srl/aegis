@@ -81,7 +81,11 @@ class SessionView:
 @dataclass(frozen=True)
 class SpawnRequest:
     """What a start runs. ``spawn`` returns it, possibly rewritten with
-    ``replace``. ``system_prompt`` is added to the agent's own."""
+    ``replace``. ``system_prompt`` is added to the agent's own. The last four
+    make a product agent (#983): ``harness_tools`` False leaves the harness
+    none of its own tools, ``isolated`` runs it without the machine's config
+    in an empty folder, ``primer`` False drops aegis's workplace prompt, and
+    ``notices`` False keeps aegis's nudges and notices out of the session."""
 
     agent: str
     harness: str
@@ -92,6 +96,10 @@ class SpawnRequest:
     env: dict[str, str]
     system_prompt: str | None
     tags: dict[str, str]
+    harness_tools: bool = True
+    isolated: bool = False
+    primer: bool = True
+    notices: bool = True
 
     def replace(self, **changes: Any) -> SpawnRequest:
         return dataclasses.replace(self, **changes)
