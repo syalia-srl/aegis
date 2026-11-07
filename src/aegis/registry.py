@@ -37,6 +37,7 @@ from .notice_sources import Item
 from .notices import TEXT_MAX
 from .ops import OpError
 from .roots import Roots
+from .policy import EventKind
 from .session import Host, Session, SpawnSpec
 from .transcript.entries import Fold, fold_records, tool_output
 from .transcript.store import Store, read_store
@@ -148,7 +149,9 @@ class Registry(Host):
         # The host policy's tools for a starting process, and what happened
         # to a session for its on_event (App.tools_for, App.event); set by App.
         self.tools_for: Callable[[Session], None] = lambda s: None
-        self.event: Callable[[str, str, dict], None] = lambda kind, log_id, data: None
+        self.event: Callable[[EventKind, str, dict], None] = lambda kind, log_id, data: (
+            None
+        )
         self.load = None  # load.LoadSampler, set by App
         # knowledge.Knowledge, and whose knowledge a session's sends are
         # hinted from (its owner, else the admin); both set by App.
