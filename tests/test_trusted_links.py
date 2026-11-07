@@ -74,57 +74,6 @@ async def test_a_plain_link_opens_no_way_back(tmp_path, fake_claude):
         await beta.stop()
 
 
-async def test_a_server_with_another_token_refuses_trust(tmp_path, fake_claude):
-    beta = await Node(tmp_path / "beta", "beta", fake_claude).start()
-    alpha = await Node(tmp_path / "alpha", "alpha", fake_claude).start()
-    try:
-        beta.app.principals.add("ben", "member")
-        # Asked through Settings, the refusal comes back with beta's reason.
-        with pytest.raises(Exception) as e:
-            await alpha.app.registry.call(
-                "link.add", {"url": beta.base, "token": beta.token, "trusted": True}
-            )
-        assert "tokens besides its admin's" in str(e.value)
-        assert alpha.app.links.wire() == []
-        # A link already asking comes up plain, and says why.
-        alpha.app.links.add("beta", beta.base, beta.token, trusted=True)
-        await until(lambda: alpha.app.links.get("beta").state == "linked")
-        link = alpha.app.links.get("beta")
-        assert not link.granted and "tokens besides its admin's" in link.trust_error
-        assert beta.app.links.get("alpha") is None
-    finally:
-        await alpha.stop()
-        await beta.stop()
-
-
-async def test_a_token_that_is_not_the_admins_gets_no_trust(tmp_path, fake_claude):
-    beta = await Node(tmp_path / "beta", "beta", fake_claude).start()
-    alpha = await Node(tmp_path / "alpha", "alpha", fake_claude).start()
-    try:
-        token = beta.app.principals.add("alpha", "admin")
-        with pytest.raises(links.LinkError) as e:
-            await links.probe(beta.base, token, "alpha", "u", trusted=True)
-        assert e.value.state == "trust_refused"
-        assert "admin token" in e.value.message
-    finally:
-        await alpha.stop()
-        await beta.stop()
-
-
-async def test_a_token_minted_later_ends_the_trust_at_the_next_call(trusted):
-    alpha, beta = trusted
-    here = await alpha.spawn()
-    far = await beta.spawn()
-    beta.app.principals.add("ben", "member")
-    out = await turn(
-        far, mcp("peer_handoff", target=f"{here.handle}@alpha", context="hi")
-    )
-    assert out.startswith("mcp error:") and "trust_ended" in out, out
-    await until(lambda: not alpha.app.links.get("beta").granted, what="trust ended")
-    assert "tokens besides" in alpha.app.links.get("beta").trust_error
-    assert beta.app.links.get("alpha") is None and not inbox(here)
-
-
 async def test_link_trust_asks_and_stops_asking(tmp_path, fake_claude):
     beta = await Node(tmp_path / "beta", "beta", fake_claude).start()
     alpha = await Node(tmp_path / "alpha", "alpha", fake_claude).start()

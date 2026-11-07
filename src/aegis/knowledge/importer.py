@@ -1,9 +1,8 @@
 """Reading what /setup moves into the store: a harness's skill folder, a
 memory file, or a procedure doc with a ``when:`` line.
 
-Everything here blocks and reads only the source: the op runs it on the
-session user's runner (as_user.py), so in multi-user mode the kernel checks
-each read against the member, never the server. A skill folder is read whole,
+Everything here blocks and reads only the source, so the op runs it in a
+thread. A skill folder is read whole,
 scripts and binaries included, up to ``MAX_FOLDER_BYTES`` in at most
 ``MAX_FOLDER_FILES`` files. A subfolder it cannot read, or a file that is not
 a regular file (a fifo, a socket, a device), refuses the whole item: a skill

@@ -99,7 +99,7 @@ def detect(f: Facts) -> Install:
 
 def _ask(argv: list[str]) -> Path | None:
     try:
-        out = launch.run(argv, user=None, text=True, timeout=PROBE_TIMEOUT_S)
+        out = launch.run(argv, text=True, timeout=PROBE_TIMEOUT_S)
     except (OSError, subprocess.TimeoutExpired):
         return None
     line = out.stdout.strip()
@@ -251,7 +251,7 @@ class Updater:
     async def _stream(self, argv: list[str], timeout: float) -> int | str:
         try:
             proc = await launch.child(
-                argv, user=None, via=None, stdout=launch.PIPE, stderr=launch.STDOUT
+                argv, via=None, stdout=launch.PIPE, stderr=launch.STDOUT
             )
         except OSError as e:
             self._line(str(e))
@@ -275,7 +275,6 @@ class Updater:
         try:
             proc = await launch.child(
                 [*prog, "--version"],
-                user=None,
                 via=None,
                 stdout=launch.PIPE,
                 stderr=launch.STDOUT,

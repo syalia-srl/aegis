@@ -49,8 +49,7 @@ sessions, recaps and side notes.
 
 aegis reads the file each time a process starts, so a new token applies to
 the next session without a restart. A `CLAUDE_CODE_OAUTH_TOKEN` already in the
-server's environment, or in the multi-user pool file, wins over the file. In
-multi-user mode a member's sessions keep their own sign-in.
+server's environment wins over the file.
 
 The token can only make model requests. Claude Code's Remote Control,
 claude.ai connectors and /schedule do not work with it; MCP servers you

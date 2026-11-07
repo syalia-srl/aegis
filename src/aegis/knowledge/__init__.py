@@ -1,10 +1,9 @@
 """Native skills and memory: knowledge that aegis keeps, finds and prunes.
 
 The store. Each principal has ``<state>/knowledge/<principal>/`` with
-``skills/<name>/SKILL.md`` and ``memories/<name>.md``. The state directory is
-out of every member's reach, so every read and write goes through a server
-operation that checks ownership: a member never lists, reads, searches or is
-hinted another principal's items. The directory is a git repository and every
+``skills/<name>/SKILL.md`` and ``memories/<name>.md``. Every read and write
+goes through a server operation that works on the caller's own principal. The
+directory is a git repository and every
 change through aegis is one commit, so a merge or a delete can be undone.
 Nothing is pushed anywhere.
 

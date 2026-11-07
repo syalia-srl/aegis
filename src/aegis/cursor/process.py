@@ -168,7 +168,6 @@ class CursorProcess:
             new_session=True,
             cgroup=self._launch.cgroup,
             oom=True,
-            user=self._launch.user,
             via=self._launch.via,
         )
         self._keep(self._drain(self._proc.stderr))
@@ -318,9 +317,7 @@ class CursorProcess:
         self._fail_pending(ConnectionResetError("cursor-agent acp was stopped"))
 
     async def _signal(self, proc: asyncio.subprocess.Process, sig: int) -> None:
-        await launch.signal_process_async(
-            proc.pid, sig, user=self._launch.user, group=True
-        )
+        await launch.signal_process_async(proc.pid, sig, group=True)
 
     def _fail_pending(self, err: Exception) -> None:
         pending, self._pending = self._pending, {}

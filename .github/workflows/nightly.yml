@@ -35,7 +35,7 @@ jobs:
       - run: uv sync --locked
       - name: chromium for browser tests
         uses: ./.github/actions/chromium
-      - run: uv run pytest -q -n 2 -m "slow and not live and not multiuser and not quarantine" --splits 4 --group ${{ matrix.group }} --splitting-algorithm least_duration
+      - run: uv run pytest -q -n 2 -m "slow and not live and not quarantine" --splits 4 --group ${{ matrix.group }} --splitting-algorithm least_duration
 
   # The quarantined tests, each three times, so a run says how often each one
   # fails. It reports in the job summary and never fails the run.

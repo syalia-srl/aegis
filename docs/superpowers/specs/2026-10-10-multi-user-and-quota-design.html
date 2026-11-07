@@ -251,7 +251,7 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)} pre .s{color:var(--ok)}
 <div class="chrome">
   <span>aegis</span>
   <span class="tab">spec · tokens, quota gate and restarts</span>
-  <span class="st"><span class="pill acc">built: restarts and tokens merged; the quota gate on branch quota-gate</span><span class="pill">2026-10-10</span><span class="pill">#311 · #312</span></span>
+  <span class="st"><span class="pill acc">tokens, roles and quota lines removed in aegis 3.0 (#958); restarts stay</span><span class="pill">2026-10-10</span><span class="pill">#311 · #312</span></span>
 </div>
 
 <div class="wrap">
@@ -286,7 +286,7 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)} pre .s{color:var(--ok)}
 
 <main>
 <h1>Tokens with owners, a quota gate over the shared pool, and restarts that continue</h1>
-<div class="meta"><span>docs/superpowers/specs/2026-10-10-multi-user-and-quota-design.html</span><span>·</span><span>not started</span></div>
+<div class="meta"><span>docs/superpowers/specs/2026-10-10-multi-user-and-quota-design.html</span><span>·</span><span>restarts built; tokens, roles and the quota gate removed in aegis 3.0 (#958)</span></div>
 <p class="lede">A team server is an aegis that several people use, and that their own machines link into. This spec gives each token a name, a role and a quota policy, so a person, a linked server or an AFK job can only start agents while the shared subscription has room for them. It also makes a restart of aegis continue the turns it interrupted, because the quota stop and the restart both interrupt work and must give it back intact.</p>
 
 <h2 id="delivers"><span class="n">01</span>What this delivers</h2>

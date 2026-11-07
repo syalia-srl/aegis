@@ -15,9 +15,7 @@ The doctor writes nothing: probe stderr goes to a temporary directory.
 from __future__ import annotations
 
 import asyncio
-import json
 import os
-import platform
 import shlex
 import shutil
 import socket
@@ -28,7 +26,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import launch, users
+from . import launch
 from .claude import login
 from .agents import EFFORTS, HARNESSES, Agent
 from .cgroups import parse_size, total_ram
@@ -54,7 +52,6 @@ from .ranking import annotate, ranking
 from .recap import load_recap
 from .queues import LEGACY_QUEUE_KEYS
 from .roots import CONFIG_FILE, Roots, legacy_state
-from .ops import OpError
 from .session import SpawnSpec
 
 PROBE_TIMEOUT_S = 20.0
@@ -90,9 +87,7 @@ class Found:
 
 
 async def _version(bin: str) -> str:
-    proc = await launch.child(
-        [bin, "--version"], stdout=PIPE, stderr=STDOUT, user=None, via=None
-    )
+    proc = await launch.child([bin, "--version"], stdout=PIPE, stderr=STDOUT, via=None)
     try:
         out, _ = await asyncio.wait_for(proc.communicate(), VERSION_TIMEOUT_S)
     except TimeoutError:
@@ -465,7 +460,7 @@ def _network(snap: Snapshot) -> Finding:
     )
 
 
-def _exit(snap: Snapshot, roots, multi_user: bool) -> list[Finding]:
+def _exit(snap: Snapshot, roots) -> list[Finding]:
     """An exit that cannot carry anything is an error: what names it fails on
     purpose, with a 502, rather than leaving from this machine's address."""
     names = {snap.exit_via} | {a.exit for a in snap.agents if a.exit != "off"}
@@ -473,8 +468,6 @@ def _exit(snap: Snapshot, roots, multi_user: bool) -> list[Finding]:
     names.discard("")
     if not names:
         return []
-    if multi_user:
-        return [Finding("error", "exit_via", "an exit is off on a multi-user server")]
     links = {
         e.get("name"): e for e in LinkStore(roots.state_root / "links.json").load()
     }
@@ -582,140 +575,6 @@ def _blocked_for_others(path: Path) -> Path | None:
     return None
 
 
-def _multi_user(
-    roots: Roots,
-    mu: users.MultiUser,
-    entries: list[dict],
-    unit: dict[str, str] | None,
-    bins: dict[str, str],
-    machine: str | None = None,
-) -> list[Finding]:
-    """The multi-user mode's rows: the machine, the unit's capabilities, each
-    member token's Linux user, the state directory, the pool file, and
-    whether every user can run each harness. Reads only."""
-    out = []
-    machine = machine or platform.machine()
-    if machine not in users.SETGROUPS:
-        # as_user.py opens a person's files with a per-thread setgroups,
-        # whose syscall number is known for these machines only.
-        out.append(
-            Finding(
-                "error",
-                "multi_user.files",
-                f"multi_user supports {' and '.join(users.SETGROUPS)}; "
-                f"this machine is {machine}",
-            )
-        )
-    if unit is None:
-        out.append(
-            Finding("warn", "multi_user.unit", "no installed unit runs aegis serve")
-        )
-    else:
-        missing = [
-            c
-            for key in ("AmbientCapabilities", "CapabilityBoundingSet")
-            for c in users.CAPS
-            if c not in unit.get(key, "").split()
-        ]
-        if missing:
-            out.append(
-                Finding(
-                    "error",
-                    "multi_user.unit",
-                    "the unit lacks capabilities; its [Service] needs "
-                    + " and ".join(users.UNIT_LINES),
-                )
-            )
-        else:
-            out.append(
-                Finding("ok", "multi_user.unit", "the unit grants the capabilities")
-            )
-    me = os.getuid()
-    members = 0
-    for e in entries:
-        if not isinstance(e, dict) or e.get("role") == "admin":
-            continue
-        members += 1
-        name, user = e.get("name"), e.get("linux_user")
-        where = f"multi_user.tokens.{name}"
-        if not user:
-            out.append(
-                Finding(
-                    "error",
-                    where,
-                    "no Linux user; revoke it and add it again with --linux-user",
-                )
-            )
-            continue
-        try:
-            users.allowed(str(user), server_uid=me)
-        except OpError as err:
-            out.append(Finding("error", where, err.message))
-    if not any(f.where.startswith("multi_user.tokens.") for f in out):
-        out.append(
-            Finding(
-                "ok",
-                "multi_user.tokens",
-                f"{members} member tokens, each with a Linux user",
-            )
-        )
-    try:
-        st = roots.state_root.stat()
-        if st.st_uid != me or st.st_mode & 0o777 != 0o700:
-            out.append(
-                Finding(
-                    "error",
-                    "multi_user.state",
-                    f"{roots.state_root} must be mode 0700, owned by the server's user",
-                )
-            )
-        else:
-            out.append(Finding("ok", "multi_user.state", f"{roots.state_root}, 0700"))
-    except FileNotFoundError:
-        out.append(
-            Finding(
-                "ok", "multi_user.state", f"{roots.state_root} is made 0700 at start"
-            )
-        )
-    if mu.env_file is not None:
-        try:
-            pst = mu.env_file.stat()
-            if pst.st_uid != me or pst.st_mode & 0o077:
-                out.append(
-                    Finding(
-                        "error",
-                        "multi_user.env_file",
-                        f"{mu.env_file} must be mode 0600, owned by the server's user",
-                    )
-                )
-            else:
-                n = len(users.parse_env(mu.env_file.read_text()))
-                out.append(
-                    Finding(
-                        "ok", "multi_user.env_file", f"{mu.env_file}, {n} variables"
-                    )
-                )
-        except OSError as err:
-            out.append(
-                Finding(
-                    "error", "multi_user.env_file", f"{mu.env_file}: {err.strerror}"
-                )
-            )
-    blocked = []
-    for name, b in bins.items():
-        exe = shutil.which(b)
-        if exe is None:
-            continue
-        if (at := _blocked_for_others(Path(exe))) is not None:
-            blocked.append(f"{name} at {exe}: {at} keeps other users out")
-    out += [Finding("error", "multi_user.harnesses", b) for b in blocked]
-    if not blocked:
-        out.append(
-            Finding("ok", "multi_user.harnesses", "every user can run each harness")
-        )
-    return out
-
-
 def _installed_unit() -> dict[str, str] | None:
     """The [Service] settings of the first installed unit that runs aegis
     serve, drop-ins included; None when there is none."""
@@ -725,17 +584,6 @@ def _installed_unit() -> dict[str, str] | None:
     if not found:
         return None
     return service.directives(service.cat(*found[0]))
-
-
-def _token_entries(roots: Roots) -> list[dict]:
-    """tokens.json's entries, read without a TokenStore, which would create
-    the admin's token: the doctor writes nothing."""
-    try:
-        doc = json.loads((roots.state_root / "tokens.json").read_text())
-    except (OSError, ValueError):
-        return []
-    entries = doc.get("tokens") if isinstance(doc, dict) else None
-    return entries if isinstance(entries, list) else []
 
 
 async def doctor(
@@ -805,7 +653,7 @@ async def doctor(
     if "error" in snap.harness_versions:
         out.append(Finding("error", "harness_versions", snap.harness_versions["error"]))
     out.append(_network(snap))
-    out += _exit(snap, roots, multi_user=snap.multi_user is not None)
+    out += _exit(snap, roots)
     if snap.host_error:
         out.append(Finding("error", "host", snap.host_error))
     out.append(_workflows(snap.workflows, tuple(a.name for a in snap.agents)))
@@ -815,14 +663,6 @@ async def doctor(
     out += _embeddings(snap.knowledge)
     if snap.multi_user_error:
         out.append(Finding("error", "multi_user", snap.multi_user_error))
-    elif snap.multi_user is not None:
-        out += _multi_user(
-            roots,
-            snap.multi_user,
-            _token_entries(roots),
-            _installed_unit(),
-            {h: bins.get(h, h) for h in used},
-        )
     return out
 
 

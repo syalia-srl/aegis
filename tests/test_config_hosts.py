@@ -75,11 +75,11 @@ def test_a_list_in_a_block_replaces_the_whole_list():
 def test_a_bad_shape_or_a_boot_key_applies_nothing_and_says_why():
     bad = {**SHARED, "hosts": ["laptop"]}
     assert overlay(bad, "laptop") == bad
-    boot = {**SHARED, "hosts": {"laptop": {"multi_user": {}, "max_workers": 1}}}
+    boot = {**SHARED, "hosts": {"laptop": {"hosts": {}, "max_workers": 1}}}
     assert overlay(boot, "laptop") == boot
     host = socket.gethostname()
-    [f] = _hosts({**SHARED, "hosts": {host: {"multi_user": {}}}}, host)
-    assert f.level == "error" and "multi_user" in f.message
+    [f] = _hosts({**SHARED, "hosts": {host: {"hosts": {}}}}, host)
+    assert f.level == "error" and "hosts" in f.message
 
 
 def test_the_doctor_names_the_block_it_applies():

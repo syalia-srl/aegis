@@ -57,9 +57,8 @@ terminals show `ended: server_stopped` with their output and a Restart button.
 
 ## Who may type
 
-Every person on the server can read every terminal. A member types into,
-resizes, restarts and closes only their own; an admin, any. Agents cannot use
-terminals yet.
+The person signed in to the server types into, resizes, restarts and closes
+any terminal. Agents cannot use terminals yet.
 
 ## Where the output is
 

@@ -68,9 +68,8 @@ class ClaudeSession:
             launch.stderr_path,
             launch.on_line,
             launch.on_exit,
-            env=login.with_token(env, launch.user),
+            env=login.with_token(env),
             cgroup=launch.cgroup,
-            user=launch.user,
             via=launch.via,
         )
 

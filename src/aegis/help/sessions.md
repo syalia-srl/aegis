@@ -322,8 +322,7 @@ a toast. An agent calls `notice_announce` with `text=`, `level=` and
 `until=`; `clear=` with an id ends one early, and a call with neither lists
 those in force. Each agent gets the text and one line more, "This was
 written by ops-agent, not measured by aegis.", naming the agent's handle or
-your name as the author; the agent that wrote it is not told its own. Announcing is for an admin and an admin's agents; a member gets
-not_for_members.
+your name as the author; the agent that wrote it is not told its own.
 
 ## Order the tabs
 
@@ -408,8 +407,7 @@ Quiet or Unquiet; then Interrupt while it works, Wake while it is asleep,
 Continue while it is not working, Sleep while it is not asleep, Restart, and
 Hand off; then Rename…, which
 opens the session with its handle ready to edit; then Archive. Each acts on
-that session, not on the one shown. Another member's session offers Open and
-Open in new tab only, and a step of a running workflow shows the rest
+that session, not on the one shown. A step of a running workflow shows the rest
 disabled, with the reason as the item's tooltip. A terminal's card has Open,
 Open in new tab and Archive.
 

@@ -141,8 +141,6 @@ async def run_sh(
     on_pid,
     env: dict[str, str] | None = None,
     seen: dict | None = None,
-    *,
-    user: str | None,
 ) -> tuple[int, str, str]:
     """An sh node's command under bash, with ``env`` (its values, see
     shell_command) added to the server's, in its own process group, so a
@@ -157,7 +155,6 @@ async def run_sh(
         stdout=launch.PIPE,
         stderr=launch.PIPE,
         new_session=True,
-        user=user,
         via=launch.resolve_via(),
     )
     on_pid(proc.pid)
@@ -167,26 +164,25 @@ async def run_sh(
         )
         await proc.wait()
     except asyncio.CancelledError:
-        await _signal_group(proc.pid, signal.SIGTERM, user)
+        await _signal_group(proc.pid, signal.SIGTERM)
         end = time.monotonic() + 2
         while time.monotonic() < end and restarts.group_alive(proc.pid):
             await asyncio.sleep(0.05)
-        await _signal_group(proc.pid, signal.SIGKILL, user)
+        await _signal_group(proc.pid, signal.SIGKILL)
         with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(asyncio.shield(proc.wait()), 2)
         raise
     return proc.returncode or 0, out, err
 
 
-async def _signal_group(pgid: int, sig: signal.Signals, user: str | None) -> None:
+async def _signal_group(pgid: int, sig: signal.Signals) -> None:
     try:
-        await launch.signal_process_async(pgid, sig, user=user, group=True)
+        await launch.signal_process_async(pgid, sig, group=True)
     except OSError as e:
         log.warning(
-            "workflow: could not send %s to group %s as %s: %s",
+            "workflow: could not send %s to group %s: %s",
             sig.name,
             pgid,
-            user,
             e,
         )
 
@@ -373,7 +369,7 @@ class Workflows:
                 # any pass, so a cut sh is never still running (spec §05).
                 for n in st.nodes.values():
                     if n.status == "running" and n.pid:
-                        restarts.end_group(n.pid, n.pstart, user=self.linux_user(st))
+                        restarts.end_group(n.pid, n.pstart)
                 try:
                     wf, errors = parse(st.text, self._agents())
                 except Exception as e:  # one run's text never stops the boot
@@ -531,22 +527,6 @@ class Workflows:
                 nxt = (self._reg.archived.get(lid) or {}).get("continued_by")
             lid = nxt if nxt != "starting" else None
         return last
-
-    def linux_user(self, st: RunState) -> str | None:
-        """The Linux user whose process group a persisted run may still own."""
-        lid, user, seen = st.owner, None, set()
-        while lid and lid not in seen:
-            seen.add(lid)
-            s = self._reg.sessions.get(lid)
-            if s is not None:
-                user, nxt = s.spec.linux_user, s.continued_by
-            else:
-                meta = self._reg.archived.get(lid)
-                if meta is None:
-                    break
-                user, nxt = meta.get("linux_user"), meta.get("continued_by")
-            lid = nxt if nxt != "starting" else None
-        return user
 
     def owns(self, log_id: str | None, st: RunState) -> bool:
         o = self.owner(st)
@@ -2072,7 +2052,7 @@ class Workflows:
         run in it. _close_spent closes it once none may."""
         owner = wf.by_key[wf.session_of.get(node.key, node.key)]
         return any(
-            self._may_run(st, wf, owner, wf.by_key[k], prefix, node)
+            self._may_run(st, wf, owner, wf.by_key[k], prefix)
             for k in wf.users.get(owner.key, [])
         )
 
@@ -2279,9 +2259,7 @@ class Workflows:
             if progress:
                 watch = asyncio.create_task(self._watch_progress(st, inst, *progress))
             seen = self._seen_out[(st.run, inst)] = {}
-            code, out, err = await run_sh(
-                cmd, self._cwd(st), pid, env, seen, user=self._user(st)
-            )
+            code, out, err = await run_sh(cmd, self._cwd(st), pid, env, seen)
         except ValueError:  # a NUL byte, from a value: every attempt would
             # fail the same way, so it fails once, never retried (below)
             code, out, err = None, "", NUL
@@ -2431,17 +2409,6 @@ class Workflows:
             return "running"
         return await self._check_judge(st, wf, node, prefix)  # task 7
 
-    def _user(self, st: RunState) -> str | None:
-        """The Linux user the run's commands run as: its owner's (users.py).
-        Raises PermissionError, which fails the step, rather than run as the
-        server when the owner is gone or has no user in multi-user mode."""
-        owner = self.owner(st)
-        if owner is None:
-            if self._reg.multi_user:
-                raise PermissionError("the workflow's owner is gone")
-            return None
-        return self._reg.user_for(owner.spec)
-
     async def _probe_sh(
         self, cmd: str, cwd: str, env: dict[str, str], st: RunState
     ) -> tuple[int | None, str, str]:
@@ -2450,7 +2417,7 @@ class Workflows:
         is None when bash did not start or the probe ran too long."""
         try:
             return await asyncio.wait_for(
-                run_sh(cmd, cwd, lambda _: None, env, user=self._user(st)),
+                run_sh(cmd, cwd, lambda _: None, env),
                 CONDITION_LIMIT_S,
             )
         except TimeoutError:

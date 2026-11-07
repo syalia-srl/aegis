@@ -1,9 +1,8 @@
 """The knowledge operations: memory and skill tools for agents, and stats.
 
 Every op works on the caller's own principal (``App.who``): an agent's is its
-session's owner, so a member's agent never reaches another member's items, and
-a name that belongs to someone else answers ``not_found`` as a name that does
-not exist. Reads are open to read-permission sessions, as help_read is; saves
+session's owner, and a name that belongs to someone else answers ``not_found``
+as a name that does not exist. Reads are open to read-permission sessions, as help_read is; saves
 and deletes are not. A save is one commit in the principal's store
 (knowledge/store.py).
 
@@ -16,18 +15,17 @@ card that offers Undo. An agent's update or delete of an approved item
 applies at once, asked or not, and its card offers Undo, which reverts that
 commit. Approve,
 Discard and Undo are the session owner's ops on the owner's store, refused
-to anyone else, an admin included. The card is a transcript record, so it
+to anyone else. The card is a transcript record, so it
 works after a restart.
 
 Reading a skill's SKILL.md loads it in the calling session: the name joins
 ``Session.skills``, which the card shows and which ``skill_run`` checks.
 
 ``skill_run`` runs a script the loaded skill declares under ``aegis.scripts``.
-The store is out of a member's reach, so the server packs the skill's folder
-as a tar and pipes it to one process started through the launcher as the
-session's Linux user: a shell that unpacks it into a fresh ``mktemp -d``
-directory, which is therefore the member's, runs ``python3`` on the script
-there and removes the directory when it ends.
+The server packs the skill's folder as a tar and pipes it to one process
+started through the launcher: a shell that unpacks it into a fresh
+``mktemp -d`` directory, runs ``python3`` on the script there and removes the
+directory when it ends.
 """
 
 from __future__ import annotations
@@ -782,7 +780,6 @@ def register_knowledge_ops(app: App) -> None:
                 it.name,
                 cmd,
                 tar,
-                s.spec.linux_user,
                 version,
             )
         except SkillToolError as e:
@@ -897,7 +894,6 @@ def register_knowledge_ops(app: App) -> None:
         try:
             proc = await launch.child(
                 ["bash", "-c", RUN_SH, "skill-run", p.script, *p.args],
-                user=s.spec.linux_user,
                 via=launch.resolve_via(s.spec.agent),
                 cwd="/",
                 stdin=launch.PIPE,
@@ -914,14 +910,14 @@ def register_knowledge_ops(app: App) -> None:
         )
         code: int | None = None
         timed_out = False
-        with app.skill_servers.tracking(s.log_id, proc, s.spec.linux_user):
+        with app.skill_servers.tracking(s.log_id, proc):
             try:
                 await asyncio.wait_for(asyncio.shield(io_done), p.timeout_s)
                 code = await proc.wait()
             except TimeoutError:
                 timed_out = True
                 # The whole group: python3 under the shell holds the pipes too.
-                await stop_group(proc, s.spec.linux_user)
+                await stop_group(proc)
                 try:
                     # A child that left the group may still hold them.
                     await asyncio.wait_for(io_done, PIPES_AFTER_KILL_S)
@@ -981,14 +977,8 @@ def register_knowledge_ops(app: App) -> None:
         }
 
     def reader(caller: Caller):
-        """The runner that reads an import's sources: as the session's
-        Linux user for an agent, else as the person's."""
-        try:
-            if caller.is_agent and (caller.log_id or "") in app.sessions.sessions:
-                return app.place_of_session(caller.log_id or "").run
-            return app.place_of(caller).run
-        except PermissionError as e:
-            raise OpError("not_allowed", str(e)) from None
+        """How an import's sources are read: in a thread."""
+        return asyncio.to_thread
 
     @r.op("knowledge.import", ImportItems, agent=True)
     async def knowledge_import(p: ImportItems, caller):
@@ -1010,8 +1000,6 @@ def register_knowledge_ops(app: App) -> None:
                     "bad_params", "name the session for the import's card: log_id"
                 )
             s = app.sessions.open(p.log_id)
-            if (s.spec.owner or app.user) != owner:
-                raise OpError("not_owner", f"{p.log_id} is not one of your sessions")
         if len(p.items) > MAX_IMPORT_ITEMS:
             raise OpError(
                 "too_many",
@@ -1141,13 +1129,6 @@ def register_knowledge_ops(app: App) -> None:
 
     def pending_card(p: CardRef, ops: tuple[str, ...], caller: Caller):
         s = app.sessions.open(p.log_id)
-        owner = s.spec.owner or app.user
-        if principal(caller) != owner:
-            # An admin may read a member's transcript, but what the member's
-            # agent believes is the member's to approve.
-            raise OpError(
-                "not_owner", f"only {owner}, who owns this session, answers its cards"
-            )
         e = s.fold().entry(p.id)
         if e is None or e["kind"] != "knowledge" or e["detail"].get("op") not in ops:
             raise OpError(
@@ -1155,8 +1136,8 @@ def register_knowledge_ops(app: App) -> None:
             )
         if e["status"] != "pending" or (s.log_id, p.id) in answering:
             raise OpError("gone", f"the card {p.id} was already answered")
-        # The session owner's store: the card is about the agent's items.
-        return s, e, owner
+        # The one person's store: the card is about the agent's items.
+        return s, e, principal(caller)
 
     @contextmanager
     def answer(s, id: str):
@@ -1236,7 +1217,7 @@ def register_knowledge_ops(app: App) -> None:
                 "again since; nothing was undone.",
             )
 
-    @r.op("knowledge.card.approve", CardRef, owned="log_id")
+    @r.op("knowledge.card.approve", CardRef)
     async def card_approve(p: CardRef, caller):
         s, e, owner = pending_card(p, ("new",), caller)
         d = e["detail"]
@@ -1272,7 +1253,7 @@ def register_knowledge_ops(app: App) -> None:
             )
         return "ok"
 
-    @r.op("knowledge.card.discard", CardRef, owned="log_id")
+    @r.op("knowledge.card.discard", CardRef)
     async def card_discard(p: CardRef, caller):
         s, e, owner = pending_card(p, ("new",), caller)
         d = e["detail"]
@@ -1302,7 +1283,7 @@ def register_knowledge_ops(app: App) -> None:
             )
         return "ok"
 
-    @r.op("knowledge.card.undo", CardRef, owned="log_id")
+    @r.op("knowledge.card.undo", CardRef)
     async def card_undo(p: CardRef, caller):
         s, e, owner = pending_card(p, ("changed", "deleted", "saved"), caller)
         d = e["detail"]
@@ -1330,7 +1311,7 @@ def register_knowledge_ops(app: App) -> None:
             )
         return "ok"
 
-    @r.op("knowledge.card.unimport", CardItem, owned="log_id")
+    @r.op("knowledge.card.unimport", CardItem)
     async def card_unimport(p: CardItem, caller):
         """Undo one item of an import card: its import commit is reverted,
         so it leaves aegis. Its original is wherever it then was."""

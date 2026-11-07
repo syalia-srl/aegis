@@ -169,11 +169,9 @@ class ClaudeProcess:
         on_exit: Callable[[int, list[str]], None],
         env: dict[str, str] | None = None,
         cgroup: Path | None = None,
-        user: str | None = None,
         via: str | None = None,
     ) -> None:
         self.argv = argv
-        self.user = user
         self.via = via
         self.cwd = cwd
         self.cgroup = cgroup
@@ -207,7 +205,6 @@ class ClaudeProcess:
             limit=LINE_LIMIT,
             cgroup=self.cgroup,
             oom=True,
-            user=self.user,
             via=self.via,
         )
         err = asyncio.create_task(self._pump_stderr())
@@ -306,13 +303,11 @@ class ClaudeProcess:
         if proc is None:
             return
         if proc.returncode is None:
-            await launch.signal_process_async(proc.pid, signal.SIGTERM, user=self.user)
+            await launch.signal_process_async(proc.pid, signal.SIGTERM)
             try:
                 await asyncio.wait_for(proc.wait(), TERM_GRACE_S)
             except TimeoutError:
-                await launch.signal_process_async(
-                    proc.pid, signal.SIGKILL, user=self.user
-                )
+                await launch.signal_process_async(proc.pid, signal.SIGKILL)
                 await proc.wait()
         for t in self._tasks:
             if not t.done():

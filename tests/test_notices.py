@@ -20,7 +20,7 @@ from aegis.notices import (
     psi,
     read_signals,
 )
-from aegis.ops import Caller, OpError, Principal
+from aegis.ops import Caller, OpError
 from aegis.transcript.entries import NOTICE_HEADER, split_notices
 from aegis.transcript.store import read_store
 
@@ -769,13 +769,6 @@ def test_a_critical_announcement_toasts_once(stub):
     assert stub.toasts == [
         ("aegis: announce is critical: the disk is being moved", "error")
     ]
-
-
-async def test_a_member_may_not_announce(world):  # noqa: F811
-    ben = Caller("user", principal=Principal("ben", "member"))
-    with pytest.raises(OpError) as e:
-        await world.app.registry.call("notice.announce", {"text": "hi"}, ben)
-    assert e.value.code == "not_for_members"
 
 
 async def test_an_agents_announcement_names_its_handle(world):  # noqa: F811

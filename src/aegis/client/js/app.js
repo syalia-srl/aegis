@@ -16,7 +16,7 @@ import { copyRow, installCopy, rowText } from "./copy.js";
 import { Find } from "./find.js";
 import * as artifacts from "./artifacts.js";
 import { TabOrder, patchTab, renderTabs, stepMove } from "./tabs.js";
-import { linesOf, mine, ownerOf, setWho, who } from "./me.js";
+import { setWho, who } from "./me.js";
 import { ago, byNeed, modelLine, money, patchCard, renderArchive, renderBand, renderBandQuota, renderCards, tickPlan, card as fleetCard } from "./fleet.js";
 import { age, countdown, diskRows, elapsed, hostRow, hostSeverity, mbps, netRows, providerFor, quotaSideRow, quotaTile, tile } from "./gauges.js";
 import { closeCard, initSide, restState, toggleCollapsed } from "./side.js";
@@ -264,7 +264,7 @@ function showCanvas(s) {
   const item = viewer.isOpen ? viewer.items.get(viewer.key) : null;
   if (item?.artifact && docked.has(item.artifact)) viewer.close();
   const r = route();
-  canvas.show(s.key, lay, { n: r.view === "window" ? r.n : 1, writable: !s.off && s.state !== "archived" && mine(s) });
+  canvas.show(s.key, lay, { n: r.view === "window" ? r.n : 1, writable: !s.off && s.state !== "archived" });
   syncDock();
 }
 setScroller($("tr"));
@@ -1007,12 +1007,10 @@ conn.subscribe(
   (snap) => {
     quota = snap || { providers: [] };
     drawQuota();
-    settings.onQuota(quota);
   },
   (ops) => {
     for (const op of ops) if (op.set) quota = op.set;
     drawQuota();
-    settings.onQuota(quota);
   },
 );
 conn.subscribe(
@@ -1159,7 +1157,7 @@ const tabFocus = (r) => (r.view === "session" || r.view === "term" || r.view ===
 // Where a browser's views find its card and the sessions it can be given to.
 browserSources({
   card: (id) => (sessions.has(paneKey(id)) ? termCard(paneKey(id)) : null),
-  sessions: () => local().filter((m) => !isTool(m) && m.state !== "asleep" && mine(m)),
+  sessions: () => local().filter((m) => !isTool(m) && m.state !== "asleep"),
 });
 // The open terminal's card, with the log id and server it is reached by.
 function termCard(key) {
@@ -1688,9 +1686,7 @@ function drawSideQuota(s) {
     return;
   }
   head.textContent = p.read_at != null ? `read ${ago(p.read_at)}` : ""; // "read just now", "read 2m ago"
-  // A member's own lines, on its own server's gauges only.
-  const lines = (w) => (s.server ? null : linesOf(p.name, w.kind));
-  const rows = p.state === "failed" ? [] : p.windows.map((w) => quotaSideRow(p, w, now, lines(w)));
+  const rows = p.state === "failed" ? [] : p.windows.map((w) => quotaSideRow(p, w, now));
   if (p.state !== "ok") {
     const n = document.createElement("p");
     n.className = "cnote gnote";
@@ -2318,21 +2314,19 @@ function renderMeta(s) {
   renderMonitors($("s-monitors"), mons, revealToolRow);
   const working = s.state === "working";
   $("interrupt").hidden = !working;
-  // A member reads another's session and changes nothing in it (tokens.py).
-  const theirs = !mine(s);
   // A workflow's node is the engine's while its run lives, and a handed-off
   // session its successor's (#874).
   const held = locked(s) || !!s.continued_by;
   $("composer").hidden = !!s.continued_by;
-  $("continue").disabled = working || theirs || held;
-  $("restart").disabled = theirs || held || !!s.old;
+  $("continue").disabled = working || held;
+  $("restart").disabled = held || !!s.old;
   $("working").hidden = !working;
-  $("stop-session").disabled = s.state === "asleep" || theirs || held;
-  $("quiet-session").disabled = !["working", "waiting"].includes(s.attention) || theirs || held;
-  $("autoclose-session").disabled = theirs || held;
+  $("stop-session").disabled = s.state === "asleep" || held;
+  $("quiet-session").disabled = !["working", "waiting"].includes(s.attention) || held;
+  $("autoclose-session").disabled = held;
   $("autoclose-session").setAttribute("aria-pressed", String(!!s.autoclose));
-  $("interrupt").disabled = theirs || held;
-  $("close").disabled = theirs || held;
+  $("interrupt").disabled = held;
+  $("close").disabled = held;
   if (working && workingSince == null) {
     workingSince = Date.now();
     workingShown = [0, 0];
@@ -2341,8 +2335,8 @@ function renderMeta(s) {
   if (!working) workingSince = null;
   // A linked server that is down: the transcript stays readable, nothing sends.
   const down = s.off ? linkOf(s.server) : null;
-  input.disabled = $("attach").disabled = !!down || theirs || held;
-  drawSending(!!down || theirs || held);
+  input.disabled = $("attach").disabled = !!down || held;
+  drawSending(!!down || held);
   if (s.asleep_why !== "idle" && warmed === shown) warmed = null;
   drawComposerHint(s);
   setTitle(`${s.title || s.handle} · aegis`);
@@ -2378,15 +2372,10 @@ function drawWaiting(s) {
 // after the first keystroke, the waking row says so in the transcript instead.
 function drawComposerHint(s) {
   $("waking").hidden = !(s.asleep_why === "idle" && warmed === shown);
-  const theirs = !mine(s);
   const down = s.off ? linkOf(s.server) : null;
   // Chrome counts a placeholder in scrollHeight: measure again when it changes.
   const placeholder = locked(s)
     ? `Step ${s.workflow.node} of the workflow ${workflowTitle(s.workflow.run) || s.workflow.run}. You can read it; it takes no messages until the run stops.`
-    : theirs
-    ? s.server
-      ? `A session on ${s.server}. You can read it; acting through the link is for an admin here.`
-      : `${ownerOf(s)}'s session. You can read it; only ${ownerOf(s)} can write to it.`
     : down
     ? `${s.server} is ${down.state} since ${new Date(down.since * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}; nothing can be sent until it is back.`
     : s.state === "asleep" && s.asleep_why === "idle"
@@ -2534,7 +2523,7 @@ let verInfo = null; // the last server.version
 let upd = { phase: "idle", lines: [], error: null, version: null };
 const UPD_STEPS = ["installing", "checking", "restarting"];
 const updRunning = () => UPD_STEPS.includes(upd.phase);
-const mayUpdate = () => verInfo?.status === "behind" && verInfo.install?.can && who.role !== "member";
+const mayUpdate = () => verInfo?.status === "behind" && verInfo.install?.can;
 
 function updButton(label) {
   const b = document.createElement("button");
@@ -4532,7 +4521,7 @@ const continueKey = (key) => !offline() && sessions.has(key) && sendLine("Contin
 // types (session.warm); once per parked stretch (warmed, above).
 function warmIfParked() {
   const s = shown && sessions.get(shown);
-  if (!s || s.asleep_why !== "idle" || warmed === shown || !mine(s)) return;
+  if (!s || s.asleep_why !== "idle" || warmed === shown) return;
   warmed = shown;
   const key = shown;
   callFor(key, "session.warm", { log_id: forKey(key).log_id }).catch(() => {
@@ -4715,7 +4704,6 @@ function sessionMenu(key) {
     { id: "newtab", label: "Open in new tab", icon: "open", run: () => window.open(hashOf(key)) },
   ];
   const title = `${isTool(s) ? s.name : s.handle} · ${LABEL[s.attention] || s.state}`;
-  if (!mine(s)) return { title, groups: [opening] };
   const why = locked(s)
     ? `${s.handle} is a step of a running workflow`
     : offline() || s.off
@@ -4837,10 +4825,9 @@ function selectionItems(range) {
   if (!text || !s) return null;
   // Another member's session takes no message from this person (drawSending),
   // so the items that write to its composer are left out, as sessionMenu does.
-  const own = mine(s);
   return [
-    own && { id: "ask", label: "Ask", icon: "prompt", run: () => insertIntoComposer(quoted(text)) },
-    own && { id: "aside", label: "Ask aside", icon: "btw", run: () => insertIntoComposer(quoted(text), { prefix: "/btw\n" }) },
+    { id: "ask", label: "Ask", icon: "prompt", run: () => insertIntoComposer(quoted(text)) },
+    { id: "aside", label: "Ask aside", icon: "btw", run: () => insertIntoComposer(quoted(text), { prefix: "/btw\n" }) },
     {
       id: "new",
       label: "New session",
@@ -4864,7 +4851,7 @@ cmenu.bar($("entries"), selectionItems);
 // alone writes it. `leave` runs first (the viewer closes over the composer).
 function pointItems({ locator, text, to, comment, leave = () => {} }) {
   const s = to && sessions.get(to);
-  const own = s && mine(s);
+  const own = !!s;
   const q = `${locator}\n${quoted(text)}`;
   return [
     own && { id: "ask", label: "Ask", icon: "prompt", run: () => (leave(), toComposer(to, q)) },
@@ -4943,7 +4930,7 @@ function pagePoint(frame, { kind, x, y, rect, touch, locator = {}, text = "" }) 
 // True when the text landed.
 async function toComposer(key, text, opts) {
   const s = key && sessions.get(key);
-  if (!s || !mine(s)) return newSessionWith(null, text);
+  if (!s) return newSessionWith(null, text);
   // A window tab (#w=) follows the session too, but draws no composer.
   if (shown !== key || route().view !== "session") {
     if (filesView.leaving(route(hashOf(key))) && !(await filesView.confirmLeave())) return false;
@@ -5009,16 +4996,15 @@ function rowMenu(t, ev) {
     icon: "link",
     run: () => navigator.clipboard.writeText(`${location.origin}${location.pathname}#s=${shown}&at=${id}`).catch((err) => toast(`Copy failed: ${err.message || err}`, { kind: "error" })),
   };
-  const own = mine(s); // Reply and Edit write to a composer only its owner sends from
   let groups = null;
-  if (e.kind === "prose" || e.kind === "inbox") groups = [[own && reply, fresh], [copy, link]];
+  if (e.kind === "prose" || e.kind === "inbox") groups = [[reply, fresh], [copy, link]];
   else if (e.kind === "user") {
-    const edit = own && { id: "edit", label: "Edit and resend", icon: "pencil", run: () => insertIntoComposer(e.md || "") };
+    const edit = { id: "edit", label: "Edit and resend", icon: "pencil", run: () => insertIntoComposer(e.md || "") };
     groups = [[edit, fresh], [copy, link]];
   } else if (e.kind === "tool") {
     const open = e.detail?.path && !s.server && { id: "open", label: "Open file", icon: "file", run: () => openToolFile(id) };
     const out = { id: "copyout", label: "Copy output", icon: "copy", key: "c", run: copy.run };
-    groups = [[open, out], [own && reply, link]];
+    groups = [[open, out], [reply, link]];
   } else if (e.kind === "file" || e.kind === "artifact") {
     const items = sentItems(t).filter(Boolean);
     if (items.length) groups = [items];

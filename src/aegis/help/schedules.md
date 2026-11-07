@@ -108,8 +108,7 @@ Schedules view instead:
   session's own server, so a far session can never aim your click somewhere
   else. Pick the server in the Schedules view here.
 
-A plain link refuses all of this, as it does `queue@server`, and a member's agent
-is refused. Nothing is relayed to a third server.
+A plain link refuses all of this, as it does `queue@server`. Nothing is relayed to a third server.
 
 ## Fire a workflow
 
@@ -207,8 +206,7 @@ ticks that fell during the pause do not fire. `schedule_fire` fires at once,
 skipping the clock and the check but not the overlap rule. `schedule_delete`
 removes a schedule, and a live run keeps going.
 
-An agent changes only the schedules it created, a member only the ones it
-owns, and an admin any. A schedule an agent creates never starts an agent
+An agent changes only the schedules it created; a person changes any. A schedule an agent creates never starts an agent
 with more permission than its creator had.
 
 ## Read the runs

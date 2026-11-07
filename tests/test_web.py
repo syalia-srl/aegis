@@ -1258,25 +1258,14 @@ def test_the_artifact_script_and_stylesheet_are_served(project, fake_claude):
     assert "var(--accent)" in css.text
 
 
-def test_a_member_token_signs_in_and_is_told_who_it_is(project, fake_claude):
-    c = client_for(project, fake_claude)
-    member = c.app.state.aegis.principals.add("ben", "member")
-    with c.websocket_connect("/ws", headers={"origin": "http://testserver"}) as ws:
-        ws.send_json({"t": "hello", "token": member, "proto": PROTO})
-        welcome = ws.receive_json()
-        assert welcome["t"] == "welcome"
-        # Its quota policy: none set and no default, so every pool closed.
-        assert welcome["me"] == {"name": "ben", "role": "member", "policy": {}}
-
-
 def test_a_revoked_token_is_refused_at_its_next_message(project, fake_claude):
     c = client_for(project, fake_claude)
     store = c.app.state.aegis.principals
-    member = store.add("ben", "member")
+    token = store.admin_token()
     with c.websocket_connect("/ws", headers={"origin": "http://testserver"}) as ws:
-        ws.send_json({"t": "hello", "token": member, "proto": PROTO})
+        ws.send_json({"t": "hello", "token": token, "proto": PROTO})
         assert ws.receive_json()["t"] == "welcome"
-        store.revoke("ben")
+        store.revoke(store.owner)
         ws.send_json({"t": "call", "id": 1, "op": "server.version", "params": {}})
         # One read: the call's reply when the socket stayed open, or the close.
         with pytest.raises(WebSocketDisconnect) as e:
@@ -1284,8 +1273,8 @@ def test_a_revoked_token_is_refused_at_its_next_message(project, fake_claude):
         assert e.value.code == 4401
 
 
-def test_login_takes_any_valid_token(project, fake_claude):
+def test_login_takes_the_servers_token_only(project, fake_claude):
     c = client_for(project, fake_claude)
-    member = c.app.state.aegis.principals.add("ben", "member")
-    assert c.post("/login", json={"token": member}).status_code == 204
+    token = c.app.state.aegis.principals.admin_token()
+    assert c.post("/login", json={"token": token}).status_code == 204
     assert c.post("/login", json={"token": "nope"}).status_code == 401
