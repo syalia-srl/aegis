@@ -184,7 +184,7 @@ async def far(
     A server that fails serves the last answers ``last`` kept, as cached; one
     never answered (down, or an aegis with no usage.read) is missing. An
     answer younger than LINKED_S (``asked`` keeps when) is reused. A call
-    over a link and a member's call ask no link: links are the admin's."""
+    over a link asks no link."""
     links = getattr(app, "links", None)
     if links is None or caller.link is not None:
         return {}
@@ -344,9 +344,8 @@ class ImportParams(_Strict):
 
 
 def import_sources(app: "App", people: list[str] | None) -> list[tuple]:
-    """(person, Linux user, home) for each person whose Claude Code files
-    the import reads: the server's own user's, and each member's read as its
-    Linux user. A token without a user of its own acts as the server."""
+    """(person, None, home) for the server's own person, whose Claude Code
+    files the import reads."""
     out = []
     name = app.principals.owner
     if people is None or name in people:
@@ -390,7 +389,7 @@ def register_usage_ops(app: "App") -> None:
     @r.op("usage.import", ImportParams, agent=True)
     async def usage_import(p: ImportParams, caller):
         """Count once the sessions Claude Code ran outside aegis: each
-        person's ~/.claude/projects, read as their Linux user, as mode
+        person's ~/.claude/projects, as mode
         outside. Messages aegis already counts are skipped, and a file
         already imported is not read again. Claude Code purges its files
         after 30 days, so run it soon after upgrading, on each server."""

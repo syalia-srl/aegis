@@ -805,7 +805,7 @@ class Session:
         resume = self.resume_id
         mcp, system_prompt = self._host.spawn_args(self)
         inbox = await asyncio.to_thread(
-            attachments.ensure_inbox, self.state_root, self.log_id, None
+            attachments.ensure_inbox, self.state_root, self.log_id
         )
         self.exit_via = launching.resolve_via(self.spec.agent)
         proc = self.harness.process(
@@ -1040,7 +1040,7 @@ class Session:
     @property
     def inbox(self) -> Path:
         """Where the files a person attaches land (attachments.py)."""
-        return attachments.inbox(self.state_root, self.log_id, None)
+        return attachments.inbox(self.state_root, self.log_id)
 
     @property
     def drafts(self) -> Path:

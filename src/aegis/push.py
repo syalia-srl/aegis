@@ -4,9 +4,9 @@ A device subscribes from the bell (``client/js/pushpanel.js``) with the sources
 it wants to hear about. Its subscription is kept in
 ``<state>/push/subscriptions.json``, mode 0600 like the VAPID key beside it:
 an endpoint and its two keys are all anyone needs to push to that device. Each
-row belongs to the principal whose token made it; a member changes only their
-own, an admin any, and revoking a token deletes its rows (``token.revoke`` in
-``app.py``), so a lost phone stops hearing about the work.
+row records the principal whose token made it, and revoking the token deletes
+its rows (``token.revoke`` in ``app.py``), so a lost phone stops hearing about
+the work.
 
 The sender listens to the ``sessions`` channel inside the server, as a browser
 does, and to ``App.toast``, and applies ping.js's rule: an event is a session

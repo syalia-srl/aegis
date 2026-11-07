@@ -172,6 +172,6 @@ class Registry:
         try:
             return await op.handler(params, caller)
         except PermissionError as e:
-            # Nothing may act as this person (users.py, as_user.py): fail
-            # closed, and say so rather than as an internal error.
+            # A refused file or process action: say so rather than as an
+            # internal error.
             raise OpError("forbidden", str(e)) from e

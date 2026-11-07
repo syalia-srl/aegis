@@ -42,7 +42,6 @@ that is free, such as a prompt, completes nothing.
 | `/restart` | end the process and start a fresh one on the same conversation; nothing is sent. Use it after a change to the agent's MCP config or when the harness hangs |
 | `/btw <question>` | ask a side question about this session, even while the agent works. aegis answers it from the transcript with the agent `btw:` names in `.aegis.yaml`, in one call with no tools, and shows the answer as a block you can fold. The agent never sees the question or the answer. One runs at a time per session; the block's cancel stops it |
 | `/feedback [text]` | report a bug, ask for a feature or point out a docs gap in aegis. The agent reads the help page feedback, asks what it still needs and shows you a draft issue; nothing is filed until you say yes. Claude Code's own /feedback, which reports to Anthropic, is hidden in aegis. The /feedback row under the new tab's chips starts a new session with the chips you picked there, and the agent asks you what to report |
-| `/multiuser [text]` | set this server up for several people, each signed in with their own token and running as their own Linux user. An admin only; the agent reads the help page multi-user, looks at the host, asks who the people are and shows every command before it runs one. On a server already in the mode it starts at adding a person |
 | `/remember <text>` | save a memory every later session can find. The agent writes it with `memory_save` in your own store and says what it saved (help page knowledge) |
 | `/consolidate [text]` | review your skills and memories with the agent. It reads `knowledge_stats`, shows one page with a row per proposal (merge two duplicates, renew or drop an expired memory, fix a stale one, retire an unused skill, mend a broken link), each with its evidence and a checkbox, and applies only the rows you tick, each a commit with Undo on its card (help page consolidate) |
 | `/workflow [id] [text]` | run a saved workflow now: the agent makes its args from your text and starts it, with no card to approve. Alone, it opens the menu of saved workflows |
@@ -79,9 +78,7 @@ and no aegis command is refused before it costs a turn.
 | `aegis link list` | the linked servers, by name and URL, and which ask for trust |
 | `aegis link trust <name>` | ask an existing link for trust, or stop asking with `--off` |
 | `aegis link remove <name>` | end a link |
-| `aegis token add <name>` | make a token for a person, a linked server or a job; `--role member` (the default) or `--role admin`. The token is printed once |
-| `aegis token list` | the tokens, their roles and quota policies |
-| `aegis token revoke <name>` | end a token; revoking the server's own admin token, the one in `.aegis/state/token`, prints its replacement |
+| `aegis token revoke <name>` | replace the server's token, the one in `.aegis/state/token`, and print the new one; the name is the server's user |
 | `aegis journal search [pattern]` | search what was done: `--since`, `--until`, `--path`, `--session`, `--kind`, `--limit` |
 | `aegis journal rebuild` | rebuild the journal from every transcript |
 | `aegis usage` | what the agents' work cost, from the usage rows aegis counts as each turn ends: `--since`, `--until`, `--split`, `--by`, `--measure`, `--where`, `--json`, `--sessions`, `--tools`; see the usage page |

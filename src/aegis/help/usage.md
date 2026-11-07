@@ -152,7 +152,7 @@ answered ("beta answered 40 s ago"); the page asks them again every minute,
 so their numbers are at most a minute old. A server that stops answering
 keeps its last numbers, and one never reached, or running an aegis without
 the usage page, is named as not reached. A session list behind a cell lists
-this server's sessions. A member's page counts only this server.
+this server's sessions.
 
 ## Ask from an agent: usage_read
 
@@ -178,7 +178,6 @@ or `agent`. For one mode alone:
 {"since": "7d", "split": ["repo"], "where": {"mode": "queue"}}
 ```
 
-A member's call counts only the sessions it owns; an admin's counts all.
 A person's call counts every linked server and merges their rows, each
 naming its `server`, with `servers` saying when each answered and whether it
 is `live`, `cached` (its last answer) or `missing`. An agent's call, and one
@@ -201,7 +200,8 @@ session named `cc-<id>` whose turns have mode `outside`, with its repo from
 its working directory; the mode filter on the page takes them out in one
 click. A message aegis already counted is skipped, and so is a whole file
 whose session aegis ran itself. Claude Code deletes these files after 30
-days, so run the import soon after upgrading.
+days, so run the import soon after upgrading. An agent does the same with the
+`usage_import` tool (or `aegis call usage_import` from its shell).
 
 `--legacy` imports the logs of aegis before 2.0, as `aegis import-legacy`
 does, then derives the journal and the usage tables again from every store.
@@ -210,12 +210,6 @@ Running either again adds nothing: each file imported is recorded with its
 size and time, and one that grew since is read again in full. A rebuild of
 the journal keeps imported sessions. The page shows them once it next
 refreshes.
-
-On a server several people use, the command reads only its own user's files.
-An admin's agent calls `usage_import` instead (or `aegis call usage_import`
-from its shell): it reads each person's files as their Linux user, gives the
-sessions to their token, and lists any file it could not read. `people`
-limits it to some tokens.
 
 ## What the numbers mean
 

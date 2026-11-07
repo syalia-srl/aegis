@@ -3,7 +3,7 @@ agents.
 
 Reading is open to anyone, as with sessions. Changing follows the rule the
 queues apply to tasks (agent_ops.mine): an agent changes only the schedules it
-created, a member only the ones it owns, an admin any. A schedule an agent
+created; a person changes any. A schedule an agent
 creates records the agent's permission as its ceiling, and a new fire never
 starts an agent above it. A run with ``spawn: false`` may not call
 schedule_create (ops.NO_SPAWN), or it could start agents through a schedule.

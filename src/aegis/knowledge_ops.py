@@ -1,9 +1,8 @@
 """The knowledge operations: memory and skill tools for agents, and stats.
 
 Every op works on the caller's own principal (``App.who``): an agent's is its
-session's owner, so a member's agent never reaches another member's items, and
-a name that belongs to someone else answers ``not_found`` as a name that does
-not exist. Reads are open to read-permission sessions, as help_read is; saves
+session's owner, and a name that belongs to someone else answers ``not_found``
+as a name that does not exist. Reads are open to read-permission sessions, as help_read is; saves
 and deletes are not. A save is one commit in the principal's store
 (knowledge/store.py).
 
@@ -16,18 +15,17 @@ card that offers Undo. An agent's update or delete of an approved item
 applies at once, asked or not, and its card offers Undo, which reverts that
 commit. Approve,
 Discard and Undo are the session owner's ops on the owner's store, refused
-to anyone else, an admin included. The card is a transcript record, so it
+to anyone else. The card is a transcript record, so it
 works after a restart.
 
 Reading a skill's SKILL.md loads it in the calling session: the name joins
 ``Session.skills``, which the card shows and which ``skill_run`` checks.
 
 ``skill_run`` runs a script the loaded skill declares under ``aegis.scripts``.
-The store is out of a member's reach, so the server packs the skill's folder
-as a tar and pipes it to one process started through the launcher as the
-session's Linux user: a shell that unpacks it into a fresh ``mktemp -d``
-directory, which is therefore the member's, runs ``python3`` on the script
-there and removes the directory when it ends.
+The server packs the skill's folder as a tar and pipes it to one process
+started through the launcher: a shell that unpacks it into a fresh
+``mktemp -d`` directory, runs ``python3`` on the script there and removes the
+directory when it ends.
 """
 
 from __future__ import annotations
@@ -1135,8 +1133,7 @@ def register_knowledge_ops(app: App) -> None:
         s = app.sessions.open(p.log_id)
         owner = s.spec.owner or app.user
         if principal(caller) != owner:
-            # An admin may read a member's transcript, but what the member's
-            # agent believes is the member's to approve.
+            # What the agent believes is its owner's to approve.
             raise OpError(
                 "not_owner", f"only {owner}, who owns this session, answers its cards"
             )

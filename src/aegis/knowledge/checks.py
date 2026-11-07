@@ -17,9 +17,7 @@ caller gives (the principal's Files root and home). A stale
 memory stays in the hint: a missing file is not proof the fact is false.
 Only the first ``MAX_PATHS`` paths of a memory are looked for.
 
-``flags`` does no I/O itself: ``exists`` is the caller's, which in
-multi-user mode runs as the member (as_user.py), so the check sees what the
-member sees and nothing more.
+``flags`` does no I/O itself: ``exists`` is the caller's.
 
 ``duplicates``: two items of one kind that each rank the other first when
 their own name and description are searched for, both scores at least

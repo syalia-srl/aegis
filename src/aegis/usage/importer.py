@@ -205,9 +205,8 @@ def import_claude_projects(
     person: str,
     progress: Callable[[int, int], None] = lambda done, total: None,
 ) -> ImportReport:
-    """Import every ``*.jsonl`` under ``roots`` as sessions of ``person``;
-    ``user`` is the Linux user the files and their repos are read as. A file
-    that cannot be read is skipped and listed."""
+    """Import every ``*.jsonl`` under ``roots`` as sessions of ``person``. A
+    file that cannot be read is skipped and listed."""
     report = ImportReport()
     files = _files(roots)
     report.files = len(files)

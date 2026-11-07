@@ -31,7 +31,7 @@ any restart of the server. The card then shows three steps:
    systemd unit sees no restart and needs no `Restart=` setting.
 
 The page reconnects, finds a newer build and reloads, and the version shows
-as current. A member sees the arrow and the command, but no button.
+as current.
 
 ## Which installs aegis can update
 

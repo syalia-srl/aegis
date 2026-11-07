@@ -214,11 +214,6 @@ me the URL. When I open it, I will run /setup.</code></pre>
       <p class="fine">Useful for tests against a running app and for sites that need you to log in.</p>
     </article>
 
-    <article class="step" data-step="multiuser">
-      <h3>A server for a team</h3>
-      <p>Give each person a token and their own Linux user. Everything they start runs as that user, so the kernel checks every file their agents touch, and each one sees only their own sessions, queues and schedules. A quota policy per person keeps the shared subscriptions fair.</p>
-      <p class="fine">An admin, and root on the host, can still read everything. <code>/multiuser</code> has an agent walk you through the setup.</p>
-    </article>
   </div>
 
   <div class="stage-col">
@@ -263,8 +258,8 @@ me the URL. When I open it, I will run /setup.</code></pre>
               <div class="gauge warning"><span>month</span><div class="bar q warning"><i style="width:72%"></i><span class="tick" style="left:70%"></span></div><span class="val"><b>72%</b><span class="proj">→ 96%</span><span class="rst">↻ 22d</span></span></div>
             </div>
           </section>
-          <div class="order" data-show="fleet multiuser"><h3>Sessions</h3><div class="seg"><button class="on" type="button">Needs you first</button><button type="button">Tab order</button></div></div>
-          <section class="cards" data-show="fleet multiuser">
+          <div class="order" data-show="fleet"><h3>Sessions</h3><div class="seg"><button class="on" type="button">Needs you first</button><button type="button">Tab order</button></div></div>
+          <section class="cards" data-show="fleet">
             <div class="grp-h">Needs you</div>
             <div class="card running at-needs_you" data-feature="together">
               <div class="hd"><svg class="ic need"><use href="#g-need"/></svg><span class="h">keen-noether</span><span class="s at-needs_you">needs you</span></div>
@@ -301,7 +296,7 @@ me the URL. When I open it, I will run /setup.</code></pre>
               <div class="ft"><span class="when">just now</span><span>$8.52</span><span class="prog"><span class="pbar live"><i class="done"></i><i class="done"></i><i class="doing"></i><i></i></span><span class="pt">2/4 · ~25m</span></span><span class="ctx">40%</span></div>
             </div>
           </section>
-          <div class="remote" data-show="quota links fleet multiuser" data-feature="links">
+          <div class="remote" data-show="quota links fleet" data-feature="links">
             <section class="band far">
               <div><h5><span class="band-server">vps</span><span class="band-link">dev.example · linked · 38 ms</span></h5><div class="counts">
                 <div><svg class="ic wait"><use href="#g-wait"/></svg><b>1</b> waiting</div>

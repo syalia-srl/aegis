@@ -4,8 +4,7 @@ Every path is relative to the config root and goes through
 ``fs_paths.resolve``. Every operation is ``local`` and none is ``agent``, so
 Registry.call refuses an agent (it has its harness's own file tools) and a
 caller acting through a link (a far server never reads or writes files here).
-An admin and a member may both call them, and every write is logged with its
-author in ``<state>/fs-log.jsonl``.
+Every write is logged with its author in ``<state>/fs-log.jsonl``.
 
 A save carries the hash of the text it was based on, and a file whose hash on
 disk differs is not written: agents write the files a person edits, and
@@ -93,8 +92,7 @@ class FsWrite(BaseModel):
 
 class Tickets:
     """Ticket to (relative path, the place it is under, expiry): what
-    ``/fs/<ticket>/<name>`` serves. The place is the issuer's, so a ticket
-    reads with the access of the person it was issued to (as_user.py)."""
+    ``/fs/<ticket>/<name>`` serves."""
 
     def __init__(self) -> None:
         self._map: dict[str, tuple[str, Place | None, float]] = {}
@@ -378,12 +376,9 @@ def _restore(place: Place, trash_id: str) -> tuple[str, int]:
 
 
 def register_fs_ops(app: App) -> tuple[FsIndex, Tickets]:
-    """The ops, each acting in the caller's place (``App.place_of``): outside
-    multi-user mode the config root with the server's access, in it a
-    member's home with the member's own (as_user.py). Each op runs its
-    whole filesystem body on the place's runner, the path's resolve
-    included, so no path a person names is touched with the server's
-    access."""
+    """The ops, each acting in the caller's place (``App.place_of``), the
+    config root. Each op runs its whole filesystem body in a thread, the
+    path's resolve included."""
     r = app.registry
     root, state = app.roots.config_root, app.roots.state_root
     index = FsIndex(root, state)

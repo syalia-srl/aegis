@@ -136,9 +136,9 @@ desktop.
 
 ## The canvas
 
-A page, a sent or attached file, or a local file opened from a reply can stay
-on screen beside the transcript instead of scrolling away with its card or
-viewer. Dock, on its card or on the viewer's bar, opens it in a pane to the
+Dock a page, a sent or attached file, or a local file opened from a reply,
+and it stays on screen beside the transcript instead of scrolling away with
+its card or viewer. Dock, on its card or on the viewer's bar, opens it in a pane to the
 right of the transcript. The card keeps one line,
 docked · show, and Show outlines the pane; Open on a docked card outlines it
 too. The panes and the transcript make up the session's canvas, columns of

@@ -515,7 +515,6 @@ FAR_ERRORS = {
     "not_owner": "{handle}@{server} is not this server's link's to prompt there",
     "quota_closed": "the quota gate on {server} for this server's link is closed: "
     "nothing was started; a person here can see why with /spawn",
-    "not_for_members": "{server} lets this server's link do that only as an admin",
     "not_allowed": "{server} refused the permission asked for",
     "unknown_agent": "{server} has no such agent",
     "trust_ended": "the trusted link with {server} no longer holds; a person "
@@ -1019,8 +1018,6 @@ def register_agent_ops(app: App) -> None:
             return await far_handoff(handle, server, p, caller)
         to = target(p.target)
         to.check_lock()  # before an interrupt reaches it
-        # A prompt or an interrupt changes the session: a member's reaches only
-        # its own (tokens.py).
         sender = (
             f"agent:{reg.sessions[caller.log_id].handle}"
             if caller.is_agent and caller.log_id in reg.sessions

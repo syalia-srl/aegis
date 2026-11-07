@@ -5,9 +5,7 @@ edit made in a worktree and one made in the main checkout are the same file to
 the journal. A path in no repo keeps its absolute real path. Claims do not use
 this module: they match real paths, which is what exempts worktrees from them.
 
-Everything here runs git, so it runs on the journal's writer thread. git runs
-as ``user``, the Linux user of the session whose turn it reads (launch.py):
-git refuses a repository another user owns.
+Everything here runs git, so it runs on the journal's writer thread.
 """
 
 from __future__ import annotations

@@ -388,8 +388,7 @@ def import_history(
     root: Path | None = ROOT,
 ) -> None:
     """Count older work once: the legacy tree's logs and Claude Code's own
-    session files. Safe to run again: what was imported is skipped. On a
-    shared server, an admin's usage_import also reads each member's files."""
+    session files. Safe to run again: what was imported is skipped."""
     import getpass
     import sys
 

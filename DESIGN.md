@@ -555,7 +555,7 @@ turn starts with predicts the doc read no better than chance.
 principal's skills and memories are Markdown files under
 `<state>/knowledge/<principal>/`, a git repository in which every change
 through aegis is one commit (`knowledge/`). The state directory is out of
-every member's reach, so ops read and write it for the caller's own principal
+reach of agents' own tools, so ops read and write it for the caller's own principal
 (`App.who`), and a name another principal holds answers like one that does
 not exist. `Session._send` asks `Host.knowledge_hint` for a block before the
 notice blocks; the registry ranks the session owner's items (or the admin's,
@@ -567,9 +567,9 @@ notice it never goes into the system prompt or onto a `/` command. Loading a
 skill (`skill_read` of its SKILL.md) is a fact about the session:
 `Session.skills` lists the loaded names in order, in the meta so a restart
 keeps them, and the card shows them. A skill's scripts (`skill_run`) and its
-MCP server (`skill_mcp.py`) run as the session's Linux user in a fresh copy of
+MCP server (`skill_mcp.py`) run in a fresh copy of
 its folder, which the server pipes to the launched shell as a tar, since the
-store is out of a member's reach. A skill's MCP tools stay behind the one
+store stays out of an agent's direct reach. A skill's MCP tools stay behind the one
 `skill_tool`: the endpoint is stateless and Codex does not re-read a tool list
 mid-session by default, so no tool is added to it per session. What an agent
 saves unasked is `status: proposed` in the file itself, so the index, the hint
@@ -587,8 +587,7 @@ The card ops act on the session owner's store and are refused
 computed on a save (in the background, so a hung read never holds or fails
 a committed save) and in a daily pass the App runs from boot, each bounded
 at 30 s per principal, through the
-principal's `as_user` runner, so the paths a memory quotes are looked for as
-the member and never on the event loop; they live in memory in `Knowledge`
+thread, so the paths a memory quotes are looked for off the event loop; they live in memory in `Knowledge`
 and in the usage db's `flags` table, so a restart logs no flag twice.
 The Knowledge view's ops (`knowledge.list`, `.get`, `.put`, `.history`,
 `.restore`, `.remove`) are a person's, never an agent's, and act on the
@@ -597,8 +596,7 @@ guarded by a stamp: the SHA-256 of the item's file when the view read it,
 checked under the store's lock, so an edit never overwrites a change it did
 not see.
 `/setup`'s import (`knowledge.import`, `knowledge/importer.py`) reads each
-ticked source on the session user's `as_user` runner, so a member's files are
-read as the member and never on the event loop, and saves it with `fresh`,
+ticked source in a thread, never on the event loop, and saves it with `fresh`,
 which refuses a name any item holds. The ticks are the approval only in a
 turn the person began (`Session.person_turn`, which `/setup`'s line and an
 artifact's submit set): then one transcript card lists the items, each with
@@ -763,49 +761,22 @@ and follows a live `/permission`, and Claude Code is told to let every aegis
 tool through, because its plan mode refuses MCP calls an allow rule names
 (`ops.py`, `claude/process.py`).
 
-**A token is a principal, and a member changes only what it owns.** A server
-holds one token per person, linked server or job, each a name and a role
-(`tokens.py`): the token in `.aegis/state/token` is the admin's, the others are
-digests in `tokens.json`. Every session and queue task records its owner: the
-principal that started it, or the owner of the agent that did, so a member's
-agent cannot hand work to anyone else. An admin changes anything. A member reads
-everything and changes only what it owns; server settings, links, tokens and
-spawning on a linked server are for admins. Each operation declares `admin` or
-the param that names the session it changes, and `ops.Registry.call` checks both
-in one place. An agent acts as its session's owner with the owner's current role,
-and a link acts as the token it presented. A token revoked while its socket is
-open is refused at its next message, and reads nothing more. Outside the
-multi-user mode every harness runs as the server's Linux user, so a member's agent
-with shell access can read the admin token: roles stop accidents between
-colleagues, not a hostile member.
+**One token, one person.** A server has one token, in `.aegis/state/token`
+(`tokens.py`), and whoever holds it may do anything. Every session and queue
+task still records its owner, the server's person, because the host policy of
+the embeddable aegis (#957) keys its stores and its checks by that string. aegis
+3.0 removed the multi-user mode (#958): a state directory that still holds its
+`tokens.json`, or an `.aegis.yaml` with a `multi_user` block, refuses to start
+and says what to delete. Every process runs as the server's Linux user, through
+one launcher (`launch.py`).
 
-**In the multi-user mode a principal is a Linux user.** With `multi_user:` in
-`.aegis.yaml`, each token names a Linux user (`users.py`), and the server, an
-unprivileged user holding `CAP_SETUID`, `CAP_SETGID` and `CAP_SETPCAP` from its
-unit, starts every process through one launcher (`launch.py`): behind `setpriv`,
-switched to the owner's user with every capability dropped, with the owner's
-environment and the pool file's variables. Files the server opens for a person,
-it opens on a thread switched to that person (`as_user.py`), so the kernel checks
-every access. The state directory is mode 0700, out of every member's reach. A
-signal follows the same ownership rule: the launcher tries the signal directly,
-then, when Linux denies it, retries through `kill` as the process's recorded
-user (or as the server for server-owned processes). Harnesses, terminals,
-timeout cleanup, workflow commands and crash recovery all use this path.
-member sees only what it owns: one rule, `App.sees`, hides another's sessions,
-runs, tasks, schedules, journal rows and toasts at the three places data leaves
-the server (an op's params in `Registry.call`, each channel subscriber's view in
-`member_view.py`, and the lists ops return), and something hidden answers like
-something missing. The host work the mode needs is the help page `multi-user`,
-which `/multiuser` hands to the admin's agent as one turn (`multiuser.py`)
-(`docs/superpowers/specs/2026-10-21-linux-users-design.html`).
 **An agent suggests the configuration; a person writes it.** `config_suggest`
 records a card with the whole new `.aegis.yaml`, its diff and the file's stamp
-in the transcript, so it survives a restart; an admin's Apply writes that text
+in the transcript, so it survives a restart; a person's Apply writes that text
 through the stamp check (`config.write_text`) and wakes the agent
 (`config_suggest.py`). `/setup` hands the help page `setup` to the session's
 agent as one turn with the caller's last run, and `setup_record` keeps one
-record per principal under the state directory, which a member's agent cannot
-write itself (`setup.py`, `docs/superpowers/specs/2026-10-22-setup-onboarding-design.html`).
+record per principal under the state directory (`setup.py`, `docs/superpowers/specs/2026-10-22-setup-onboarding-design.html`).
 Closing is the one exception, and it asks for a second thought: `session_close`
 closes at once only a session the agent spawned, or a worker whose task it
 enqueued, whose attention is done. Anything else, the caller's own session
@@ -835,25 +806,15 @@ the far server's quota policy for that token decides (`app._spawn_far`). Its
 permission is capped at the agent's, and the far session records where it came
 from as `spawned_from`, provenance the far side cannot check and never trusts.
 
-**A member spends the pool only below its lines.** A policy (`quota_gate.py`)
-gives each pool, `claude`, `opencode-go` or `codex`, a mode: closed, open, or
-lines, where each listed window of the pool's gauge has a launch line and a stop
-line. A member token takes its own policy or `default_policy` from
-`tokens.json`, a pool its policy does not name is closed, and so is a token with
-neither; an admin has none and is never gated. Below every launch line the owner
-may start harnesses; between the lines its running turns go on and nothing new
-starts; at a stop line aegis interrupts them. One question decides every start,
-`Registry.quota_hold`, asked by `session.spawn`, a queue's dispatch (a waiting
-task is skipped, never failed, so the next owner's runs), `Session.deliver`, a
-turn's end with held messages, a person's send, and the boot's continue: a
-message that may not start a turn is held with `held_for: "quota"`. After every
-reading and every minute `App.on_quota` pauses each working session whose gate
-says stopped (`quota_paused` in the meta, a `quota_paused` record) and continues
-each paused or holding one whose gate is open, with one `> from aegis:quota`
-message ahead of what it held. It is level-triggered, so a restart or a missed
-reading needs no memory, and only an open gate continues, so a gauge between the
-lines leaves a paused session paused and nothing flaps. A reading older than 15
-minutes closes the gate and stops nothing: a failed poll must not interrupt work.
+**The person's pause holds every start.** One question decides whether a
+session may start a turn, `Registry.quota_hold`, asked by `session.spawn`, a
+queue's dispatch (a waiting task is skipped, never failed), `Session.deliver`, a
+turn's end with held messages, a person's send, and the boot's continue: while
+every session is paused (`pause.py`) a message that may not start a turn is
+held. Quota lines per token left with the multi-user mode; a session a line
+paused before then is continued by `App.on_quota` at the next reading, with one
+`> from aegis:quota` message ahead of what it held. A schedule's own launch
+lines (`schedules.py`, `quota_gate.decide`) still hold its ticks.
 
 **A cascade picks a model at every start and falls only inside a turn.** An
 agent's `models:` is recorded on the spawn spec as `cascade` (unless the spawn
@@ -1317,9 +1278,7 @@ longer have it, nothing is written and the answer is changed_on_disk with the
 disk's text, because agents write the files a person edits and
 last-write-wins would drop an agent's edit silently. A write goes through a
 temporary file in the same folder and `os.replace`, keeping the mode, and is
-logged with its author in `<state>/fs-log.jsonl`. Admins and members alike may
-write: every harness already runs as the server's user, so a member's agent
-could anyway. The picker's list is `fs_index.py`'s git-aware walk, run on
+logged with its author in `<state>/fs-log.jsonl`. The picker's list is `fs_index.py`'s git-aware walk, run on
 demand and never watched (#458). The tree lists one folder per `fs.list`, with
 one `git check-ignore` for the folder's innermost repository; a folder holding
 a repository shows although its parent ignores it, or `repos/` would hide every

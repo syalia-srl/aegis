@@ -172,20 +172,6 @@ class _Strict(BaseModel):
     model_config = {"extra": "forbid"}
 
 
-# The param that names a session by handle in each op that takes one
-# (App._hides): a member may not learn of another's session through it.
-HANDLE_FIELDS = {
-    "peer.read": "target",
-    "peer.handoff": "target",
-    "peer.deliver": "target",
-    "session.close": "handle",
-    "session.quiet": "handle",
-    "monitor.sessions": "sessions",
-    "schedule.test": "session",
-    "journal.search": "session",
-}
-
-
 class SpawnedFrom(_Strict):
     handle: str
     server: str
@@ -868,7 +854,7 @@ class App:
 
     def who(self, caller: Caller) -> Principal:
         """The principal a caller acts as. An agent acts as its session's
-        owner, with the owner's role now: a revoked owner's agent is a member."""
+        owner."""
         if caller.principal is not None:
             return caller.principal
         if caller.is_agent:
@@ -1412,8 +1398,6 @@ class App:
         if source is not None:
             t["from"] = {"handle": source.handle, "id": source.log_id}
         if owner is not None:
-            # About a principal's own thing (a schedule): its browsers only,
-            # in multi-user mode (member_view.py).
             t["owner"] = owner
         self.channels.publish("toasts", [{"toast": t}])
         self.push.sender.on_toast(t)  # an agent's goes to subscribed devices
@@ -2151,9 +2135,7 @@ class App:
         }
 
     def _archive_sources(self, only: str | None, who: Principal):
-        """Each server an archive listing reads, with how to fetch a page. A
-        member in multi-user mode reads its own sessions here, and no linked
-        server's: links are the admin's."""
+        """Each server an archive listing reads, with how to fetch a page."""
 
         async def local(query, limit, after, workers):
             items, total, last = self.sessions.archive(
@@ -2253,8 +2235,7 @@ class App:
                 self._resolve_cwd(p.cwd, parent.spec.cwd if parent else None),
                 spawned_by=parent.log_id if parent else None,
                 group=self._group_for(parent, p.from_session, caller),
-                # A child is its parent's owner's, so a member's agent cannot
-                # hand work to anyone else; a person's session is theirs.
+                # A child is its parent's owner's; a person's session is theirs.
                 owner=parent.spec.owner if parent else self.who(caller).name,
             )
             if p.spawned_from is not None:

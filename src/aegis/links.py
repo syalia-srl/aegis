@@ -622,8 +622,7 @@ class Backlink:
     router find it by name. A browser here watches that server down the same
     socket, as ``rsub`` and ``rframe``, when it said ``views`` in its hello
     (#969); an older one gets ``not_both_ways``. ``check`` says why the trust
-    no longer holds, or None, and is asked before every call: a member token
-    minted here ends it at once."""
+    no longer holds, or None, and is asked before every call."""
 
     url = None  # nothing to fetch files from: the far server has no route here
 

@@ -214,7 +214,6 @@ def register_artifact_ops(app: App) -> None:
             _sized(p.state, "state")
         a = s.artifacts.create(p.title, p.caption, p.state, write=False)
         run = asyncio.to_thread
-        # Written as the session's user, in its home in multi-user mode.
         path = await run(artifacts.write_draft, s.drafts, a.id, p.title)
         return {"id": a.id, "path": str(path), "html": artifacts.skeleton(p.title)}
 
