@@ -459,15 +459,15 @@ class Notices:
         A source turned off in .aegis.yaml sets nothing."""
         if source not in self._order:
             self._order.append(source)
-        if self.cfg(source) is None:
-            items = []
+        s = self._app.sessions.sessions.get(log_id)
+        if self.cfg(source) is None or (s is not None and not s.spec.notices):
+            items = []  # off in .aegis.yaml, or a product agent's (#983)
         mine = self._items.setdefault(log_id, {})
         prefix = f"{source}:"
         new = {
             prefix + i.key: Item(i.key, i.level, _cut(i.text), _cut(i.clear), i.wake)
             for i in items
         }
-        s = self._app.sessions.sessions.get(log_id)
         sent = s.items_sent if s is not None else {}
         for full in [k for k in mine if k.startswith(prefix) and k not in new]:
             gone = mine.pop(full)

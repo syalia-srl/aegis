@@ -1079,6 +1079,8 @@ class Session:
         msg = {"header": header, "body": body, "ts": time.time()}
         if by_person:
             msg["by_person"] = True
+        if not (msg := self._quiet(msg)):
+            return "sent"  # aegis's own news, which a product agent never gets
         if urgent and self.status == "working" and self.harness.steers_mid_turn:
             # Steered in as a person's mid-turn message is: a user message at
             # the next tool boundary (Claude Code) or a turn/steer (Codex).
@@ -1099,9 +1101,19 @@ class Session:
         self._publish_now()
         self._host.status_changed(self)
 
+    def _quiet(self, msg: dict) -> dict | None:
+        """``msg`` as a session with notices off gets it (#983): aegis's own
+        messages dropped, except a cut turn's continuation, under a header
+        that does not name aegis. Unchanged when notices are on."""
+        if self.spec.notices or not msg["header"].startswith(AEGIS_HEADER):
+            return msg
+        if msg["header"].startswith(CONTINUED):
+            return msg | {"header": "> continue"}
+        return None
+
     async def _flush_held(self) -> None:
         self._flushing = True
-        batch, self.held = self.held, []
+        batch, self.held = [m for m in map(self._quiet, self.held) if m], []
         try:
             if batch:
                 # Before the send gathers notices: the "held" warning ends here.
@@ -1161,7 +1173,7 @@ class Session:
             self._set(title=default_title(typed or text))
         if self.cascade_exhausted:
             self.cascade_exhausted = False  # a new turn starts
-        if not text.startswith("/"):
+        if not text.startswith("/") and self.spec.notices:
             await self._host.know_how_ready(self)
             # The hint first, then the notices. The record and the harness get
             # the same text, so the fold pairs them; the fold splits the
@@ -1705,6 +1717,12 @@ def _cascade_of(raw: Any) -> tuple[str, ...]:
     if isinstance(raw, dict):
         raw = raw.get("models")
     return tuple(str(m) for m in raw) if isinstance(raw, list) else ()
+
+
+# aegis's own inbox headers, and the restart and crash ones among them
+# (restarts.header) that continue a cut turn.
+AEGIS_HEADER = "> from aegis:"
+CONTINUED = ("> from aegis:restart", "> from aegis:crash")
 
 
 def _inbox_text(batch: list[dict]) -> str:
