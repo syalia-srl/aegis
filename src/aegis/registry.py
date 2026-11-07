@@ -775,6 +775,17 @@ class Registry(Host):
             self._admit(m)
 
     def _admit(self, meta: dict) -> None:
+        if meta.get("linux_user") and not meta.get("archived"):
+            # A former member's session (#958): its harness ran as another
+            # Linux user, in that user's home, and cannot resume as the server.
+            meta["archived"] = True
+            self.metas.write(meta)
+            log.warning(
+                "aegis: archived %s, which ran as Linux user %s under the "
+                "multi-user mode aegis 3.0 removed",
+                meta.get("handle") or meta["log_id"],
+                meta["linux_user"],
+            )
         if not meta.get("handle") or (
             not meta.get("archived") and meta["handle"] in self._open_handles()
         ):

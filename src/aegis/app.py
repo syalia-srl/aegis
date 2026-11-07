@@ -848,14 +848,12 @@ class App:
         return listed if isinstance(listed, list) else None
 
     def who(self, caller: Caller) -> Principal:
-        """The principal a caller acts as. An agent acts as its session's
-        owner."""
+        """The principal a caller acts as: the token's, or the server's one
+        person for an agent and for the server's own calls, whoever a session
+        from before aegis 3.0 names as its owner."""
         if caller.principal is not None:
             return caller.principal
-        if caller.is_agent:
-            name = self.owner_of(caller.log_id or "") or self.user
-            return Principal(name)
-        return Principal(self.user)  # the server's own calls
+        return Principal(self.user)
 
     def gate(self, owner: str | None, harness: str, model: str | None) -> Gate:
         """Whether a harness may start on that pool now: always, since quota
@@ -1155,6 +1153,7 @@ class App:
         self.journal.start()
         self.repos.start()
         self.sessions.boot(restarts.started(self.roots.state_root))
+        self.push.subscriptions.keep_owner(self.principals.owner)
         await self.terminals.boot()
         if self.sessions.sign_in is not None:
             self.sessions.sign_in.boot()
@@ -2230,8 +2229,8 @@ class App:
                 self._resolve_cwd(p.cwd, parent.spec.cwd if parent else None),
                 spawned_by=parent.log_id if parent else None,
                 group=self._group_for(parent, p.from_session, caller),
-                # A child is its parent's owner's; a person's session is theirs.
-                owner=parent.spec.owner if parent else self.who(caller).name,
+                # Every session is the server's one person's.
+                owner=self.who(caller).name,
             )
             if p.spawned_from is not None:
                 if not valid_handle(p.spawned_from.handle):

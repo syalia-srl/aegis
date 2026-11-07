@@ -266,6 +266,10 @@ class Terminals:
         meta = json.loads(path.read_text())
         if missing := META_KEYS - set(meta):
             raise ValueError(f"meta.json lacks {sorted(missing)}")
+        if meta.get("linux_user") and not meta.get("archived"):
+            # A former member's terminal (#958): it ran as another Linux user.
+            meta.update(archived=True, state="ended", reason="multi_user_removed")
+            path.write_text(json.dumps(meta))
         if meta.get("archived"):
             self.archived[meta["id"]] = meta
             return

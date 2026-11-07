@@ -11,6 +11,8 @@ from pathlib import Path
 
 import pytest
 
+import signal
+
 from aegis import launch
 from aegis.harness import OOM_SCORE_ADJ
 
@@ -195,3 +197,20 @@ async def test_a_call_without_via_is_refused():
     """Required like ``user``, so a new call site has to say whether it exits."""
     with pytest.raises(TypeError, match="via"):
         await launch.child(["true"])  # type: ignore[call-arg]
+
+
+def test_signal_process_ignores_a_process_already_gone(monkeypatch):
+    def gone(pid, sig):
+        raise ProcessLookupError
+
+    monkeypatch.setattr(launch.os, "kill", gone)
+    launch.signal_process(4321, signal.SIGTERM)
+
+
+def test_browser_hands_the_url_to_webbrowser(monkeypatch):
+    import webbrowser
+
+    seen = []
+    monkeypatch.setattr(webbrowser, "open", lambda url: seen.append(url) or True)
+    launch.browser("http://127.0.0.1:1/")
+    assert seen == ["http://127.0.0.1:1/"]

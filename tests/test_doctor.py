@@ -375,3 +375,16 @@ def test_knowledge_in_use_without_git_warns(tmp_path, monkeypatch):
     assert (f.level, f.where) == ("warn", "knowledge") and "git" in f.message
     monkeypatch.setattr("aegis.doctor.shutil.which", lambda b: "/usr/bin/git")
     assert _knowledge(roots) == []
+
+
+async def test_a_failing_version_read_warns_unknown_and_still_lists_models(
+    tmp_path, fake_claude, fake_opencode, monkeypatch
+):
+    """A harness whose --version fails is judged unknown, as a launch judges it,
+    and its models are still read (#454)."""
+    monkeypatch.setenv("AEGIS_FAKE_HARNESS_VERSION", "")
+    found = await run(tmp_path, GOOD, fake_claude, fake_opencode)
+    claude = at(found, "harness.claude-code")
+    assert [f.level for f in claude] == ["warn"], claude
+    assert "could not be read" in claude[0].message
+    assert "--version` failed" in claude[0].message

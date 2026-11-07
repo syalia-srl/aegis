@@ -1000,8 +1000,6 @@ def register_knowledge_ops(app: App) -> None:
                     "bad_params", "name the session for the import's card: log_id"
                 )
             s = app.sessions.open(p.log_id)
-            if (s.spec.owner or app.user) != owner:
-                raise OpError("not_owner", f"{p.log_id} is not one of your sessions")
         if len(p.items) > MAX_IMPORT_ITEMS:
             raise OpError(
                 "too_many",
@@ -1131,12 +1129,6 @@ def register_knowledge_ops(app: App) -> None:
 
     def pending_card(p: CardRef, ops: tuple[str, ...], caller: Caller):
         s = app.sessions.open(p.log_id)
-        owner = s.spec.owner or app.user
-        if principal(caller) != owner:
-            # What the agent believes is its owner's to approve.
-            raise OpError(
-                "not_owner", f"only {owner}, who owns this session, answers its cards"
-            )
         e = s.fold().entry(p.id)
         if e is None or e["kind"] != "knowledge" or e["detail"].get("op") not in ops:
             raise OpError(
@@ -1144,8 +1136,8 @@ def register_knowledge_ops(app: App) -> None:
             )
         if e["status"] != "pending" or (s.log_id, p.id) in answering:
             raise OpError("gone", f"the card {p.id} was already answered")
-        # The session owner's store: the card is about the agent's items.
-        return s, e, owner
+        # The one person's store: the card is about the agent's items.
+        return s, e, principal(caller)
 
     @contextmanager
     def answer(s, id: str):

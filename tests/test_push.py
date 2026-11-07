@@ -534,3 +534,63 @@ async def test_a_long_title_or_toast_is_cut_and_still_pushes(world, service):
     await until(lambda: service.got, what="the push")
     [payload] = service.payloads()
     assert payload["body"].startswith("x") and payload["tag"].endswith("…")
+
+
+async def test_at_most_ten_devices_and_a_counted_one_subscribes_again(world):
+    ids = [
+        (
+            await call(
+                world,
+                "push.subscribe",
+                {
+                    "subscription": sub(endpoint=f"https://push.example.test/{i}"),
+                    "device": "x",
+                },
+            )
+        )["id"]
+        for i in range(10)
+    ]
+    with pytest.raises(OpError) as e:
+        await call(
+            world,
+            "push.subscribe",
+            {
+                "subscription": sub(endpoint="https://push.example.test/10"),
+                "device": "x",
+            },
+        )
+    assert e.value.code == "too_many_devices"
+    # A device already counted subscribes again, by its id or its endpoint.
+    await call(
+        world,
+        "push.subscribe",
+        {
+            "subscription": sub(endpoint="https://push.example.test/new"),
+            "device": "x",
+            "id": ids[0],
+        },
+    )
+    await call(
+        world,
+        "push.subscribe",
+        {"subscription": sub(endpoint="https://push.example.test/1"), "device": "y"},
+    )
+    assert len(world.app.push.subscriptions.list()) == 10
+
+
+async def test_one_endpoint_is_one_row(world):
+    first = await call(world, "push.subscribe", {"subscription": sub(), "device": "x"})
+    again = await call(world, "push.subscribe", {"subscription": sub(), "device": "x"})
+    assert again == first
+    # A rotation onto an endpoint another row has leaves one row too.
+    other = await call(
+        world,
+        "push.subscribe",
+        {"subscription": sub(endpoint="https://push.example.test/2"), "device": "z"},
+    )
+    await call(
+        world,
+        "push.subscribe",
+        {"subscription": sub(), "device": "z", "id": other["id"]},
+    )
+    assert [r["id"] for r in world.app.push.subscriptions.list()] == [other["id"]]

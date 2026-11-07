@@ -47,6 +47,22 @@ class Prepared:
     roots: Roots
 
 
+def _proc_status() -> str:
+    try:
+        return Path("/proc/self/status").read_text()
+    except OSError:
+        return ""
+
+
+def _ambient_caps(status: str) -> bool:
+    """Whether this process holds ambient capabilities, which every child
+    inherits: a systemd unit made for the multi-user mode grants them."""
+    for line in status.splitlines():
+        if line.startswith("CapAmb:"):
+            return int(line.split(":", 1)[1].strip() or "0", 16) != 0
+    return False
+
+
 def prepare(start: Path, root: Path | None = None) -> Prepared:
     """The checks before a server may start on ``root`` (default: the nearest
     ancestor of ``start`` holding .aegis.yaml); StartError when one fails."""
@@ -68,6 +84,15 @@ def prepare(start: Path, root: Path | None = None) -> Prepared:
         refuse_old_state(roots.state_root)
     except OldStateError as e:
         raise StartError([str(e)]) from None
+    if _ambient_caps(_proc_status()):
+        raise StartError(
+            [
+                "aegis holds ambient capabilities, which every agent would inherit: "
+                "its systemd unit was made for the multi-user mode, which aegis 3.0 "
+                "removed.",
+                "Write a new unit with `aegis service install` and restart the service.",
+            ]
+        )
     snap = Config(roots.config_root).current()
     if snap.multi_user_error:
         raise StartError([snap.multi_user_error])

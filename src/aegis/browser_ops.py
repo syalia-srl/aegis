@@ -385,8 +385,6 @@ def register_browser_ops(app: App) -> None:
         )
         if s is None:
             raise OpError("unknown_session", f"no open session {p.session}")
-        if app.owner_of(s.log_id) != app.owner_of(p.id):
-            raise OpError("not_owner", "give a browser to a session of its owner")
         await br.give(p.id, s.log_id, s.handle)
         dock(s, p.id, "right")
 

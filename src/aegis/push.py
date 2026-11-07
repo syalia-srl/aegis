@@ -187,6 +187,13 @@ class Subscriptions:
         self._rows = [r for r in self._rows if r["id"] != id]
         self._save()
 
+    def keep_owner(self, name: str) -> None:
+        """Drop every row another principal made: a former member's device,
+        from before aegis 3.0 removed the multi-user mode (#958)."""
+        if any(r["owner"] != name for r in self._rows):
+            self._rows = [r for r in self._rows if r["owner"] == name]
+            self._save()
+
     def remove_owner(self, name: str) -> None:
         if any(r["owner"] == name for r in self._rows):
             self._rows = [r for r in self._rows if r["owner"] != name]
