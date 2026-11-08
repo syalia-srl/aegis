@@ -339,6 +339,9 @@ body{background:#000}
 #a2 .row .body{min-width:0}
 /* Off-screen rows skip layout and paint, and keep their last height once drawn (#157). */
 #a2 #entries>.row{content-visibility:auto;contain-intrinsic-size:auto 40px}
+/* The selected row is the one the reader is on: its text must be there even
+   when it is scrolled out of view, for a reveal and for innerText. */
+#a2 #entries>.row.sel{content-visibility:visible}
 #a2 .row.user .body{color:var(--strong);background:var(--raised);padding:9px 12px;border-radius:var(--r);font-size:14px;white-space:pre-wrap;overflow-wrap:anywhere}
 #a2 .row.user .body .md{white-space:normal}
 #a2 .row.user .g{color:var(--accent)}
