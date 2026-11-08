@@ -350,6 +350,23 @@ export function tickPlan(c, m) {
 }
 
 export function renderArchive(box, items, { onReopen, onRead }) {
+  // A link's state change reads the archive again (#774), and several replies
+  // may land while a person is aiming at a row. Replacing identical rows is
+  // what makes a tap miss: it was resolved on the old node and goes nowhere.
+  // Skip a redraw that would draw exactly what is already there.
+  const sig = JSON.stringify(
+    items.map((m) => [
+      m.key,
+      m.title,
+      m.handle,
+      m.server,
+      cwdTail(m.cwd),
+      ago(m.last_activity),
+      money(m.cost_usd),
+    ]),
+  );
+  if (box.dataset.rendered === sig) return;
+  box.dataset.rendered = sig;
   if (!items.length) {
     box.replaceChildren(el("div", "empty", "Nothing archived matches."));
     return;
