@@ -29,6 +29,7 @@ import * as cmenu from "./menu.js";
 import { attachTabCard } from "./tabcard.js";
 import { blocksOf } from "./groups.js";
 import { clampToRow, insertIntoComposer, quoted, rangeText } from "./quote.js";
+import { closeFeedCard, renderFeeds, tickFeeds } from "./feeds.js";
 import { closeMonitorCard, renderMonitors, tickMonitors } from "./monitors.js";
 import { Settings } from "./settings.js";
 import { entry, Journal, opens } from "./journal.js";
@@ -2321,6 +2322,9 @@ function renderMeta(s) {
   const mons = s.monitors || [];
   $("s-mon-sec").hidden = !mons.length;
   renderMonitors($("s-monitors"), mons, revealToolRow);
+  const fds = s.feeds || [];
+  $("s-feed-sec").hidden = !fds.length;
+  renderFeeds($("s-feeds"), fds, (op, params) => callFor(s.key, op, params));
   const working = s.state === "working";
   $("interrupt").hidden = !working;
   // A workflow's node is the engine's while its run lives, and a handed-off
@@ -2450,6 +2454,7 @@ setInterval(tickWorking, 60);
 
 setInterval(() => {
   tickMonitors();
+  tickFeeds();
   if (root.dataset.view === "fleet" && local().some((m) => m.stale)) drawBand();
   if (root.dataset.view === "fleet") for (const c of document.querySelectorAll(".card")) {
     const m = sessions.get(c.dataset.id);
@@ -3731,7 +3736,7 @@ installKeys(
       }
       if (root.dataset.side === "open") return closeSide();
       if (!keymap.hidden) help(false);
-      else if (cmenu.close() || cmenu.unbar() || viewer.close() || find.close() || closeMonitorCard() || closeCard()) return;
+      else if (cmenu.close() || cmenu.unbar() || viewer.close() || find.close() || closeMonitorCard() || closeFeedCard() || closeCard()) return;
       else if (route().view === "session" && !editing.size) interrupt();
     },
     help: () => help(),
@@ -4576,7 +4581,7 @@ $("close").addEventListener("click", () => {
 // -- the panel: a drawer on a phone (client.css, max-width 760px), collapsible
 // and resizable on a desktop (side.js) ------------------------------------------
 const drawerMode = matchMedia("(max-width: 760px)");
-initSide({ onCardOpen: () => closeMonitorCard() });
+initSide({ onCardOpen: () => closeMonitorCard() || closeFeedCard() });
 // Closing the drawer returns to the desktop state this browser keeps.
 const closeSide = () => {
   if (root.dataset.side === "open") restState();

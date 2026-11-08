@@ -334,3 +334,63 @@ async def test_a_feed_started_by_its_agent_wakes_it_and_holds_done(
         assert w.app.feeds.of(a.log_id) == []
     finally:
         await w.stop()
+
+
+# -- the card's history -------------------------------------------------------
+def test_the_card_counts_items_per_bucket_and_batches_as_ticks():
+    from aegis.feeds import card_stats
+
+    now = 1_800_000_000.0
+    f = Feed(name="c", owner="o", cwd="/", source={"file": "c"})
+    f.arrivals = [now - 30, now - 40, now - 3500]
+    hour = int(now // 3600)
+    f.hours = {str(hour): 2, str(hour - 1): 5, str(hour - 30): 4}
+    f.batches = [{"b": 1, "at": now - 20, "n": 2, "shared": False, "turn_s": 30.0, "tokens": 900},
+                 {"b": 2, "at": now - 7200, "n": 5, "shared": True, "turn_s": None, "tokens": None}]  # fmt: skip
+    f.waits = [[now - 20, 10.0], [now - 20, 20.0], [now - 7200, 300.0]]
+    f.acc = {"debounce": 30.0, "turn": 90.0}
+    got = card_stats(f, now)
+    assert (
+        got["ranges"]["hour"]["counts"][-1] == 2
+        and sum(got["ranges"]["hour"]["counts"]) == 3
+    )
+    assert got["ranges"]["day"]["counts"][-2:] == [5, 2]
+    assert sum(got["ranges"]["week"]["counts"]) == 11
+    assert got["ranges"]["hour"]["batches"][-1] == 1
+    assert got["ranges"]["hour"]["wait"] == [20.0, 20.0, 20.0]
+    assert got["ranges"]["day"]["wait"][2] == 300.0
+    assert got["split"] == {"debounce": 0.25, "turn": 0.75}
+    assert got["per_batch"] == {"items": 5, "turn_s": 30.0, "tokens": 900}
+
+
+def test_waiting_is_charged_to_why_it_waited():
+    f = Feed(name="c", owner="o", cwd="/", source={"file": "c"})
+    s = FakeSession()
+    f.account(s, 100.0)
+    f.pending = [{"text": "a", "seen": 100.0}, {"text": "b", "seen": 100.0}]
+    f.account(s, 110.0)  # idle: debounce
+    s.in_turn = True
+    f.account(s, 115.0)
+    f.paused = "by you"
+    f.account(s, 116.0)
+    assert f.acc == {"debounce": 20.0, "turn": 10.0, "paused": 2.0}
+
+
+async def test_a_batch_records_the_turn_it_started(tmp_path):
+    (tmp_path / "c.log").write_text("")
+    feeds, _, s = await _feeds(tmp_path)
+    s.turn_tokens = [1200, 300]
+    try:
+        await feeds.start(
+            "s1", str(tmp_path), "c", {"file": "c.log", **FAST}, debounce_s=0.1
+        )
+        (tmp_path / "c.log").write_text("a\n")
+        await until(lambda: s.got, timeout=3, what="the batch")
+        f = feeds.get("s1", "c")
+        assert f.open_batch == 1 and f.batches[0]["shared"] is False
+        feeds.turn_ended(s)
+        assert f.batches[0]["tokens"] == 1500 and f.batches[0]["turn_s"] >= 0
+        card = f.card(s)
+        assert card["waiting"] == [] and card["recent"][0]["text"] == "a"
+    finally:
+        await feeds.shutdown()

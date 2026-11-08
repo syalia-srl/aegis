@@ -67,6 +67,14 @@ ERRORS_TO_PAUSE = 3
 JQ_TIMEOUT_S = 10.0
 RECENT_KEPT = 12
 ITEM_SHOWN = 160
+# The card's history: items per hour for HOURS_KEPT hours, arrivals of the
+# last hour, the waits and batches of the last week, at most so many.
+HOURS_KEPT = 8 * 24
+WAITS_KEPT = 2000
+BATCHES_KEPT = 500
+WEEK_S = 7 * 86400
+# The card's ranges: how many buckets of how many seconds.
+RANGES = {"hour": (12, 300), "day": (24, 3600), "week": (28, 6 * 3600)}
 
 SOURCE = "feeds"
 notice_sources.declare(SOURCE, {"wake": True})
@@ -101,6 +109,17 @@ class Feed:
     polled_at: float | None = None
     notes: list[str] = field(default_factory=list)  # told in the next batch
     recent: list[dict] = field(default_factory=list)  # {"text","seen","sent","batch"}
+    # The card's history (card_stats).
+    hours: dict[str, int] = field(default_factory=dict)  # hour (epoch // 3600) -> items
+    arrivals: list[float] = field(default_factory=list)  # item times, last hour
+    waits: list[list[float]] = field(default_factory=list)  # [sent, waited]
+    # {"b", "at", "n", "shared", "turn_s", "tokens"}; shared: it joined a
+    # flush with other messages, so the turn it started is not its own.
+    batches: list[dict] = field(default_factory=list)
+    open_batch: int | None = None  # a batch whose turn has not ended yet
+    # Item-seconds of waiting, by why: debounce, turn, quota, paused.
+    acc: dict[str, float] = field(default_factory=dict)
+    acc_at: float | None = None
 
     @property
     def kind(self) -> str:
@@ -159,7 +178,90 @@ class Feed:
             "polled_at": self.polled_at,
             "pos": self.pos,
             "recent": self.recent,
+            "waiting": [
+                {"text": i["text"][:ITEM_SHOWN], "seen": i["seen"]}
+                for i in self.pending[-6:][::-1]
+            ],
+            **card_stats(self, time.time()),
         }
+
+    def account(self, session: Session | None, now: float) -> None:
+        """Add the item-seconds since the last call to why the pending
+        items waited: a pause, the quota gate, a turn, or the debounce."""
+        if self.acc_at is not None and self.pending:
+            why = wait_reason(self, session)
+            dt = max(0.0, now - self.acc_at) * len(self.pending)
+            self.acc[why] = self.acc.get(why, 0.0) + dt
+        self.acc_at = now
+
+
+def wait_reason(f: Feed, s: Session | None) -> str:
+    if f.paused:
+        return "paused"
+    if s is not None and any(m.get("held_for") == "quota" for m in s.held):
+        return "quota"
+    if s is not None and (s.in_turn or s.held):
+        return "turn"
+    return "debounce"
+
+
+def _quantiles(xs: list[float]) -> list[float] | None:
+    """Median, 90th percentile and maximum of ``xs``, or None."""
+    if not xs:
+        return None
+    xs = sorted(xs)
+    pick = lambda q: xs[min(len(xs) - 1, int(q * len(xs)))]  # noqa: E731
+    return [pick(0.5), pick(0.9), xs[-1]]
+
+
+def _median(xs: list[float]) -> float | None:
+    q = _quantiles(xs)
+    return q[0] if q else None
+
+
+def card_stats(f: Feed, now: float) -> dict:
+    """What the card draws, decided here: per range, items and batches per
+    bucket and the waits; the split of all waiting by why; per batch, items,
+    and the length and tokens of the turn it started."""
+    ranges = {}
+    hour_now = int(now // 3600)
+    for name, (n, size) in RANGES.items():
+        start = now - n * size
+        if name == "hour":
+            counts = [0] * n
+            for a in f.arrivals:
+                if a > start:
+                    counts[min(n - 1, int((a - start) // size))] += 1
+        else:
+            per = size // 3600
+            first = hour_now - n * per + 1
+            counts = [
+                sum(f.hours.get(str(first + i * per + j), 0) for j in range(per))
+                for i in range(n)
+            ]
+            start = first * 3600.0
+        ticks = [0] * n
+        for b in f.batches:
+            if b["at"] > start:
+                ticks[min(n - 1, int((b["at"] - start) // size))] += 1
+        waits = [w for at, w in f.waits if at > now - n * size]
+        ranges[name] = {
+            "size": size,
+            "counts": counts,
+            "batches": ticks,
+            "wait": _quantiles(waits),
+        }
+    own = [b for b in f.batches if not b["shared"]]
+    total = sum(f.acc.values())
+    return {
+        "ranges": ranges,
+        "split": {k: v / total for k, v in f.acc.items()} if total else {},
+        "per_batch": {
+            "items": _median([b["n"] for b in f.batches]),
+            "turn_s": _median([b["turn_s"] for b in own if b["turn_s"] is not None]),
+            "tokens": _median([b["tokens"] for b in own if b["tokens"] is not None]),
+        },
+    }
 
 
 def batch_text(f: Feed, items: list[dict], now: float, again: bool) -> tuple[str, str]:
@@ -329,11 +431,13 @@ class Feeds:
         return f
 
     def pause(self, f: Feed, why: str) -> None:
+        f.account(self._registry.sessions.get(f.owner), time.time())
         f.paused = why
         self._save()
         self._changed(f)
 
     def resume(self, f: Feed) -> None:
+        f.account(self._registry.sessions.get(f.owner), time.time())
         f.paused, f.errors, f.last_error = None, 0, ""
         self._save()
         self._changed(f)
@@ -375,6 +479,16 @@ class Feeds:
         """The turn ended: each feed's pending items join the held flush as one
         block, or go now when nothing is held. Synchronous, so the block is in
         ``s.held`` before the flush task the turn's end scheduled takes it."""
+        now = time.time()
+        for f in self.of(s.log_id):
+            if f.open_batch is not None:
+                for b in f.batches:
+                    if b["b"] == f.open_batch:
+                        b["turn_s"] = now - b["at"]
+                        b["tokens"] = sum(getattr(s, "turn_tokens", None) or [0, 0])
+                f.open_batch = None
+                self._save()
+            f.account(s, now)
         for f in self.live(s.log_id):
             if f.pending:
                 self._deliver(f, s)
@@ -392,7 +506,21 @@ class Feeds:
         header, body = batch_text(f, items, time.time(), again)
         f.notes = []
         t = time.time()
+        f.account(s, t)
         f.delivered += len(items)
+        shared = bool(s.held or s.in_turn)
+        f.waits = [w for w in f.waits if w[0] > t - WEEK_S][
+            -(WAITS_KEPT - len(items)) :
+        ]
+        f.waits += [[t, t - i["seen"]] for i in items]
+        f.batches = [b for b in f.batches if b["at"] > t - WEEK_S][
+            -(BATCHES_KEPT - 1) :
+        ]
+        f.batches.append(
+            {"b": f.batch, "at": t, "n": len(items), "shared": shared,
+             "turn_s": None, "tokens": None}
+        )  # fmt: skip
+        f.open_batch = None if shared else f.batch
         f.recent = [
             *({"text": i["text"][:ITEM_SHOWN], "seen": i["seen"], "sent": t,
                "batch": f.batch} for i in reversed(items)),
@@ -446,6 +574,7 @@ class Feeds:
             ev.clear()
 
     async def _tick(self, f: Feed) -> None:
+        f.account(self._registry.sessions.get(f.owner), time.time())
         before = (len(f.pending), f.errors, f.paused)
         try:
             await self._poll(f)
@@ -472,8 +601,17 @@ class Feeds:
         if not texts:
             return
         now = time.time()
+        s = self._registry.sessions.get(f.owner)
+        f.account(s, now)
         f.pending += [{"text": t, "seen": now} for t in texts]
         f.last_new = now
+        hour = str(int(now // 3600))
+        f.hours[hour] = f.hours.get(hour, 0) + len(texts)
+        if len(f.hours) > HOURS_KEPT:
+            oldest: list[str] = sorted(f.hours, key=lambda k: int(k))
+            for k in oldest[: len(f.hours) - HOURS_KEPT]:
+                del f.hours[k]
+        f.arrivals = [a for a in f.arrivals if a > now - 3600] + [now] * len(texts)
         over = len(f.pending) - PENDING_ITEMS
         size = sum(len(i["text"]) for i in f.pending)
         while f.pending and (over > 0 or size > PENDING_BYTES):
@@ -581,7 +719,10 @@ class Feeds:
 
     def session_changed(self, owner: str) -> None:
         """The session's status changed: its "items wait" notices follow it."""
-        if self.of(owner):
+        if fs := self.of(owner):
+            s, now = self._registry.sessions.get(owner), time.time()
+            for f in fs:
+                f.account(s, now)
             self._status(owner)
 
     def _status(self, owner: str) -> None:

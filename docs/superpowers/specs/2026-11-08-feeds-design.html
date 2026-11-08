@@ -241,7 +241,7 @@ svg text{font-family:var(--font-mono)}
 
 <main>
 <h1>Feeds</h1>
-<div class="meta"><span>spec</span><span>·</span><span>status: approved; engine and both sources built (#998), the card next</span><span>·</span><span>issue <a href="https://github.com/syalia-srl/aegis/issues/998">#998</a></span></div>
+<div class="meta"><span>spec</span><span>·</span><span>status: approved; built (#998)</span><span>·</span><span>issue <a href="https://github.com/syalia-srl/aegis/issues/998">#998</a></span></div>
 <p class="lede">A feed binds a source that grows, a file of lines or a command with a cursor, to the session that started it. Each new batch of items wakes that session as one inbox message, aegis keeps the cursor so no item is missed or sent twice in normal operation, and the feed stays armed until it is cancelled or its session closes. Its card shows how many items came, when, and where each one's wait went.</p>
 
 <h2 id="delivers"><span class="n">01</span>What this delivers</h2>
@@ -464,7 +464,7 @@ Nothing else waits. Live feeds here: group-chat. feed_pause or feed_cancel with 
 <p>Three pull requests, each usable on its own, each with its tests, help text and changelog fragment.</p>
 <ol>
 <li><strong>The engine, file feeds and command feeds</strong> (built: the command source shares the poll loop and buffer, so it came with the engine). <code>feeds.py</code>, the five tools, file sources, the message, the flush hook, the held notice item, handoff and close, <code>feeds.json</code> and boot. The row on the card shows name, state and counts. A new help page <code>src/aegis/help/feeds.md</code> and the primer line.</li>
-<li><strong>The card.</strong> The history on the server, the card in the client, the sparkline, the Fleet chip and the person's buttons. Screenshots at desktop and phone width.</li>
+<li><strong>The card</strong> (built; the wait split covers the feed's whole life, not the range shown). The history on the server, the card in the client, the sparkline, the Fleet chip and the person's buttons. Screenshots at desktop and phone width.</li>
 </ol>
 
 <h2 id="testing"><span class="n">11</span>Testing</h2>
