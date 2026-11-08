@@ -14,8 +14,12 @@
 .aegis ::-webkit-scrollbar-thumb{background:var(--rule);border-radius:4px;border:2px solid transparent;background-clip:padding-box}
 .aegis ::-webkit-scrollbar-thumb:hover{background:var(--faint);background-clip:padding-box}
 .aegis ::-webkit-scrollbar-corner{background:transparent}
-.aegis{height:100dvh;display:grid;grid-template-rows:auto 1fr;grid-template-columns:minmax(0,1fr);overflow:hidden;
-  background:var(--bg);color:var(--ink);font-family:var(--font-ui)}
+.aegis{overflow:hidden;background:var(--bg);color:var(--ink);font-family:var(--font-ui)}
+/* The standalone page sizes its root from the viewport; a chat is as tall as
+   the element the host gave mount() (data-layout=chat), which is what lets a
+   host put it in a panel or a sheet. */
+.aegis[data-layout=full]{height:100dvh;display:grid;grid-template-rows:auto 1fr;grid-template-columns:minmax(0,1fr)}
+.aegis[data-layout=chat]{height:100%;display:flex;flex-direction:column;min-height:0}
 .aegis button,.aegis input,.aegis select,.aegis textarea{font:inherit;color:inherit}
 /* The connection banner (app.js): while it shows, .aegis gains a row above the
    tab bar for it; hidden, the grid is the two rows above. */

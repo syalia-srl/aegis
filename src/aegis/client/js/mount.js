@@ -262,6 +262,7 @@ function el(tag, cls) {
 function makeRoot(host, opts, urls) {
   const root = el("div", "aegis");
   root.dataset.theme = opts.theme;
+  root.dataset.layout = opts.layout;
   host.append(root);
   linkStyles(opts.theme, urls);
   installGlyphs(root);
