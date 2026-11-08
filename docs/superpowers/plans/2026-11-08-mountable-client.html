@@ -990,7 +990,7 @@ uv run pytest -q -m browser tests/test_browser.py -k spawn</script>
 <p>Every view mounts into its own root; the two files pass unchanged; <code>make gates</code>; a shot of Settings and of Files at both widths.</p>
 </div></details>
 
-<details class="task" id="b8-full-layout-index" data-state="pending">
+<details class="task" id="b8-full-layout-index" data-state="done">
 <summary><span class="num">B8</span><span><span class="ttl"><code>index.html</code> as a page that mounts the full layout</span><span class="files">index.html · js/app.js · js/mount.js · js/layouts/full.js (new) · js/keys.js · tests/test_browser.py · tests/test_pages_browser.py</span></span><span class="state"></span></summary>
 <div class="body">
 <p>The last structural slice: the page keeps its head and an empty body, and <code>mount(document.body, {layout: "full"})</code> builds the whole client in the same DOM order as the old markup. Every id now comes from a part; the root keeps <code>id="a2"</code> for the suite.</p>
