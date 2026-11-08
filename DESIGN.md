@@ -293,7 +293,7 @@ the click, so the main agent's card falls through to waiting on the run, and
 the click wakes it once to tell the person where the run next stops (#474); its plan comes from `plan_update`. `turn_end` refuses done
 while the plan has an item not done, because a done card offers to archive the
 session and the person should not have to read it to learn the task goes on.
-For the same reason it refuses done while a monitor, a callback queue task, a
+For the same reason it refuses done while a monitor, a live feed, a callback queue task, a
 background task or an approved run will still wake the session
 (`Registry.wakers`, #608); its children do not count, since they do not wake it.
 A done it accepts names, in its answer, what the session left in its repos
@@ -533,6 +533,17 @@ when the harness declares `steers_mid_turn` (Claude Code, Codex), records the se
 as `steered`, and holds it otherwise. While messages are held, the `held` notice
 source gives the busy agent one warning per message, its sender and first line, on
 its next aegis tool result; the warnings end silently when the batch is sent.
+
+**A feed is a source that keeps waking its session** (`feeds.py`, #998): a file
+of lines or a command with a cursor, polled, with what it read and has not
+delivered kept as pending in `feeds.json`. A batch goes to `deliver` after a
+debounce when the session is idle, never mid-turn: at a turn's end
+`Registry.turn_ended` has each feed add one block to the held flush, before the
+flush task takes it, so bursts during a long turn arrive as one block per feed.
+The position is saved after the hand-off and a `sending` mark before it, so a
+crash in between sends that batch again marked `again` rather than losing it.
+A live feed counts in `Registry.wakers`, so `turn_end` refuses done; a local
+handoff moves the feeds to the successor instead of refusing.
 
 **aegis nudges an agent that drifts, once.** A live, idle session that is
 not a queue worker, whose card says done or review, gets an inbox message
