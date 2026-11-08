@@ -1,14 +1,18 @@
-"""A host program for the mount's browser tests (plan 2026-11-08, slice a1).
+"""A host program for the mount's browser tests (plan 2026-11-08, slice a2).
 
 It runs an aegis ``Server`` with a host policy under ``/aegis``, one session
 owned by Ana, and a Starlette page that mounts the client at that prefix. The
 server is the same one a Python host embeds: ``app.mount("/aegis", srv.asgi)``
 with the loopback listener still serving the MCP tools at its own root.
 
+The page is a stranger's: a board of its own, and a #chat div that the client
+mounts into. It records every socket and message on ``window`` so the browser
+test can count sockets and read the welcome without reaching into aegis's
+objects; ``window.__chat`` is the handle mount() returned.
+
 Run it as ``python -m tests.host_fixture --root <dir> --port <port>
 --claude <binary>``; it prints one JSON line when the page is ready
-(``{"url": ..., "session": ...}``) and serves until stopped. a2 replaces the
-page's body with the mount script; a1 only proves the server half.
+(``{"url": ..., "session": ...}``) and serves until stopped.
 """
 
 from __future__ import annotations
@@ -49,8 +53,37 @@ HOST_PAGE = """\
 <body>
 <main id="board">A host page</main>
 <div id="chat"></div>
+<div id="chat2"></div>
 <script>
-window.aegisHost = {token: "__TOKEN__", session: "__SESSION__"};
+window.aegisHost = {token: "__TOKEN__", session: "__SESSION__", prefix: "__PREFIX__"};
+// What the test reads: every socket the page opens and every message it hears.
+// Wrapping WebSocket here runs before the module script below, which is
+// deferred until parsing ends.
+window.__ws = [];
+window.__wsMsgs = [];
+const Native = window.WebSocket;
+window.WebSocket = class extends Native {
+  constructor(...args) {
+    super(...args);
+    window.__ws.push(this);
+    this.closed = false;
+    this.addEventListener("message", (ev) => {
+      try { window.__wsMsgs.push(JSON.parse(ev.data)); } catch (e) {}
+    });
+    this.addEventListener("close", () => { this.closed = true; });
+  }
+};
+window.__board = document.getElementById("board").outerHTML;
+</script>
+<script type="module">
+import { mount } from "__PREFIX__/aegis.js";
+const chat = mount(document.getElementById("chat"), {
+  token: window.aegisHost.token,
+  session: window.aegisHost.session,
+  layout: "chat",
+  theme: "host",
+});
+window.__chat = chat;
 </script>
 </body>
 </html>
@@ -116,8 +149,10 @@ async def main(
     ) as srv:
         who = Who("ana")
         sid = await read_or_spawn(srv, who, session_file or root / "host-session")
-        page = HOST_PAGE.replace("__TOKEN__", srv.token_for(who)).replace(
-            "__SESSION__", sid
+        page = (
+            HOST_PAGE.replace("__TOKEN__", srv.token_for(who))
+            .replace("__SESSION__", sid)
+            .replace("__PREFIX__", prefix)
         )
         print(json.dumps({"url": f"{origin}/", "session": sid}), flush=True)
         await uvicorn.Server(
