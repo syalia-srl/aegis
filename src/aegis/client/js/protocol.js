@@ -3,12 +3,19 @@
 // A channel delivers a snapshot, then patches numbered from 1. A gap in the
 // numbers, or a reconnect, means resubscribe, saying which revision it holds.
 //
-// The socket signs in with the HttpOnly cookie the server set; the page never
-// holds the token.
+// The standalone socket signs in with the HttpOnly cookie the server set; the
+// page never holds the token. A host's mount has no such cookie, so it passes
+// a token (a string, or a function called on each connect so an expired one is
+// replaced without a reload) and the hello carries it.
 //
 // A call or subscription may name a linked `server`: the home server forwards
 // it down its link and stamps `server` on what comes back (links.py). A
 // subscription is keyed by its server and channel.
+//
+// A page may hold one socket for several mounts (connection.js). More than one
+// of them may follow the same channel, so a channel carries a list of
+// listeners: every snapshot and patch reaches all of them, and the channel is
+// unsubscribed only when the last one goes.
 
 import { setServerTime } from "./clock.js";
 
@@ -27,28 +34,42 @@ export class OpError extends Error {
 }
 
 export class Connection {
-  constructor(url, { onState = () => {} } = {}) {
+  constructor(url, { token = "", onState = () => {} } = {}) {
     this.url = url;
+    this.token = token; // a string, or () => string | Promise, called on each connect
     this.onState = onState;
     this.ws = null;
     this.open = false;
     this.nextId = 0;
     this.pending = new Map(); // call id -> {resolve, reject}
-    this.subs = new Map(); // key -> {channel, server, seq, onSnapshot, onPatch, onError, since}
+    this.subs = new Map(); // key -> {channel, server, seq, listeners: [{onSnapshot, onPatch, onError, since}]}
     this.watches = new Map(); // server -> the last watch message sent to it
     this.backoff = 500;
     this.stopped = false;
+    this.gen = 0; // bumped by stop(): a token awaited across a stop opens nothing
     this.retryTimer = null;
     this.retryAt = 0; // epoch ms of the next attempt, or 0
   }
 
-  connect() {
+  async connect() {
     clearTimeout(this.retryTimer);
     this.retryTimer = null;
     this.retryAt = 0;
+    const gen = ++this.gen;
     this.onState("connecting");
+    let token;
+    try {
+      token = typeof this.token === "function" ? await this.token() : this.token;
+    } catch (e) {
+      // A token this page could not fetch is a connection that did not open,
+      // and the backoff knows what to do with that.
+      if (!this.stopped && gen === this.gen) this._closed(1006);
+      return;
+    }
+    if (this.stopped || gen !== this.gen) return;
     const ws = (this.ws = new WebSocket(this.url));
-    ws.onopen = () => ws.send(JSON.stringify({ t: "hello", proto: PROTO }));
+    ws.onopen = () =>
+      ws.send(JSON.stringify({ t: "hello", proto: PROTO, ...(token ? { token } : {}) }));
     ws.onmessage = (ev) => this._receive(JSON.parse(ev.data));
     ws.onclose = (ev) => this._closed(ev.code);
   }
@@ -81,7 +102,8 @@ export class Connection {
         const s = this.subs.get(subKey(msg.channel, msg.server));
         if (!s) return;
         s.seq = msg.seq;
-        s.onSnapshot(msg.data);
+        s.snapshotted = true; // seq 0 is a snapshot too
+        for (const l of s.listeners) l.onSnapshot(msg.data);
         break;
       }
       case "patch": {
@@ -93,12 +115,12 @@ export class Connection {
           return;
         }
         s.seq = msg.seq;
-        s.onPatch(msg.ops);
+        for (const l of s.listeners) l.onPatch(msg.ops);
         break;
       }
       case "error": {
         const s = msg.channel && this.subs.get(subKey(msg.channel, msg.server));
-        if (s) s.onError?.(msg.error);
+        if (s) for (const l of s.listeners) l.onError?.(msg.error);
         else console.warn("aegis:", msg);
         break;
       }
@@ -142,6 +164,28 @@ export class Connection {
     this.connect();
   }
 
+  // The last mount on the page gave the socket back. Its close is not news
+  // (nothing hears it), a token still being awaited opens nothing, and every
+  // call in flight is rejected as offline rather than left pending forever.
+  stop() {
+    if (this.stopped) return;
+    this.stopped = true;
+    this.gen += 1;
+    clearTimeout(this.retryTimer);
+    this.retryTimer = null;
+    this.retryAt = 0;
+    const ws = this.ws;
+    this.ws = null;
+    if (ws) {
+      ws.onopen = ws.onmessage = ws.onclose = null;
+      ws.close();
+    }
+    this.open = false;
+    for (const p of this.pending.values()) p.reject(new OpError("offline", "the connection stopped"));
+    this.pending.clear();
+    this.subs.clear();
+  }
+
   call(op, params = {}, server = null) {
     if (!this.open) return Promise.reject(new OpError("offline", "not connected"));
     const id = ++this.nextId;
@@ -162,12 +206,32 @@ export class Connection {
 
   // since: optional () => the revision this subscriber holds, or null. A
   // channel that keeps revisions answers a resubscribe with what changed.
+  //
+  // More than one listener may hold a channel: two mounts on one page share
+  // the socket and both follow `sessions`, and each must hear every snapshot
+  // and patch. The unsub that comes back removes only this listener; the
+  // channel is unsubscribed when the last one goes.
   subscribe(channel, onSnapshot, onPatch, onError, since, server = null) {
     const key = subKey(channel, server);
-    this.subs.set(key, { channel, server, seq: 0, onSnapshot, onPatch, onError, since });
-    if (this.open) this._sendSub(key);
+    const listener = { onSnapshot, onPatch, onError, since };
+    let s = this.subs.get(key);
+    if (s) {
+      s.listeners.push(listener);
+      // A listener that joins after the snapshot arrived cannot see it. Ask
+      // the channel again from the beginning, so every listener holds the
+      // same state rather than one of them waiting for the next patch.
+      if (this.open && s.snapshotted) this._sendSub(key, true);
+    } else {
+      s = { channel, server, seq: 0, snapshotted: false, listeners: [listener] };
+      this.subs.set(key, s);
+      if (this.open) this._sendSub(key);
+    }
     return () => {
-      if (this.subs.get(key)?.onSnapshot !== onSnapshot) return; // replaced since
+      const held = this.subs.get(key);
+      const i = held ? held.listeners.indexOf(listener) : -1;
+      if (i < 0) return;
+      held.listeners.splice(i, 1);
+      if (held.listeners.length) return;
       this.subs.delete(key);
       if (this.open) this.ws.send(JSON.stringify(server ? { t: "unsub", channel, server } : { t: "unsub", channel }));
     };
@@ -180,10 +244,23 @@ export class Connection {
     for (const [key, s] of this.subs) if (s.server === server) this._sendSub(key);
   }
 
-  _sendSub(key) {
+  _sendSub(key, start = false) {
     const s = this.subs.get(key);
     if (!s) return;
-    const rev = s.since?.();
+    // The revision the channel resumes from: the oldest one its listeners
+    // hold, or none when one of them wants the snapshot anew (`start`, or a
+    // listener that keeps no revision).
+    let rev;
+    if (!start) {
+      for (const l of s.listeners) {
+        const r = l.since?.();
+        if (!Number.isInteger(r)) {
+          rev = undefined;
+          break;
+        }
+        rev = rev === undefined ? r : Math.min(rev, r);
+      }
+    }
     const msg = { t: "sub", channel: s.channel };
     if (s.server) msg.server = s.server;
     if (Number.isInteger(rev)) msg.since = rev;

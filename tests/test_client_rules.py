@@ -131,13 +131,15 @@ def theme_names() -> list[str]:
 
 def test_every_theme_in_settings_has_a_stylesheet_the_page_links():
     """A theme Settings offers without its file, or with a file index.html never
-    links, paints the page in base.css's undefined variables."""
+    links, paints the page in client.css's undefined variables."""
     names = theme_names()
     html = (JS.parent / "index.html").read_text()
     assert sorted(names) == sorted(p.stem for p in THEMES.glob("*.css"))
-    assert [n for n in names if f'href="/static/themes/{n}.css"' not in html] == []
+    assert [
+        n for n in names if f'href="__AEGIS_PREFIX__/static/themes/{n}.css"' not in html
+    ] == []
     for n in names:
-        assert f"[data-theme={n}] #a2{{" in (THEMES / f"{n}.css").read_text()
+        assert f".aegis[data-theme={n}]{{" in (THEMES / f"{n}.css").read_text()
 
 
 def test_every_font_a_theme_names_is_vendored():

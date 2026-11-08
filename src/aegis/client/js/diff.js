@@ -1,6 +1,6 @@
 // An edit's hunks (transcript/describe.py) drawn two ways from the same data:
 // four columns side by side, or three in one column. A container query on the
-// row picks one (base.css), so rotating a phone switches without a fetch. The
+// row picks one (client.css), so rotating a phone switches without a fetch. The
 // colours and the marks on changed words are computed here, so the wire
 // carries only the hunks (#323).
 

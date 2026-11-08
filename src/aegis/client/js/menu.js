@@ -13,6 +13,7 @@
 // The menu's only key listener is on its own node: keys.js owns the page's.
 
 import { icon } from "./glyphs.js";
+import { rootOf } from "./root.js";
 import { clampToRow, rangeText } from "./quote.js";
 
 export const LONG_PRESS = 500; // ms a touch holds before the menu opens
@@ -192,7 +193,7 @@ export function open(menu, at, target, { onClose, focus = true, settle = 0 } = {
         node.append(b);
       }
     });
-  document.getElementById("a2").append(node);
+  rootOf(target || at.anchor).append(node);
   const w = node.offsetWidth;
   const h = node.offsetHeight;
   let x = at.x;
@@ -366,7 +367,7 @@ function showBar(items, range, row, root, settle = 0) {
     });
     node.append(b);
   }
-  document.getElementById("a2").append(node);
+  rootOf(root || document.activeElement).append(node);
   bar_ = { node, range, row, root };
   addEventListener("hashchange", unbar);
   place();
@@ -392,7 +393,7 @@ function place() {
 // The bar of a row no longer drawn (its pane went behind another canvas tab):
 // no scroll tells follow(), so the canvas calls this when it lays out.
 export function unbarHidden() {
-  // A tabbed canvas hides a pane with visibility, not display (base.css).
+  // A tabbed canvas hides a pane with visibility, not display (client.css).
   // The row by its id: a streaming delta redraws it as a new node.
   if (!bar_?.row) return;
   const row = bar_.row.isConnected ? bar_.row : document.querySelector(`.row[data-id="${CSS.escape(bar_.row.dataset.id)}"]`);

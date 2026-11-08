@@ -65,11 +65,11 @@ class Conn:
 def test_index_and_static_are_public_and_always_revalidated(project, fake_claude):
     with client_for(project, fake_claude) as c:
         assert c.get("/").status_code == 200
-        css = c.get("/static/css/base.css")
+        css = c.get("/static/css/client.css")
         assert css.status_code == 200 and css.headers["cache-control"] == "no-cache"
         assert (
             c.get(
-                "/static/css/base.css", headers={"if-none-match": css.headers["etag"]}
+                "/static/css/client.css", headers={"if-none-match": css.headers["etag"]}
             ).status_code
             == 304
         )
@@ -1278,3 +1278,95 @@ def test_login_takes_the_servers_token_only(project, fake_claude):
     token = c.app.state.aegis.principals.admin_token()
     assert c.post("/login", json={"token": token}).status_code == 204
     assert c.post("/login", json={"token": "nope"}).status_code == 401
+
+
+# -- a host mounts the client under a prefix (plan 2026-11-08, slice a1) ------
+
+
+def prefixed_client(project: Path, claude_bin: str, prefix: str = "/aegis"):
+    app = App(make_roots(project, None), claude_bin=claude_bin, interrupt_timeout=0.5)
+    return TestClient(build_web(app, TOKEN, {"testserver"}, prefix=prefix))
+
+
+def test_a_prefixed_page_carries_the_prefix_in_its_links(project, fake_claude):
+    with prefixed_client(project, fake_claude) as c:
+        page = c.get("/").text
+        assert 'href="/aegis/manifest.webmanifest"' in page
+        assert 'href="/aegis/static/css/client.css"' in page
+        assert 'src="/aegis/static/js/app.js"' in page
+        assert "__AEGIS_PREFIX__" not in page
+        # The standalone client still gets root-relative links.
+        assert (
+            'href="/manifest.webmanifest"'
+            in client_for(project, fake_claude).get("/").text
+        )
+
+
+def test_a_prefixed_manifest_hashes_every_file_under_the_prefix(project, fake_claude):
+    with prefixed_client(project, fake_claude) as c:
+        doc = c.get("/manifest.json").json()
+        assert doc["prefix"] == "/aegis"
+        assert doc["build"] and doc["version"]
+        files = {f["url"]: f for f in doc["files"]}
+        assert "/aegis/" in files
+        assert (
+            files["/aegis/manifest.webmanifest"]["url"] == "/aegis/manifest.webmanifest"
+        )
+        static = [u for u in files if u.startswith("/aegis/static/")]
+        assert "/aegis/static/js/app.js" in static
+        # The public entry is served once, at <prefix>/aegis.js, and listed
+        # there so a host's worker has it offline; never under /static, where
+        # its relative mount.js import would resolve a directory too deep.
+        assert files["/aegis/aegis.js"]["bytes"] > 0
+        assert not [u for u in files if u.endswith("/static/js/aegis.js")]
+        assert not [u for u in files if u.endswith("/static/aegis.js")]
+        assert all(f["url"].startswith("/aegis/") for f in doc["files"])
+        assert all(len(f["hash"]) == 64 for f in doc["files"])
+        assert doc["bytes"] == sum(f["bytes"] for f in doc["files"])
+        # The listing reuses a file's hash until its bytes or mtime move.
+        first = {f["url"]: f["hash"] for f in doc["files"]}
+        again = c.get("/manifest.json").json()
+        assert {f["url"]: f["hash"] for f in again["files"]} == first
+
+
+def test_the_entry_module_and_mcp_are_at_their_own_paths(project, fake_claude):
+    web = build_web(
+        App(make_roots(project, None), claude_bin=fake_claude, interrupt_timeout=0.5),
+        TOKEN,
+        {"testserver"},
+        prefix="/aegis",
+    )
+    with TestClient(web) as c:
+        entry = c.get("/aegis.js")
+        assert entry.status_code == 200
+        assert entry.headers["content-type"].startswith("text/javascript")
+        assert 'from "./static/js/mount.js"' in entry.text
+        # Routes are relative; only generated URLs carry the prefix. MCP stays
+        # at the app's root, where harness children reach it.
+        paths = {getattr(r, "path", "") for r in web.routes}
+        assert "/mcp" in paths and "/static" in paths and "/ws" in paths
+
+
+def test_no_client_stylesheet_uses_a_root_absolute_asset_url():
+    from aegis.web import CLIENT_DIR
+
+    sheets = [
+        *sorted((CLIENT_DIR / "css").rglob("*.css")),
+        *sorted((CLIENT_DIR / "themes").rglob("*.css")),
+    ]
+    assert sheets
+    bad = [
+        (path.relative_to(CLIENT_DIR).as_posix(), form)
+        for path in sheets
+        for form in ('url("/', "url('/", "url(/")
+        if form in path.read_text()
+    ]
+    assert bad == [], "a host mounts these under a prefix; make asset URLs relative"
+
+
+def test_a_prefixed_token_redirect_returns_to_the_prefixed_page(project, fake_claude):
+    with prefixed_client(project, fake_claude) as c:
+        r = c.get(f"/?token={TOKEN}", follow_redirects=False)
+        assert r.status_code == 303 and r.headers["location"] == "/aegis/"
+        bad = c.get("/?token=nope", follow_redirects=False)
+        assert bad.headers["location"] == "/aegis/?refused=1"

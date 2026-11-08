@@ -3,7 +3,7 @@
 // badges come first; Python decides a session's attention, this only maps it
 // to a symbol and a word. A new symbol needs a row on help/icons.md, and
 // nothing outside this file draws SVG of its own (tests/test_glyphs.py). Drawn in currentColor; the knocked-out glyph inside a badge
-// uses --knock, which base.css sets to the theme's background.
+// uses --knock, which client.css sets to the theme's background.
 
 import { MARK } from "./mark.js";
 
@@ -129,8 +129,13 @@ export const LABEL = {
   done: "done",
 };
 
-export function installGlyphs() {
-  if (document.getElementById("glyphs")) return;
+// The sprite goes inside the mount that draws it, so a mount's icons are
+// removed with it. Idempotent per root: a second call for the same root is a
+// no-op, while another mount on the page gets its own sprite (the ids repeat
+// between them, as every other id does; a <use> finds the first one, and they
+// are the same symbols).
+export function installGlyphs(root = document.body) {
+  if (root.querySelector(":scope > #glyphs")) return;
   const svg = document.createElementNS(NS, "svg");
   svg.id = "glyphs";
   svg.setAttribute("width", "0");
@@ -138,7 +143,7 @@ export function installGlyphs() {
   svg.setAttribute("aria-hidden", "true");
   svg.style.position = "absolute";
   svg.innerHTML = SPRITE;
-  document.body.prepend(svg);
+  root.prepend(svg);
 }
 
 export function glyph(attention) {
@@ -189,7 +194,7 @@ export function entryIcon(name) {
 // The Gorgoneion (mark.js) in the theme: the head and serpents in
 // currentColor, the eye knocked out in the background. The favicon keeps
 // its fixed amber; a page copy follows the theme, and moves (#348): the eye,
-// drawn 1.2 times the favicon's, looks left, right and blinks (base.css),
+// drawn 1.2 times the favicon's, looks left, right and blinks (client.css),
 // and each serpent bends so its tip crosses from one side of its body to
 // the other, the six out of phase so the wave travels round the head.
 const BEAT = 4.5; // seconds per serpent bend
@@ -245,7 +250,7 @@ export function gorgoneion() {
     p.setAttribute("class", "serpent");
     p.setAttribute("fill", "currentColor");
     p.setAttribute("d", d);
-    // SMIL ignores CSS, so reduced motion is honoured here and not in base.css.
+    // SMIL ignores CSS, so reduced motion is honoured here and not in client.css.
     if (!STILL.matches) {
       const anim = document.createElementNS(NS, "animate");
       anim.setAttribute("attributeName", "d");

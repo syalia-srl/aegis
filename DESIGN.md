@@ -925,6 +925,24 @@ token already runs a shell there, so the relay adds no power. It asks
 falls back to the near server's own address. It covers what honours the proxy
 variables and nothing else.
 
+**A client is a set of mounts.** The page is not one client but as many mounts
+as it asks for: `mount()` (`js/mount.js`) builds one `.aegis` root inside the
+element the host named, and composes into it the parts the layout asks for — a
+chat is one session's transcript and, unless it is switched off, its composer.
+A part owns the markup it draws, looks every node up under its own element and
+never asks the page for an id, and every stylesheet a mount loads is scoped to
+`.aegis`, so a host page keeps its own `#tabs`, its own `#composer` and its own
+rules, and two mounts never see each other's nodes. One socket is shared by
+every mount on the page (`js/connection.js`, keyed by URL and token), a host's
+token rides in the hello (`protocol.js`), and the mount derives every address
+from its own module URL, so a host that serves the app under its prefix
+(`web.py`, `Server(prefix=...)`) configures nothing; `theme: "host"` loads no
+theme and leaves the variables to the host's own CSS. The handle is the whole
+contract a host sees: `on` for `connection`, `entry`, `turnEnd` and `error`,
+`send`, `destroy`. A turn's cost is the mount's — the cumulative figure the
+patch that entered working carried, subtracted from the one it left with, null
+when the mount joined mid-turn — so no host re-derives it.
+
 **The client knows no subsystem by name.** Server state reaches the browser as
 named channels: a snapshot on subscribe, then numbered patches. A gap in the
 numbers, or a reconnect, means resubscribe, saying which revision it holds; a
@@ -1131,11 +1149,12 @@ second Ctrl+F, inside the bar, is the browser's again.
 
 **A theme is one CSS file over one markup.** The markup carries everything any
 theme might show, and the base stylesheet reads only CSS variables. A theme sets
-the variables and a few overrides that decide what shows. Every font a theme
-names is vendored in `fonts.css`, or the theme looks different on every
-machine. Anything a theme draws over the whole window, such as Phosphor's
-scanlines, is positioned against `#a2` and never the viewport, because the
-landing page applies the same rules to a window that sits inside a page.
+the variables on the mount's root, `.aegis[data-theme=x]`, and a few overrides
+that decide what shows. Every font a theme names is vendored in `fonts.css`, or
+the theme looks different on every machine. Anything a theme draws over the
+whole window, such as Phosphor's scanlines, is positioned against the root and
+never the viewport, because the landing page applies the same rules to a window
+that sits inside a page.
 
 **A quota projection reads history once per window.** `quota.core.window_pace`
 keeps what is spent and runs the time left at the posterior mean of a rate with

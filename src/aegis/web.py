@@ -23,6 +23,14 @@ channel, may not open files on this server's desktop, and is not relayed on.
 A browser message naming another ``server`` goes down the link to it; what
 comes back gets ``server`` stamped on it. Agents' sent files on a linked server
 are streamed through ``/via/<server>/files/…``.
+
+The app's routes are relative, so a Python host can mount it under a prefix of
+its own (``Server(prefix=...)``: ``srv.asgi``). Only the URLs it generates carry
+the prefix: the page's asset links, the manifest, and the redirects. The MCP
+routes keep their root paths, because harness children reach them at
+``<base_url>/mcp`` on the Server's own listener. That listener still serves the
+same app, so a prefixed server's loopback page is not browsable; the host serves
+the page under its prefix.
 """
 
 from __future__ import annotations
@@ -41,6 +49,7 @@ from urllib.parse import urlsplit
 
 from starlette.applications import Starlette
 import httpx
+from starlette.requests import Request
 from starlette.responses import (
     FileResponse,
     HTMLResponse,
@@ -72,6 +81,11 @@ CLIENT_DIR = Path(__file__).parent / "client"
 # The service worker lives outside CLIENT_DIR, so /static never serves it: it is
 # served only from the root, where its scope is the whole client.
 SERVICE_WORKER = Path(__file__).parent / "sw.js"
+# The client's public entry, served at <prefix>/aegis.js. It lives outside
+# CLIENT_DIR for the same reason: /static serves files from the URL they sit at,
+# and a copy at /static/js/aegis.js would resolve its relative mount.js import
+# to /static/js/static/js/mount.js.
+ENTRY_MODULE = Path(__file__).parent / "aegis.js"
 
 
 POINT_TAG = b'<script src="/static/js/pagepoint.js"></script>'
@@ -150,14 +164,42 @@ def ws_protocol():
     return Protocol
 
 
-def client_files(version: str) -> dict:
-    """The client as the service worker keeps it: every file under CLIENT_DIR by
-    the URL the page asks for it, plus the manifest, and a build id hashed from
-    each file's path, size and mtime, the worker's own and the version, so a
-    change to sw.js alone is a new build with a cache of its own. Computed per
-    request: about a hundred ``stat`` calls, and an edit to the client while
-    the server runs is a new build at once, which is what the browser's byte
-    comparison of ``/sw.js`` needs to see."""
+def normalize_prefix(prefix: str) -> str:
+    """A mount prefix as the URLs use it: ``""`` or one leading slash and no
+    trailing one (``"/aegis"``). ``"/"``, ``""`` and a bare ``"aegis"`` all
+    become one of those two forms."""
+    path = "/" + str(prefix or "").strip().strip("/")
+    return "" if path == "/" else path
+
+
+# path -> (size, mtime_ns, sha256 of its bytes), so a manifest request re-reads
+# only the files that changed. The client is about 4 MB; hashing all of it on
+# every request would be waste, and the service worker only needs to know
+# whether a file moved.
+_hashes: dict[Path, tuple[int, int, str]] = {}
+
+
+def _file_hash(path: Path, st: os.stat_result) -> str:
+    """The content hash of ``path`` as it is now, cached by size and mtime."""
+    seen = _hashes.get(path)
+    if seen is None or seen[0] != st.st_size or seen[1] != st.st_mtime_ns:
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        _hashes[path] = (st.st_size, st.st_mtime_ns, digest)
+        return digest
+    return seen[2]
+
+
+def client_files(version: str, prefix: str = "") -> dict:
+    """The client as a service worker keeps it: every file under CLIENT_DIR by
+    the URL the page asks for it, with a content hash each, and a build id
+    hashed from each file's path, size and mtime, the worker's own and the
+    version, so a change to sw.js alone is a new build with a cache of its
+    own. Computed per request: about two hundred ``stat`` calls, and an edit
+    to the client while the server runs is a new build at once, which is what
+    the browser's byte comparison of ``/sw.js`` needs to see. ``prefix`` is
+    written into every URL, so a host mounts the same listing under its own
+    path; the mount's default (``""``) is the standalone client."""
+    prefix = normalize_prefix(prefix)
     h = hashlib.sha256(version.encode())
     files = []
     for path in sorted(CLIENT_DIR.rglob("*")):
@@ -172,13 +214,21 @@ def client_files(version: str) -> dict:
         h.update(f"{rel}\0{st.st_size}\0{st.st_mtime_ns}\n".encode())
         files.append(
             {
-                "url": "/" if rel == "index.html" else f"/static/{rel}",
+                "url": f"{prefix}/"
+                if rel == "index.html"
+                else f"{prefix}/static/{rel}",
                 "bytes": st.st_size,
+                "hash": _file_hash(path, st),
             }
         )
     st = SERVICE_WORKER.stat()
     h.update(f"sw.js\0{st.st_size}\0{st.st_mtime_ns}\n".encode())
-    return {"build": h.hexdigest()[:12], "version": version, "files": files}
+    return {
+        "build": h.hexdigest()[:12],
+        "version": version,
+        "prefix": prefix,
+        "files": files,
+    }
 
 
 # Close codes, in the 4000 range websockets leave to applications.
@@ -196,6 +246,40 @@ def cookie_name(state_root: Path) -> str:
     host would overwrite each other's under one name; this one is per state
     root, as the token is."""
     return "aegis_" + hashlib.sha256(str(state_root).encode()).hexdigest()[:8]
+
+
+def sign_in_cookie(
+    response: Response,
+    request: Request | None,
+    token: str,
+    cookie: str,
+    origins: Iterable[str] = (),
+) -> Response:
+    """``response`` carrying the session cookie with ``token``: HttpOnly, so no
+    script on the page can read it; Secure behind an https origin.
+
+    The same cookie the page's ``?token=`` sign-in sets (web.py's index), for a
+    host whose own page hands the client a token from ``Server.token_for``: an
+    HTTP fetch of a sent file or a page's frame cannot carry the websocket
+    hello's token, so the browser needs the cookie too. A later token replaces
+    it with another call.
+    """
+    public = {urlsplit(o).netloc: o for o in map(public_origin, origins)}
+    if request is None:
+        secure = any(o.startswith("https://") for o in public.values())
+    else:
+        origin = public.get(request.headers.get("host", ""), "")
+        secure = origin.startswith("https://")
+    response.set_cookie(
+        cookie,
+        token,
+        max_age=COOKIE_MAX_AGE_S,
+        path="/",
+        httponly=True,
+        samesite="strict",
+        secure=secure,
+    )
+    return response
 
 
 class ClientFiles(StaticFiles):
@@ -251,12 +335,18 @@ def public_origin(value: str) -> str:
 
 
 def build_web(
-    app: App, token: str, allowed_hosts: set[str], origins: Iterable[str] = ()
+    app: App,
+    token: str,
+    allowed_hosts: set[str],
+    origins: Iterable[str] = (),
+    prefix: str = "",
 ) -> Starlette:
+    origins = list(origins)
     # Host header -> the one origin a socket naming that host must come from.
     public = {urlsplit(o).netloc: o for o in map(public_origin, origins)}
     app.push.origins = list(public.values())  # the VAPID contact (push.py)
     cookie = cookie_name(app.roots.state_root)
+    prefix = normalize_prefix(prefix)
 
     # ``token`` is the admin's (tokens.py); any token the store knows signs in.
     app.principals.use_admin(token)
@@ -273,32 +363,28 @@ def build_web(
     def signed_in(response: Response, request, given: str) -> Response:
         """``response`` carrying the cookie with the token that was presented:
         HttpOnly, so no script on the page can read it; Secure behind an https
-        origin."""
-        origin = public.get(request.headers.get("host", ""), "")
-        response.set_cookie(
-            cookie,
-            given,
-            max_age=COOKIE_MAX_AGE_S,
-            path="/",
-            httponly=True,
-            samesite="strict",
-            secure=origin.startswith("https://"),
-        )
-        return response
+        origin. A host's own page uses Server.sign_in for the same cookie."""
+        return sign_in_cookie(response, request, given, cookie, origins)
 
     async def index(request):
         """The page. ``?token=`` from the URL `aegis serve` printed becomes the
-        cookie, and the address bar loses it; a wrong one says so."""
+        cookie, and the address bar loses it; a wrong one says so. The same
+        file serves the standalone at "" and a host under its prefix: the
+        prefix fills the asset links, not the routes."""
         given = request.query_params.get("token")
         if given is not None:
             if await valid(given):
-                return signed_in(RedirectResponse("/", status_code=303), request, given)
-            return RedirectResponse("/?refused=1", status_code=303)
+                return signed_in(
+                    RedirectResponse(f"{prefix}/", status_code=303), request, given
+                )
+            return RedirectResponse(f"{prefix}/?refused=1", status_code=303)
         # The build the page belongs to, which the welcome repeats: a page
         # older than the server takes the new build by itself (#499).
         html = (CLIENT_DIR / "index.html").read_text()
         return HTMLResponse(
-            html.replace("__AEGIS_BUILD__", listing()["build"]),
+            html.replace("__AEGIS_PREFIX__", prefix).replace(
+                "__AEGIS_BUILD__", listing()["build"]
+            ),
             headers={"Cache-Control": "no-cache"},
         )
 
@@ -316,15 +402,15 @@ def build_web(
     manifest = {
         "name": f"aegis · {app.server_name}",
         "short_name": "aegis",
-        "start_url": "/",
-        "scope": "/",
+        "start_url": f"{prefix}/",
+        "scope": f"{prefix}/",
         "display": "standalone",
         "background_color": "#11100e",
         "theme_color": "#0b0a09",
         # Android lists the installed app as a share target (#735). The service
         # worker takes the POST (sw.js stash); share_fallback below when none runs.
         "share_target": {
-            "action": "/share",
+            "action": f"{prefix}/share",
             "method": "POST",
             "enctype": "multipart/form-data",
             "params": {
@@ -336,17 +422,17 @@ def build_web(
         },
         "icons": [
             {
-                "src": "/static/icons/aegis-192.png",
+                "src": f"{prefix}/static/icons/aegis-192.png",
                 "sizes": "192x192",
                 "type": "image/png",
             },
             {
-                "src": "/static/icons/aegis-512.png",
+                "src": f"{prefix}/static/icons/aegis-512.png",
                 "sizes": "512x512",
                 "type": "image/png",
             },
             {
-                "src": "/static/icons/aegis-maskable-512.png",
+                "src": f"{prefix}/static/icons/aegis-maskable-512.png",
                 "sizes": "512x512",
                 "type": "image/png",
                 "purpose": "maskable",
@@ -356,11 +442,27 @@ def build_web(
 
     version = running()["version"] or "dev"
 
-    def listing() -> dict:
-        doc = client_files(version)
+    def listing(with_entry: bool = False) -> dict:
+        doc = client_files(version, prefix)
+        body = json.dumps(manifest)
         doc["files"].append(
-            {"url": "/manifest.webmanifest", "bytes": len(json.dumps(manifest))}
+            {
+                "url": f"{prefix}/manifest.webmanifest",
+                "bytes": len(body),
+                "hash": hashlib.sha256(body.encode()).hexdigest(),
+            }
         )
+        if with_entry:
+            # The public entry is not under /static, so client_files cannot
+            # name it: a host's worker caches it from here (life#101).
+            st = ENTRY_MODULE.stat()
+            doc["files"].append(
+                {
+                    "url": f"{prefix}/aegis.js",
+                    "bytes": st.st_size,
+                    "hash": _file_hash(ENTRY_MODULE, st),
+                }
+            )
         doc["bytes"] = sum(f["bytes"] for f in doc["files"])
         return doc
 
@@ -368,17 +470,37 @@ def build_web(
         """A share that reached the server: no service worker took it, as when
         the one running predates share targets. The body is never read, since
         the route takes no token; the person gets an empty New session form."""
-        return RedirectResponse("/#new", status_code=303)
+        return RedirectResponse(f"{prefix}/#new", status_code=303)
 
     async def files_list(request):
         """What the service worker downloads to open the client offline (sw.js)."""
         return JSONResponse(listing(), headers={"Cache-Control": "no-cache"})
+
+    async def manifest_json(request):
+        """The client's files for a host's own service worker: the same hashed
+        listing, with the build, the version and the mount prefix, so the
+        host knows what to cache and when it moved. It also names the public
+        entry at <prefix>/aegis.js, which /static does not serve. aegis
+        installs no worker in an embed; the page's is the host's."""
+        return JSONResponse(
+            listing(with_entry=True), headers={"Cache-Control": "no-cache"}
+        )
 
     async def webmanifest(request):
         """What Chrome installs: the server's name, so two servers differ on a
         home screen. The service worker is ``sw.js``, and it keeps this
         manifest with the build it belongs to."""
         return JSONResponse(manifest, media_type="application/manifest+json")
+
+    async def entry_module(request):
+        """The client's public entry, ``<prefix>/aegis.js``: a host imports
+        ``mount`` from it (a2). Read on every request so an edit shows at
+        once, like the rest of the client."""
+        return Response(
+            ENTRY_MODULE.read_text(),
+            media_type="text/javascript",
+            headers={"Cache-Control": "no-cache"},
+        )
 
     async def service_worker(request):
         """The service worker, from the root so its scope is the whole client,
@@ -869,6 +991,8 @@ def build_web(
             Route("/login", login, methods=["POST"]),
             Route("/share", share_fallback, methods=["POST"]),
             Route("/manifest.webmanifest", webmanifest),
+            Route("/manifest.json", manifest_json),
+            Route("/aegis.js", entry_module),
             Route("/sw.js", service_worker),
             Route("/client-files.json", files_list),
             Mount("/static", ClientFiles(directory=CLIENT_DIR)),
