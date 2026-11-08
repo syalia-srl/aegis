@@ -496,3 +496,165 @@ def test_a_missing_label_falls_back_to_english_and_warns_once(host, browser):  #
     assert got["spanish"] == "Descartar"
     assert errors == []
     page.close()
+
+
+# -- the composer part (a6) --------------------------------------------------
+# These drive the box the mount built, never the page's: the chat's #input is
+# looked up under #chat, as a host's own ids would be.
+
+
+def composer_send(page, text: str) -> None:
+    """Type into the mount's box and press Enter, as a person would."""
+    box = page.locator("#chat .aegis #input")
+    box.click()
+    box.fill(text)
+    box.press("Enter")
+
+
+@pytest.mark.parametrize("width", [1280, 390])
+def test_the_composer_sends_from_the_mount_and_the_reply_streams(
+    host,
+    browser,  # noqa: F811
+    width,
+):
+    """The box the mount owns sends through the mount's socket: the person's
+    message draws as a row and the agent's answer streams back after it."""
+    page, errors = open_page(browser, width)
+    page.goto(host["url"])
+    mounted(page)
+    assert page.locator("#chat .aegis #composer").count() == 1
+    assert page.locator("#chat .aegis #composer #input").count() == 1
+    # The chips name the session the chat follows.
+    assert "opus" in page.inner_text("#chat .aegis #chip-model")
+    composer_send(page, "hello from the mount's own box")
+    page.wait_for_function(
+        """() => [...document.querySelectorAll("#chat .aegis #entries .row.user .body")]
+          .some((b) => b.textContent.includes("hello from the mount's own box"))""",
+        timeout=60_000,
+    )
+    # The agent answered after it, in the same transcript.
+    page.wait_for_function(
+        """() => {
+          const rows = [...document.querySelectorAll("#chat .aegis #entries > .row")];
+          const at = rows.findIndex((r) => r.textContent.includes("hello from the mount's own box"));
+          return rows.slice(at + 1).some((r) => r.classList.contains("prose") && r.textContent.trim());
+        }""",
+        timeout=60_000,
+    )
+    # The box is empty and free again, and the draft is gone from the device.
+    assert page.input_value("#chat .aegis #input") == ""
+    assert (
+        page.evaluate("localStorage.getItem('aegis.draft.' + window.aegisHost.session)")
+        is None
+    )
+    assert errors == []
+    page.close()
+
+
+def test_an_attachment_uploads_as_a_chip_and_goes_out_with_the_message(host, browser):  # noqa: F811
+    """A file chosen on the mount's paperclip uploads into the session as a
+    chip, and the send names it: the row that lands carries its card."""
+    note = Path(host["root"]) / "attached-note.txt"
+    note.write_text("a note the person attached\n")
+    page, errors = open_page(browser, 1280)
+    page.goto(host["url"])
+    mounted(page)
+    page.set_input_files("#chat .aegis #attach-pick", str(note))
+    chip = page.locator("#chat .aegis #atts .chip.att")
+    chip.wait_for(timeout=30_000)
+    assert "attached-note.txt" in chip.inner_text()
+    page.wait_for_selector("#chat .aegis #atts .chip.att.done", timeout=30_000)
+    page.fill("#chat .aegis #input", "with a file")
+    page.press("#chat .aegis #input", "Enter")
+    card = page.locator("#chat .aegis #entries .row.user .fcard.att")
+    card.first.wait_for(timeout=60_000)
+    assert "attached-note.txt" in page.inner_text("#chat .aegis #entries")
+    # The tray is empty again once the send took the file.
+    page.wait_for_selector("#chat .aegis #atts", state="hidden", timeout=10_000)
+    assert errors == []
+    page.close()
+
+
+def test_the_interrupt_button_stops_a_working_turn(host, browser):  # noqa: F811
+    """The mount's own interrupt sends session.interrupt for the session it
+    follows, and the turn ends."""
+    page, errors = open_page(browser, 1280)
+    page.goto(host["url"])
+    mounted(page)
+    assert page.is_hidden("#chat .aegis #interrupt")
+    composer_send(page, "/busy 5")
+    page.wait_for_selector("#chat .aegis #interrupt", state="visible", timeout=60_000)
+    page.click("#chat .aegis #interrupt")
+    page.wait_for_selector("#chat .aegis #interrupt", state="hidden", timeout=30_000)
+    page.wait_for_function(
+        """() => /interrupted|done in/.test(document.querySelector("#chat .aegis #entries").textContent)""",
+        timeout=30_000,
+    )
+    assert errors == []
+    page.close()
+
+
+OFFLINE = """async (prefix) => {
+  // The same socket the mount holds (the registry is keyed by URL and token),
+  // dropped as a stalled one is; every reconnect from here meets an inert
+  // WebSocket, so the box is offline until the test says otherwise.
+  const { acquire } = await import(`${prefix}/static/js/connection.js`);
+  // mount.js builds new URL("ws", <prefix>/): an http address, key for key.
+  const url = location.origin + prefix + "/ws";
+  window.__held = acquire(url, { token: window.aegisHost.token });
+  window.__liveWS = window.WebSocket;
+  window.__held.conn.drop();
+  window.WebSocket = class InertWebSocket {
+    constructor(url) { this.url = url; }
+    send() {}
+    close() {}
+  };
+  return true;
+}"""
+
+ONLINE = """async () => {
+  window.WebSocket = window.__liveWS;
+  window.__held.conn.connect(); // what a reconnect does: hello, welcome, a flush
+  return true;
+}"""
+
+
+def test_a_message_sent_offline_is_queued_and_goes_out_once_on_reconnect(host, browser):  # noqa: F811
+    """The mount's outbox: with no connection a send waits as the device's
+    draft and draws as the transcript's queued row; the reconnect flushes it,
+    and the agent sees it once."""
+    page, errors = open_page(browser, 1280)
+    page.goto(host["url"])
+    mounted(page)
+    prefix = page.evaluate("window.aegisHost.prefix")
+    page.evaluate(OFFLINE, prefix)
+    page.wait_for_timeout(800)  # the retry meets the inert socket
+    composer_send(page, "ship it while offline")
+    queued = page.locator("#chat .aegis #queued")
+    queued.wait_for(state="visible", timeout=10_000)
+    assert "ship it while offline" in queued.inner_text()
+    assert page.input_value("#chat .aegis #input") == ""
+    # The draft is the device's, keyed by the session.
+    stored = page.evaluate(
+        """prefix => import(`${prefix}/static/js/devicestore.js`).then(s => s.outboxAll())
+        .then(all => Object.fromEntries(all))""",
+        prefix,
+    )
+    assert stored[host["session"]]["text"] == "ship it while offline"
+    page.evaluate(ONLINE)
+    queued.wait_for(state="hidden", timeout=30_000)
+    page.wait_for_function(
+        """t => [...document.querySelectorAll("#chat .aegis #entries .row.user .body")]
+          .some((b) => b.textContent.includes(t))""",
+        arg="ship it while offline",
+        timeout=60_000,
+    )
+    # Once: a second copy would be a second row.
+    said = page.evaluate(
+        """t => [...document.querySelectorAll("#chat .aegis #entries .row.user")]
+          .filter((r) => r.textContent.includes(t)).length""",
+        arg="ship it while offline",
+    )
+    assert said == 1
+    assert errors == []
+    page.close()
