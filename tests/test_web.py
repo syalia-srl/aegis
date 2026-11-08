@@ -1314,6 +1314,12 @@ def test_a_prefixed_manifest_hashes_every_file_under_the_prefix(project, fake_cl
         )
         static = [u for u in files if u.startswith("/aegis/static/")]
         assert "/aegis/static/js/app.js" in static
+        # The public entry is served once, at <prefix>/aegis.js, and listed
+        # there so a host's worker has it offline; never under /static, where
+        # its relative mount.js import would resolve a directory too deep.
+        assert files["/aegis/aegis.js"]["bytes"] > 0
+        assert not [u for u in files if u.endswith("/static/js/aegis.js")]
+        assert not [u for u in files if u.endswith("/static/aegis.js")]
         assert all(f["url"].startswith("/aegis/") for f in doc["files"])
         assert all(len(f["hash"]) == 64 for f in doc["files"])
         assert doc["bytes"] == sum(f["bytes"] for f in doc["files"])
@@ -1339,6 +1345,23 @@ def test_the_entry_module_and_mcp_are_at_their_own_paths(project, fake_claude):
         # at the app's root, where harness children reach it.
         paths = {getattr(r, "path", "") for r in web.routes}
         assert "/mcp" in paths and "/static" in paths and "/ws" in paths
+
+
+def test_no_client_stylesheet_uses_a_root_absolute_asset_url():
+    from aegis.web import CLIENT_DIR
+
+    sheets = [
+        *sorted((CLIENT_DIR / "css").rglob("*.css")),
+        *sorted((CLIENT_DIR / "themes").rglob("*.css")),
+    ]
+    assert sheets
+    bad = [
+        (path.relative_to(CLIENT_DIR).as_posix(), form)
+        for path in sheets
+        for form in ('url("/', "url('/", "url(/")
+        if form in path.read_text()
+    ]
+    assert bad == [], "a host mounts these under a prefix; make asset URLs relative"
 
 
 def test_a_prefixed_token_redirect_returns_to_the_prefixed_page(project, fake_claude):
