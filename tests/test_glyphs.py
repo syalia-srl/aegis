@@ -60,7 +60,7 @@ def symbols() -> set[str]:
 
 def code_files() -> list[Path]:
     return [
-        *JS.glob("*.js"),
+        *JS.rglob("*.js"),
         CLIENT / "index.html",
         *(CLIENT / "css").glob("*.css"),
         *(CLIENT / "themes").glob("*.css"),
