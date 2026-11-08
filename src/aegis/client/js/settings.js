@@ -1750,7 +1750,7 @@ export class Settings {
   }
 
   async runDoctor() {
-    const b = document.getElementById("set-doctor");
+    const b = this.box.querySelector("#set-doctor");
     if (b) {
       b.disabled = true;
       b.textContent = "Checking…";

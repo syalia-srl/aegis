@@ -293,17 +293,25 @@ function fit(v) {
 }
 
 // -- the browser's own tab (app.js) ----------------------------------------
+// The part (parts/browser.js) owns the view and its host node; this controller
+// mounts one browser into it and lets go of it when the route leaves. A
+// browser docked in a session's canvas is a second mountBrowser, not this one.
 
-let tab = null; // {id, view}
+export class BrowserTab {
+  constructor(host) {
+    this.host = host;
+    this.tab = null; // {id, view}
+  }
 
-export function openBrowser(id, card, { conn, server = null }) {
-  if (tab?.id === id) return tab.view.draw(card);
-  closeBrowser();
-  tab = { id, view: mountBrowser(document.getElementById("br-tab"), id, card, { conn, server }) };
-}
+  open(id, card, { conn, server = null } = {}) {
+    if (this.tab?.id === id) return this.tab.view.draw(card);
+    this.close();
+    this.tab = { id, view: mountBrowser(this.host, id, card, { conn, server }) };
+  }
 
-export function closeBrowser() {
-  tab?.view.dispose();
-  tab = null;
-  document.getElementById("br-tab").replaceChildren();
+  close() {
+    this.tab?.view.dispose();
+    this.tab = null;
+    this.host.replaceChildren();
+  }
 }

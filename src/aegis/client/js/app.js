@@ -27,6 +27,9 @@ import { CommandsPart } from "./parts/commands.js";
 import { DictationPart } from "./parts/dictation.js";
 import { SpawnPart } from "./parts/spawn.js";
 import { FleetPart } from "./parts/fleet.js";
+import { ViewsPart } from "./parts/views.js";
+import { TerminalPart } from "./parts/terminal.js";
+import { BrowserPart } from "./parts/browser.js";
 import { factIcon, glyph, gorgoneion, icon, LABEL } from "./glyphs.js";
 import * as cmenu from "./menu.js";
 import { attachTabCard } from "./tabcard.js";
@@ -46,8 +49,8 @@ import "./pick.js";
 import { Attachments } from "./attach.js";
 import { setToastOpener, toast } from "./toast.js";
 import { Speaker } from "./speak.js";
-import { closeTerm, drawCard, openTerm } from "./termview.js";
-import { browserSources, closeBrowser, drawBrowser, mountBrowser, openBrowser } from "./browserview.js";
+import { TermView } from "./termview.js";
+import { BrowserTab, browserSources, drawBrowser, mountBrowser } from "./browserview.js";
 import { applyUpdate, checkForUpdate, setAutoApply, startWorker, takeBuild } from "./appworker.js";
 import { closeInstallDialog } from "./install.js";
 import { checkRotation, closePushPanel, openPushPanel, setupPush } from "./pushpanel.js";
@@ -136,6 +139,20 @@ const sidebar = new SidebarPart(app, root.querySelector(".v-session"), {
     fleet.invalidateArchive();
   },
 });
+
+// The views that are not the Fleet, a session or the new-session form are
+// parts too (b7): each builds its <main class="view"> and hands its module the
+// section inside it. The key list, the command palette and the file picker are
+// the overlays it builds beside them. They go ahead of the session's view so
+// the markup keeps index.html's order until the full layout builds it (b8).
+const views = new ViewsPart(app, root, { before: root.querySelector(".v-session") });
+
+// A terminal and a browser each have a view of their own; their controllers
+// take the part's nodes and never ask the page.
+const terminalPart = new TerminalPart(app, root);
+const terminal = new TermView(terminalPart);
+const browserPart = new BrowserPart(app, root);
+const browserTab = new BrowserTab(browserPart.host);
 
 // The Fleet is a part (b6): it builds the markup index.html used to hold and
 // owns the cards, the band, the linked servers and the archive. The page hands
@@ -688,7 +705,7 @@ document.addEventListener("visibilitychange", () => {
   app.conn.retryNow();
   if (app.conn.open) checkPush(); // otherwise the connect does
 });
-const settings = new Settings(app.conn, $("settings"), {
+const settings = new Settings(app.conn, views.settings, {
   themes: THEMES,
   setTheme,
   speaker,
@@ -696,7 +713,7 @@ const settings = new Settings(app.conn, $("settings"), {
   openSession: (id) => openSession(id),
 });
 let landEntry = null; // {key, id}: reveal this entry once its transcript lands
-const journal = new Journal(app.conn, $("journal"), {
+const journal = new Journal(app.conn, views.journal, {
   onOpen: (r) => {
     landEntry = r.source ? { key: r.log_id, id: r.source } : null;
     go(r.open ? `#s=${r.log_id}` : `#read=${r.log_id}`);
@@ -704,19 +721,19 @@ const journal = new Journal(app.conn, $("journal"), {
 });
 // The Knowledge view routes its rows and Back through the URL, so the
 // browser's Back closes an open item.
-const knowledgeView = new Knowledge(app.conn, $("knowledge"), {
+const knowledgeView = new Knowledge(app.conn, views.knowledge, {
   onOpen: (name) => go(`#knowledge=${encodeURIComponent(name)}`),
   onBack: () => go("#knowledge"),
 });
 // Alt+O's picker opens a file in the Files view; Shift+Enter in a new browser tab.
-filePicker = new FilePicker($("fpick"), app.conn, (path, line, newTab) => {
+filePicker = new FilePicker(views.fpick, app.conn, (path, line, newTab) => {
   const hash = filesHash(path, line);
   if (newTab) window.open(location.pathname + location.search + hash, "_blank");
   else go(hash);
 });
 // Files' pointing writes to the session last shown in this window: the Files
 // view itself shows none.
-filesView = new Files(app.conn, $("files"), {
+filesView = new Files(app.conn, views.files, {
   toast,
   go,
   onPick: () => filePicker.open(),
@@ -737,7 +754,7 @@ filesView = new Files(app.conn, $("files"), {
 // as the transcript's do.
 // Guided tour: what /tutorial <page> does, on default_agent, for any page. A
 // failure shows as an error toast, since the Help tab belongs to no session.
-const helpTab = new Help(app.conn, $("help"), {
+const helpTab = new Help(app.conn, views.help, {
   go,
   onKeys: () => help(true),
   onStart: (id, tutorial) =>
@@ -745,8 +762,8 @@ const helpTab = new Help(app.conn, $("help"), {
   onAsk: (question, page) =>
     spawn.startGuide({ question, page }, "ask", false).catch((e) => toast(e.message, { kind: "error" })),
 });
-installCopy($("help"), copyDeps);
-installCopy($("files"), copyDeps);
+installCopy(views.help, copyDeps);
+installCopy(views.files, copyDeps);
 const sideJournalChanged = () => {
   journal.changed();
   // Away from the session view nothing refetches; the panel forgets what it
@@ -756,14 +773,14 @@ const sideJournalChanged = () => {
 app.conn.subscribe("journal", sideJournalChanged, sideJournalChanged);
 // The usage page (usage.js): the channel says a turn was counted, the page
 // asks again while it is shown.
-const usage = new Usage(app.conn, $("usage"), {
+const usage = new Usage(app.conn, views.usage, {
   onOpen: (r) => go(r.open ? `#s=${r.session}` : `#read=${r.session}`),
 });
 const usageChanged = () => usage.changed();
 app.conn.subscribe("usage", usageChanged, usageChanged);
 // The Schedules view (schedules.js); its button counts them, red while one is
 // paused by errors.
-const schedules = new Schedules(app.conn, $("schedules"), {
+const schedules = new Schedules(app.conn, views.schedules, {
   go,
   sessions: (server) => (server ? on(server) : local()),
   onCount: (n, red) => header.setSchedules(n, red),
@@ -1120,7 +1137,7 @@ function flushSessions() {
   if (r.view === "fleet") {
     fleet.patch(ids);
   } else if (r.view === "session" && ids.has(r.id)) renderMeta(app.state.sessions.get(r.id));
-  else if (r.view === "term" && ids.has(r.id)) drawCard(termCard(r.id));
+  else if (r.view === "term" && ids.has(r.id)) terminal.draw(termCard(r.id));
   else if (r.view === "window" && ids.has(r.id)) drawWindow(r);
   // A browser shows in its tab and in canvas panes: every view redraws.
   for (const id of ids) if (app.state.sessions.get(id)?.kind === "browser") drawBrowser(termCard(id));
@@ -1283,8 +1300,8 @@ function render() {
     cmenu.close();
     cmenu.unbar();
   }
-  if (r.view !== "term") closeTerm();
-  if (r.view !== "browser") closeBrowser();
+  if (r.view !== "term") terminal.close();
+  if (r.view !== "browser") browserTab.close();
   if (leaveIfGone(r)) return;
   // A session's link to a terminal, or the reverse, opens the right view.
   if ((r.view === "session" || r.view === "term" || r.view === "browser") && app.state.sessions.has(r.id) && `#${r.view[0]}=${r.id}` !== hashOf(r.id)) {
@@ -1302,7 +1319,7 @@ function render() {
     watchHost(null);
     follow(null);
     show("term");
-    openTerm(card.id, card, { conn: app.conn }).catch((e) => toast(e.message, { kind: "error" }));
+    terminal.open(card.id, card, { conn: app.conn }).catch((e) => toast(e.message, { kind: "error" }));
     setTitle(`${card.name} · aegis`);
     return;
   }
@@ -1406,14 +1423,14 @@ function render() {
     if (!app.state.sessions.has(r.id)) return homeLive && go("#");
     show("browser");
     const card = termCard(r.id);
-    openBrowser(card.id, card, { conn: app.conn, server: card.server ?? null });
+    browserTab.open(card.id, card, { conn: app.conn, server: card.server ?? null });
     setTitle(`${card.name} · aegis`);
   } else if (r.view === "term") {
     watchHost(null);
     follow(null);
     show("term");
     const card = termCard(r.id);
-    openTerm(card.id, card, { conn: app.conn, server: card.server ?? null }).catch((e) => toast(e.message, { kind: "error" }));
+    terminal.open(card.id, card, { conn: app.conn, server: card.server ?? null }).catch((e) => toast(e.message, { kind: "error" }));
     setTitle(`${card.name} · aegis`);
   } else if (r.view === "window") {
     // The session's card and transcript, as the session view has them (the
@@ -1983,11 +2000,11 @@ async function untestedRetry(call, again) {
 
 // -- keys -----------------------------------------------------------------------
 // The ? list: drawn once from the key table.
-const keymap = $("keymap");
+const keymap = views.keymap;
 renderKeys(keymap);
 const help = (open = keymap.hidden) => (keymap.hidden = !open);
 keymap.addEventListener("click", (ev) => ev.target === keymap && help(false));
-const palette = new Palette($("palette"), () => route().view);
+const palette = new Palette(views.palette, () => route().view);
 
 // Alt+J and the navigator's button. In byNeed's order, from the tab after this
 // one; from the top when this one is not in the list, as after reading a
