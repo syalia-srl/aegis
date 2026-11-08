@@ -262,7 +262,7 @@ parts: `on`, `send`, `destroy` and `el`.
 |---|---|
 | `token` | A string, or a function called on each connect, so an expired token is replaced without a reload. |
 | `session` | The log id of the session the chat follows. |
-| `layout` | `"chat"`: one session, no tab strip, a transcript and (with `composer`) a box. The full layout arrives in a later release. |
+| `layout` | `"chat"`: one session, no tab strip, a transcript and (with `composer`) a box. `"full"`: the standalone client's own page, which `index.html` mounts; a host page wants `"chat"`. |
 | `composer` | `true` (the default) draws the message box; `false` gives a transcript only, as for an answer pane. |
 | `commands` | `true` builds the `/` command menu under the box; `false` (the default) leaves it out. |
 | `dictation` | `true` builds the dictation mic (and hold-to-record) beside the box; `false` (the default) leaves it out. |
