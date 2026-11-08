@@ -701,3 +701,161 @@ def test_a_message_sent_offline_is_queued_and_goes_out_once_on_reconnect(host, b
     assert said == 1
     assert errors == []
     page.close()
+
+
+# -- the whole chat in a stranger's page (a8) --------------------------------
+# The page was already using the ids and the CSS a chat would trip over: its
+# own #tabs and #composer, a #input of its own to come, and a stylesheet that
+# names every variable plus a rule that hides tool calls. The mount may not
+# move, rename or restyle any of it.
+
+# The host's own boxes, the same shape the fixture recorded before the mount.
+HOST_BOXES = """() => {
+  const out = {};
+  for (const id of ["board", "tabs", "composer"]) {
+    const n = document.getElementById(id);
+    const r = n.getBoundingClientRect();
+    out[id] = {text: n.textContent, x: r.x, y: r.y, width: r.width, height: r.height};
+  }
+  return out;
+}"""
+
+# The session's cumulative cost_usd as the sessions channel carried it, replayed
+# from the page's own socket log: what the mount's turnEnd has to agree with.
+COST = """(sid) => {
+  let cost = 0;
+  for (const m of window.__wsMsgs) {
+    if (m.channel !== "sessions") continue;
+    if (m.t === "snapshot") {
+      const row = (m.data || []).find((r) => r.log_id === sid);
+      if (row && typeof row.cost_usd === "number") cost = row.cost_usd;
+    } else if (m.t === "patch") {
+      for (const op of m.ops || []) {
+        const row = op.merge || op.upsert;
+        if (row && row.log_id === sid && typeof row.cost_usd === "number") cost = row.cost_usd;
+      }
+    }
+  }
+  return cost;
+}"""
+
+
+@pytest.mark.parametrize("width", [1280, 390])
+def test_the_whole_chat_in_a_page_that_already_had_the_ids(
+    host,
+    browser,  # noqa: F811
+    width,
+):
+    """The phase-A story on the fixture page: the host's boxes and ids survive,
+    the mount paints in the host's colours, the host's rule hides tool calls, a
+    send from the mount streams back and reports one turn with the turn's own
+    cost, and a send while the socket is down waits and goes out once."""
+    page, errors = open_page(browser, width)
+    page.goto(host["url"] + "?tools=hidden")
+    mounted(page)
+
+    # The host's own boxes stand exactly where they stood before the mount.
+    assert page.evaluate(HOST_BOXES) == page.evaluate("window.__host")
+    assert page.evaluate("document.getElementById('composer').textContent") == (
+        "the host's own input"
+    )
+    assert page.evaluate("document.getElementById('tabs').textContent") == (
+        "the host's own tabs"
+    )
+    # An id aegis also uses still returns the host's node, never the mount's.
+    assert (
+        page.evaluate("document.getElementById('composer').closest('.aegis')") is None
+    )
+    assert page.evaluate("document.getElementById('tabs').closest('.aegis')") is None
+    # The mount's composer is under the mount, and the page's only #input.
+    assert page.locator("#chat .aegis #composer #input").count() == 1
+    assert page.evaluate("document.querySelectorAll('#input').length") == 1
+
+    # theme: "host" reads the host's variables: its --bg is what the mount
+    # paints, resolved by the browser rather than compared as a string.
+    colour = page.evaluate(
+        """() => {
+          const probe = document.createElement("div");
+          probe.style.background = "var(--bg)";
+          document.body.append(probe);
+          const want = getComputedStyle(probe).backgroundColor;
+          probe.remove();
+          return {
+            want,
+            got: getComputedStyle(document.querySelector("#chat .aegis")).backgroundColor,
+            declared: getComputedStyle(document.documentElement)
+              .getPropertyValue("--bg").trim(),
+          };
+        }"""
+    )
+    assert colour["declared"] == "#fbf8f2"
+    assert colour["got"] == colour["want"] != "rgba(0, 0, 0, 0)"
+
+    page.evaluate(
+        """() => {
+          window.__turns = [];
+          window.__chat.on("turnEnd", (t) => window.__turns.push(t));
+        }"""
+    )
+
+    # With the socket down the same box queues the message on the device and
+    # draws the transcript's queued row; the reconnect delivers it once. It is
+    # the first message this session gets, so the draft's revision cannot have
+    # been passed by a row the page had not seen yet.
+    prefix = page.evaluate("window.aegisHost.prefix")
+    page.evaluate(OFFLINE, prefix)
+    page.wait_for_timeout(800)  # the retry meets the inert socket
+    composer_send(page, "held while the host was down")
+    queued = page.locator("#chat .aegis #queued")
+    queued.wait_for(state="visible", timeout=10_000)
+    assert "held while the host was down" in queued.inner_text()
+    page.evaluate(ONLINE)
+    queued.wait_for(state="hidden", timeout=30_000)
+    page.wait_for_function(
+        """t => [...document.querySelectorAll("#chat .aegis #entries .row.user .body")]
+          .some((b) => b.textContent.includes(t))""",
+        arg="held while the host was down",
+        timeout=60_000,
+    )
+    said = page.evaluate(
+        """t => [...document.querySelectorAll("#chat .aegis #entries .row.user")]
+          .filter((r) => r.textContent.includes(t)).length""",
+        arg="held while the host was down",
+    )
+    assert said == 1
+    page.wait_for_function("() => window.__turns.length >= 1", timeout=60_000)
+
+    # A prose row draws as the host's, and a tool row is in the DOM but the
+    # host's own rule keeps it off the page.
+    assert page.locator("#chat .aegis #entries .row.prose").first.is_visible()
+    send(page, host["session"], "/many 3")
+    tool = page.locator("#chat .aegis #entries .row.tool").first
+    tool.wait_for(state="attached", timeout=60_000)
+    assert tool.is_hidden()
+    page.wait_for_function("() => window.__turns.length >= 2", timeout=60_000)
+
+    # A message typed into the mount's box streams back, and its turn ends
+    # once: the cost is this turn's own, the cumulative figure after minus the
+    # one before, and a plain done turn carries no line.
+    seen = page.evaluate("window.__turns.length")
+    before = page.evaluate(COST, host["session"])
+    composer_send(page, "typed in the host's page")
+    page.wait_for_function(
+        """() => [...document.querySelectorAll("#chat .aegis #entries .row.user .body")]
+          .some((b) => b.textContent.includes("typed in the host's page"))""",
+        timeout=60_000,
+    )
+    page.wait_for_function(f"() => window.__turns.length > {seen}", timeout=60_000)
+    page.wait_for_timeout(1500)  # a second turnEnd for the same turn lands here
+    turns = page.evaluate("window.__turns")
+    assert len(turns) == seen + 1
+    turn = turns[seen]
+    assert turn["session"] == host["session"]
+    assert turn["line"] is None
+    assert isinstance(turn["cost_usd"], (int, float))
+    assert turn["cost_usd"] > 0
+    after = page.evaluate(COST, host["session"])
+    assert turn["cost_usd"] == pytest.approx(after - before, abs=1e-9)
+
+    assert errors == []
+    page.close()

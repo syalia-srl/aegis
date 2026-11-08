@@ -5,10 +5,16 @@ owned by Ana, and a Starlette page that mounts the client at that prefix. The
 server is the same one a Python host embeds: ``app.mount("/aegis", srv.asgi)``
 with the loopback listener still serving the MCP tools at its own root.
 
-The page is a stranger's: a board of its own, and a #chat div that the client
-mounts into. It records every socket and message on ``window`` so the browser
-test can count sockets and read the welcome without reaching into aegis's
-objects; ``window.__chat`` is the handle mount() returned.
+The page is a stranger's: a board, tabs and a composer of its own, a host
+stylesheet that sets every variable aegis reads, and a #chat div that the
+client mounts into. It records every socket and message on ``window`` so the
+browser test can count sockets and read the welcome without reaching into
+aegis's objects; ``window.__chat`` is the handle mount() returned, and
+``window.__host`` is the page's own boxes as they stood before the mount drew.
+
+The host's stylesheet hides tool calls only when the page is loaded with
+``?tools=hidden``: the tests that click a tool row need the row on screen, and
+a host turning them off is a rule of the page, not of the mount (slice a8).
 
 Run it as ``python -m tests.host_fixture --root <dir> --port <port>
 --claude <binary>``; it prints one JSON line when the page is ready
@@ -51,11 +57,66 @@ HOST_PAGE = """\
 <title>aegis host</title>
 </head>
 <body>
+<style>
+  /* The host's own page: its colours and fonts, the ids it already uses (tabs,
+     composer), and one rule that hides tool calls. aegis reads these variables
+     (theme: "host", spec 06 Styling) and must not reach anything else. The
+     block sits in the body, after the client's stylesheet in the head, so a
+     rule of the host's that ties with one of aegis's still wins. */
+  :root { --bg:#fbf8f2; --chrome:#f2ece1; --side:#f6f1e7; --surface:#fff;
+          --raised:#fdfbf6; --rule:#e2dccf; --ink:#2b2722; --strong:#17140f;
+          --muted:#6b655c; --faint:#8d867b; --accent:#b0482f;
+          --accent-soft:#f3e4de; --on-accent:#fff; --ok:#4f7a3a; --err:#b23b2e;
+          --err-bg:#fbeceb; --warn:#b07a2f; --comms:#466a8f; --add-bg:#eef3e6;
+          --del-bg:#fbeceb; --h-kw:#8a5a2b; --h-str:#4f7a3a; --h-num:#b0482f;
+          --h-com:#8d867b; --h-fn:#2b2722; --h-type:#466a8f; --h-var:#6b655c;
+          --h-meta:#8d867b; --font-ui:Georgia,serif; --font-prose:Georgia,serif;
+          --font-mono:ui-monospace; --font-chrome:ui-monospace;
+          --font-head:Georgia,serif; --prose-size:16px; --r:4px; --r-lg:8px;
+          --time:none; --thread:block; --row-cols:22px 1fr; --fill:var(--accent); }
+  html { overflow-y: scroll; }  /* a constant gutter: the mount's height is not this page's */
+  body { margin: 0; background: var(--surface); color: var(--ink);
+         font-family: var(--font-ui); }
+  #board { padding: 18px 16px; font-size: 24px; }
+  /* The host's own boxes are styled by class: an id aegis also uses (#composer,
+     #input) would match a node inside the mount too, and the host wants its
+     own box, not aegis's. */
+  .host-tabs { padding: 10px 16px; border-bottom: 1px solid var(--rule);
+               font-family: var(--font-chrome); font-size: 12px; }
+  .host-input { margin: 0 16px 12px; padding: 8px 12px; width: 320px;
+                border: 1px solid var(--rule); border-radius: var(--r);
+                font-size: 13px; }
+  #chat { margin: 0 16px 16px; border: 1px solid var(--rule); }
+  /* The height is a host's default; :where keeps it at zero specificity so a
+     test's own #chat rule (or a host's) still decides. */
+  :where(#chat) { height: 560px; }
+  [data-hide-tools] .aegis .tool { display: none; }
+</style>
+<div id="tabs" class="host-tabs">the host's own tabs</div>
 <main id="board">A host page</main>
+<div id="composer" class="host-input">the host's own input</div>
 <div id="chat"></div>
 <div id="chat2"></div>
 <script>
 window.aegisHost = {token: "__TOKEN__", session: "__SESSION__", session2: "__SESSION2__", prefix: "__PREFIX__"};
+// A host that wants no tool calls turns them off with its own CSS. It is asked
+// for with ?tools=hidden because the tests that click a tool row need the row
+// on screen, and the rule is the page's, never the mount's (slice a8).
+if (new URLSearchParams(location.search).get("tools") === "hidden") {
+  document.documentElement.dataset.hideTools = "";
+}
+// The host's own boxes as they stood once the page's stylesheet applied and
+// before the mount drew anything: the test compares text, size and position
+// after it, and no aegis rule may move them.
+window.__host = (() => {
+  const out = {};
+  for (const id of ["board", "tabs", "composer"]) {
+    const n = document.getElementById(id);
+    const r = n.getBoundingClientRect();
+    out[id] = {text: n.textContent, x: r.x, y: r.y, width: r.width, height: r.height};
+  }
+  return out;
+})();
 // What the test reads: every socket the page opens and every message it hears.
 // Wrapping WebSocket here runs before the module script below, which is
 // deferred until parsing ends.
