@@ -144,11 +144,22 @@ export class Mount {
     }
   }
 
+  // A refused call or a channel's error reaches the host as code and message,
+  // beside the OpError itself: a host that only logs must not need to know the
+  // client's error class to say what went wrong (the plan's `error` event).
+  fail(session, error) {
+    const code = error?.code || "error";
+    const text = String(error?.message ?? error ?? "");
+    // An OpError's message is "code: text" (protocol.js); a host gets the text.
+    const message = text.startsWith(`${code}: `) ? text.slice(code.length + 2) : text;
+    this.emit("error", { session, code, message, error });
+  }
+
   send(text) {
     if (this.composer) return this.composer.send(text);
     // A transcript-only mount still lets a reply pill's send arrive.
     if (!this.state.shown) return Promise.resolve();
-    return this.callFor(this.state.shown, "session.send", { text }).catch((error) => this.emit("error", { session: this.state.shown, error }));
+    return this.callFor(this.state.shown, "session.send", { text }).catch((error) => this.fail(this.state.shown, error));
   }
 
   destroy() {

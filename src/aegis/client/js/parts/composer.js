@@ -481,11 +481,15 @@ export class ComposerPart {
           );
           if (r !== CANCELLED) sent(r);
         } catch (e2) {
+          this.mount.fail(key, e2);
           toast(e2.message, { kind: "error", root: this.mount.root });
         }
         return;
       }
       if (e !== LATE) {
+        // A refusal the host may act on reaches it as the error event; the
+        // person sees the same thing, a toast in the mount's root.
+        this.mount.fail(key, e);
         toast(e.message, { kind: "error", root: this.mount.root });
         return;
       }
@@ -505,7 +509,11 @@ export class ComposerPart {
       const still = () => (this.key === key ? this.input.value.trim() : localStorage.getItem(`aegis.draft.${key}`)?.trim()) === text;
       call.then(
         (r) => still() && sent(r),
-        (e) => still() && this.key === key && (this.error.textContent = this.t("composer.notSent", { error: e.message })),
+        (e) => {
+          if (!still()) return;
+          this.mount.fail(key, e);
+          if (this.key === key) this.error.textContent = this.t("composer.notSent", { error: e.message });
+        },
       );
     } finally {
       if (fromComposer) {
