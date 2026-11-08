@@ -41,9 +41,8 @@ def isolated_env(home: Path) -> dict[str, str]:
     config dir, holding a link to the person's sign-in and nothing else of
     theirs (no CLAUDE.md, skills, plugins or settings). An empty dir without
     the link starts signed out."""
-    from ..quota.claude import credentials_path
-
-    link, login_file = home / ".credentials.json", credentials_path()
+    own = os.environ.get("CLAUDE_CONFIG_DIR") or str(Path.home() / ".claude")
+    link, login_file = home / ".credentials.json", Path(own) / ".credentials.json"
     if login_file.exists() and not link.is_symlink():
         link.symlink_to(login_file)
     return {"CLAUDE_CONFIG_DIR": str(home)}

@@ -152,7 +152,7 @@ def test_an_isolated_claude_has_its_own_config_dir_with_only_the_login(
     creds = tmp_path / "person" / ".credentials.json"
     creds.parent.mkdir()
     creds.write_text("{}")
-    monkeypatch.setenv("CLAUDE_CREDS", str(creds))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(creds.parent))
     home = tmp_path / "home"
     home.mkdir()
     s = ClaudeSession("claude", replace(launch(tmp_path, None), home=home))
