@@ -712,7 +712,7 @@ async def main(root: Path, port: int):
 <p>Both files pass; <code>make gates</code> is clean; the fixture is in place for a2 to mount into; the slice's report carries a terminal capture of <code>curl /aegis/manifest.json</code> and of the mounted page's headers.</p>
 </div></details>
 
-<details class="task" id="a2-client-kernel" data-state="pending">
+<details class="task" id="a2-client-kernel" data-state="doing">
 <summary><span class="num">A2</span><span><span class="ttl">The mount kernel: one root, one socket, labels and the rooted helpers</span><span class="files">js/mount.js · js/connection.js · js/protocol.js · js/root.js · js/dom.js · js/labels.js · js/labels/en.js · js/labels/es.js · js/toast.js · js/dialog.js · js/menu.js · js/glyphs.js · tests/host_fixture.py · tests/test_mount_browser.py (new)</span></span><span class="state"></span></summary>
 <div class="body">
 <p>Import <code>mount</code> in a host page and get one <code>.aegis</code> root, its theme, and one websocket carrying the page's token; destroy it and both go. No transcript or composer yet.</p>
