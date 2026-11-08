@@ -8,6 +8,10 @@ harness children reach aegis's tools at ``<base_url>/mcp``, so a server without
 a listener would spawn agents with no aegis tools. It installs no signal
 handlers; the host program stops it by leaving the block.
 
+``prefix`` is where the host mounts ``srv.asgi``. Only the URLs aegis generates
+carry it, and the MCP routes keep their root paths on the loopback listener, so
+the listener's page is not browsable under a prefix: the host serves it.
+
 One Server runs per process at a time: ``launch.configure`` sets a mode every
 child process reads, and two servers would share it (spec 2026-10-23).
 """
@@ -34,6 +38,7 @@ if TYPE_CHECKING:
     from .policy import HostPolicy, McpServer
     from .app import App
     from .roots import Roots
+    from starlette.applications import Starlette
 
 
 class StartError(Exception):
@@ -126,6 +131,7 @@ class Server:
         origins: Iterable[str] = (),
         policy: HostPolicy | None = None,
         mcp: Mapping[str, McpServer] | None = None,
+        prefix: str = "",
     ) -> None:
         # Required: nothing below the CLI reads the working directory (test_no_cwd).
         self._root = Path(root)
@@ -136,7 +142,9 @@ class Server:
         self._origins = list(origins)
         self._policy = policy
         self._mcp = mcp
+        self._prefix = prefix
         self._app: App | None = None
+        self._asgi: Starlette | None = None
         self._uvicorn: Any = None
         self._task: asyncio.Task | None = None
         self._caller: Caller | None = None
@@ -201,8 +209,13 @@ class Server:
             mcp=self._mcp,
         )
         web = build_web(
-            self._app, self.token, allowed_hosts(self._host, port), self._origins
+            self._app,
+            self.token,
+            allowed_hosts(self._host, port),
+            self._origins,
+            self._prefix,
         )
+        self._asgi = web
         self._caller = Caller(
             "user", principal=self._app.principals.resolve(self.token)
         )
@@ -233,6 +246,15 @@ class Server:
         if self._app is None:
             raise RuntimeError("the Server is not running: use it in `async with`")
         return self._app
+
+    @property
+    def asgi(self) -> Starlette:
+        """The web app a host mounts at its own prefix, or a proxy reaches
+        with the prefix stripped: ``app.mount("/aegis", srv.asgi)``. Its
+        routes are relative; only the URLs it generates carry ``prefix``."""
+        if self._asgi is None:
+            raise RuntimeError("the Server is not running: use it in `async with`")
+        return self._asgi
 
     @property
     def sessions(self) -> Sessions:
