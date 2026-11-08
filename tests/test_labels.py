@@ -75,6 +75,31 @@ def test_the_transcript_and_its_rows_are_labelled():
         assert key in keys, key
 
 
+def test_every_literal_key_the_client_uses_exists():
+    """A key spelled in a module (or a ``data-t`` attribute) is in the table.
+
+    The browser logs a missing key once and shows the key itself, so a typo is
+    a page that reads "transcript.oflline" and nobody notices. Keys built at
+    run time (a kind, a fold level, a copy noun) are checked by the browser
+    tests that draw them.
+    """
+    en = table("en")
+    used = set()
+    for path in CLIENT.rglob("*.js"):
+        if path.parent.name == "labels":
+            continue
+        src = path.read_text(encoding="utf-8")
+        used |= set(re.findall(r'\bt\("([a-z0-9]+\.[A-Za-z0-9.]+)"', src))
+        used |= set(
+            re.findall(
+                r'data-t(?:-title|-aria|-placeholder)?="([a-z0-9]+\.[A-Za-z0-9.]+)"',
+                src,
+            )
+        )
+    assert used, "no label keys found: the scan is looking in the wrong place"
+    assert used <= set(en), f"not in the table: {sorted(used - set(en))}"
+
+
 def test_no_transcript_literal_was_left_in_the_modules():
     """The words a5 moved live in the table only.
 
