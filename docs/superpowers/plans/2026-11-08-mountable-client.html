@@ -739,7 +739,7 @@ window.__chat = chat;
 <p>The browser test passes at 1280 and 390; <code>make gates</code> is clean; a <code>grep -r '#a2' js/</code> finds only <code>rootOf</code>'s fallback and no new one; no <code>app.js</code> change.</p>
 </div></details>
 
-<details class="task" id="a3-css-aegis" data-state="doing">
+<details class="task" id="a3-css-aegis" data-state="done">
 <summary><span class="num">A3</span><span><span class="ttl">The <code>.aegis</code> root and the styling contract</span><span class="files">css/base.css → css/client.css · css/page.css (new) · themes/*.css · index.html · js/mount.js · scripts/cascade_baseline.py (new) · tests/fixtures/cascade-baseline.json (new) · tests/test_css_scope.py (new)</span></span><span class="state"></span></summary>
 <div class="body">
 <p>The 2,288 <code>#a2</code> selectors become <code>.aegis</code>, the four page-level rules move out of the mount's stylesheet, the themes set variables on the root itself, and the specificity loss is measured rather than argued.</p>
