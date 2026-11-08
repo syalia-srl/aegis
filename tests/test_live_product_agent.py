@@ -25,18 +25,21 @@ pytestmark = pytest.mark.live
 
 ECHO = Path(__file__).parent / "fixtures" / "mcp_echo.py"
 HAIKU = "claude-haiku-4-5-20251001"
-FLASH = "opencode-go/deepseek-v4-flash"
+FLASH = "opencode-go/deepseek-v4.1-flash"
 # Planted where a harness that reads project or machine config would find it.
 PLANTED = "ZEBRA-41"
 BRIEF = "You answer through the echo server's tools and nothing else."
 
 
 class Product(StandalonePolicy):
+    def __init__(self, echo: McpServer) -> None:
+        self.echo = echo
+
     def tools(self, who, session):
         return set()
 
     def mcp(self, who, session):
-        return [McpServer.stdio("echo", sys.executable, [str(ECHO)])]
+        return [self.echo]
 
     async def spawn(self, who, req):
         return req.replace(
@@ -60,7 +63,12 @@ def plant(root: Path) -> None:
     )
 
 
-async def run(tmp_path: Path, harness: str, model: str, **bins) -> object:
+STDIO = McpServer.stdio("echo", sys.executable, [str(ECHO)])
+
+
+async def run(
+    tmp_path: Path, harness: str, model: str, echo: McpServer = STDIO, **bins
+) -> object:
     import uvicorn
 
     from aegis.app import App
@@ -79,7 +87,7 @@ async def run(tmp_path: Path, harness: str, model: str, **bins) -> object:
     app = App(
         make_roots(tmp_path, None),
         base_url=f"http://127.0.0.1:{port}",
-        policy=Product(),
+        policy=Product(echo),
         **bins,
     )
     server = uvicorn.Server(
@@ -96,12 +104,7 @@ async def run(tmp_path: Path, harness: str, model: str, **bins) -> object:
             "Call the ping tool with marker KESTREL-7, then reply with exactly "
             "what it returned."
         )
-        await until(
-            lambda: s.status == "idle"
-            and any(e["kind"] == "prose" for e in s.entries()),
-            timeout=240,
-            what="the answer",
-        )
+        await until(lambda: s.status != "working", timeout=240, what="the turn's end")
         return s, s.entries()
     finally:
         await app.shutdown()
@@ -113,8 +116,7 @@ def check(entries: list[dict]) -> None:
     tools = [e for e in entries if e["kind"] == "tool"]
     assert tools, "no tool call streamed"
     for t in tools:
-        blob = json.dumps(t)
-        assert "ping" in blob, f"a tool other than echo's ping: {t['title']}"
+        assert "ping" in t["title"], f"a tool other than echo's ping: {t['title']}"
     assert any("KESTREL-7" in json.dumps(t["detail"]) for t in tools)
     assert any("pong KESTREL-7" in json.dumps(t["detail"]) for t in tools)
     prose = [e.get("md") or "" for e in entries if e["kind"] == "prose"]
@@ -141,7 +143,30 @@ async def test_a_real_claude_product_agent_sees_only_its_mcp_server(tmp_path: Pa
 
 
 async def test_a_real_opencode_product_agent_sees_only_its_mcp_server(tmp_path: Path):
+    """Over HTTP: OpenCode 2.1.2 keeps a stdio server's tools in Code Mode
+    whatever its ``codemode`` says, and with ``execute`` denied they are gone
+    (measured; a remote server's are on the native list)."""
+    from .test_agents import _free_port
+
     opencode = shutil.which("opencode")
     assert opencode, "opencode is not on PATH"
-    _, entries = await run(tmp_path, "opencode", FLASH, opencode_bin=opencode)
+    port = _free_port()
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable, str(ECHO), "--http", str(port),
+        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+    )  # fmt: skip
+    try:
+        echo = McpServer.http("echo", f"http://127.0.0.1:{port}/mcp")
+        await until(lambda: _listening(port), timeout=20, what="the echo server")
+        _, entries = await run(tmp_path, "opencode", FLASH, echo, opencode_bin=opencode)
+    finally:
+        proc.terminate()
+        await proc.wait()
     check(entries)
+
+
+def _listening(port: int) -> bool:
+    import socket
+
+    with socket.socket() as s:
+        return s.connect_ex(("127.0.0.1", port)) == 0
