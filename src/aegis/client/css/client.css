@@ -585,6 +585,9 @@
 .aegis .composer textarea::placeholder,.aegis .spawn textarea::placeholder{color:var(--faint);opacity:1}
 /* Buttons inside the box, bottom right: send, and the mic when it comes. */
 .aegis .composer .acts{display:flex;gap:6px;align-items:center;padding:8px 8px 8px 0}
+/* The mic is built into a slot by parts/dictation.js: contents, so the button
+   is the row's flex item and the empty slot draws nothing when it is off. */
+.aegis [data-slot=mic]{display:contents}
 /* Text longer than a line takes the whole width, and the buttons a row of their
    own under it (#575): beside it they narrowed every line, not only the last. */
 .aegis :is(.composer,.spawn) .box.stacked{flex-wrap:wrap}

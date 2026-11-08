@@ -264,6 +264,8 @@ parts: `on`, `send`, `destroy` and `el`.
 | `session` | The log id of the session the chat follows. |
 | `layout` | `"chat"`: one session, no tab strip, a transcript and (with `composer`) a box. The full layout arrives in a later release. |
 | `composer` | `true` (the default) draws the message box; `false` gives a transcript only, as for an answer pane. |
+| `commands` | `true` builds the `/` command menu under the box; `false` (the default) leaves it out. |
+| `dictation` | `true` builds the dictation mic (and hold-to-record) beside the box; `false` (the default) leaves it out. |
 | `theme` | `"host"`, or a built-in theme's name (`"ink"`, `"riso"`), which aegis loads itself. |
 | `lang`, `labels` | `"en"` or `"es"`, and single keys to override. A key a table lacks falls back to English and is logged once. |
 

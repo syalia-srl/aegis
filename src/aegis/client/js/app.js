@@ -23,6 +23,8 @@ import { installKeys, renderKeys } from "./keys.js";
 import { Palette } from "./palette.js";
 import { HeaderPart } from "./parts/header.js";
 import { SidebarPart } from "./parts/sidebar.js";
+import { CommandsPart } from "./parts/commands.js";
+import { DictationPart } from "./parts/dictation.js";
 import { factIcon, glyph, gorgoneion, icon, LABEL } from "./glyphs.js";
 import { CommandMenu } from "./commands.js";
 import * as cmenu from "./menu.js";
@@ -41,8 +43,6 @@ import { listenForOpen, pingToast, redrawFavicon, setTitle, updatePing } from ".
 import { ask, cancelAsk, choose } from "./dialog.js";
 import { modelMeta } from "./models.js";
 import "./pick.js";
-import { Dictation } from "./dictation.js";
-import { HoldToRecord } from "./record.js";
 import { Attachments } from "./attach.js";
 import { setToastOpener, toast } from "./toast.js";
 import { Speaker } from "./speak.js";
@@ -1689,7 +1689,7 @@ function follow(id) {
   } else transcript.clear();
   drawNavNow(); // at once: the old session's navigator goes with its rows
   find.close(false); // it searched the old session
-  if (dictation.target?.el === input) dictation.stop("tab"); // a recording belongs to its session
+  dictation.stopIfHere(input, "tab"); // a recording belongs to its session
   speaker.stop(); // what is being read belongs to the session on screen
   app.state.shown = id;
   drawSpeak();
@@ -2917,7 +2917,7 @@ installKeys(
       if (offline()) return;
       const v = route().view;
       if (!navigator.mediaDevices || (v !== "session" && v !== "spawn")) return;
-      dictation.toggle(v === "spawn" ? spawnTarget() : sessionTarget(), "key");
+      dictation.toggle(v === "spawn" ? $("sp-text") : input, "key");
     },
     browse() {
       const v = route().view;
@@ -2997,7 +2997,7 @@ installKeys(
       } else menu.openOverlay();
     },
     escape() {
-      if (recorder.discard() || cancelAsk() || closeInstallDialog() || closePushPanel()) return;
+      if (dictation.discard() || cancelAsk() || closeInstallDialog() || closePushPanel()) return;
       if (header.close()) return;
       if (root.dataset.side === "open") return closeSide();
       if (!keymap.hidden) help(false);
@@ -3123,63 +3123,46 @@ document.addEventListener("drop", (ev) => {
   else if (onSpawn()) spAtts.add([...ev.dataTransfer.files], "spawn");
 });
 
-// -- dictation: the mic in both message boxes (dictation.js) ----------------
-const mics = () => [
-  [$("mic"), input],
-  [$("sp-mic"), $("sp-text")],
-];
-const dictation = new Dictation({
-  prepare: () => app.conn.call("dictation.prepare"),
-  onState(state) {
-    for (const [b, el] of mics()) b.dataset.state = dictation.target?.el === el ? state : "idle";
-    artifacts.dictationState(state);
-  },
-  onLevel(x) {
-    for (const [b] of mics()) b.style.setProperty("--level", Math.min(1, x * 8).toFixed(2));
-    artifacts.dictationCheck();
-  },
-  onError(message) {
-    toast(message, { kind: "error" });
-  },
-});
-// A session's box holds that session's draft, so text that lands after the
-// box moved to another session goes to the draft it started in.
+// -- dictation: the mic in both message boxes (parts/dictation.js) -----------
+// The page's one dictation part. The session's box owns it and builds the mic
+// index.html used to hold; the new tab's first-message box is a second box of
+// the same engine until b5 moves that view into a part of its own.
 // The drafts that got dictated text since their last send, by draft key and
 // "spawn": their send tells the server, which adds a note for the agent (#579).
 const spoken = new Set();
-const sessionTarget = () => {
-  const key = `aegis.draft.${app.state.shown}`;
-  return { el: input, key, current: () => `aegis.draft.${app.state.shown}`, heard: () => spoken.add(key) };
-};
-const spawnTarget = () => ({ el: $("sp-text"), key: null, current: () => null, heard: () => spoken.add("spawn") });
-if (!navigator.mediaDevices) {
-  for (const [b] of mics()) {
-    b.disabled = true;
-    b.title = "Dictation needs https or localhost";
+const onTake = (file, ms, ctx) => {
+  // A take that ends after its tab was left waits in that session's tray
+  // rather than going out unseen (record.js, #932).
+  if (ctx?.spawn) {
+    spAtts.add([file], "spawn");
+    if (onSpawn()) spawnFromComposer();
+    return;
   }
-}
-// A long press on either mic records audio instead (record.js, #932): the take
-// goes out as an attachment with what the box holds. A take that ends after
-// its tab was left waits in that session's tray rather than going out unseen.
-const recorder = new HoldToRecord({
-  busy: () => offline() || dictation.state !== "idle",
-  onError: (message) => toast(message, { kind: "error" }),
-  onDone(file, ms, ctx) {
-    if (ctx.spawn) {
-      spAtts.add([file], "spawn");
-      if (onSpawn()) spawnFromComposer();
-      return;
-    }
-    atts.add([file], ctx.key);
-    if (app.state.shown === ctx.key && onSession()) send();
-    else toast("The recording waits in its session's box: send it from there");
-  },
+  if (!ctx?.key) return;
+  atts.add([file], ctx.key);
+  if (app.state.shown === ctx.key && onSession()) send();
+  else toast("The recording waits in its session's box: send it from there");
+};
+const dictation = new DictationPart(app, $("composer"), {
+  input: () => input,
+  // A session's box holds that session's draft, so text that lands after the
+  // box moved to another session goes to the draft it started in.
+  draft: () => (app.state.shown ? `aegis.draft.${app.state.shown}` : null),
+  heard: (key) => key && spoken.add(key),
+  ctx: () => ({ key: app.state.shown }),
+  canStart: () => !offline(),
+  prepare: () => app.conn.call("dictation.prepare"),
+  onState: (state) => artifacts.dictationState(state),
+  onLevel: () => artifacts.dictationCheck(),
+  onTake,
 });
-recorder.attach($("mic"), () => ({ key: app.state.shown }));
-recorder.attach($("sp-mic"), () => ({ spawn: true }));
-for (const [b] of mics()) if (!b.disabled) b.title += " · hold to record audio";
-$("mic").addEventListener("click", () => !offline() && dictation.toggle(sessionTarget(), "button"));
-$("sp-mic").addEventListener("click", () => !offline() && dictation.toggle(spawnTarget(), "button"));
+dictation.add($("spawn"), {
+  input: () => $("sp-text"),
+  mic: $("sp-mic"),
+  heard: () => spoken.add("spawn"),
+  ctx: () => ({ spawn: true }),
+  onTake,
+});
 // On a touch screen Enter adds a line and the button sends: the key sits where
 // a mistap lands, and half a message costs a turn.
 const touch = matchMedia("(pointer: coarse)");
@@ -3483,7 +3466,7 @@ async function sendLine(text, fromComposer, attachments = [], target = focused()
   const call = callFor(s.key, "session.send", params);
   const sent = (r) => {
     unconfirmed.delete(s.key);
-    if (/^\/model\s/.test(text)) catalogs.delete(s.key); // its efforts may differ
+    if (/^\/model\s/.test(text)) menu.forget(s.key); // its efforts may differ
     if (fromComposer) {
       localStorage.removeItem(`aegis.draft.${s.key}`);
       spoken.delete(`aegis.draft.${s.key}`);
@@ -3613,12 +3596,10 @@ const send = async () => {
   return sendLine(text, true, ready.ids, s);
 };
 
-// Catalogs per session, fetched when the menu first opens there. The promise
-// is kept, so keystrokes that arrive while it loads wait for the same call
-// instead of each asking the server again.
-const catalogs = new Map();
 // A session's menu: its commands, and the tutorial pages /tutorial completes.
-// A linked server without help.pages offers none.
+// A linked server without help.pages offers none. The part keeps the catalogs
+// per session, so keystrokes that arrive while one loads wait for the same
+// call instead of each asking the server again.
 async function loadCommands(key) {
   const [cat, pages, agents] = await Promise.all([
     callFor(key, "commands.list"),
@@ -3643,24 +3624,11 @@ async function spawnAgents(server) {
   const far = server ? [] : app.state.links.filter((l) => l.state === "linked").map((l) => roster(l.name, true));
   return (await Promise.all([roster(server, false), ...far])).flat();
 }
-async function loadCatalog() {
-  const s = focused();
-  if (!s) return null;
-  if (!catalogs.has(s.key)) catalogs.set(s.key, loadCommands(s.key));
-  try {
-    return await catalogs.get(s.key);
-  } catch (e) {
-    catalogs.delete(s.key); // the next open asks again
-    toast(e.message, { kind: "error" });
-    return null;
-  }
-}
 
-const menu = new CommandMenu({
-  box: $("cmd-menu"),
-  rows: $("cmd-rows"),
-  filter: $("cmd-filter"),
-  load: loadCatalog,
+// The composer's menu is a part (b4): it builds the list under the box and
+// keeps its catalogs; the page hands it the line and the keys.
+const menu = new CommandsPart(app, $("composer"), {
+  fetch: loadCommands,
   run: (line) => sendLine(line, false),
   getLine: () => input.value,
   setLine: (v) => {
