@@ -318,7 +318,7 @@ def register_secret_ops(app: App) -> ss.SecretStore:
             raise OpError("refused", str(e)) from None
         return "ok"
 
-    @r.op("signin.open", SignInOpen, agent=True, server=True)
+    @r.op("signin.open", SignInOpen, agent=True, server=True, work=True)
     async def signin_open(p: SignInOpen, caller):
         """Open a sign-in card for a harness in your transcript, to renew its
         sign-in before it expires or when the person asks. aegis runs the
@@ -331,7 +331,7 @@ def register_secret_ops(app: App) -> ss.SecretStore:
         except ValueError as e:
             raise OpError("refused", str(e)) from None
 
-    @r.op("harness.status", read=True)
+    @r.op("harness.status", read=True, access="read")
     async def harness_status_op(p, caller):
         """Each harness with a sign-in: installed, its version, signed in and until when."""
         rows = await harness_status(_sign_ins().recipes())

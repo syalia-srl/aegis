@@ -66,7 +66,7 @@ def register_config_ops(app: App) -> None:
         cache["found"] = (time.monotonic(), found)
         return found
 
-    @r.op("config.read")
+    @r.op("config.read", access="read")
     async def config_read(_, caller):
         """.aegis.yaml as aegis holds it: the form's document, its stamp, and
         the error when the file on disk does not parse."""
@@ -99,12 +99,12 @@ def register_config_ops(app: App) -> None:
         except Exception as e:  # whatever the server or its transport raised
             raise OpError("mcp_test", f"{name}: {str(e) or type(e).__name__}") from e
 
-    @r.op("config.detect", server=True)
+    @r.op("config.detect", server=True, access="read")
     async def config_detect(_, caller):
         """The harnesses installed on this machine: binary, version, models."""
         return [f.wire() for f in await detected()]
 
-    @r.op("config.doctor", agent=True, read=True)
+    @r.op("config.doctor", agent=True, read=True, access="read")
     async def config_doctor(_, caller):
         """Check .aegis.yaml, the harnesses it names and the state directory.
         Each finding has a level (ok, warn, error), where it is, and what is
@@ -116,7 +116,7 @@ def register_config_ops(app: App) -> None:
         """The first configuration `aegis init` would write here."""
         return propose(await detected()).model_dump()
 
-    @r.op("models.list", agent=True, read=True)
+    @r.op("models.list", agent=True, read=True, access="read")
     async def models_list(_, caller):
         """Every model the installed harnesses can run, with its rank among
         its harness's models, Artificial Analysis's Coding and Intelligence

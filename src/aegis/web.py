@@ -27,10 +27,11 @@ are streamed through ``/via/<server>/files/…``.
 The app's routes are relative, so a Python host can mount it under a prefix of
 its own (``Server(prefix=...)``: ``srv.asgi``). Only the URLs it generates carry
 the prefix: the page's asset links, the manifest, and the redirects. The MCP
-routes keep their root paths, because harness children reach them at
-``<base_url>/mcp`` on the Server's own listener. That listener still serves the
-same app, so a prefixed server's loopback page is not browsable; the host serves
-the page under its prefix.
+routes stay on the Server's own loopback listener, because harness children
+reach them at ``<base_url>/mcp``; the app a host mounts leaves them out, so
+``<prefix>/mcp`` is not on the host's public origin. That listener serves its
+own copy of the app, so a prefixed server's loopback page is not browsable; the
+host serves the page under its prefix.
 """
 
 from __future__ import annotations
@@ -340,7 +341,11 @@ def build_web(
     allowed_hosts: set[str],
     origins: Iterable[str] = (),
     prefix: str = "",
+    *,
+    mcp: bool = True,
 ) -> Starlette:
+    """The web app. ``mcp`` adds the MCP routes harness children reach at
+    ``<base_url>/mcp``; a host's public mount leaves them out (#993)."""
     origins = list(origins)
     # Host header -> the one origin a socket naming that host must come from.
     public = {urlsplit(o).netloc: o for o in map(public_origin, origins)}
@@ -979,33 +984,41 @@ def build_web(
 
     @contextlib.asynccontextmanager
     async def lifespan(_):
+        if not mcp:
+            # The host's app has no MCP routes; there is no session manager to
+            # keep running.
+            await app.boot()
+            yield
+            await app.shutdown()
+            return
         # The MCP app keeps its own session manager running for the server's life.
         async with app.mcp_app.router.lifespan_context(app.mcp_app):
             await app.boot()
             yield
             await app.shutdown()
 
-    web = Starlette(
-        routes=[
-            Route("/", index),
-            Route("/login", login, methods=["POST"]),
-            Route("/share", share_fallback, methods=["POST"]),
-            Route("/manifest.webmanifest", webmanifest),
-            Route("/manifest.json", manifest_json),
-            Route("/aegis.js", entry_module),
-            Route("/sw.js", service_worker),
-            Route("/client-files.json", files_list),
-            Mount("/static", ClientFiles(directory=CLIENT_DIR)),
-            Route("/files/{file_id}/{name}", sent_file),
-            Route("/fs/{ticket}/{name}", fs_file),
-            Route("/via/{server}/files/{file_id}/{name}", via_file),
-            Route("/dictation/{pin}/{name}", dictation_file),
-            Route("/speech/{pin}/{name:path}", speech_file),
-            WebSocketRoute("/ws", ws),
-            WebSocketRoute("/tunnel", tunnel),
-            *app.mcp_app.routes,
-        ],
-        lifespan=lifespan,
-    )
+    routes = [
+        Route("/", index),
+        Route("/login", login, methods=["POST"]),
+        Route("/share", share_fallback, methods=["POST"]),
+        Route("/manifest.webmanifest", webmanifest),
+        Route("/manifest.json", manifest_json),
+        Route("/aegis.js", entry_module),
+        Route("/sw.js", service_worker),
+        Route("/client-files.json", files_list),
+        Mount("/static", ClientFiles(directory=CLIENT_DIR)),
+        Route("/files/{file_id}/{name}", sent_file),
+        Route("/fs/{ticket}/{name}", fs_file),
+        Route("/via/{server}/files/{file_id}/{name}", via_file),
+        Route("/dictation/{pin}/{name}", dictation_file),
+        Route("/speech/{pin}/{name:path}", speech_file),
+        WebSocketRoute("/ws", ws),
+        WebSocketRoute("/tunnel", tunnel),
+    ]
+    if mcp:
+        # Only the Server's own loopback listener serves these; a host's
+        # public mount does not put /mcp on its origin (#993).
+        routes.extend(app.mcp_app.routes)
+    web = Starlette(routes=routes, lifespan=lifespan)
     web.state.aegis = app
     return web

@@ -125,7 +125,7 @@ def register_journal_ops(app: "App") -> None:
         finally:
             con.close()
 
-    @r.op("journal.search", SearchParams, agent=True, read=True)
+    @r.op("journal.search", SearchParams, agent=True, read=True, access="read")
     async def journal_search(p: SearchParams, caller):
         """Ask what was done on this server: commits, pull requests, finished plan
         items, turns that changed files, and the decisions, blockers and
@@ -139,7 +139,7 @@ def register_journal_ops(app: "App") -> None:
         handles = {k: s.handle for k, s in app.sessions.sessions.items()}
         return render.text(hits, cut, root, handles)
 
-    @r.op("journal.rows", RowsParams)
+    @r.op("journal.rows", RowsParams, access="read")
     async def journal_rows(p: RowsParams, caller):
         """The Journal view's rows: what journal.search finds, narrowed by the
         fuzzy box q, as fields to draw, and the server's day, which the view

@@ -232,7 +232,7 @@ def register_schedule_ops(app: App) -> None:
     def definition(p: ScheduleDef) -> Definition:
         return Definition.model_validate(p.model_dump(exclude={"name"}))
 
-    @r.op("schedule.list", NoParams, agent=True, read=True)
+    @r.op("schedule.list", NoParams, agent=True, read=True, access="read")
     async def schedule_list(_, caller):
         """Every schedule on this server: its clock, layers and owner, its next
         tick, its live runs, and whether it is paused. An agent also gets each
@@ -257,7 +257,7 @@ def register_schedule_ops(app: App) -> None:
                     out.append(addressed(w, link.name))
         return out
 
-    @r.op("schedule.runs", ScheduleRuns, agent=True, read=True)
+    @r.op("schedule.runs", ScheduleRuns, agent=True, read=True, access="read")
     async def schedule_runs(p: ScheduleRuns, caller):
         """One schedule's fires and ticks, newest first, a page at a time. The
         ticks that changed nothing are left out unless you pass quiet.
@@ -268,7 +268,7 @@ def register_schedule_ops(app: App) -> None:
             return far["result"]
         return sch.runs(p.name, p.offset, p.limit, p.quiet)
 
-    @r.op("schedule.pools", NoParams, read=True)
+    @r.op("schedule.pools", NoParams, read=True, access="read")
     async def schedule_pools(_, caller):
         """The pools a schedule's quota lines may name, with their windows, and
         the lines a schedule gets when it names none: for the view's editor."""
@@ -277,7 +277,7 @@ def register_schedule_ops(app: App) -> None:
             "default": DEFAULT_QUOTA,
         }
 
-    @r.op("schedule.create", ScheduleDef, agent=True)
+    @r.op("schedule.create", ScheduleDef, agent=True, work=True)
     async def schedule_create(p: ScheduleDef, caller):
         """Fire a prompt on a clock: every 5m, a cron line, or once at a time,
         into a new session from an agent or into an existing session's inbox.
@@ -330,7 +330,7 @@ def register_schedule_ops(app: App) -> None:
         sch.pause(p.name)
         return sch.wire(p.name)
 
-    @r.op("schedule.resume", ScheduleResume, agent=True)
+    @r.op("schedule.resume", ScheduleResume, agent=True, work=True)
     async def schedule_resume(p: ScheduleResume, caller):
         """Start a paused schedule again from now, its error count cleared. The
         ticks that fell during the pause do not fire. `name@server` is one on a
@@ -351,7 +351,7 @@ def register_schedule_ops(app: App) -> None:
         sch.resume(p.name, p.workflow)
         return sch.wire(p.name)
 
-    @r.op("schedule.fire", ScheduleName, agent=True)
+    @r.op("schedule.fire", ScheduleName, agent=True, work=True)
     async def schedule_fire(p: ScheduleName, caller):
         """Fire a schedule you own now, skipping its clock and its check. The
         overlap rule still holds: with a live run, wait holds it and skip drops it.

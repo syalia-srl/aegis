@@ -47,6 +47,15 @@ queues:
 STUB = Path(__file__).parents[1] / "src" / "aegis" / "api" / "ops.pyi"
 
 
+class NoSpawn(Named):
+    """A host policy that refuses every start, whoever asks."""
+
+    def can(self, who, action, session):
+        if action == "spawn":
+            return False
+        return super().can(who, action, session)
+
+
 @pytest.fixture
 async def srv(tmp_path: Path, fake_claude: str):
     (tmp_path / ".aegis.yaml").write_text(CONFIG)
@@ -151,6 +160,30 @@ async def test_the_committed_stub_matches_the_registry(srv: Server):
         check=True,
     ).stdout
     assert fresh == STUB.read_text(), "run `make ops-stubs` and commit ops.pyi"
+
+
+async def test_a_policy_that_refuses_spawn_refuses_the_api_and_the_websocket(
+    tmp_path: Path, fake_claude: str
+):
+    (tmp_path / ".aegis.yaml").write_text(CONFIG)
+    async with Server(
+        tmp_path, claude=fake_claude, name="lab", policy=NoSpawn()
+    ) as srv:
+        with pytest.raises(OpError) as e:
+            await srv.sessions.spawn()
+        assert e.value.code == "refused"
+        token = srv.token_for(Who("ana"))
+        async with connect(
+            f"{srv.base_url.replace('http', 'ws')}/ws", origin=srv.base_url
+        ) as ws:
+            await ws.send(json.dumps({"t": "hello", "token": token, "proto": PROTO}))
+            assert json.loads(await ws.recv())["t"] == "welcome"
+            await ws.send(
+                json.dumps({"t": "call", "id": 1, "op": "session.spawn", "params": {}})
+            )
+            reply = json.loads(await ws.recv())
+            assert reply["t"] == "reply"
+            assert reply["error"]["code"] == "refused"
 
 
 async def test_one_server_per_process(tmp_path: Path, fake_claude: str):
@@ -357,6 +390,34 @@ async def test_asgi_mounts_at_the_hosts_prefix(host_srv):
             )
             welcome = json.loads(await ws.recv())
             assert welcome["t"] == "welcome" and welcome["me"]["name"] == "ana"
+    finally:
+        server.should_exit = True
+        await task
+
+
+async def test_the_hosts_mount_serves_no_mcp_while_the_loopback_listener_does(
+    host_srv,
+):
+    """Harness children reach the tools on the Server's listener at /mcp; the
+    app a host mounts at /aegis must not put them on its public origin."""
+    srv, port = host_srv
+    server, task = await serve_host(srv, port)
+    try:
+        payload = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
+        async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}") as c:
+            gone = await c.post("/aegis/mcp", json=payload)
+            assert gone.status_code == 404
+        async with httpx.AsyncClient() as c:
+            here = await c.post(
+                f"{srv.base_url}/mcp",
+                json=payload,
+                headers={"accept": "application/json, text/event-stream"},
+            )
+            assert here.status_code == 200
+            assert here.json()["result"]["tools"]
+        s = await srv.as_who(Who("ana")).sessions.spawn("/mcp meta {}")
+        turn = await s.wait(timeout=20)
+        assert "mcp ok:" in turn.text
     finally:
         server.should_exit = True
         await task
