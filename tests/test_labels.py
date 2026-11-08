@@ -36,7 +36,9 @@ def table(lang: str) -> dict[str, str]:
 
 def test_en_and_es_hold_the_same_keys():
     en, es = table("en"), table("es")
-    assert set(en) == set(es), f"only in en: {sorted(set(en) - set(es))}; only in es: {sorted(set(es) - set(en))}"
+    assert set(en) == set(es), (
+        f"only in en: {sorted(set(en) - set(es))}; only in es: {sorted(set(es) - set(en))}"
+    )
 
 
 def test_every_key_names_its_part_and_a_thing():
@@ -76,32 +78,36 @@ def test_the_transcript_and_its_rows_are_labelled():
 def test_no_transcript_literal_was_left_in_the_modules():
     """The words a5 moved live in the table only.
 
-    Each pair is a literal the module used to carry and the key that replaced
-    it; a copy left behind in the JS would show English to a Spanish mount and
-    would not be translated by anyone.
+    Each row names a literal the module used to carry, the key that replaced
+    it, and the modules that must not hold it any more: a copy left behind
+    would show English to a Spanish mount and nobody would translate it. The
+    modules are named one by one because a literal can be legitimately owned
+    by a phase-B card in the same file (entries.js's secret card still says
+    "Copied" until b9 moves the remaining cards).
     """
     en = table("en")
-    modules = [
-        CLIENT / "parts/transcript.js",
-        CLIENT / "transcript.js",
-        CLIENT / "entries.js",
-        CLIENT / "find.js",
-        CLIENT / "copy.js",
-    ]
     moved = {
-        "transcript.offline": "Not saved on this device",
-        "transcript.cold.continue": "Continue in a fresh session",
-        "transcript.working.escape": "Esc to interrupt",
-        "transcript.run.show": "Show these steps",
-        "transcript.nav.recap": "Recap where this session stands",
-        "find.placeholder": "Find in transcript",
-        "find.none": "no matches",
-        "copy.copied": "Copied",
-        "entries.tool.peekAgain": "Show the file again",
-        "entries.file.download": "Download",
-        "entries.btw.reading": "reading the transcript…",
+        "transcript.offline": ("Not saved on this device", ["parts/transcript.js"]),
+        "transcript.cold.continue": (
+            "Continue in a fresh session",
+            ["parts/transcript.js"],
+        ),
+        "transcript.working.escape": ("Esc to interrupt", ["parts/transcript.js"]),
+        "transcript.nav.recap": (
+            "Recap where this session stands",
+            ["parts/transcript.js"],
+        ),
+        "transcript.run.show": ("Show these steps", ["transcript.js"]),
+        "transcript.needsConnection": ("Needs the connection.", ["transcript.js"]),
+        "find.placeholder": ("Find in transcript", ["find.js"]),
+        "find.none": ("no matches", ["find.js"]),
+        "copy.copied": ("Copied", ["copy.js"]),
+        "entries.tool.peekAgain": ("Show the file again", ["entries.js"]),
+        "entries.file.download": ("Download", ["entries.js"]),
+        "entries.btw.reading": ("reading the transcript…", ["entries.js"]),
     }
-    for key, literal in moved.items():
+    for key, (literal, names) in moved.items():
         assert literal in en[key], (key, literal)
-        for path in modules:
-            assert literal not in path.read_text(encoding="utf-8"), f"{literal} is still in {path.name}"
+        for name in names:
+            src = (CLIENT / name).read_text(encoding="utf-8")
+            assert literal not in src, f"{literal} is still in {name}"

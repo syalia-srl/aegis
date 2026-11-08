@@ -26,31 +26,45 @@ const SAVE_MS = 2000;
 
 // The markup this part owns. The ids stay as they are: they are the browser
 // suite's hooks, and two mounts' copies are harmless because every lookup is
-// scoped to the part's own element.
+// scoped to the part's own element. The words are not here: `data-t` names a
+// key (with `data-t-title`, `data-t-aria` and `data-t-placeholder` for the
+// attributes), and applyLabels fills them from the mount's table, so a Spanish
+// mount and an English one on the same page each read their own.
 export const TRANSCRIPT_HTML = `
-<div class="tr" id="tr" tabindex="-1"><p class="notice tr-offline" id="tr-offline" hidden>Not saved on this device. It opens when the connection is back.</p><div id="entries"></div><div class="row queued" id="queued" hidden><span class="t"></span><span class="g" id="queued-g"></span><div class="body"><span class="lbl" id="queued-lbl"></span><div class="text"></div><div class="ctl"><button class="btn primary" type="button" data-act="send">Send anyway</button><button class="btn" type="button" data-act="copy">Copy</button><button class="btn" type="button" data-act="edit">Edit</button><button class="btn" type="button" data-act="discard">Discard</button></div></div></div><div class="row replies" id="replies" hidden><span class="t"></span><span class="g" id="replies-g"></span><div class="body"><div id="replies-pills"></div><p class="cnote" id="handoff-done" hidden></p></div></div><div class="row coldnote" id="coldnote" hidden><span class="t"></span><span class="g" id="coldnote-g"></span><div class="body"><div class="cold"><span class="lbl">cache expired</span><span id="coldnote-t"></span><button class="btn needs-net" id="coldnote-go" type="button">Continue in a fresh session</button></div></div></div><div class="row closing" id="closing" hidden><span class="t"></span><span class="g" id="closing-g"></span><div class="body"><button class="btn archive needs-net" id="closing-btn" type="button" title="Close this session; it stays in the archive">Archive</button></div></div><div class="row working" id="working" hidden><span class="t"></span><span class="g" id="working-g"></span><div class="body"><span class="wverb"><span id="working-verb">Working…</span><span class="wcur"></span></span><span class="meta">(<span id="working-s">0</span>s · ↑ <span class="wtok" id="working-in">0</span> · ↓ <span class="wtok" id="working-out">0</span> tokens<span class="wesc"> · Esc to interrupt</span>)</span></div></div><div class="row working" id="waking" hidden><span class="t"></span><span class="g" id="waking-g"></span><div class="body">Waking <span class="meta">· resuming the harness</span></div></div></div>
+<div class="tr" id="tr" tabindex="-1"><p class="notice tr-offline" id="tr-offline" hidden data-t="transcript.offline"></p><div id="entries"></div><div class="row queued" id="queued" hidden><span class="t"></span><span class="g" id="queued-g"></span><div class="body"><span class="lbl" id="queued-lbl"></span><div class="text"></div><div class="ctl"><button class="btn primary" type="button" data-act="send" data-t="transcript.queued.send"></button><button class="btn" type="button" data-act="copy" data-t="transcript.queued.copy"></button><button class="btn" type="button" data-act="edit" data-t="transcript.queued.edit"></button><button class="btn" type="button" data-act="discard" data-t="transcript.queued.discard"></button></div></div></div><div class="row replies" id="replies" hidden><span class="t"></span><span class="g" id="replies-g"></span><div class="body"><div id="replies-pills"></div><p class="cnote" id="handoff-done" hidden></p></div></div><div class="row coldnote" id="coldnote" hidden><span class="t"></span><span class="g" id="coldnote-g"></span><div class="body"><div class="cold"><span class="lbl" data-t="transcript.cold.expired"></span><span id="coldnote-t"></span><button class="btn needs-net" id="coldnote-go" type="button" data-t="transcript.cold.continue"></button></div></div></div><div class="row closing" id="closing" hidden><span class="t"></span><span class="g" id="closing-g"></span><div class="body"><button class="btn archive needs-net" id="closing-btn" type="button" data-t="transcript.closing.archive" data-t-title="transcript.closing.title"></button></div></div><div class="row working" id="working" hidden><span class="t"></span><span class="g" id="working-g"></span><div class="body"><span class="wverb"><span id="working-verb" data-t="transcript.working.verb"></span><span class="wcur"></span></span><span class="meta">(<span id="working-s">0</span><span data-t="transcript.working.seconds"></span> · ↑ <span class="wtok" id="working-in">0</span> · ↓ <span class="wtok" id="working-out">0</span> <span data-t="transcript.working.tokens"></span><span class="wesc"> · <span data-t="transcript.working.escape"></span></span>)</span></div></div><div class="row working" id="waking" hidden><span class="t"></span><span class="g" id="waking-g"></span><div class="body"><span data-t="transcript.waking.verb"></span> <span class="meta" data-t="transcript.waking.meta"></span></div></div></div>
 <div class="nav" id="nav" hidden>
-<button class="spark" id="nav-recap" title="Recap where this session stands" aria-label="Recap where this session stands"></button>
-<button class="fold" id="nav-fold" data-level="0" title="Fold tool calls and thinking (Z)" aria-label="Fold tool calls and thinking"></button>
-<button class="needs" id="nav-needs" title="Next session that needs you (Alt+J)" aria-label="Next session that needs you"><span class="n" id="nav-needs-n"></span></button>
-<button class="up" id="nav-up" title="Previous agent message (Alt+↑)" aria-label="Previous agent message"></button>
-<button class="pos" id="nav-pos" title="First unread (Alt+U)"></button>
-<button class="down" id="nav-down" title="Next agent message (Alt+↓)" aria-label="Next agent message"></button>
-<button class="last" id="nav-last" title="Start of the last agent message" aria-label="Start of the last agent message"></button>
-<button class="latest" id="jump" title="Latest (G)" aria-label="Latest"></button>
-<button class="side-btn" id="nav-side" title="Session panel (Alt+B)" aria-label="Session panel"></button>
+<button class="spark" id="nav-recap" data-t-title="transcript.nav.recapTitle" data-t-aria="transcript.nav.recap"></button>
+<button class="fold" id="nav-fold" data-level="0" data-t-title="transcript.nav.foldTitle" data-t-aria="transcript.nav.fold"></button>
+<button class="needs" id="nav-needs" data-t-title="transcript.nav.needsTitle" data-t-aria="transcript.nav.needs"><span class="n" id="nav-needs-n"></span></button>
+<button class="up" id="nav-up" data-t-title="transcript.nav.upTitle" data-t-aria="transcript.nav.up"></button>
+<button class="pos" id="nav-pos"></button>
+<button class="down" id="nav-down" data-t-title="transcript.nav.downTitle" data-t-aria="transcript.nav.down"></button>
+<button class="last" id="nav-last" data-t-title="transcript.nav.lastTitle" data-t-aria="transcript.nav.last"></button>
+<button class="latest" id="jump" data-t-title="transcript.nav.latestTitle" data-t-aria="transcript.nav.latest"></button>
+<button class="side-btn" id="nav-side" data-t-title="transcript.nav.sideTitle" data-t-aria="transcript.nav.side"></button>
 </div>
 <div class="find" id="find" hidden>
-<input id="find-q" spellcheck="false" autocomplete="off" placeholder="Find in transcript" aria-label="Find in this transcript">
+<input id="find-q" spellcheck="false" autocomplete="off" data-t-placeholder="find.placeholder" data-t-aria="find.aria">
 <span class="count" id="find-n" aria-live="polite"></span>
-<button class="prev" id="find-prev" title="Previous match (Shift+Enter)" aria-label="Previous match"></button>
-<button class="next" id="find-next" title="Next match (Enter)" aria-label="Next match"></button>
-<button class="close" id="find-close" title="Close (Esc)" aria-label="Close"></button>
+<button class="prev" id="find-prev" data-t-title="find.prevTitle" data-t-aria="find.prev"></button>
+<button class="next" id="find-next" data-t-title="find.nextTitle" data-t-aria="find.next"></button>
+<button class="close" id="find-close" data-t-title="find.closeTitle" data-t-aria="find.close"></button>
 </div>
 <div class="viewer" id="viewer" hidden></div>`;
 
-const FOLDS = ["Everything shown", "Tool calls and thinking folded", "Only messages shown"];
-const VERBS = ["Working", "Thinking", "Weaving", "Brewing", "Forging", "Pondering", "Tinkering", "Conjuring", "Untangling", "Crafting"];
+const FOLDS = ["transcript.fold.0", "transcript.fold.1", "transcript.fold.2"];
+const VERBS = [
+  "transcript.verb.working",
+  "transcript.verb.thinking",
+  "transcript.verb.weaving",
+  "transcript.verb.brewing",
+  "transcript.verb.forging",
+  "transcript.verb.pondering",
+  "transcript.verb.tinkering",
+  "transcript.verb.conjuring",
+  "transcript.verb.untangling",
+  "transcript.verb.crafting",
+];
 const stillMotion = matchMedia("(prefers-reduced-motion: reduce)");
 
 function el(tag, cls, text) {
@@ -60,11 +74,21 @@ function el(tag, cls, text) {
   return n;
 }
 
+// The attributes a key can fill on the part's own markup: the words, and the
+// three attributes that hold a label instead of text.
+const T_ATTRS = [
+  ["data-t", (n, v) => (n.textContent = v)],
+  ["data-t-title", (n, v) => (n.title = v)],
+  ["data-t-aria", (n, v) => n.setAttribute("aria-label", v)],
+  ["data-t-placeholder", (n, v) => n.setAttribute("placeholder", v)],
+];
+
 const fmtTokens = (n) => (n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
 
 export class TranscriptPart {
   constructor(mount, host) {
     this.mount = mount;
+    this.t = mount.t;
     this.key = null;
     this.base = "";
     this.unsub = null;
@@ -82,6 +106,7 @@ export class TranscriptPart {
     this.pane = el("section", "tr-pane col");
     this.pane.dataset.pane = "transcript";
     this.pane.innerHTML = TRANSCRIPT_HTML;
+    this.applyLabels();
     host.append(this.pane);
 
     const n = (id) => byId(this.pane, id);
@@ -109,14 +134,19 @@ export class TranscriptPart {
     });
     this.transcript = new Transcript(this.tr, this.entries, this.jump, {
       base: this.base,
+      t: this.t,
       opener: (item) => this.viewer.open(item),
       onSelect: () => this.drawNav(),
       onRead: (ids) => this.read(ids),
       loadDetail: (ids) => this.detail(ids),
       statPaths: (entryId) => this.stat(entryId),
     });
-    this.find = new Find(this.findBar, this.transcript, (q) =>
-      this.key ? this.mount.callFor(this.key, "transcript.search", { q }).then((r) => r.ids) : Promise.resolve([]),
+    this.find = new Find(
+      this.findBar,
+      this.transcript,
+      (q) =>
+        this.key ? this.mount.callFor(this.key, "transcript.search", { q }).then((r) => r.ids) : Promise.resolve([]),
+      this.t,
     );
 
     this.copyDeps = {
@@ -131,6 +161,14 @@ export class TranscriptPart {
     this.wire();
     this.drawNavNow();
     this.drawOfflineNotice();
+  }
+
+  // The part's own words, from the mount's table. Every key the markup names
+  // is filled once, before any icon is appended to a button it would wipe.
+  applyLabels() {
+    for (const [attr, set] of T_ATTRS) {
+      for (const n of this.pane.querySelectorAll(`[${attr}]`)) set(n, this.t(n.getAttribute(attr)));
+    }
   }
 
   // A part draws its own glyphs; the sprite is in the mount's root (glyphs.js
@@ -181,7 +219,9 @@ export class TranscriptPart {
   setFold(level) {
     this.transcript.setFoldLevel(level);
     this.navFold.dataset.level = String(level);
-    this.navFold.title = `${FOLDS[level]}. Press for: ${FOLDS[(level + 1) % 3].toLowerCase()} (Z)`;
+    const level0 = this.t(FOLDS[level]);
+    const next = this.t(FOLDS[(level + 1) % 3]).toLowerCase();
+    this.navFold.title = this.t("transcript.fold.title", { level: level0, next });
   }
 
   // -- what the mount's sessions channel reports --------------------------
@@ -276,9 +316,10 @@ export class TranscriptPart {
   // The divider's words: how long since this session was last read.
   sinceText() {
     const t = this.mount.state.sessions.get(this.key)?.last_read_at;
-    if (!t) return "new since you left";
+    if (!t) return this.t("transcript.since.plain");
     const m = Math.round((serverNow() - t) / 60);
-    return `new since you left · ${m < 60 ? `${m} min` : `${Math.round(m / 60)} h`}`;
+    const when = m < 60 ? this.t("transcript.since.minutes", { n: m }) : this.t("transcript.since.hours", { n: Math.round(m / 60) });
+    return this.t("transcript.since.ago", { when });
   }
 
   // The device keeps what it has seen, as app.js does, but one part's copy.
@@ -355,10 +396,11 @@ export class TranscriptPart {
     });
     const verb = n("working-verb");
     if (stillMotion.matches) {
-      if (verb.textContent !== "Working…") verb.textContent = "Working…";
+      const still = this.t("transcript.working.verb");
+      if (verb.textContent !== still) verb.textContent = still;
       return;
     }
-    const word = `${VERBS[this.typer.verb]}…`;
+    const word = `${this.t(VERBS[this.typer.verb])}…`;
     if (this.typer.wait > 0) this.typer.wait -= 1;
     else if (this.typer.phase === "type") {
       this.typer.at += 1;
@@ -398,7 +440,7 @@ export class TranscriptPart {
       return b;
     });
     if (brief) {
-      const h = el("button", "rp hand", `continue fresh · ${fmtTokens(s.context_tokens)}`);
+      const h = el("button", "rp hand", this.t("transcript.replies.continue", { tokens: fmtTokens(s.context_tokens) }));
       h.addEventListener("mousedown", keepFocus);
       h.addEventListener("click", () => this.handOff());
       chips.unshift(h);
@@ -409,13 +451,13 @@ export class TranscriptPart {
     done.textContent = !s?.continued_by
       ? ""
       : s.archived
-        ? `continued in ${this.handleOf(s.continued_by)}`
-        : `continued in ${this.handleOf(s.continued_by)}; this tab takes no messages and is archived when it finishes its first turn`;
+        ? this.t("transcript.replies.continued", { handle: this.handleOf(s.continued_by) })
+        : this.t("transcript.replies.continuedClosing", { handle: this.handleOf(s.continued_by) });
     if (this.transcript.following) this.transcript.toBottom();
   }
 
   handleOf(key) {
-    if (!key) return "a fresh session";
+    if (!key) return this.t("transcript.replies.fresh");
     return this.mount.state.sessions.get(keyOf(forKey(this.key).server, key))?.handle || key;
   }
 
@@ -429,7 +471,7 @@ export class TranscriptPart {
     box.hidden = !on;
     byId(this.pane, "coldnote-go").hidden = !!s?.worker;
     byId(this.pane, "coldnote-t").textContent = on
-      ? `The prompt cache has expired, so your next message rewrites all ${fmtTokens(s.context_tokens)} tokens of this context, about 20 times what a warm turn reads.`
+      ? this.t("transcript.cold.note", { tokens: fmtTokens(s.context_tokens) })
       : "";
     if (on && this.transcript.following) this.transcript.toBottom();
   }
@@ -457,7 +499,13 @@ export class TranscriptPart {
     const now = {
       hidden: !this.transcript.entries.size,
       text: total ? `${index}/${total}` : "",
-      label: total ? `${unread ? `${unread} unread · ` : ""}message ${index} of ${total}` : "",
+      label: total
+        ? this.t("transcript.nav.message", {
+            index,
+            total,
+            unread: unread ? this.t("transcript.nav.unread", { n: unread }) : "",
+          })
+        : "",
       unread: unread > 0,
       off: !total,
     };
@@ -466,7 +514,8 @@ export class TranscriptPart {
     if (now.text !== this.navDrawn.text) pos.textContent = now.text;
     if (now.label !== this.navDrawn.label) {
       pos.setAttribute("aria-label", now.label);
-      pos.title = `${now.label}. First unread (Alt+U)`;
+      const first = this.t("transcript.nav.firstUnread");
+      pos.title = now.label ? `${now.label}. ${first}` : first;
     }
     if (now.unread !== this.navDrawn.unread) pos.classList.toggle("unread", now.unread);
     if (now.off !== this.navDrawn.off)

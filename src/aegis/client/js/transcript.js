@@ -29,6 +29,7 @@
 // window above still holds; the walks below skip them.
 
 import { applyKinds, fadeTables, hhmm, render, update } from "./entries.js";
+import { labelsFor } from "./labels.js";
 import { CARET_ICON, icon } from "./glyphs.js";
 import { unwatch, watch } from "./highlight.js";
 import * as menu from "./menu.js";
@@ -67,8 +68,11 @@ const PAGE = 100;
 const NEAR_TOP_PX = 400;
 
 export class Transcript {
-  constructor(scroller, list, jump, { loadDetail, statPaths = null, onRead = () => {}, onSelect = () => {}, onReply = () => {}, seen = () => true, base = null, opener = null } = {}) {
+  constructor(scroller, list, jump, { loadDetail, statPaths = null, onRead = () => {}, onSelect = () => {}, onReply = () => {}, seen = () => true, base = null, opener = null, t = labelsFor("en") } = {}) {
     this.scroller = scroller;
+    // The mount's label table; the standalone page passes none and reads
+    // English, as it does until b9 labels the whole client.
+    this.t = t;
     this.list = list;
     this.jump = jump;
     // Where this transcript's files live: null means the page's own default
@@ -187,7 +191,7 @@ export class Transcript {
               if (gen !== this.gen) return;
               this.kinds.set(id, kinds);
               const n = this.nodes.get(id);
-              if (n) applyKinds(n, kinds);
+              if (n) applyKinds(n, kinds, this.t);
             })
             .catch(() => {}) // the refs stay pending, and still open on a click
             .finally(() => gen === this.gen && this.statting.delete(id));
@@ -237,11 +241,11 @@ export class Transcript {
   }
 
   mount(e) {
-    const n = render(this.whole(e), { base: this.base ?? undefined, open: this.opener });
+    const n = render(this.whole(e), { base: this.base ?? undefined, open: this.opener, t: this.t });
     for (const f of n.querySelectorAll(".fence")) watch(f);
     if (this.statPaths && n.querySelector(".md code.ref[data-index]")) {
       const known = this.kinds.get(e.id);
-      if (known) applyKinds(n, known);
+      if (known) applyKinds(n, known, this.t);
       else this.refWatch.observe(n);
     }
     if (n.querySelector(".md .tw")) requestAnimationFrame(() => fadeTables(n));
@@ -293,7 +297,8 @@ export class Transcript {
         this.fetching.delete(id);
         // Not cached: opening the row again once the connection is back fetches.
         if (e?.code === "offline")
-          for (const n of this.nodes.get(id)?.querySelectorAll(".loading") || []) n.textContent = "Needs the connection.";
+          for (const n of this.nodes.get(id)?.querySelectorAll(".loading") || [])
+            n.textContent = this.t("transcript.needsConnection");
       });
   }
 
@@ -414,7 +419,8 @@ export class Transcript {
         const done = e.kind === "prose" && !e.live && (!known || prev.live);
         const old = this.nodes.get(e.id);
         if (old) {
-          if (update(e, old, prev, { base: this.base ?? undefined, open: this.opener })) this.nodes.set(e.id, old);
+          if (update(e, old, prev, { base: this.base ?? undefined, open: this.opener, t: this.t }))
+            this.nodes.set(e.id, old);
           else {
             this.watch.unobserve(old);
             this.drop(old);
@@ -729,7 +735,7 @@ export class Transcript {
             marked.add(n);
           }
           head.dataset.run = run[0].id;
-          drawLine(head, run, next, open);
+          drawLine(head, run, next, open, this.t);
         }
         run = [];
       };
@@ -755,7 +761,7 @@ export class Transcript {
 
 // A run's line, as a button laid out like a row: its time, a caret, and what
 // the run holds.
-function drawLine(head, run, next, open) {
+function drawLine(head, run, next, open, t) {
   let b = head.querySelector(":scope > .runline");
   if (!b) {
     b = document.createElement("button");
@@ -768,36 +774,37 @@ function drawLine(head, run, next, open) {
     }
     head.prepend(b);
   }
-  const [t, g, rs] = b.children;
-  const text = runText(run, next);
+  const [t0, g, rs] = b.children;
+  const text = runText(run, next, t);
   const time = hhmm(run[0].ts);
   const caret = CARET_ICON[open ? "open" : "shut"];
-  if (t.textContent !== time) t.textContent = time;
+  if (t0.textContent !== time) t0.textContent = time;
   if (g.dataset.caret !== caret) {
     g.dataset.caret = caret;
     g.replaceChildren(icon(caret));
   }
   if (rs.textContent !== text) rs.textContent = text;
   b.classList.toggle("running", run.some((e) => e.status === "running"));
-  b.title = open ? "Fold these steps" : "Show these steps";
+  b.title = open ? t("transcript.run.fold") : t("transcript.run.show");
 }
 
-// What the rest of a run holds, by kind, in this order: "2 notes".
+// What the rest of a run holds, by kind, in this order: "2 notes". Each entry
+// names its key for one and for many; the plural is chosen here.
 const COUNTED = [
-  ["thinking", "thought"],
-  ["system", "note"],
-  ["inbox", "inbox message"],
-  ["file", "file"],
-  ["artifact", "page"],
-  ["error", "error"],
-  ["recap", "recap"],
+  ["thinking", "transcript.run.thought", "transcript.run.thoughts"],
+  ["system", "transcript.run.note", "transcript.run.notes"],
+  ["inbox", "transcript.run.inbox", "transcript.run.inboxPlural"],
+  ["file", "transcript.run.file", "transcript.run.files"],
+  ["artifact", "transcript.run.page", "transcript.run.pages"],
+  ["error", "transcript.run.error", "transcript.run.errors"],
+  ["recap", "transcript.run.recap", "transcript.run.recaps"],
 ];
 
 // "14 tool calls · Bash ×8, Read ×3, Edit · 2 thoughts · 1 failed · 4m 12s".
 // The time runs from the run's first entry to the entry after it; a run still
 // working names the tool it is in instead. A card of several files counts each.
-function runText(run, next) {
-  const count = (n, one) => `${n} ${one}${n === 1 ? "" : "s"}`;
+function runText(run, next, t) {
+  const count = (n, one, many) => `${n} ${n === 1 ? t(one) : t(many)}`;
   const tools = run.filter((e) => e.kind === "tool");
   const parts = [];
   if (tools.length) {
@@ -805,27 +812,27 @@ function runText(run, next) {
     for (const e of tools) by.set(e.title, (by.get(e.title) || 0) + 1);
     const names = [...by].sort((a, b) => b[1] - a[1]);
     const listed = names.slice(0, 4).map(([name, n]) => (n > 1 ? `${name} ×${n}` : name));
-    if (names.length > 4) listed.push(`${names.length - 4} more`);
-    parts.push(count(tools.length, "tool call"), listed.join(", "));
+    if (names.length > 4) listed.push(t("transcript.run.moreTools", { n: names.length - 4 }));
+    parts.push(count(tools.length, "transcript.run.toolCall", "transcript.run.toolCalls"), listed.join(", "));
   }
-  for (const [kind, one] of COUNTED) {
+  for (const [kind, one, many] of COUNTED) {
     const n = run.filter((e) => e.kind === kind).reduce((a, e) => a + (e.detail?.files?.length || 1), 0);
-    if (n) parts.push(count(n, one));
+    if (n) parts.push(count(n, one, many));
   }
   const failed = tools.filter((e) => e.status === "err").length;
-  if (failed) parts.push(`${failed} failed`);
+  if (failed) parts.push(t("transcript.run.failed", { n: failed }));
   const live = tools.find((e) => e.status === "running");
-  if (live) parts.push(`running ${[live.title, live.summary].filter(Boolean).join(": ")}`);
+  if (live) parts.push(t("transcript.run.running", { what: [live.title, live.summary].filter(Boolean).join(": ") }));
   else {
     const end = next?.ts ?? run.at(-1).ts;
-    if (end && run[0].ts && end - run[0].ts >= 1) parts.push(took(end - run[0].ts));
+    if (end && run[0].ts && end - run[0].ts >= 1) parts.push(took(end - run[0].ts, t));
   }
   return parts.join(" · ");
 }
 
-function took(secs) {
+function took(secs, t) {
   const s = Math.round(secs);
-  if (s < 60) return `${s}s`;
-  if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`;
-  return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
+  if (s < 60) return t("transcript.run.clockSeconds", { n: s });
+  if (s < 3600) return t("transcript.run.clockMinutes", { m: Math.floor(s / 60), s: s % 60 });
+  return t("transcript.run.clockHours", { h: Math.floor(s / 3600), m: Math.floor((s % 3600) / 60) });
 }

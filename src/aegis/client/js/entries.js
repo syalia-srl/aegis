@@ -13,6 +13,11 @@ import { diffView } from "./diff.js";
 import { cachedColour, colour, isPlain, langName, paint, splitLines } from "./highlight.js";
 import { hostIcon, repoUrl, shortLabel, sureRepo } from "./refs.js";
 import { serverNow } from "./clock.js";
+import { labelsFor } from "./labels.js";
+
+// The table a row reads when its caller passes none: the standalone page, until
+// b1/b9 give it a mount of its own. A mount passes its own through render().
+const en = labelsFor("en");
 
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
@@ -161,7 +166,7 @@ export function paneFile(f) {
   const remote = fileBase !== "";
   return { file: remote ? viaFile({ ...f }) : f, remote };
 }
-function fileCard(files, glyph, { base = fileBase, remote = fileBase !== "", open = null } = {}) {
+function fileCard(files, glyph, { base = fileBase, remote = fileBase !== "", open = null, t = en } = {}) {
   const sent = files.map((f) => ({ ...f }));
   const openerFor = open || opener; // app.js's default; a part passes its own
   if (base !== "" || remote) for (const f of sent) viaFile(f, base);
@@ -169,18 +174,18 @@ function fileCard(files, glyph, { base = fileBase, remote = fileBase !== "", ope
   const bar = el("div", "fbar");
   const name = el("span", "fn");
   const size = el("span", "fs");
-  const { acts, set } = fileActions(remote);
-  const view = iconButton(el("button", "btn primary view"), "expand", "Open");
+  const { acts, set } = fileActions(remote, t);
+  const view = iconButton(el("button", "btn primary view"), "expand", t("entries.file.open"));
   view.addEventListener("click", () => openerFor({ files: sent, at, remote, glyph }));
-  const dock = dockButton("");
+  const dock = dockButton("", t);
   acts.prepend(view, ...(remote ? [] : [dock]));
   bar.append(entryIcon(glyph), name, size);
   const prev = withIcon(el("button", "btn prev"), "left");
   const next = withIcon(el("button", "btn next"), "right");
   const count = el("span", "count");
   if (sent.length > 1) {
-    prev.title = "Previous file";
-    next.title = "Next file";
+    prev.title = t("entries.file.previous");
+    next.title = t("entries.file.next");
     const pager = el("span", "pager");
     pager.append(prev, count, next);
     bar.append(pager);
@@ -198,17 +203,17 @@ function fileCard(files, glyph, { base = fileBase, remote = fileBase !== "", ope
     // An older version docks nothing: its key's pane shows the newest.
     dock.dataset.dock = f.replaced ? "" : f.key || "";
     dock.hidden = !docker.can(dock.dataset.dock);
-    count.textContent = `${i + 1} / ${sent.length}`;
+    count.textContent = t("entries.file.count", { at: i + 1, n: sent.length });
     stage?.remove();
     // A replaced file, or one docked as a pane, holds a line instead of its
     // preview; syncDock() redraws it when the docking changes.
     const hd = holds(f);
     card.dataset.held = hd;
     stage =
-      hd === "replaced" ? el("div", "held", `replaced by v${f.replaced}`)
-      : hd === "docked" ? heldLine(f.key, DOCKED)
-      : hd ? heldLine(f.key, hd)
-      : preview(f, remote, () => view.click());
+      hd === "replaced" ? el("div", "held", t("entries.file.replaced", { version: f.replaced }))
+      : hd === "docked" ? heldLine(f.key, DOCKED, t)
+      : hd ? heldLine(f.key, hd, t)
+      : preview(f, remote, () => view.click(), t);
     if (stage) card.append(stage);
   };
   // What the shown page holds now: "replaced", "docked", "in window <n>" or "".
@@ -232,13 +237,13 @@ function fileCard(files, glyph, { base = fileBase, remote = fileBase !== "", ope
 // the desktop app and a download, each an icon that names itself in its
 // title. Open natively shows only where the server said so (#a2[data-native])
 // and never for a linked server's file.
-export function fileActions(remote) {
+export function fileActions(remote, t = en) {
   const acts = el("span", "acts");
-  const open = iconButton(el("a", "btn open"), "open", "Open in a new tab");
+  const open = iconButton(el("a", "btn open"), "open", t("entries.file.openTab"));
   open.target = "_blank";
   open.rel = "noopener noreferrer";
-  const native = iconButton(el("button", "btn native"), "window", "Open in the desktop app for it");
-  const dl = iconButton(el("a", "btn dl"), "latest", "Download");
+  const native = iconButton(el("button", "btn native"), "window", t("entries.file.native"));
+  const dl = iconButton(el("a", "btn dl"), "latest", t("entries.file.download"));
   acts.append(open, ...(remote ? [] : [native]), dl);
   const set = (f) => {
     open.href = f.url;
@@ -1586,8 +1591,8 @@ let docker = {
 export function setDocker(d) {
   docker = { ...d, can: (id) => !!id && d.can(id) };
 }
-export function dockButton(id) {
-  const b = iconButton(el("button", "btn dock"), "dock", "Dock beside the transcript");
+export function dockButton(id, t = en) {
+  const b = iconButton(el("button", "btn dock"), "dock", t("entries.file.dock"));
   b.type = "button";
   b.dataset.dock = id;
   b.hidden = !docker.can(id);
@@ -1596,8 +1601,8 @@ export function dockButton(id) {
 }
 // Pop out, on a live page's card and pane: it takes the place of Open in a
 // new tab, which ran the page with no bridge behind it.
-export function popButton(id) {
-  const b = iconButton(el("button", "btn popout"), "open", "Pop out into a browser window of its own");
+export function popButton(id, t = en) {
+  const b = iconButton(el("button", "btn popout"), "open", t("entries.file.pop"));
   b.type = "button";
   b.dataset.pop = id;
   b.hidden = !docker.canPop(id);
@@ -1617,14 +1622,24 @@ export function syncDock() {
 // which outlines its pane; one in another browser window carries Open, which
 // focuses that window's tab or opens it.
 export const DOCKED = "docked";
+// Where a held page is: these three are sentinels a caller passes, and the
+// words a card shows for them come from the table (labelText).
+export const VIEWER = "open in the viewer";
 export const inWindow = (n) => `in window ${n}`;
-function heldLine(id, label) {
-  const line = el("div", "held", label);
+function labelText(label, t) {
+  if (label === DOCKED) return t("entries.file.docked");
   const away = /^in window (\d+)$/.exec(label);
+  if (away) return t("entries.file.inWindow", { n: away[1] });
+  if (label === VIEWER) return t("entries.file.viewer");
+  return label; // a label the caller wrote itself (a workflow's, b9)
+}
+function heldLine(id, label, t = en) {
+  const away = /^in window (\d+)$/.exec(label);
+  const line = el("div", "held", labelText(label, t));
   if (label === DOCKED || away) {
-    const b = el("button", "btn link locate", label === DOCKED ? "show" : "open");
+    const b = el("button", "btn link locate", label === DOCKED ? t("entries.file.show") : t("entries.file.openWindow"));
     b.type = "button";
-    b.title = label === DOCKED ? "Outline its pane" : `Open window ${away[1]}`;
+    b.title = label === DOCKED ? t("entries.file.showTitle") : t("entries.file.openWindowTitle", { n: away[1] });
     b.addEventListener("click", () => (away ? docker.open(Number(away[1])) : docker.show(id)));
     line.append(" · ", b);
   }
@@ -1633,7 +1648,7 @@ function heldLine(id, label) {
 
 // One sent file's preview, or null when the browser cannot draw one. A click
 // on an image calls zoom, when there is one.
-export function preview(f, remote, zoom) {
+export function preview(f, remote, zoom, t = en) {
   const pv = f.preview;
   let view = null;
   if (pv === "image") {
@@ -1651,7 +1666,7 @@ export function preview(f, remote, zoom) {
     view.src = f.url;
     view.title = f.name;
   } else if (pv === "markdown") {
-    view = markdown(f.excerpt);
+    view = markdown(f.excerpt, { t });
     view.classList.add("excerpt");
   } else if (pv === "text") {
     view = el("pre", "excerpt", f.excerpt);
@@ -1667,16 +1682,16 @@ export function preview(f, remote, zoom) {
   return stage;
 }
 
-export function markdown(text, { breaks = false, paths = null } = {}) {
+export function markdown(text, { breaks = false, paths = null, t = en } = {}) {
   const div = document.createElement("div");
   div.className = "md";
   const src = text || "";
   div._src = src; // what a table's copy slices its lines from (copy.js)
   div.innerHTML = (breaks ? mdTyped : mdAgent).render(src, { lines: src.split("\n") });
-  for (const fh of div.querySelectorAll(".fence > .fh")) fh.append(copyButton("code"));
-  for (const pre of div.querySelectorAll("pre")) if (!pre.closest(".fence")) pre.append(copyButton("code"));
+  for (const fh of div.querySelectorAll(".fence > .fh")) fh.append(copyButton("code", t));
+  for (const pre of div.querySelectorAll("pre")) if (!pre.closest(".fence")) pre.append(copyButton("code", t));
   for (const blk of div.querySelectorAll(".tblk")) {
-    blk.prepend(copyButton("table"));
+    blk.prepend(copyButton("table", t));
     const heads = [...blk.querySelectorAll("thead th")].map((th) => th.textContent);
     for (const tr of blk.querySelectorAll("tbody tr")) {
       [...tr.children].forEach((td, i) => {
@@ -1703,7 +1718,7 @@ export function markdown(text, { breaks = false, paths = null } = {}) {
     if (i < 0) continue;
     code.classList.add("ref");
     code.dataset.index = String(i);
-    code.title = "Open in the viewer";
+    code.title = t("entries.path.view");
   }
   return div;
 }
@@ -1740,11 +1755,11 @@ function asRepo(code, text) {
 }
 
 const KIND_ICON = { file: "file", dir: "folder", missing: "file-gone" };
-const KIND_TITLE = { file: "Open in the viewer", dir: "A folder", missing: "No such file when shown; click to look again" };
+const KIND_TITLE = { file: "entries.path.view", dir: "entries.path.folder", missing: "entries.path.missing" };
 
 // What path.stat answered, drawn on a reply's pending refs. Applied twice,
 // it changes nothing.
-export function applyKinds(node, kinds) {
+export function applyKinds(node, kinds, t = en) {
   for (const code of node.querySelectorAll(".md code.ref[data-index]")) {
     if (code.dataset.kind) continue;
     const k = kinds[Number(code.dataset.index)];
@@ -1756,7 +1771,7 @@ export function applyKinds(node, kinds) {
     } else if (KIND_ICON[k]) {
       code.dataset.kind = k;
       code.prepend(icon(KIND_ICON[k]));
-      code.title = KIND_TITLE[k];
+      code.title = t(KIND_TITLE[k]);
     }
   }
 }
@@ -1819,19 +1834,20 @@ function fileView(file, lang) {
 
 // A tool's arguments: a coloured block for a command or other arguments, the
 // plain lines for a file tool's (its path and range).
-function argsView(text, lang) {
+function argsView(text, lang, t = en) {
   if (!lang) return el("pre", "args", text);
   const wrap = el("div", "md args");
   wrap.innerHTML = fenceHtml(text, lang);
-  wrap.querySelector(".fh").append(copyButton("code"));
+  wrap.querySelector(".fh").append(copyButton("code", t));
   paint(wrap.firstChild);
   return wrap;
 }
 
 const RENDERERS = {
   user(e, opts = {}) {
+    const t = opts.t || en;
     const body = el("div", "body");
-    if (e.md) body.append(markdown(e.md, { breaks: true }));
+    if (e.md) body.append(markdown(e.md, { breaks: true, t }));
     if (e.detail?.files?.length) {
       // What the person attached: one card that pages, as a file_send's.
       const card = fileCard(e.detail.files, "file", opts);
@@ -1842,28 +1858,29 @@ const RENDERERS = {
     if (e.detail?.tail || e.detail?.more) {
       // A command OpenCode expanded: the line as typed, its template under it.
       const d = el("details");
-      d.append(el("summary", null, "template"), e.detail.tail ? el("pre", "out", e.detail.tail) : el("div", "loading", "loading…"));
+      d.append(el("summary", null, t("entries.tool.template")), e.detail.tail ? el("pre", "out", e.detail.tail) : el("div", "loading", t("entries.tool.loading")));
       body.append(d);
     }
     // Sent from the mic: the agent read a note asking it to allow for misheard words (#579).
     if (e.detail?.dictated) {
       const d = el("div", "dictated");
-      d.append(...iconText("mic", "dictated"));
+      d.append(...iconText("mic", t("entries.row.dictated")));
       body.append(d);
     }
-    body.append(copyButton("message"));
+    body.append(copyButton("message", t));
     return row(e, `user ${e.status}`, body);
   },
 
-  command(e) {
+  command(e, opts = {}) {
+    const t = opts.t || en;
     const body = el("div", "body");
     body.append(el("div", "cmd", e.title));
-    if (e.md) body.append(markdown(e.md));
+    if (e.md) body.append(markdown(e.md, { t }));
     return row(e, `command ${e.status}`, body);
   },
 
-  prose(e) {
-    const body = markdown(e.md, { paths: e.detail?.paths });
+  prose(e, opts = {}) {
+    const body = markdown(e.md, { paths: e.detail?.paths, t: opts.t || en });
     body.classList.add("body");
     const r = row(e, "prose", body);
     // The gutter: the read mark, then the chip that reads the reply aloud (speak.js).
@@ -1880,28 +1897,30 @@ const RENDERERS = {
     return r;
   },
 
-  thinking(e) {
+  thinking(e, opts = {}) {
+    const t = opts.t || en;
     const body = el("div", "body");
     if (e.md || e.detail?.more) {
       const d = el("details");
-      d.append(el("summary", null, e.title || "Thinking"), e.md ? markdown(e.md) : el("div", "loading", "loading…"));
+      d.append(el("summary", null, e.title || t("entries.thinking.title")), e.md ? markdown(e.md, { t }) : el("div", "loading", t("entries.tool.loading")));
       body.append(d);
     } else {
-      body.textContent = e.summary || "thought";
+      body.textContent = e.summary || t("entries.thinking.one");
     }
     return row(e, "think", body);
   },
 
   tool(e, opts = {}) {
+    const t = opts.t || en;
     const det = e.detail || {};
     const d = el("details");
     const line = el("summary", "line");
     line.dataset.chrome = ""; // the tool's name and counts, not its output (quote.js)
     const name = el("span", "tn", e.title);
     const label = el("span", "ta", e.summary);
-    if (det.steps) label.append(el("span", "steps", `${det.steps} steps`));
+    if (det.steps) label.append(el("span", "steps", t("entries.tool.steps", { n: det.steps })));
     line.append(name, label, el("span", "tr2", e.status === "running" ? "" : det.result || ""));
-    if (e.status !== "running") line.append(copyButton("output"));
+    if (e.status !== "running") line.append(copyButton("output", t));
     d.append(line);
     const more = el("div", "more");
     if (det.path && fileBase === "") {
@@ -1909,13 +1928,15 @@ const RENDERERS = {
       // sending it (file.peek). Not on a linked server's row: the op is local.
       const bar = el("div", "peekbar");
       bar.dataset.chrome = "";
-      const b = det.peek ? withIcon(el("button", "btn peek"), "again", "Show the file again") : withIcon(el("button", "btn peek"), "file", "Show the file");
+      const b = det.peek
+        ? withIcon(el("button", "btn peek"), "again", t("entries.tool.peekAgain"))
+        : withIcon(el("button", "btn peek"), "file", t("entries.tool.peek"));
       b.dataset.entry = e.id;
       bar.append(b, el("span", "peekerr"));
       more.append(bar);
     }
     if (det.peek) {
-      const cap = el("div", "peekcap", `as of ${hhmm(det.peek.ts)}`);
+      const cap = el("div", "peekcap", t("entries.tool.asOf", { time: hhmm(det.peek.ts) }));
       const card = fileCard(det.peek.files, det.peek.glyph, opts);
       cap.dataset.chrome = card.dataset.chrome = "";
       more.append(cap, card);
@@ -1923,9 +1944,9 @@ const RENDERERS = {
     if (det.file) more.append(fileView(det.file, det.lang));
     if (det.diff) more.append(diffView(det.diff, det.lang));
     if (det.tail) more.append(el("pre", "out", det.tail));
-    if (det.args && !det.file && !det.diff) more.append(argsView(det.args, det.path ? null : det.lang));
+    if (det.args && !det.file && !det.diff) more.append(argsView(det.args, det.path ? null : det.lang, t));
     if (det.more) {
-      const wait = el("div", "loading", "loading…");
+      const wait = el("div", "loading", t("entries.tool.loading"));
       wait.dataset.chrome = "";
       more.append(wait);
     }
@@ -1935,33 +1956,36 @@ const RENDERERS = {
     return row(e, `tool ${e.status}`, body);
   },
 
-  system(e) {
+  system(e, opts = {}) {
+    const t = opts.t || en;
     const body = el("div", "body", e.summary);
     if (e.detail?.tail || e.detail?.more) {
       const d = el("details");
       d.open = !!e.detail.open;
-      d.append(el("summary", null, "show"), e.detail.tail ? el("pre", "out", e.detail.tail) : el("div", "loading", "loading…"));
+      d.append(el("summary", null, t("entries.tool.show")), e.detail.tail ? el("pre", "out", e.detail.tail) : el("div", "loading", t("entries.tool.loading")));
       body.append(d);
     }
     return row(e, "sys", body);
   },
 
-  inbox(e) {
+  inbox(e, opts = {}) {
     // A monitor wake, a queue result, a handoff: the header is the title.
+    const t = opts.t || en;
     const body = el("div", "body");
     const from = el("div", "from", e.title);
     // An urgent handoff sent into the running turn, not after it.
-    if (e.detail?.steered) from.append(el("span", "steered", "steered in"));
+    if (e.detail?.steered) from.append(el("span", "steered", t("entries.row.steered")));
     body.append(from);
     const text = (e.md || "").split("\n").filter((l) => !l.startsWith("> from ")).join("\n");
-    body.append(markdown(text));
+    body.append(markdown(text, { t }));
     // A background command's or a subagent's notice: the command or the
     // report, and where its output went, folded under the label (#699).
     const det = e.detail || {};
     if (det.fold || det.output) {
       const d = el("details");
-      d.append(el("summary", null, det.lang ? "command" : det.fold ? "report" : "output"));
-      if (det.fold) d.append(det.lang ? argsView(det.fold, det.lang) : markdown(det.fold));
+      const kind = det.lang ? "entries.tool.command" : det.fold ? "entries.tool.report" : "entries.tool.output";
+      d.append(el("summary", null, t(kind)));
+      if (det.fold) d.append(det.lang ? argsView(det.fold, det.lang, t) : markdown(det.fold, { t }));
       if (det.output) d.append(el("div", "outfile", det.output));
       body.append(d);
     }
@@ -1970,12 +1994,13 @@ const RENDERERS = {
 
   file(e, opts = {}) {
     // An agent's file_send, as a card (fileCard) under its caption.
+    const t = opts.t || en;
     const det = e.detail || {};
     // A linked server older than sets sends its one file's fields on the detail.
     const sent = det.files || [{ ...det, name: e.title, summary: e.summary }];
     const body = el("div", "body");
     if (e.md) {
-      const cap = markdown(e.md);
+      const cap = markdown(e.md, { t });
       cap.classList.add("cap");
       body.append(cap);
     }
@@ -2082,10 +2107,11 @@ const RENDERERS = {
     // An agent's interactive page: a card like a file's, the frame while
     // live, one line with the label after. Status and label were decided in
     // the fold; the frame's state is handed over by js/artifacts.js on init.
+    const t = opts.t || en;
     const det = e.detail || {};
     const body = el("div", "body");
     if (e.md) {
-      const cap = markdown(e.md);
+      const cap = markdown(e.md, { t });
       cap.classList.add("cap");
       body.append(cap);
     }
@@ -2093,41 +2119,42 @@ const RENDERERS = {
     card.dataset.status = e.status;
     const bar = el("div", "fbar");
     const acts = el("span", "acts");
-    const view = iconButton(el("button", "btn primary view"), "expand", "Open");
+    const view = iconButton(el("button", "btn primary view"), "expand", t("entries.file.open"));
     view.addEventListener("click", () => (opts.open || opener)({ artifact: e.id }));
-    if (e.status === "live") acts.append(view, dockButton(e.id), popButton(e.id));
+    if (e.status === "live") acts.append(view, dockButton(e.id, t), popButton(e.id, t));
     else {
-      const open = iconButton(el("a", "btn open"), "open", "Open in a new tab");
+      const open = iconButton(el("a", "btn open"), "open", t("entries.file.openTab"));
       open.href = fileUrl(det.url, opts.base);
       open.target = "_blank";
       open.rel = "noopener noreferrer";
       acts.append(view, open);
     }
-    acts.prepend(phoneButton(e.id));
-    if (e.status !== "live") acts.prepend(el("button", "btn show", "Show"));
+    acts.prepend(phoneButton(e.id, t));
+    if (e.status !== "live") acts.prepend(el("button", "btn show", t("entries.artifact.show")));
     card.dataset.md = e.md || ""; // the caption's source, for update() to compare exactly
     bar.append(entryIcon(e.glyph), el("span", "fn", e.title), el("span", "fs", e.summary), acts);
     card.append(bar);
     const holder = held.get(e.id);
     holder?.onEntry(e);
-    if (e.status === "live" && holder) card.append(heldLine(e.id, holder.label));
-    else if (e.status === "live" && !docker.frames()) card.append(heldLine(e.id, "in window 1"));
+    if (e.status === "live" && holder) card.append(heldLine(e.id, holder.label, t));
+    else if (e.status === "live" && !docker.frames()) card.append(heldLine(e.id, "in window 1", t));
     else if (e.status === "live") card.append(artifactStage(e, opts));
     else {
-      const what = det.label || (e.status === "closed" ? "closed by the agent" : "answered");
+      const what = det.label || (e.status === "closed" ? t("entries.artifact.closed") : t("entries.artifact.answered"));
       card.append(el("div", "done", `${what} · ${hhmm(det.ended_ts)}`));
     }
     body.append(card);
     return row(e, "artifact", body);
   },
 
-  recap(e) {
+  recap(e, opts = {}) {
     // One quiet line, the latest as the older ones: what the person reads
     // coming back, not a card that outshouts the transcript. Only the latest
     // carries its ask; the model and cost are its tooltip.
+    const t = opts.t || en;
     const det = e.detail || {};
     const body = el("div", "body");
-    body.append(el("span", "lbl", "recap · "), el("span", "ctx", det.context));
+    body.append(el("span", "lbl", t("entries.recap.label")), el("span", "ctx", det.context));
     if (det.ask && !det.folded) body.append(el("span", "ask", ` · ${det.ask}`));
     const r = row(e, det.folded ? "recap folded" : "recap", body);
     r.querySelector(".g").replaceChildren(icon("sparkle"));
@@ -2136,30 +2163,31 @@ const RENDERERS = {
     return r;
   },
 
-  btw(e) {
+  btw(e, opts = {}) {
+    const t = opts.t || en;
     const det = e.detail || {};
     const body = el("div", "body");
     const sum = el("span", "sum");
-    const end = e.status === "ok" ? det.answer : e.status === "running" ? "…" : e.status === "cancelled" ? "cancelled" : det.why;
-    sum.append(el("span", "lbl", "btw · "), el("span", null, `${det.question} · ${end || ""}`));
+    const end = e.status === "ok" ? det.answer : e.status === "running" ? "…" : e.status === "cancelled" ? t("entries.btw.cancelled") : det.why;
+    sum.append(el("span", "lbl", `${t("entries.btw.label")} · `), el("span", null, `${det.question} · ${end || ""}`));
     const hd = el("div", "hd");
-    hd.append(el("span", null, "btw"), el("span", "q", det.question));
+    hd.append(el("span", null, t("entries.btw.label")), el("span", "q", det.question));
     const full = el("div", "full");
     if (e.status === "running") {
-      full.append(el("div", "ans wait", "reading the transcript…"));
+      full.append(el("div", "ans wait", t("entries.btw.reading")));
     } else if (e.status === "ok") {
-      const ans = markdown(det.answer);
+      const ans = markdown(det.answer, { t });
       ans.classList.add("ans");
       full.append(ans);
-      if (det.needs_more) full.append(el("div", "more", "needs more: the window did not hold the answer"));
+      if (det.needs_more) full.append(el("div", "more", t("entries.btw.needsMore")));
     } else if (e.status === "failed") {
-      full.append(el("div", "why", `failed: ${det.why}`));
+      full.append(el("div", "why", t("entries.btw.failed", { why: det.why })));
     }
     const ft = el("div", "ft");
     const secs = det.duration_ms ? `${(det.duration_ms / 1000).toFixed(1)}s` : "";
     ft.append(el("span", null, [det.model, secs, det.cost_usd ? money(det.cost_usd) : "", det.header].filter(Boolean).join(" · ")));
     if (e.status === "running") {
-      const stop = el("button", "btn link", "cancel");
+      const stop = el("button", "btn link", t("entries.btw.cancel"));
       stop.dataset.btwCancel = det.id;
       ft.append(stop);
     }
@@ -2201,7 +2229,7 @@ export function fileUrl(url, base = fileBase) {
 // runs twice; releasing it gives the card its frame back, if the card is on
 // screen.
 const held = new Map(); // artifact id -> {onEntry: (entry) => void, label}
-export function hold(id, onEntry, entry, label = "open in the viewer") {
+export function hold(id, onEntry, entry, label = VIEWER) {
   const card = document.querySelector(`#entries .row[data-id="${CSS.escape(id)}"] .acard`);
   if (onEntry) {
     held.set(id, { onEntry, label });
@@ -2218,8 +2246,8 @@ export function hold(id, onEntry, entry, label = "open in the viewer") {
 // viewport so the page's own media queries answer as on a phone. Per
 // artifact and per tab, so a redrawn card, the viewer and a pane agree.
 const phoneIds = new Set();
-export function phoneButton(id) {
-  const b = iconButton(el("button", "btn phone"), "phone", "Phone width");
+export function phoneButton(id, t = en) {
+  const b = iconButton(el("button", "btn phone"), "phone", t("entries.file.phone"));
   b.type = "button";
   b.dataset.phone = id;
   b.setAttribute("aria-pressed", String(phoneIds.has(id)));
