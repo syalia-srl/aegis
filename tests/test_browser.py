@@ -4808,7 +4808,7 @@ def test_an_open_tab_takes_the_new_build_after_an_upgrade(server, browser, worke
     page.evaluate("window.__before = true")
     # An upgrade: the server restarts serving another client. The build id
     # hashes each file's mtime, so a newer mtime is a new build.
-    css = aegis.web.CLIENT_DIR / "css" / "base.css"
+    css = aegis.web.CLIENT_DIR / "css" / "client.css"
     st = css.stat()
     server.stop()
     try:

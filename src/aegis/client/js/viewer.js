@@ -154,7 +154,7 @@ async function drawText(f, body, line, isCurrent, drawn) {
 // title and status in the bar, Phone width and Open in a new tab in acts (or the `popout`
 // button a live page's pane or the viewer passes instead), the frame in the body. Who holds the page
 // (entries.hold) is the caller's business.
-export function drawArtifact(e, { bar, body, acts, popout = null }) {
+export function drawArtifact(e, { bar, body, acts, popout = null, base = null }) {
   acts.append(phoneButton(e.id));
   if (popout) acts.append(popout);
   else {
@@ -162,14 +162,14 @@ export function drawArtifact(e, { bar, body, acts, popout = null }) {
     open.append(icon("open"));
     open.title = "Open in a new tab";
     open.setAttribute("aria-label", open.title);
-    open.href = fileUrl(e.detail?.url);
+    open.href = fileUrl(e.detail?.url, base ?? undefined);
     open.target = "_blank";
     open.rel = "noopener noreferrer";
     acts.append(open);
   }
   bar.append(entryIcon(e.glyph), el("span", "fn", e.title), el("span", "fs", e.summary));
   body.dataset.preview = "html";
-  const stage = artifactStage(e);
+  const stage = artifactStage(e, { base: base ?? undefined });
   stage.querySelector("iframe").loading = "eager";
   body.append(stage);
 }
@@ -196,10 +196,11 @@ export function contentUnit(range, root) {
 export class Viewer {
   // `point` is app.js's: items({locator, text, to, comment, leave}) gives a
   // selection's items, send(key, text) writes a session's composer.
-  constructor(root, { entry, point }) {
+  constructor(root, { entry, point, base = null }) {
     this.root = root; // #viewer, inside .col
     this.entry = entry; // (id) -> the shown transcript's entry, or undefined
     this.point = point;
+    this.base = base; // the mount's file prefix; null follows entries.js's fileBase
     this.items = new Map(); // session key -> {files, at, remote, glyph, line?}, {artifact} or {workflow}
     this.key = null; // the session shown
     this.drawn = 0; // bumped by every draw, so a fetch for an older one is dropped
@@ -408,7 +409,7 @@ export class Viewer {
     if (e.status === "live") acts.append(dockButton(e.id));
     // A live page pops out into a window of its own, with the bridge behind
     // it; only an ended one opens raw in a new tab, as its card does.
-    drawArtifact(e, { bar, body, acts, popout: e.status === "live" ? popButton(e.id) : null });
+    drawArtifact(e, { bar, body, acts, popout: e.status === "live" ? popButton(e.id) : null, base: this.base ?? undefined });
     acts.append(this.closeButton());
     bar.append(acts);
     // By the artifact's id: a page the agent sends again is a new file, and
@@ -424,7 +425,7 @@ export class Viewer {
     const item = this.isOpen ? this.items.get(this.key) : null;
     if (item?.artifact !== e.id) return;
     const frame = this.root.querySelector("iframe[data-artifact]");
-    if (frame && frame.dataset.status === e.status && frame.getAttribute("src") === fileUrl(e.detail?.url)) return;
+    if (frame && frame.dataset.status === e.status && frame.getAttribute("src") === fileUrl(e.detail?.url, this.base ?? undefined)) return;
     this.render(e);
   }
 }

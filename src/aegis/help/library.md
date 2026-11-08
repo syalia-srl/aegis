@@ -198,6 +198,134 @@ until a restart.
 Memories, skills and help state are kept per key; dictation, saved workflow
 definitions and harness sign-ins are the server's.
 
+## The chat in your page
+
+The web client is not one page: it is a set of mounts. A page names an element
+and a session, and `mount()` draws a transcript and a composer inside that
+element, in the page's own colours. Every other part of the page stays as it
+was: nothing a mount draws reaches an id or a selector outside the element you
+gave it, so your page keeps its own `#tabs`, its own `#composer`, and its own
+layout — and `document.getElementById("composer")` is still yours.
+
+**Mount the app at your prefix.** `Server(..., prefix="/aegis")` gives a web app
+(`srv.asgi`) whose routes are relative: mount it at the prefix your page uses,
+and every URL aegis writes — the client's files, the websocket, the manifest —
+carries that prefix, so the page configures nothing. `srv.url` stays the
+standalone sign-in URL: the loopback listener keeps serving the MCP tools at
+the app's root, and a prefixed server's own page is not browsable.
+
+```python
+from starlette.applications import Starlette
+from starlette.responses import HTMLResponse
+from starlette.routing import Mount, Route
+
+async with Server("./proj", prefix="/aegis", policy=MyPolicy(),
+                  origins=["https://app.example.com"]) as srv:
+    token = srv.token_for(ana)        # whose the page acts as
+
+    async def index(request):
+        return srv.sign_in(HTMLResponse(PAGE.replace("__TOKEN__", token)), token)
+
+    app = Starlette(routes=[Route("/", index), Mount("/aegis", srv.asgi)])
+```
+
+The websocket's origin check admits the host's page: pass your page's public
+origin in `origins`.
+
+**Mint the token.** `srv.token_for(who, ttl=3600)` signs a short-lived token for
+one of your policy's callers. The page passes it to `mount()`, the hello carries
+it, and your `identify` never sees it. Set it as the page's cookie too, with
+`srv.sign_in(response, token)`: a websocket hello carries the token, but an
+HTTP fetch of a sent file, an image or a preview cannot.
+
+**The page.** One module import, one element, one call, and the handle's four
+parts: `on`, `send`, `destroy` and `el`.
+
+```html
+<div id="chat"></div>
+<script type="module">
+  import { mount } from "/aegis/aegis.js";
+  const chat = mount(document.getElementById("chat"), {
+    token: () => fetch("/api/aegis-token").then((r) => r.text()),
+    session: "20261106-070453-2f96a5",
+    layout: "chat",
+    theme: "host",
+    lang: "es",
+    labels: { "composer.placeholder": "Dile qué hacer…" },
+  });
+  chat.on("turnEnd", ({ session, cost_usd, line }) => reloadNotebook(cost_usd));
+  await chat.send("Resume el capítulo 3");
+</script>
+```
+
+| Option | What it does |
+|---|---|
+| `token` | A string, or a function called on each connect, so an expired token is replaced without a reload. |
+| `session` | The log id of the session the chat follows. |
+| `layout` | `"chat"`: one session, no tab strip, a transcript and (with `composer`) a box. The full layout arrives in a later release. |
+| `composer` | `true` (the default) draws the message box; `false` gives a transcript only, as for an answer pane. |
+| `theme` | `"host"`, or a built-in theme's name (`"ink"`, `"riso"`), which aegis loads itself. |
+| `lang`, `labels` | `"en"` or `"es"`, and single keys to override. A key a table lacks falls back to English and is logged once. |
+
+The handle's `send(text)` is the box's own send, through this mount's socket,
+and resolves when the send has an answer; `destroy()` unsubscribes, gives the
+socket back and removes the root, so a host closes a tab with it.
+
+**Events.** `chat.on(name, fn)` takes four names:
+
+| Event | Payload |
+|---|---|
+| `connection` | `{state, server}`: `connecting`, `open`, `closed`, `unauthorized` or `version`. |
+| `entry` | `{session, entry}` on every row upsert — a tool call of yours that changed your data says so here. |
+| `turnEnd` | `{session, cost_usd, line, meta}` when the session leaves working: the turn's own cost (the cumulative figure after minus the one before, `null` when the mount joined mid-turn), and `line` when the turn left a question, else `null`. |
+| `error` | `{session, code, message, error}` for a call the chat made that was refused, and for its transcript channel's errors. |
+
+**`theme: "host"` and the variables.** With `theme: "host"` aegis loads no
+theme of its own: it paints with the CSS variables your page sets, and your CSS
+is the contract. Set the ones you care about on the mount's ancestors (usually
+`:root`); anything unset keeps a plain fallback.
+
+| Group | Variables |
+|---|---|
+| Background and panels | `--bg`, `--surface`, `--raised`, `--chrome`, `--side` |
+| Text | `--ink`, `--strong`, `--muted`, `--faint` |
+| Lines and accents | `--rule`, `--accent`, `--accent-soft`, `--on-accent` |
+| Statuses | `--ok`, `--err`, `--err-bg`, `--warn`, `--comms`, `--add-bg`, `--del-bg` |
+| Syntax colours | `--h-kw`, `--h-str`, `--h-num`, `--h-com`, `--h-fn`, `--h-type`, `--h-var`, `--h-meta` |
+| Fonts | `--font-ui`, `--font-prose`, `--font-mono`, `--font-chrome`, `--font-head` |
+| Shape and row | `--prose-size`, `--r`, `--r-lg`, `--time`, `--thread`, `--row-cols`, `--fill` |
+
+Classes inside the mount are stable across minor releases, so a host may
+restyle them. Hiding tool calls is one rule of yours, `.aegis .tool { display:
+none }`. It ties with the client's own `.aegis .row` rule, so put your block in
+the page's body — the client's stylesheets load into its head — or name the
+element you gave the mount (`.aegis` is the root the mount builds inside it).
+
+The mount's own nodes keep ids such as `#composer`, `#input` and `#entries`, so
+a page that has its own `#composer` now has two: `getElementById` still returns
+yours (the first in the document), but an id selector matches both. Style your
+own boxes by class, or from the element you gave `mount()`.
+
+**The manifest.** `/aegis/manifest.json` lists every client file with its URL,
+byte count and hash, plus `build`, `version` and `prefix`, so your own service
+worker caches the client and knows when it changed. aegis installs no worker in
+an embed: the page's worker is yours.
+
+**Offline.** A mounted chat works with no connection, which is what a phone in
+a WebView, or a notebook with the laptop shut, needs. A message typed while the
+socket is down stays on the device as that session's draft and draws as the
+transcript's queued row; the reconnect sends it once, never twice. A draft
+written before the session moved on is not sent blind: the queued row says so
+and offers `Send anyway`, so the person decides. Your service worker caches the
+files `/aegis/manifest.json` lists — and that page's own last transcript, which
+the device kept — so the chat opens with no network at all.
+
+**Behind a proxy.** A proxy in front of the loopback port works the same: the
+browser's URLs keep the prefix and the proxy strips it before the port, so pass
+`prefix=` exactly what the browser sees. Everything aegis hands the page is a
+URL under that prefix, so a host that strips, rewrites or terminates TLS needs
+no other change.
+
 ## Product agents
 
 An agent your program runs for its own users can be closed to everything but

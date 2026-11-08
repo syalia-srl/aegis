@@ -7,16 +7,18 @@
 // their files until take() hands them to the session that was started.
 
 import { icon } from "./glyphs.js";
+import { labelsFor } from "./labels.js";
 
 const CHUNK = 256 * 1024;
 const PARALLEL = 3;
+const english = labelsFor("en");
 
-function human(n) {
-  if (n < 1024) return `${n} B`;
+function human(t, n) {
+  if (n < 1024) return t("attach.size.bytes", { n });
   const kb = n / 1024;
-  if (kb < 1024) return `${kb < 10 ? kb.toFixed(1) : Math.round(kb)} KB`;
+  if (kb < 1024) return t("attach.size.kb", { n: kb < 10 ? kb.toFixed(1) : Math.round(kb) });
   const mb = kb / 1024;
-  return `${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB`;
+  return t("attach.size.mb", { n: mb < 10 ? mb.toFixed(1) : Math.round(mb) });
 }
 
 function base64(buf) {
@@ -67,11 +69,12 @@ export async function stageFile(call, waitOnline, file, name, onSent = () => {})
 export class Attachments {
   // call(key, op, params) runs an operation on the server holding the
   // session keyed `key`; waitOnline() resolves once the socket is open again.
-  constructor(tray, { call, waitOnline, hold = false }) {
+  constructor(tray, { call, waitOnline, hold = false, t = english }) {
     this.tray = tray;
     this.call = call;
     this.waitOnline = waitOnline;
     this.hold = hold;
+    this.t = t;
     this.byKey = new Map();
     this.key = null;
     this.queue = [];
@@ -191,8 +194,8 @@ export class Attachments {
   // What Send may carry: the upload ids, or why it may not send yet.
   ready(key) {
     const items = this.list(key);
-    if (items.some((x) => x.state === "failed")) return { error: "an attachment failed; click it to retry or remove it" };
-    if (items.some((x) => x.state !== "done")) return { error: "attachments are still uploading" };
+    if (items.some((x) => x.state === "failed")) return { error: this.t("attach.failed") };
+    if (items.some((x) => x.state !== "done")) return { error: this.t("attach.uploading") };
     return { ids: items.map((x) => x.upload_id) };
   }
 
@@ -215,14 +218,14 @@ export class Attachments {
     const x = el("button", "ax");
     x.append(icon("close"));
     x.type = "button";
-    x.title = "Remove";
-    x.setAttribute("aria-label", `Remove ${it.name}`);
+    x.title = this.t("attach.remove");
+    x.setAttribute("aria-label", this.t("attach.removeName", { name: it.name }));
     x.addEventListener("click", (ev) => {
       ev.stopPropagation();
       this.remove(it);
     });
     if (it.state === "failed") c.addEventListener("click", () => this.retry(it));
-    c.append(el("span", "an", it.name), el("span", "as", it.state === "failed" ? "failed · retry" : human(it.size)), bar, x);
+    c.append(el("span", "an", it.name), el("span", "as", it.state === "failed" ? this.t("attach.failedRetry") : human(this.t, it.size)), bar, x);
     return c;
   }
 }

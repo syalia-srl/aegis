@@ -14,7 +14,7 @@ export function groupKey(m, here) {
   return m.group.includes("@") ? m.group : `${m.group}@${at}`;
 }
 
-// A group's colour, --group-0 to --group-3 (base.css), from its key: the bar
+// A group's colour, --group-0 to --group-3 (client.css), from its key: the bar
 // and the Fleet paint one group alike.
 export function hueOf(key) {
   let h = 0;

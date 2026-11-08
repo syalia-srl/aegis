@@ -54,12 +54,16 @@ import { closeInstallDialog, startInstall } from "./install.js";
 import { checkRotation, closePushPanel, openPushPanel, pushSupported, setupPush } from "./pushpanel.js";
 import { clearDevice, loadFleet, loadTranscript, saveFleet, saveTranscript } from "./devicestore.js";
 import { markNeedsNet, offline } from "./net.js";
-import { discard, draftFor, flushNow, loadDrafts, onDrafts, queue, sendAnyway, setSender } from "./outbox.js";
+import { outbox } from "./outbox.js";
 import { idleFor, lifecycle } from "./lifecycle.js";
 import { serverNow } from "./clock.js";
 
 const $ = (id) => document.getElementById(id);
 const root = $("a2");
+// The theme is a variable block on the root itself (themes/*.css); index.html
+// applied the stored choice to <html> before the first paint, and this copies
+// it here before the first render.
+root.dataset.theme = document.documentElement.dataset.theme;
 
 // Quota is one subscription for the page: the band and the sidebar both draw
 // it. Host is subscribed only while a view shows it, the Fleet every server's
@@ -87,6 +91,7 @@ const THEMES = [
 ];
 function setTheme(name) {
   document.documentElement.dataset.theme = name;
+  root.dataset.theme = name;
   localStorage.setItem("aegis.theme", name);
   redrawFavicon();
   artifacts.theme();
@@ -577,6 +582,9 @@ function markOffline(state) {
     root.dataset.offline = "";
   }
   markNeedsNet();
+  // The band's line says how old the device copy is while offline: opening or
+  // closing the socket changes it, not only the next snapshot.
+  if (root.dataset.view === "fleet") drawBand();
 }
 
 // The token no longer works: what this device kept goes before the sign-in
@@ -892,7 +900,7 @@ function sessionHandlers(server) {
       else booted = homeLive = true;
       onSessions();
       // The server is reachable again: what was written meanwhile goes out.
-      flushNow((key) => forKey(key).server === server);
+      outbox.flushNow((key) => forKey(key).server === server);
     },
     (ops) => {
       for (const op of ops) {
@@ -1520,9 +1528,10 @@ function drawHost() {
 
 function drawBand() {
   if (root.dataset.view !== "fleet") return;
-  // Saved cards say how old they are.
-  const stale = local().some((m) => m.stale);
-  renderBand($("band"), { metas: local(), host, server: conn.server || localStorage.getItem("aegis.server") || "", link: stale ? seenText() : links.length ? "this server" : "", off: stale, measure: () => measureNet(null) });
+  // Saved cards say how old they are while the socket is not open. Once it
+  // opens the live snapshot is on its way, and the band is no longer offline.
+  const saved = !conn.open && local().some((m) => m.stale);
+  renderBand($("band"), { metas: local(), host, server: conn.server || localStorage.getItem("aegis.server") || "", link: saved ? seenText() : links.length ? "this server" : "", off: saved, measure: () => measureNet(null) });
   for (const l of links) {
     const box = $("remotes").querySelector(`[data-server="${CSS.escape(l.name)}"]`);
     if (!box) continue;
@@ -3371,7 +3380,7 @@ $("sp-text").addEventListener("keydown", (ev) => {
 // changes with the window and with what sits around the box (files, hints, an
 // error), so those are watched too. A hidden view has no height to fill.
 function spawnGrow() {
-  // The tip and /feedback rows give way to a first message (base.css).
+  // The tip and /feedback rows give way to a first message (client.css).
   $("sp-hints").toggleAttribute("data-typing", $("sp-text").value !== "");
   const t = $("sp-text");
   const view = t.closest(".view");
@@ -4064,7 +4073,7 @@ const QUEUED_LABEL = {
 };
 function drawQueued() {
   const box = $("queued");
-  const d = shown && draftFor(shown);
+  const d = shown && outbox.draftFor(shown);
   box.hidden = !d;
   if (!d) return;
   for (const st of ["sending", "stale", "gone", "error"]) box.classList.toggle(st, d.state === st);
@@ -4073,11 +4082,11 @@ function drawQueued() {
   box.querySelector(".text").textContent = d.text;
   if (transcript.following) transcript.toBottom();
 }
-onDrafts(drawQueued);
-loadDrafts();
+outbox.on(drawQueued);
+outbox.load();
 // A queued draft's send gets the composer's deadline: with no answer the socket
 // is dropped, which settles the send as unreached and the draft waits again.
-setSender((key, params, { ask: asking = false } = {}) => {
+outbox.setSender((key, params, { ask: asking = false } = {}) => {
   const call = callFor(key, "session.send", params);
   const late = setTimeout(() => conn.drop(), SEND_VERDICT_MS);
   // A stopped session on an untested harness: a background flush settles the
@@ -4094,10 +4103,10 @@ setSender((key, params, { ask: asking = false } = {}) => {
 $("queued").addEventListener("click", (ev) => {
   const act = ev.target.closest("[data-act]")?.dataset.act;
   const key = shown;
-  const d = key && draftFor(key);
+  const d = key && outbox.draftFor(key);
   if (!act || !d) return;
-  if (act === "discard") discard(key);
-  if (act === "send") sendAnyway(key).catch((e) => toast(e.message, { kind: "error" }));
+  if (act === "discard") outbox.discard(key);
+  if (act === "send") outbox.sendAnyway(key).catch((e) => toast(e.message, { kind: "error" }));
   if (act === "copy")
     navigator.clipboard.writeText(d.text).then(
       () => toast("Copied"),
@@ -4108,7 +4117,7 @@ $("queued").addEventListener("click", (ev) => {
     localStorage.setItem(`aegis.draft.${key}`, input.value);
     autosize();
     input.focus();
-    discard(key);
+    outbox.discard(key);
   }
 });
 
@@ -4191,7 +4200,7 @@ async function sendLine(text, fromComposer, attachments = [], target = focused()
   // device (outbox.js); a command or files still need the connection.
   const rev = shown === s.key ? transcript.rev : -1;
   const waitAsDraft = async (nonce) => {
-    await queue(s.key, text, rev, nonce);
+    await outbox.queue(s.key, text, rev, nonce);
     if (fromComposer) {
       localStorage.removeItem(`aegis.draft.${s.key}`);
       spoken.delete(`aegis.draft.${s.key}`); // the outbox keeps no mark
@@ -4564,7 +4573,7 @@ $("close").addEventListener("click", () => {
   if (s) closeSession(s);
 });
 
-// -- the panel: a drawer on a phone (base.css, max-width 760px), collapsible
+// -- the panel: a drawer on a phone (client.css, max-width 760px), collapsible
 // and resizable on a desktop (side.js) ------------------------------------------
 const drawerMode = matchMedia("(max-width: 760px)");
 initSide({ onCardOpen: () => closeMonitorCard() });
@@ -4599,7 +4608,7 @@ $("side-btn").addEventListener("click", toggleSide);
 // switcher. Its count is every open session, quiet ones included, as the
 // switcher lists them. A tap opens it without the field's focus, so no
 // on-screen keyboard covers the list.
-const phoneHeader = matchMedia("(max-width:760px)"); // the one-row header (base.css)
+const phoneHeader = matchMedia("(max-width:760px)"); // the one-row header (client.css)
 function sizeTabMore() {
   const list = $("tablist");
   $("tab-more").hidden = !phoneHeader.matches && list.scrollWidth <= list.clientWidth + 1;
