@@ -608,7 +608,8 @@ class Feeds:
         hour = str(int(now // 3600))
         f.hours[hour] = f.hours.get(hour, 0) + len(texts)
         if len(f.hours) > HOURS_KEPT:
-            for k in sorted(f.hours, key=int)[: len(f.hours) - HOURS_KEPT]:
+            oldest: list[str] = sorted(f.hours, key=lambda k: int(k))
+            for k in oldest[: len(f.hours) - HOURS_KEPT]:
                 del f.hours[k]
         f.arrivals = [a for a in f.arrivals if a > now - 3600] + [now] * len(texts)
         over = len(f.pending) - PENDING_ITEMS
