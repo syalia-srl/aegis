@@ -680,7 +680,7 @@ chat.destroy();
 <h2>Phase A — the hosts' chat</h2>
 <p>Eight slices, in this order, on one branch, <code>961-mountable-client</code>, and one PR for the phase. They run one at a time in this one worktree, each by one agent that commits and pushes its slice; workers do not open PRs. After each slice the nightly workflow (the slow and browser suites) runs on CI on the branch and is compared with a baseline taken on the untouched branch at the phase's start. The main agent reviews every slice's diff against this plan and the spec. The code in a slice is the hypothesis and the slice's tests judge it; the existing browser suite is not edited.</p>
 
-<details class="task" id="a1-host-serving" data-state="pending">
+<details class="task" id="a1-host-serving" data-state="doing">
 <summary><span class="num">A1</span><span><span class="ttl">Serving the client under a prefix: <code>srv.asgi</code>, the manifest and the entry module</span><span class="files">src/aegis/server.py · src/aegis/web.py · src/aegis/client/index.html · src/aegis/client/js/aegis.js · tests/host_fixture.py · tests/test_web.py · tests/test_library.py</span></span><span class="state"></span></summary>
 <div class="body">
 <p>A Python host can mount the client at its own prefix and mint the page's token. This slice is the server half only: no JavaScript changes, no mount yet.</p>
