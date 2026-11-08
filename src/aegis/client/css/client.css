@@ -1262,6 +1262,55 @@
 .aegis .mon.late .kv .r .eta{color:var(--warn)}
 .aegis .mon.bad .bar i{background:var(--err)}
 
+/* a feed's row and card (js/feeds.js): the monitor card's rules, plus the bars,
+   the wait split, the latest items and the person's buttons */
+.aegis .mon.feed{cursor:pointer}
+.aegis .mon.feed.pz .kv .r{color:var(--faint)}
+.aegis .mon.feed .spark{display:flex;gap:2px;align-items:flex-end;height:14px;margin-top:4px}
+.aegis .mon.feed .spark i{flex:1;background:var(--accent);opacity:.55;border-radius:1px;min-height:1px}
+.aegis .mon.feed .spark i.w{background:var(--warn);opacity:1}
+.aegis .fcard .pill.off{background:var(--raised);color:var(--faint)}
+.aegis .fcard .pill.off::before{animation:none}
+.aegis .fcard .big .p small{font-size:12px;margin-left:6px;letter-spacing:0;font-family:var(--font-chrome)}
+.aegis .fcard .rng{display:flex;gap:4px;margin:10px 0 0}
+.aegis .fcard .rng button{font-family:var(--font-mono);font-size:10.5px;padding:2px 8px;border-radius:4px;border:1px solid var(--rule);background:transparent;color:var(--faint);cursor:pointer}
+.aegis .fcard .rng button.on{color:var(--strong);border-color:var(--accent)}
+.aegis .fcard .chart .col{fill:var(--accent);opacity:.6}
+.aegis .fcard .chart .col.w{fill:var(--warn);opacity:1}
+.aegis .fcard .chart .hit{fill:transparent}
+.aegis .fcard .chart .btick{stroke:var(--comms);stroke-width:1.5}
+.aegis .fcard .waits,.aegis .fcard .items{border-top:1px solid var(--rule);padding:10px 16px 12px}
+.aegis .fcard .facts{border-top:1px solid var(--rule)}
+.aegis .fcard .none{color:var(--faint);font-size:11px}
+.aegis .fcard .q3{display:flex;gap:14px;flex-wrap:wrap;font-family:var(--font-mono);font-size:11px;color:var(--faint);margin-bottom:8px}
+.aegis .fcard .q3 b{font-weight:500;color:var(--strong);font-size:13px;margin-right:4px}
+.aegis .fcard .split{display:flex;height:6px;border-radius:3px;overflow:hidden;background:var(--raised)}
+.aegis .fcard .split i{display:block;height:100%}
+.aegis .fcard .db{--c:var(--faint)} .aegis .fcard .tn{--c:var(--warn)} .aegis .fcard .qt{--c:var(--err)} .aegis .fcard .pz{--c:var(--comms)}
+.aegis .fcard .split i{background:var(--c)}
+.aegis .fcard .lg{display:flex;gap:10px;flex-wrap:wrap;margin-top:5px;font-size:10.5px;color:var(--faint)}
+.aegis .fcard .lg span::before{content:"";display:inline-block;width:7px;height:7px;border-radius:2px;margin-right:4px;background:var(--c)}
+.aegis .fcard .per{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:10px}
+.aegis .fcard .per>div{background:var(--raised);border-radius:5px;padding:5px 8px;min-width:0}
+.aegis .fcard .per .v{font-family:var(--font-mono);color:var(--strong);font-size:12.5px}
+.aegis .fcard .per .k{font-size:10px;color:var(--faint)}
+.aegis .fcard .bt{display:flex;gap:8px;font-size:10.5px;color:var(--comms);margin:8px 0 3px}
+.aegis .fcard .items h5+.bt{margin-top:0}
+.aegis .fcard .bt .r{margin-left:auto;color:var(--faint)}
+.aegis .fcard .it{display:grid;grid-template-columns:max-content minmax(0,1fr) auto;gap:8px;padding:2px 0;font-size:11px}
+.aegis .fcard .it .ts{color:var(--faint);font-family:var(--font-mono);white-space:nowrap}
+.aegis .fcard .it .tx{color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;font-family:var(--font-mono)}
+.aegis .fcard .it .tx.x{white-space:pre-wrap;overflow-wrap:anywhere}
+.aegis .fcard .it .wt{color:var(--faint);white-space:nowrap}
+.aegis .fcard .it.w .wt{color:var(--warn)}
+.aegis .fcard .ck .err.flt{background:var(--raised);color:var(--muted)}
+.aegis .fcard .ft .path{min-width:0}
+.aegis .fcard .ft .acts{margin-left:auto;display:flex;gap:6px;flex:none}
+.aegis .fcard .ft button{font-family:var(--font-ui);font-size:11.5px;padding:3px 10px;border-radius:5px;border:1px solid var(--rule);background:var(--raised);color:var(--ink);cursor:pointer}
+.aegis .fcard .ft button.dz{color:var(--err)}
+.aegis .fcard .ft button:disabled{opacity:.5;cursor:default}
+@media (pointer:coarse){.aegis .fcard .ft button,.aegis .fcard .rng button{min-height:44px}}
+
 /* the card: fixed, to the left of the sidebar, level with its row */
 .aegis .mcard{position:fixed;z-index:20;width:392px;max-height:calc(100vh - 24px);overflow:auto;
   background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-lg);

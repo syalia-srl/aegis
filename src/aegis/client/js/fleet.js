@@ -280,6 +280,12 @@ export function card(m, onOpen, onClose) {
   if (m.unread) ft.append(el("span", "unr", `${m.unread} unread`));
   const mons = (m.monitors || []).length;
   if (mons) ft.append(el("span", "mons", `${mons} monitor${mons > 1 ? "s" : ""}`));
+  const fds = m.feeds || [];
+  if (fds.length) {
+    const waiting = fds.reduce((n, f) => n + (f.pending || 0), 0);
+    const txt = `${fds.length} feed${fds.length > 1 ? "s" : ""}${waiting ? ` · ${waiting} waiting` : ""}`;
+    ft.append(el("span", "mons", txt));
+  }
   if (m.plan_total) ft.append(planProg(m));
   ft.append(el("span", "ctx", `${pct}%`));
   parts.push(bar, ft);
