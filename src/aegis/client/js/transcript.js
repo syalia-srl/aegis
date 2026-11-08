@@ -306,6 +306,11 @@ export class Transcript {
   // answers in full, a gap in the patches) keeps the divider where it was;
   // switching sessions clears it (stash, clear).
   snapshot(data) {
+    // A snapshot is the whole transcript at the revision it was taken. One
+    // taken before a delta this tab already applied would take that delta's
+    // rows away: on a busy server the mount's first snapshot can land after a
+    // live turn's upserts, and the reply vanishes. Keep what is newer (#961).
+    if (Number.isFinite(data.rev) && data.rev < this.rev) return;
     const { sinceId, sinceText } = this;
     this.clear();
     this.sinceId = sinceId;
