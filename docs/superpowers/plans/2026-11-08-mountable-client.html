@@ -101,13 +101,13 @@ table{margin:0}
 </div>
 <main>
 <h1>The client as mountable parts, and the hosts' chat first</h1>
-<p class="meta">Implements <a href="../specs/2026-11-06-embeddable-aegis-design.html">specs/2026-11-06-embeddable-aegis-design.html</a> §06 and §10 (approved). Issue <a href="https://github.com/apiad/aegis/issues/961">#961</a>, with the chat slice of <a href="https://github.com/apiad/aegis/issues/962">#962</a>. Branch <code>961-mountable-client</code>. Two phases, one PR per slice, slices run in this order in one worktree and never in parallel.</p>
+<p class="meta">Implements <a href="../specs/2026-11-06-embeddable-aegis-design.html">specs/2026-11-06-embeddable-aegis-design.html</a> §06 and §10 (approved). Issue <a href="https://github.com/apiad/aegis/issues/961">#961</a>, with the chat slice of <a href="https://github.com/apiad/aegis/issues/962">#962</a>. Phase A branch <code>961-mountable-client</code>; phase B, after A merges, <code>961-mountable-client-b</code> from <code>main</code>. Two phases, one PR each; slices run one at a time in one worktree and never in parallel.</p>
 
 <h2>The goal</h2>
 <p>Every part of the client — transcript, composer, tab strip, sidebar, command menu, dictation — becomes something that mounts into an element it is given and finds its nodes under that root, instead of <code>$("id")</code> over all of <code>index.html</code>. The state that <code>app.js</code> keeps in module variables moves into the mount, every mount on a page shares one <code>Connection</code> keyed by URL and token, the root is the class <code>.aegis</code> with <code>data-theme</code> on it, and every string the client shows comes from a label table shipped in English and Spanish. <code>index.html</code> ends as a page that mounts the full layout.</p>
 <p>That is #961. It is too big for one change, and three real hosts need one piece of it now, so the work is two phases:</p>
 <ul>
-<li><b>Phase A — the hosts' chat (a1–a7).</b> What skene, Oikos and life need to delete their own event folding and thread rendering and mount aegis instead: the <code>.aegis</code> root and the styling contract, the shared connection, the transcript and composer parts, the chat layout of <code>aegis.js</code>, the Server served under a prefix as <code>srv.asgi</code>, the hashed <code>/manifest.json</code>, and the outbox inside a mount. Phase A ends with a browser test that mounts chat into a foreign fixture page.</li>
+<li><b>Phase A — the hosts' chat (a1–a8).</b> What skene, Oikos and life need to delete their own event folding and thread rendering and mount aegis instead: the <code>.aegis</code> root and the styling contract, the shared connection, the transcript and composer parts, the chat layout of <code>aegis.js</code>, the Server served under a prefix as <code>srv.asgi</code>, the hashed <code>/manifest.json</code>, and the outbox inside a mount. Phase A ends with a browser test that mounts chat into a foreign fixture page.</li>
 <li><b>Phase B — the rest of #961 (b1–b9).</b> Tab strip, sidebar, command menu, dictation, the spawn and Fleet views, the remaining views, the remaining module state, every remaining string, and <code>index.html</code> as a page that mounts the full layout. The rest of #962 (layouts <code>tabs</code> and <code>full</code> from a host, host renderers, <code>embedding.md</code>) stays out.</li>
 </ul>
 
@@ -142,11 +142,11 @@ table{margin:0}
 <div class="tscroll"><table>
 <thead><tr><th>state today in <code>app.js</code></th><th>moves to</th><th>slice</th></tr></thead>
 <tbody>
-<tr><td><code>conn</code>, <code>wasClosed</code>, <code>live</code>, <code>closedSince</code>, <code>seenAt</code>, <code>bannerTimer</code>, <code>PAGE_BUILD</code></td><td>the shared <code>Connection</code> plus the mount's connection fields</td><td>a1</td></tr>
-<tr><td><code>sessions</code>, <code>links</code>, <code>remote</code>, <code>linksLoaded</code>, <code>linksReady</code>, <code>linksSig</code>, <code>quota</code>, <code>host</code>, <code>unsubHost</code>, <code>ordered</code>, <code>shown</code></td><td><code>MountState</code> on the mount</td><td>a1 (chat: <code>sessions</code>, <code>shown</code>) · b1 (full)</td></tr>
-<tr><td><code>keyOf</code>, <code>forKey</code>, <code>callFor</code>, <code>linkOf</code>, <code>isOff</code>, <code>withKey</code></td><td>mount methods that use <code>this.conn</code> and <code>this.state</code></td><td>a1</td></tr>
-<tr><td><code>transcript</code>, <code>viewer</code>, <code>find</code>, <code>speaker</code>, <code>followed</code>, <code>follows</code>, <code>kept</code>, <code>unsubTranscript</code>, <code>early</code>, <code>lastShown</code>, <code>workingSince</code>, <code>workingTokens</code>, <code>workingShown</code>, <code>navDrawn</code>, <code>foldLevel</code></td><td>the transcript part</td><td>a3</td></tr>
-<tr><td><code>input</code>, <code>sending</code>, <code>waiting</code>, <code>unconfirmed</code>, <code>blocked</code>, <code>spoken</code>, <code>atts</code>, <code>touch</code>, <code>ruler</code>, <code>composerWidth</code></td><td>the composer part; <code>outbox</code> becomes one instance it owns</td><td>a5</td></tr>
+<tr><td><code>conn</code>, <code>wasClosed</code>, <code>live</code>, <code>closedSince</code>, <code>seenAt</code>, <code>bannerTimer</code>, <code>PAGE_BUILD</code></td><td>the shared <code>Connection</code> plus the mount's connection fields</td><td>a2</td></tr>
+<tr><td><code>sessions</code>, <code>links</code>, <code>remote</code>, <code>linksLoaded</code>, <code>linksReady</code>, <code>linksSig</code>, <code>quota</code>, <code>host</code>, <code>unsubHost</code>, <code>ordered</code>, <code>shown</code></td><td><code>MountState</code> on the mount</td><td>a2 (chat: <code>sessions</code>, <code>shown</code>) · b1 (full)</td></tr>
+<tr><td><code>keyOf</code>, <code>forKey</code>, <code>callFor</code>, <code>linkOf</code>, <code>isOff</code>, <code>withKey</code></td><td>mount methods that use <code>this.conn</code> and <code>this.state</code></td><td>a2</td></tr>
+<tr><td><code>transcript</code>, <code>viewer</code>, <code>find</code>, <code>speaker</code>, <code>followed</code>, <code>follows</code>, <code>kept</code>, <code>unsubTranscript</code>, <code>early</code>, <code>lastShown</code>, <code>workingSince</code>, <code>workingTokens</code>, <code>workingShown</code>, <code>navDrawn</code>, <code>foldLevel</code></td><td>the transcript part</td><td>a4</td></tr>
+<tr><td><code>input</code>, <code>sending</code>, <code>waiting</code>, <code>unconfirmed</code>, <code>blocked</code>, <code>spoken</code>, <code>atts</code>, <code>touch</code>, <code>ruler</code>, <code>composerWidth</code></td><td>the composer part; <code>outbox</code> becomes one instance it owns</td><td>a6</td></tr>
 <tr><td><code>settings</code>, <code>journal</code>, <code>knowledgeView</code>, <code>usage</code>, <code>helpTab</code>, <code>schedules</code>, <code>filesView</code>, <code>filePicker</code>, <code>palette</code>, <code>switcher</code>, <code>help</code>, <code>keymap</code></td><td>their own parts; the mount keeps the router that opens them</td><td>b7</td></tr>
 <tr><td><code>fleetOrder</code>, <code>unfoldedGroups</code>, <code>fleetStacks</code>, <code>fleetKind</code>, <code>archived</code>, <code>archive*</code>, <code>closedTerms</code>, <code>fleetSel</code>, <code>cardServer</code></td><td>the Fleet part</td><td>b6</td></tr>
 <tr><td><code>roster</code>, <code>spModels</code>, <code>spServer</code>, <code>helpState</code>, <code>tips</code>, <code>spawnFrom</code>, <code>previews</code>, <code>agentsLoading</code></td><td>the spawn view part</td><td>b5</td></tr>
@@ -439,7 +439,7 @@ export default {
   "composer.settling": "sending when the attachments finish…",
 };
 </script>
-<p>The block above shows the shape and a few keys: a1 ships six, a4 and a6 add the transcript's and the composer's, and b9 adds the rest. A key is <code>&lt;part&gt;.&lt;thing&gt;</code>. The tables are plain ES modules exporting an object, written JSON-compatible (double quotes, no comments, no trailing comma), so <code>tests/test_labels.py</code> can parse them with <code>json.loads</code> after stripping <code>export default</code> and the trailing semicolon, and assert that en and es hold the same keys. The part slices add keys as they replace literals; no slice introduces a key without both languages.</p>
+<p>The block above shows the shape and a few keys: a2 ships six, a5 and a7 add the transcript's and the composer's, and b9 adds the rest. A key is <code>&lt;part&gt;.&lt;thing&gt;</code>. The tables are plain ES modules exporting an object, written JSON-compatible (double quotes, no comments, no trailing comma), so <code>tests/test_labels.py</code> can parse them with <code>json.loads</code> after stripping <code>export default</code> and the trailing semicolon, and assert that en and es hold the same keys. The part slices add keys as they replace literals; no slice introduces a key without both languages.</p>
 
 <h3>One connection per page</h3>
 <p><code>Connection</code> gains a token (a string or a function called on each connect, so an expired token is replaced without a reload), sends it in the <code>hello</code>, and gains <code>stop()</code>. A registry keyed by URL and token hands every mount the same socket and closes it when the last mount goes.</p>
@@ -521,7 +521,7 @@ stop() {
   this.subs.clear();
 }
 </script>
-<p>Two mounts with the same URL and token share the socket and each subscribe their own channels. A page with one chat therefore opens one socket, and a page with a chat and the full layout still opens one. The outbox is per mount (a5); the device store behind it is keyed by session, so two mounts never lose a draft to each other.</p>
+<p>Two mounts with the same URL and token share the socket and each subscribe their own channels. A page with one chat therefore opens one socket, and a page with a chat and the full layout still opens one. The outbox is per mount (a6); the device store behind it is keyed by session, so two mounts never lose a draft to each other.</p>
 
 <h3>Paths under a prefix</h3>
 <p>The mount derives every address from the module's own URL, so the host configures nothing:</p>
@@ -544,10 +544,10 @@ stop() {
 <li><b>Unscoped rules</b> become scoped: <code>.tabcard</code> is <code>.aegis .tabcard</code>, <code>svg.ic</code> is <code>.aegis svg.ic</code>. The tab card, the context menu, a dialog, a toast and the glyph sprite append to <code>rootOf(node)</code>, never to <code>document.body</code> or <code>#a2</code>.</li>
 <li><b>The id stays as a test hook.</b> <code>index.html</code>'s root keeps <code>id="a2"</code> next to <code>class="aegis"</code>; no stylesheet uses the id, but the browser suite does. The mount sets the same id on a full-layout root it builds.</li>
 </ul>
-<p>Lowering <code>#a2</code> to a class lowers specificity. <b>a2 checks it twice</b>, and the plan's PR body reports both:</p>
+<p>Lowering <code>#a2</code> to a class lowers specificity. <b>a3 checks it twice</b>, and the phase's PR body reports both:</p>
 <ol>
 <li><b>A specificity ledger.</b> <code>scripts/cascade_baseline.py</code> parses every selector in <code>client.css</code>, <code>page.css</code> and each theme before the rewrite and records its specificity; <code>tests/test_css_scope.py</code> fails if a selector outside <code>.aegis</code> now outranks a selector that contains it where it did not outrank the old <code>#a2</code> form. This is static and catches the rule you did not think about.</li>
-<li><b>A computed-style baseline.</b> The same script opens the real client on <code>origin/main</code>'s tree, visits Fleet, a session, New session and Settings at 1280 and 390 px, and records about thirty stable properties (colours, font families, sizes, radii, display, grid columns, margins) for a fixed inventory of elements. It writes <code>tests/fixtures/cascade-baseline.json</code>; the browser half of <code>tests/test_css_scope.py</code> re-measures the rewritten client and diffs it, naming the selector that moved. The slice commits the baseline in the same PR so a reviewer sees what was compared.</li>
+<li><b>A computed-style baseline.</b> The same script, run at the slice's base commit in this worktree before the rewrite, opens the real client once — one shared host and one browser pass — visits Fleet, a session, New session and Settings at 1280 and 390 px, and records about thirty stable properties (colours, font families, sizes, radii, display, grid columns, margins) for a fixed inventory of elements. It writes <code>tests/fixtures/cascade-baseline.json</code>; the browser half of <code>tests/test_css_scope.py</code> re-measures the rewritten client and diffs it, naming the selector that moved. The baseline is committed before the rewrite and the script with it, so a reviewer can rerun the comparison.</li>
 </ol>
 <p>The full browser suite is the third check and is not edited.</p>
 
@@ -653,7 +653,7 @@ chat.on("error", ({ code, message }) => console.warn(code, message));
 await chat.send("Resume el capítulo 3");
 chat.destroy();
 </script>
-<p><code>entry</code> fires on every transcript upsert, so a host whose MCP tool changed its data hears that tool's row. <code>turnEnd</code> fires when the session's state patch leaves <code>working</code>, with the session's last known meta (its cost is cumulative; the turn's own cost is <code>TurnEnded</code>'s, which the transcript does not carry — a host that needs the turn's line reads it from the session API). <code>error</code> fires for a refused operation the chat itself made and for a transcript channel error.</p>
+<p><code>entry</code> fires on every transcript upsert, so a host whose MCP tool changed its data hears that tool's row. <code>turnEnd</code> fires when the session's state patch leaves <code>working</code>, with <code>{session, cost_usd, line}</code>. <code>cost_usd</code> is the turn's own cost: the mount remembers the meta's cumulative <code>cost_usd</code> when the state entered <code>working</code> and reports the difference when it leaves (<code>null</code> if the mount joined mid-turn, so nothing is invented). <code>line</code> is the meta's <code>attention_line</code> when the turn left one (<code>review</code> or <code>needs_you</code>), else <code>null</code>. That is the sum skene computes today by diffing <code>agents.py</code>'s cumulative cost, so no host redoes it. <code>error</code> fires for a refused operation the chat itself made and for a transcript channel error.</p>
 
 <h3>The outbox inside a mount</h3>
 <p><code>outbox.js</code> becomes a class. The device store stays shared and keyed by session; each mount owns one instance and one sender, so a message typed offline waits on the device, draws as the transcript's queued row, and goes out when the connection comes back. Life's WebView and Oikos's phone sheet both depend on this: the mount must not need the full layout's <code>drawQueued</code> or its <code>#queued</code> row to exist, and the chat layout includes the queued row in the transcript part.</p>
@@ -665,37 +665,34 @@ chat.destroy();
 <tbody>
 <tr><td>sidebar (session card, plan, skills, repos, journal, usage, quota, host, version, actions)</td><td>127</td><td>84</td><td>111</td><td>side 4, usage 30, gauges 24, monitors 46</td><td>b3</td></tr>
 <tr><td>spawn (New session form, chips, hints, doctor, profiles)</td><td>112</td><td>33</td><td>51</td><td>commands 20, pick 8, install 18, help 22</td><td>b5</td></tr>
-<tr><td>transcript (scroller, rows, nav, find, working, replies, queued, cold, closing, viewer)</td><td>76</td><td>39</td><td>81</td><td>transcript 21, entries 84 (A kinds) + 146 (B cards), find 3, viewer 23, canvas 28, artifacts 16</td><td>a3–a4, a7, b9</td></tr>
+<tr><td>transcript (scroller, rows, nav, find, working, replies, queued, cold, closing, viewer)</td><td>76</td><td>39</td><td>81</td><td>transcript 21, entries 84 (A kinds) + 146 (B cards), find 3, viewer 23, canvas 28, artifacts 16</td><td>a4–a5, a8, b9</td></tr>
 <tr><td>tab strip &amp; header (tabs, header menu, bell)</td><td>57</td><td>17</td><td>32</td><td>tabs 5, tabcard 6, switcher 21, keys 129 (shared)</td><td>b2</td></tr>
-<tr><td>composer (box, actions, attachments, chips, sending)</td><td>44</td><td>16</td><td>49</td><td>attach 4, outbox 3, record 2</td><td>a5–a6</td></tr>
+<tr><td>composer (box, actions, attachments, chips, sending)</td><td>44</td><td>16</td><td>49</td><td>attach 4, outbox 3, record 2</td><td>a6–a7</td></tr>
 <tr><td>command menu (inline and overlay)</td><td>— (inside composer and spawn)</td><td>—</td><td>— (inside composer and spawn)</td><td>commands 20</td><td>b4</td></tr>
 <tr><td>dictation (mic, recorder, targets)</td><td>— (inside composer)</td><td>—</td><td>— (inside composer)</td><td>dictation 5, record 2</td><td>b4</td></tr>
 <tr><td>fleet (band, cards, remotes, archive, closed terminals)</td><td>27</td><td>13</td><td>29</td><td>fleet 50, journal 17, install 18</td><td>b6</td></tr>
-<tr><td>shell (root, boot, login, connection, route, views)</td><td>18</td><td>11</td><td>50</td><td>protocol 2, toast 5, dialog 3, net 2</td><td>a1, b1, b8</td></tr>
+<tr><td>shell (root, boot, login, connection, route, views)</td><td>18</td><td>11</td><td>50</td><td>protocol 2, toast 5, dialog 3, net 2</td><td>a1–a2, b1, b8</td></tr>
 <tr><td>other views (settings, journal, usage, knowledge, files, schedules, help, palette, switcher, terminal, browser)</td><td>13</td><td>11</td><td>0</td><td>settings 241, files 46, knowledge 31, help 22, journal 17, usage 30, schedules 105, palette 6, browser 25, termview 6</td><td>b7</td></tr>
 <tr><td><b>total</b></td><td><b>474</b></td><td><b>224</b></td><td><b>403</b></td><td>about 1,700 across the client</td><td></td></tr>
 </tbody>
 </table></div>
 <p>The label table therefore lands in two waves: phase A needs about <b>200</b> keys (transcript chrome ~60, entry rows and files/artifacts ~84, composer ~50, mount/toast ~6); phase B adds about <b>600</b> (sidebar 111, spawn 51, fleet 29, tabs 32, command menu 20, dictation 7, the rest of <code>entries.js</code> 146, the other views ~200). Each part's slice adds its own keys, so no slice is a translation of the whole client at once.</p>
 <h2>Phase A — the hosts' chat</h2>
-<p>Seven slices, in this order. Each is one PR, one worker, one worktree; the code in a slice is the hypothesis and the slice's tests judge it. The full browser suite runs on CI after each slice, unchanged.</p>
+<p>Eight slices, in this order, on one branch, <code>961-mountable-client</code>, and one PR for the phase. They run one at a time in this one worktree, each by one agent that commits and pushes its slice; workers do not open PRs. After each slice the nightly workflow (the slow and browser suites) runs on CI on the branch and is compared with a baseline taken on the untouched branch at the phase's start. The main agent reviews every slice's diff against this plan and the spec. The code in a slice is the hypothesis and the slice's tests judge it; the existing browser suite is not edited.</p>
 
-<details class="task" id="a1-host-entry" data-state="pending">
-<summary><span class="num">A1</span><span><span class="ttl">The host entry: <code>/aegis.js</code>, the prefix, the manifest and one socket</span><span class="files">src/aegis/server.py · src/aegis/web.py · js/aegis.js · js/mount.js · js/connection.js · js/protocol.js · js/root.js · js/dom.js · js/labels.js · js/labels/en.js · js/labels/es.js · index.html · js/toast.js · js/dialog.js · js/menu.js · js/glyphs.js · tests/host_fixture.py · tests/test_mount_browser.py · tests/test_web.py · tests/test_library.py</span></span><span class="state"></span></summary>
+<details class="task" id="a1-host-serving" data-state="pending">
+<summary><span class="num">A1</span><span><span class="ttl">Serving the client under a prefix: <code>srv.asgi</code>, the manifest and the entry module</span><span class="files">src/aegis/server.py · src/aegis/web.py · src/aegis/client/index.html · src/aegis/client/js/aegis.js · tests/host_fixture.py · tests/test_web.py · tests/test_library.py</span></span><span class="state"></span></summary>
 <div class="body">
-<p>A host can serve the client under <code>/aegis</code>, mint a token, import <code>mount</code>, and get one <code>.aegis</code> root and one websocket carrying that token. No part of the transcript or composer yet: the kernel is the slice.</p>
+<p>A Python host can mount the client at its own prefix and mint the page's token. This slice is the server half only: no JavaScript changes, no mount yet.</p>
 <ol>
-<li><b>Connection.</b> <code>protocol.js</code> takes <code>{ token }</code> (a string or a function called on each connect), writes it in the <code>hello</code>, gains <code>stop()</code> and a generation guard so a token awaited across a stop never opens a socket. Existing callers pass no token and keep the cookie path.</li>
-<li><b>Registry.</b> <code>connection.js</code> implements <code>acquire(url, {token, onState})</code> keyed by URL and token (a function keyed by identity), refcounted, <code>release()</code> closing the socket at zero. It replays the last state to a mount that joins late.</li>
-<li><b>Kernel.</b> <code>mount.js</code>: the <code>Mount</code> class, <code>MountState</code>, <code>keyOf</code>/<code>forKey</code>, <code>call</code>/<code>callFor</code>, <code>on</code>/<code>emit</code>, <code>send</code> (a no-op until a5), <code>destroy</code>, the URL table, and <code>makeRoot</code> with <code>.aegis</code>, <code>data-theme</code>, the stylesheet links and the glyph sprite. It mounts an empty <code>.aegis-chat</code>; a3 and a5 add the imports and the parts. <code>layout: "full"</code> is accepted but composes nothing until b8; <code>layout: "chat"</code> is the only layout that draws.</li>
-<li><b>Entry.</b> <code>aegis.js</code> is two lines: <code>export { mount } from "./static/js/mount.js";</code>. It is a file in <code>js/</code>, not a build.</li>
-<li><b>Labels.</b> <code>labels.js</code> with the fallback and one warning per missing key; empty <code>en.js</code>/<code>es.js</code> with the six mount keys. No part uses them yet.</li>
-<li><b>Root helpers.</b> <code>root.js</code>'s <code>rootOf(node)</code>; <code>dom.js</code>'s <code>q</code>/<code>qa</code>/<code>byId</code>. <code>toast</code>, <code>ask</code> and the context menu take or find the root they draw in (a part passes its mount's root; the default is <code>rootOf(document.activeElement)</code>) instead of appending to <code>#a2</code>; <code>glyphs.js</code>'s <code>installGlyphs(root = document.body)</code> takes a root and is idempotent per root.</li>
-<li><b>Server.</b> <code>Server(prefix="/aegis")</code>, <code>srv.asgi</code> (the relative app, mounted by the host at the prefix); <code>build_web(..., prefix)</code> keeps its routes relative and writes the prefix into the URLs it generates; <code>client_files(version, prefix)</code> carries prefixed URLs and a cached content hash; <code>/manifest.json</code> is the hashed listing plus <code>prefix</code>; <code>/aegis.js</code> is the entry module; <code>index</code> fills <code>__AEGIS_PREFIX__</code> in its HTML; <code>/mcp</code> stays at the root. <code>aegis serve</code> passes the empty prefix and is unchanged. A prefixed Server's loopback listener is not a browsable client: the host serves the page, or its proxy forwards the browser's <code>/aegis/…</code> to the loopback root.</li>
-<li><b>The fixture.</b> <code>tests/host_fixture.py</code> is a program the browser test starts like <code>aegis serve</code>: it runs <code>Server(root, policy=Named(), prefix="/aegis", origins=[host origin])</code>, spawns or reuses one session as <code>Who("ana")</code>, writes its id, and serves a Starlette host app with <code>app.mount("/aegis", srv.asgi)</code> and a page that imports <code>/aegis/aegis.js</code> and calls <code>mount</code>. For this slice the page is one <code>&lt;div id="chat"&gt;</code>.</li>
+<li><b>Server.</b> <code>Server(prefix="/aegis")</code> and <code>srv.asgi</code>: the app whose routes are relative, which the host mounts at its prefix (or a proxy reaches with the prefix stripped). <code>srv.url</code> stays the loopback sign-in URL; a prefixed server's loopback listener is not browsable, and the host serves the page.</li>
+<li><b>URLs.</b> <code>build_web(app, token, allowed_hosts, origins, prefix)</code> keeps its routes relative and writes <code>prefix</code> into every URL it generates. <code>client_files(version, prefix)</code> carries prefixed URLs and a cached content hash; <code>/manifest.json</code> is the hashed listing plus <code>build</code>, <code>version</code> and <code>prefix</code>; the MCP routes stay at the app's root so harness children keep <code>&lt;base_url&gt;/mcp</code>.</li>
+<li><b>Page links.</b> <code>index.html</code>'s asset links become <code>__AEGIS_PREFIX__/…</code>; the <code>index</code> route fills the placeholder with <code>prefix</code>, so the same file serves the standalone at <code>""</code> and a host at <code>/aegis</code>.</li>
+<li><b>Entry module.</b> <code>js/aegis.js</code> is the public entry, <code>export { mount } from "./static/js/mount.js";</code>, served at <code>&lt;prefix&gt;/aegis.js</code> by a route that reads the file. <code>mount.js</code> arrives in a2; nothing imports the entry before then.</li>
+<li><b>The fixture.</b> <code>tests/host_fixture.py</code> is the program every later browser test starts: it runs <code>Server(root, policy=Named(), prefix="/aegis", origins=[host origin])</code>, spawns or reuses one session as <code>Who("ana")</code>, writes its id, and serves a Starlette host app with <code>app.mount("/aegis", srv.asgi)</code> and a static page. a2 replaces the page's body with the mount script; a1 only proves the server half.</li>
 </ol>
 <script type="text/plain" data-lang="python">
-# tests/host_fixture.py, run by the browser test
+# tests/host_fixture.py
 async def main(root: Path, port: int):
     async with Server(root, claude=claude, policy=Named(), prefix="/aegis",
                       origins=[f"http://127.0.0.1:{port}"]) as srv:
@@ -708,8 +705,27 @@ async def main(root: Path, port: int):
         await uvicorn.Server(uvicorn.Config(host, host="127.0.0.1", port=port,
                                             log_level="warning")).serve()
 </script>
+<h4>tests</h4>
+<script type="text/plain" data-lang="bash">uv run pytest -q tests/test_web.py tests/test_library.py</script>
+<p>New in <code>tests/test_web.py</code>: the manifest lists every client file under <code>/aegis/static/…</code> with a hash and the right <code>prefix</code>; <code>/aegis.js</code> is the entry module; the index carries the prefix; <code>/mcp</code> is at the root. New in <code>tests/test_library.py</code>: <code>srv.asgi</code> mounted in a Starlette app answers <code>/aegis/</code>, and a websocket at <code>/aegis/ws</code> whose <code>hello</code> carries <code>srv.token_for(Who("ana"))</code> is welcomed as Ana. No JavaScript is touched.</p>
+<h4>done</h4>
+<p>Both files pass; <code>make gates</code> is clean; the fixture is in place for a2 to mount into; the slice's report carries a terminal capture of <code>curl /aegis/manifest.json</code> and of the mounted page's headers.</p>
+</div></details>
+
+<details class="task" id="a2-client-kernel" data-state="pending">
+<summary><span class="num">A2</span><span><span class="ttl">The mount kernel: one root, one socket, labels and the rooted helpers</span><span class="files">js/mount.js · js/connection.js · js/protocol.js · js/root.js · js/dom.js · js/labels.js · js/labels/en.js · js/labels/es.js · js/toast.js · js/dialog.js · js/menu.js · js/glyphs.js · tests/host_fixture.py · tests/test_mount_browser.py (new)</span></span><span class="state"></span></summary>
+<div class="body">
+<p>Import <code>mount</code> in a host page and get one <code>.aegis</code> root, its theme, and one websocket carrying the page's token; destroy it and both go. No transcript or composer yet.</p>
+<ol>
+<li><b>Connection.</b> <code>protocol.js</code> takes <code>{ token }</code> (a string or a function called on each connect), writes it in the <code>hello</code>, gains <code>stop()</code> and a generation guard so a token awaited across a stop never opens a socket. Existing callers pass no token and keep the cookie path; <code>app.py</code> already resolves a minted <code>token_for</code> token, so this is only the token carried.</li>
+<li><b>Registry.</b> <code>connection.js</code> implements <code>acquire(url, {token, onState})</code> keyed by URL and token (a function keyed by identity), refcounted, <code>release()</code> closing the socket at zero, and replays the last state to a mount that joins late.</li>
+<li><b>Kernel.</b> <code>mount.js</code>: the <code>Mount</code> class, <code>MountState</code>, <code>keyOf</code>/<code>forKey</code>, <code>call</code>/<code>callFor</code>, <code>on</code>/<code>emit</code>, <code>send</code> (a no-op until a6), <code>destroy</code>, the URL table, and <code>makeRoot</code> with <code>.aegis</code>, <code>data-theme</code>, the stylesheet links and the glyph sprite. It mounts an empty <code>.aegis-chat</code>; a4 and a6 add the imports and the parts. <code>layout: "full"</code> is accepted but composes nothing until b8; <code>layout: "chat"</code> is the only layout that draws.</li>
+<li><b>Session meta and <code>turnEnd</code>.</b> The mount subscribes <code>sessions</code>, keeps <code>state.sessions</code> and <code>state.shown</code>, remembers the cumulative <code>cost_usd</code> on the patch that enters <code>working</code>, and emits <code>turnEnd</code> on the patch that leaves it with <code>{session, cost_usd: end - start, line: meta.attention_line || null}</code> (<code>null</code> if the mount joined mid-turn).</li>
+<li><b>Labels.</b> <code>labels.js</code> with the fallback and one warning per missing key; empty <code>en.js</code>/<code>es.js</code> with the six mount keys. No part uses them yet.</li>
+<li><b>Root helpers.</b> <code>root.js</code>'s <code>rootOf(node)</code>; <code>dom.js</code>'s <code>q</code>/<code>qa</code>/<code>byId</code>. <code>toast</code>, <code>ask</code> and the context menu take or find the root they draw in (a part passes its mount's root; the default is <code>rootOf(document.activeElement)</code>) instead of appending to <code>#a2</code>; <code>glyphs.js</code>'s <code>installGlyphs(root = document.body)</code> takes a root and is idempotent per root.</li>
+</ol>
 <script type="text/plain" data-lang="javascript">
-// the fixture page's script
+// the fixture page's body, from a2 on
 import { mount } from "/aegis/aegis.js";
 const chat = mount(document.getElementById("chat"), {
   token: "__TOKEN__", layout: "chat", session: "__SESSION__", theme: "host",
@@ -717,44 +733,44 @@ const chat = mount(document.getElementById("chat"), {
 window.__chat = chat;
 </script>
 <h4>tests</h4>
-<script type="text/plain" data-lang="bash">uv run pytest -q tests/test_web.py tests/test_library.py
-uv run pytest -q -m browser tests/test_mount_browser.py -k "mount or socket"</script>
-<p>New: <code>tests/test_web.py</code> gets the manifest's prefixed URLs, the <code>aegis.js</code> module and the hashes; <code>tests/test_library.py</code> gets <code>srv.asgi</code> mounted in a Starlette app and a websocket that signs in with <code>token_for</code>. The browser test asserts the root, <code>data-theme="host"</code>, exactly one socket on the page, and that <code>destroy()</code> removes the root and closes it.</p>
+<script type="text/plain" data-lang="bash">uv run pytest -q -m browser tests/test_mount_browser.py -k "mount or socket"</script>
+<p>The browser test loads the fixture and asserts: one <code>.aegis</code> child under <code>#chat</code>, <code>data-theme="host"</code>, exactly one websocket on the page, the welcome names Ana, <code>destroy()</code> removes the root and closes the socket, and a second mount with the same URL and token shares the first socket. Nothing outside <code>#chat</code> changed.</p>
 <h4>done</h4>
-<p>Both test files and the new browser test pass; <code>make gates</code> is clean; a `grep -r '#a2' js/` finds only the full layout's <code>rootOf</code> fallback and no new one; the PR carries a terminal capture of the manifest and the fixture page at 1280 px.</p>
+<p>The browser test passes at 1280 and 390; <code>make gates</code> is clean; a <code>grep -r '#a2' js/</code> finds only <code>rootOf</code>'s fallback and no new one; no <code>app.js</code> change.</p>
 </div></details>
 
-<details class="task" id="a2-css-aegis" data-state="pending">
-<summary><span class="num">A2</span><span><span class="ttl">The <code>.aegis</code> root and the styling contract</span><span class="files">css/base.css → css/client.css · css/page.css (new) · themes/*.css · index.html · js/mount.js · scripts/cascade_baseline.py (new) · tests/fixtures/cascade-baseline.json (new) · tests/test_css_scope.py (new)</span></span><span class="state"></span></summary>
+<details class="task" id="a3-css-aegis" data-state="pending">
+<summary><span class="num">A3</span><span><span class="ttl">The <code>.aegis</code> root and the styling contract</span><span class="files">css/base.css → css/client.css · css/page.css (new) · themes/*.css · index.html · js/mount.js · scripts/cascade_baseline.py (new) · tests/fixtures/cascade-baseline.json (new) · tests/test_css_scope.py (new)</span></span><span class="state"></span></summary>
 <div class="body">
 <p>The 2,288 <code>#a2</code> selectors become <code>.aegis</code>, the four page-level rules move out of the mount's stylesheet, the themes set variables on the root itself, and the specificity loss is measured rather than argued.</p>
 <ol>
-<li><b>Baseline first.</b> Write and run <code>scripts/cascade_baseline.py</code> on the unchanged tree: it starts the client, visits Fleet, a session, New session and Settings at 1280 and 390, and writes <code>tests/fixtures/cascade-baseline.json</code> — a fixed inventory of selectors, about thirty properties each, and the specificity ledger of every selector in <code>base.css</code> and the themes. Commit the baseline <em>before</em> the rewrite in the same PR, so the diff shows what the test compares.</li>
+<li><b>Baseline first.</b> Write and commit <code>scripts/cascade_baseline.py</code>, then run it in this worktree at the slice's base commit (<code>git rev-parse HEAD</code> before any CSS edit) against the untouched client: one <code>aegis serve</code> and one browser pass visit Fleet, a session, New session and Settings at 1280 and 390, and write <code>tests/fixtures/cascade-baseline.json</code> — a fixed inventory of selectors, about thirty properties each, and the specificity ledger of every selector in <code>base.css</code> and the themes. Commit the baseline before the rewrite, on the phase's branch; the script stays in the tree so a reviewer can rerun it at the base commit and get the same file.</li>
 <li><b>The rewrite.</b> A token-aware replace of <code>#a2</code> with <code>.aegis</code> in <code>base.css</code> and every theme. In themes, <code>[data-theme=x] #a2{…}</code> becomes <code>.aegis[data-theme=x]{…}</code> (the same element). Keep <code>#a2[data-theme=x] .card</code> forms as <code>.aegis[data-theme=x] .card</code>.</li>
 <li><b>The split.</b> <code>base.css</code> becomes <code>client.css</code> with no global rule: <code>*</code>, <code>html, body</code>, <code>body</code> and <code>#probes</code> go to <code>page.css</code>, which only <code>index.html</code> loads. <code>index.html</code> loads both, and its root gets <code>class="aegis"</code> beside <code>id="a2"</code>.</li>
-<li><b>Scope the strays.</b> <code>.tabcard</code> → <code>.aegis .tabcard</code>, <code>svg.ic</code> → <code>.aegis svg.ic</code>; a toast, dialog, menu and sprite draw in the mount's root (a1 already did the JS half).</li>
+<li><b>Scope the strays.</b> <code>.tabcard</code> → <code>.aegis .tabcard</code>, <code>svg.ic</code> → <code>.aegis svg.ic</code>; a toast, dialog, menu and sprite draw in the mount's root (a2 already did the JS half).</li>
 <li><b>Layout modes.</b> <code>.aegis[data-layout=full]</code> keeps the <code>100dvh</code> grid and the <code>:has(> .netbanner)</code> row; <code>.aegis[data-layout=chat]</code> is <code>height:100%; display:flex; flex-direction:column; min-height:0</code>; the root itself sets <code>box-sizing</code> on its subtree.</li>
-<li><b>The host fallback.</b> Put ink's variables in <code>:where(.aegis){…}</code> (zero specificity) so <code>theme:"host"</code> starts sane and any host rule wins. Document the variable list on the help page in a7.</li>
+<li><b>The host fallback.</b> Put ink's variables in <code>:where(.aegis){…}</code> (zero specificity) so <code>theme:"host"</code> starts sane and any host rule wins. Document the variable list on the help page in a8.</li>
 <li><b>The audit test.</b> <code>tests/test_css_scope.py</code>: static — no <code>#a2</code> in any stylesheet a mount loads, and the specificity ledger admits no non-<code>.aegis</code> selector that now outranks one it lost to before; browser — re-measure the baseline inventory at both widths and diff it, naming the element and property that moved.</li>
 </ol>
 <h4>tests</h4>
 <script type="text/plain" data-lang="bash">uv run pytest -q -m browser tests/test_css_scope.py tests/test_browser.py</script>
-<p>Nothing in <code>tests/</code> is edited: the suite keeps reading <code>#a2</code>, which is why the id stays on the root. The browser test is the computed-style half; CI runs the rest.</p>
+<p>Nothing in <code>tests/</code> is edited: the suite keeps reading <code>#a2</code>, which is why the id stays on the root. The browser test is the computed-style half; the nightly suite runs the rest on the branch.</p>
 <h4>done</h4>
-<p>No stylesheet a mount loads mentions <code>#a2</code>; the baseline diff is empty at 1280 and 390; the full suite passes on CI; the PR body names every selector whose specificity changed and why nothing outside <code>.aegis</code> now wins.</p>
+<p>No stylesheet a mount loads mentions <code>#a2</code>; the baseline diff is empty at 1280 and 390; the full suite passes; the slice's report, and at the end the phase's PR body, names every selector whose specificity changed and why nothing outside <code>.aegis</code> now wins.</p>
 </div></details>
 
-<details class="task" id="a3-transcript-part" data-state="pending">
-<summary><span class="num">A3</span><span><span class="ttl">The transcript part</span><span class="files">js/parts/transcript.js (new) · js/transcript.js · js/entries.js · js/find.js · js/viewer.js · js/mount.js · css/client.css · tests/test_mount_browser.py</span></span><span class="state"></span></summary>
+<details class="task" id="a4-transcript-part" data-state="pending">
+<summary><span class="num">A4</span><span><span class="ttl">The transcript part</span><span class="files">js/parts/transcript.js (new) · js/transcript.js · js/entries.js · js/find.js · js/viewer.js · js/mount.js · css/client.css · tests/test_mount_browser.py</span></span><span class="state"></span></summary>
 <div class="body">
 <p>One session's transcript, mounted into any element: rows that stream, the fold levels, the navigator, find, the working/replies/queued/cold/closing rows, and the viewer for a file or an artifact. The existing <code>Transcript</code> class does the hard part; the part supplies its nodes and its live wiring.</p>
 <ol>
 <li><b>Markup.</b> Move the <code>#tr</code>, <code>#entries</code>, the six status rows, <code>#nav</code>, <code>#find</code> and <code>#viewer</code> slices of <code>index.html</code> into <code>TRANSCRIPT_HTML</code>, ids intact. The part appends one <code>.tr-pane</code> under the root it is given.</li>
 <li><b>Nodes under the root.</b> <code>q(this.el, …)</code> for every node; no <code>document.getElementById</code>. The <code>Transcript</code> constructor receives the scroller, the list and the jump button.</li>
+<li><b>Ids and references.</b> The transcript markup has no <code>label[for]</code>, <code>aria-controls</code> or <code>aria-labelledby</code> that points at an id — checked against <code>index.html</code>: the page's only <code>aria-controls="hdr-menu"</code> belongs to the header part (b2), and its target is inside that part; the only <code>label for="login-token"</code> is the boot form. A new reference in this part must point at an id inside <code>this.el</code>, so <code>byId(this.el, …)</code> resolves it; the mount test asserts no query leaves the part and that <code>byId(this.el, "entries")</code> is the list.</li>
 <li><b>Show.</b> <code>show(key)</code> clears, stashes/restores through <code>mount.state.kept</code>, sets the file base to <code>CLIENT.pathname</code> (+ <code>/via/&lt;server&gt;</code>), subscribes <code>transcript:&lt;log_id&gt;</code> with the revision it holds, and calls <code>snapshot</code> or <code>resume</code>. A kept tab mounts at once; a cold one reads the device's copy first.</li>
 <li><b>Base threading.</b> <code>entries.js</code>: <code>fileUrl(url, base = "")</code>, <code>render(entry, { base })</code>, <code>artifactStage(e, { base })</code>; the part passes its base. <code>setFileBase</code> stays for <code>app.js</code> until b1.</li>
-<li><b>Rows.</b> Draw the working row's clock and the verbs, the replies/pills and handoff, the queued outbox row (the outbox instance arrives in a5; until then it reads the device store directly? no — a5 owns it; in a3 the queued row is markup and a3 draws it from <code>draftFor</code>, guarded so it is empty until a5), the cache-cold row, the phone Archive row, and the offline notice.</li>
-<li><b>Events.</b> Every transcript upsert emits <code>entry</code>; the session's <code>sessions</code> patch leaving <code>working</code> emits <code>turnEnd</code>. <code>error</code> is emitted for a transcript channel error and for a refused detail fetch the part reports.</li>
+<li><b>Rows.</b> Draw the working row's clock and the verbs, the replies/pills and handoff, the cache-cold row, the phone Archive row, and the offline notice. The queued row's markup lives here and stays empty in this slice: the composer slice (a6) adds the <code>Outbox</code> that fills it.</li>
+<li><b>Events.</b> Every transcript upsert emits <code>entry</code>; <code>turnEnd</code> comes from the mount's <code>sessions</code> subscription (a2). <code>error</code> is emitted for a transcript channel error and for a refused detail fetch the part reports.</li>
 <li><b>Chat styling.</b> In the chat layout the transcript fills the root, and the nav/find stay in the markup; a host that wants a bare answer pane hides them with <code>.aegis .nav{display:none}</code>, the documented contract.</li>
 </ol>
 <script type="text/plain" data-lang="javascript">
@@ -772,8 +788,8 @@ uv run pytest -q -m browser tests/test_stream_browser.py</script>
 <p>The mount test passes at 1280 and 390 px; <code>test_stream_browser.py</code> passes unchanged; <code>make gates</code>; screenshots of a streaming reply in the mount at both widths.</p>
 </div></details>
 
-<details class="task" id="a4-labels-transcript" data-state="pending">
-<summary><span class="num">A4</span><span><span class="ttl">The transcript's strings, English and Spanish</span><span class="files">js/parts/transcript.js · js/transcript.js · js/entries.js · js/labels/en.js · js/labels/es.js · tests/test_labels.py (new) · tests/test_mount_browser.py</span></span><span class="state"></span></summary>
+<details class="task" id="a5-labels-transcript" data-state="pending">
+<summary><span class="num">A5</span><span><span class="ttl">The transcript's strings, English and Spanish</span><span class="files">js/parts/transcript.js · js/transcript.js · js/entries.js · js/labels/en.js · js/labels/es.js · tests/test_labels.py (new) · tests/test_mount_browser.py</span></span><span class="state"></span></summary>
 <div class="body">
 <p>Every string the transcript part and the entry rows it draws can show moves behind <code>t()</code>. The workflow, secret, sign-in, config and knowledge cards are phase B (they are not what a host's chat reaches first); the rows, files, artifacts, errors, system notes and chrome are this slice.</p>
 <ol>
@@ -787,15 +803,16 @@ uv run pytest -q -m browser tests/test_stream_browser.py</script>
 <script type="text/plain" data-lang="bash">uv run pytest -q tests/test_labels.py
 uv run pytest -q -m browser tests/test_mount_browser.py -k "spanish or label"</script>
 <h4>done</h4>
-<p>Parity passes; the Spanish mount shows Spanish chrome and rows; no literal in the phase-A transcript path remains outside the table; <code>make gates</code>; the PR shows the same reply in English and Spanish at 390 px.</p>
+<p>Parity passes; the Spanish mount shows Spanish chrome and rows; no literal in the phase-A transcript path remains outside the table; <code>make gates</code>; the slice's report shows the same reply in English and Spanish at 390 px.</p>
 </div></details>
 
-<details class="task" id="a5-composer-part" data-state="pending">
-<summary><span class="num">A5</span><span><span class="ttl">The composer part, attachments and the outbox</span><span class="files">js/parts/composer.js (new) · js/attach.js · js/outbox.js · js/parts/transcript.js · js/mount.js · js/app.js · tests/test_mount_browser.py</span></span><span class="state"></span></summary>
+<details class="task" id="a6-composer-part" data-state="pending">
+<summary><span class="num">A6</span><span><span class="ttl">The composer part, attachments and the outbox</span><span class="files">js/parts/composer.js (new) · js/attach.js · js/outbox.js · js/parts/transcript.js · js/mount.js · js/app.js · tests/test_mount_browser.py</span></span><span class="state"></span></summary>
 <div class="body">
 <p>The box and everything that makes a send safe: the 5 s verdict, the nonce, the untested-harness question, attachments uploading in chunks, the per-session draft, commands and dictation off by default, and the outbox when the connection is not there.</p>
 <ol>
 <li><b>Markup.</b> Move <code>#composer</code>, <code>#input</code>, <code>#send</code>, <code>#attach</code>, <code>#attach-pick</code>, <code>#atts</code>, <code>#send-error</code>, the chips and the actions row into the part. The mic and the command menu are empty slots: <code>[data-slot=mic]</code>, <code>[data-slot=menu]</code>.</li>
+<li><b>Ids and references.</b> The composer markup adds no <code>label[for]</code>, <code>aria-controls</code> or <code>aria-labelledby</code>; if one is added, its target lives inside the same part and <code>byId(this.el, …)</code> resolves it. The chat test in a8 also proves the host's own <code>#composer</code> still resolves to the host's node.</li>
 <li><b>Send.</b> Move <code>send</code>/<code>sendLine</code>/<code>sendFirst</code>/<code>answered</code>/<code>nonceFor</code>/<code>drawSending</code> and the interrupt into the part, with the mount's <code>callFor</code>. <code>send(text)</code> is the host's call and returns the send's promise; a <code>/</code> line still goes to the server as a line.</li>
 <li><b>Attachments.</b> <code>Attachments</code> takes the tray node the part built; uploads, paste and drop are per mount; the full layout's <code>spAtts</code> hold mode stays in app.js until b5.</li>
 <li><b>Outbox.</b> Turn <code>outbox.js</code> into an <code>Outbox</code> class (one per mount) over the same device store; <code>app.js</code> constructs one instance for the full layout so b1 has less to move. A draft's queued row is drawn by the transcript part; sending offline queues, sending again after a drop reuses the nonce, and a reconnect flushes.</li>
@@ -810,8 +827,8 @@ uv run pytest -q -m browser tests/test_browser.py -k "queued"</script>
 <p>The mount sends, attaches and queues; the full layout's queued test passes unchanged; <code>make gates</code>; screenshots of the composer, a chip and the queued row at 1280/390.</p>
 </div></details>
 
-<details class="task" id="a6-labels-composer" data-state="pending">
-<summary><span class="num">A6</span><span><span class="ttl">The composer's strings, English and Spanish</span><span class="files">js/parts/composer.js · js/attach.js · js/outbox.js · js/labels/en.js · js/labels/es.js · tests/test_labels.py · tests/test_mount_browser.py</span></span><span class="state"></span></summary>
+<details class="task" id="a7-labels-composer" data-state="pending">
+<summary><span class="num">A7</span><span><span class="ttl">The composer's strings, English and Spanish</span><span class="files">js/parts/composer.js · js/attach.js · js/outbox.js · js/labels/en.js · js/labels/es.js · tests/test_labels.py · tests/test_mount_browser.py</span></span><span class="state"></span></summary>
 <div class="body">
 <p>The composer's placeholders and titles, the attach/mic/send/interrupt labels and their touch variants, the chip names, the upload sizes, the send errors and the outbox's toasts.</p>
 <ol>
@@ -826,15 +843,15 @@ uv run pytest -q -m browser tests/test_mount_browser.py -k "spanish"</script>
 <p>Parity green; the Spanish composer reads as Spanish; <code>make gates</code>; a 390 px shot of both languages.</p>
 </div></details>
 
-<details class="task" id="a7-chat-layout-and-docs" data-state="pending">
-<summary><span class="num">A7</span><span><span class="ttl">The chat layout, the foreign fixture, and what the phase ships</span><span class="files">js/mount.js · js/parts/transcript.js · js/parts/composer.js · tests/host_fixture.py · tests/test_mount_browser.py · src/aegis/help/library.md · changelog.d/961-mountable-client.added.md (new) · DESIGN.md</span></span><span class="state"></span></summary>
+<details class="task" id="a8-chat-layout-and-docs" data-state="pending">
+<summary><span class="num">A8</span><span><span class="ttl">The chat layout, the foreign fixture, and what the phase ships</span><span class="files">js/mount.js · js/parts/transcript.js · js/parts/composer.js · tests/host_fixture.py · tests/test_mount_browser.py · src/aegis/help/library.md · changelog.d/961-mountable-client.added.md (new) · DESIGN.md</span></span><span class="state"></span></summary>
 <div class="body">
 <p>Compose the two parts into <code>layout: "chat"</code>, make the events and <code>send</code>/<code>destroy</code> real, and prove the whole story in a host page that already uses the ids and the CSS a chat would trip over.</p>
 <ol>
 <li><b>Composition.</b> <code>mountLayout</code> builds the transcript and, with <code>composer: true</code>, the composer under the same <code>.aegis-chat</code>; <code>follow(session)</code> subscribes it; <code>send(text)</code> goes through the composer; <code>destroy()</code> unsubscribes, removes the root, releases the socket.</li>
 <li><b>Events.</b> <code>entry</code>, <code>turnEnd</code>, <code>error</code> as described in the architecture; a host that reloads on <code>turnEnd</code> is the test.</li>
 <li><b>The fixture page.</b> Extend <code>tests/host_fixture.py</code>'s page: its own <code>&lt;div id="composer"&gt;</code> and <code>&lt;div id="tabs"&gt;</code> with text, a <code>&lt;main id="board"&gt;</code>, and a host stylesheet on <code>:root</code> with the full variable set plus <code>.aegis .tool { display: none }</code>. The mount target is <code>#chat</code>.</li>
-<li><b>The test.</b> At 1280 and 390: no page errors; the host's <code>#composer</code> and <code>#tabs</code> text, size and position are unchanged; the mount's composer is under <code>#chat .aegis</code> and the page's only <code>#input</code>; the host's <code>--bg</code> is the transcript's computed background; tool rows are hidden by the host rule; a message sent from the mount streams back and <code>turnEnd</code> fires. Then stop the fixture, send, see the queued row, restart, and see the message arrive once.</li>
+<li><b>The test.</b> At 1280 and 390: no page errors; the host's <code>#composer</code> and <code>#tabs</code> text, size and position are unchanged, and <code>document.getElementById("composer")</code> and <code>document.getElementById("tabs")</code> still return the host's own nodes, not the mount's; the mount's composer is under <code>#chat .aegis</code> and the page's only <code>#input</code>; the host's <code>--bg</code> is the transcript's computed background; tool rows are hidden by the host rule; a message sent from the mount streams back, <code>turnEnd</code> fires once with a numeric <code>cost_usd</code> equal to the session's cumulative cost after the turn minus before it, and <code>line</code> null for a plain done turn. Then stop the fixture, send, see the queued row, restart, and see the message arrive once.</li>
 <li><b>Docs.</b> A section in <code>src/aegis/help/library.md</code>, <code>## The chat in your page</code>: <code>srv.asgi</code> at the host's prefix, <code>srv.token_for</code>, <code>mount</code> options, <code>theme: "host"</code>, the variable list, <code>manifest.json</code> for the service worker, and the proxy note (a proxy strips the prefix before the loopback port; the browser's URLs keep it).</li>
 <li><b>DESIGN.md</b> gains the "A client is a set of mounts" rule under the client's rules, and the changelog fragment is <code>added</code>, ending <code>help: library#the-chat-in-your-page</code>.</li>
 </ol>
@@ -856,10 +873,10 @@ uv run pytest -q -m browser tests/test_mount_browser.py -k "spanish"</script>
 <script type="text/plain" data-lang="bash">make gates && make lint-docs
 uv run pytest -q -m browser tests/test_mount_browser.py</script>
 <h4>done</h4>
-<p>The fixture test passes at both widths, including the offline send; <code>make gates</code> and <code>make lint-docs</code> are clean; the changelog check accepts the fragment; the PR carries the 1280 and 390 fixture screenshots and a terminal capture of <code>curl /aegis/manifest.json</code>; CI is green.</p>
+<p>The fixture test passes at both widths, including the offline send; <code>make gates</code> and <code>make lint-docs</code> are clean; the changelog check accepts the fragment; the slice's report, and the phase's PR when it opens, carry the 1280 and 390 fixture screenshots and a terminal capture of <code>curl /aegis/manifest.json</code>; the nightly suite is green on the branch.</p>
 </div></details>
 <h2>Phase B — the rest of #961</h2>
-<p>Nine slices. They start only after phase A is merged, and they keep the full client working after each one: the parts are adopted by <code>app.js</code> slice by slice, and <code>index.html</code> loses its markup in the same slice that moves it.</p>
+<p>Nine slices, in this order, on a second branch, <code>961-mountable-client-b</code>, branched from <code>main</code> after phase A merges, with one PR for the phase. They run one at a time in one worktree, each by one agent that commits and pushes; workers do not open PRs, and after each slice the nightly suite runs on CI on the branch against the phase's baseline while the main agent reviews the diff. They keep the full client working after each one: the parts are adopted by <code>app.js</code> slice by slice, and <code>index.html</code> loses its markup in the same slice that moves it.</p>
 
 <details class="task" id="b1-full-mount-state" data-state="pending">
 <summary><span class="num">B1</span><span><span class="ttl">The full layout's mount and its state</span><span class="files">js/mount.js · js/app.js · js/protocol.js · tests/test_browser.py</span></span><span class="state"></span></summary>
@@ -874,7 +891,7 @@ uv run pytest -q -m browser tests/test_mount_browser.py</script>
 <h4>tests</h4>
 <script type="text/plain" data-lang="bash">uv run pytest -q -m browser tests/test_browser.py</script>
 <h4>done</h4>
-<p>No module-level session, link, quota or host state remains in <code>app.js</code>; <code>test_browser.py</code> passes unchanged; <code>make gates</code>; the PR's benchmark table shows no regression (this slice adds no work per frame).</p>
+<p>No module-level session, link, quota or host state remains in <code>app.js</code>; <code>test_browser.py</code> passes unchanged; <code>make gates</code>; the phase's PR benchmark table shows no regression (this slice adds no work per frame).</p>
 </div></details>
 
 <details class="task" id="b2-tab-strip" data-state="pending">
@@ -884,6 +901,7 @@ uv run pytest -q -m browser tests/test_mount_browser.py</script>
 <ol>
 <li>Move the header markup from <code>index.html</code> into the part, ids intact (<code>#tablist</code>, <code>#tab-add</code>, <code>#hdr-burger</code>, <code>#hdr-menu</code>, …).</li>
 <li>Move <code>tabActions</code>, <code>tabFolds</code>, <code>quietSeen</code>, <code>sizeTabMore</code>, <code>setHdrMenu</code>/<code>markHdrMenu</code>, the <code>--hdr</code> ResizeObserver, and the switcher into the part; it exposes <code>cycle</code>, <code>stepTab</code>, <code>focus</code>, <code>close</code>, <code>render</code>.</li>
+<li><b>Ids and references.</b> The header's <code>aria-controls="hdr-menu"</code> must resolve inside the header part; both the burger and the menu move in the same slice, and the test asserts <code>byId(this.el, "hdr-menu")</code> is the menu and that the burger's <code>aria-controls</code> names it. No other part in the page carries a <code>label[for]</code>, <code>aria-controls</code> or <code>aria-labelledby</code> that crosses a part boundary.</li>
 <li><code>tabcard.js</code> appends to <code>rootOf(box)</code>; the tab sheet stays.</li>
 <li>The key table in <code>app.js</code> calls the part's methods; the keys themselves do not move (b8).</li>
 </ol>
@@ -986,7 +1004,7 @@ uv run pytest -q -m browser tests/test_browser.py -k spawn</script>
 <h4>tests</h4>
 <script type="text/plain" data-lang="bash">uv run pytest -q -m browser tests/test_browser.py tests/test_pages_browser.py</script>
 <h4>done</h4>
-<p><code>index.html</code> has no UI markup and the full suite passes unchanged, which is the proof the DOM is the same; <code>make gates</code>; the PR's benchmark table is no worse than the base; shots of Fleet, a session, New session and Settings at 1280/390.</p>
+<p><code>index.html</code> has no UI markup and the full suite passes unchanged, which is the proof the DOM is the same; <code>make gates</code>; the phase's PR benchmark table is no worse than the base; shots of Fleet, a session, New session and Settings at 1280/390.</p>
 </div></details>
 
 <details class="task" id="b9-labels-remaining-and-docs" data-state="pending">
@@ -1003,16 +1021,16 @@ uv run pytest -q -m browser tests/test_browser.py -k spawn</script>
 <script type="text/plain" data-lang="bash">uv run pytest -q tests/test_labels.py
 make lint-docs</script>
 <h4>done</h4>
-<p>Parity green; no user-visible literal outside the tables (a <code>grep</code> over the part modules in the PR body); the Spanish full client and the Spanish chat both read correctly; <code>make gates</code>; <code>make lint-docs</code>; CI green.</p>
+<p>Parity green; no user-visible literal outside the tables (a <code>grep</code> over the part modules in the phase's PR body); the Spanish full client and the Spanish chat both read correctly; <code>make gates</code>; <code>make lint-docs</code>; the nightly suite green on the branch.</p>
 </div></details>
 
 <h2>Where this plan departs from the spec</h2>
 <ul></ul>
 
 <h2>How this runs</h2>
-<p>One queue worker per slice, on the <code>general</code> queue, enqueued one at a time after the one before has come back: the slices touch the same files and would collide in one worktree. Each worker's brief says the worktree and branch, the plan and the spec, the slice's ids, that it runs only the named tests and <code>make gates</code>, one conventional commit per task staged by path, and that its last message is its report (commits, what it verified, every departure from the plan and why). This page is the plan; the worker marks each task's <code>data-state</code> as it goes, one edit each.</p>
-<p>After each slice the enqueuer merges <code>main</code>, opens the PR, and lets CI run the full suite and the bench; the worker's local run is only its slice. A slice that hides a state change (a1, a5, b1) gets a review agent; a mechanical move (a2, b3, b8) does not.</p>
-
+<p>Each phase is one branch and one PR: phase A on <code>961-mountable-client</code>; phase B on <code>961-mountable-client-b</code>, branched from <code>main</code> after phase A merges. Within a phase, slices run one at a time in the same worktree, each by one agent that commits and pushes; workers do not open PRs and do not merge.</p>
+<p>At the start of a phase the main agent takes the baseline: the nightly workflow's slow and browser suites on the untouched branch. After each slice the main agent dispatches <code>nightly.yml</code> on the branch (<code>gh workflow run nightly.yml --ref &lt;branch&gt;</code>; it has <code>workflow_dispatch</code>) and compares its result with the baseline; a new failure is the slice's until it is shown to fail on <code>main</code> too. The main agent reviews every slice's diff against this plan and the spec, not only the slices that move state; a separate review agent is added only where the diff could hide a state change (a2, a6, b1).</p>
+<p>The phase's PR is opened by the main agent when its last slice is in. It merges <code>main</code> into the branch, lets CI run the fast suite and the bench, copies the bench table into the PR body, and asks the person before merging. This page is the plan; each worker marks its tasks' <code>data-state</code> as it goes, one edit each, and its last message is its report: the commits, what it verified and how, and every departure from the plan with the reason.</p>
 </main>
 <script>
 // Tables read as cards on a phone: each cell says which column it was.
