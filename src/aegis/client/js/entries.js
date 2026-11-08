@@ -92,7 +92,7 @@ export function fadeTables(root) {
 
 // Where a sent file's URL is fetched from: "" on this server, `/via/<server>`
 // for a transcript from a linked one (web.py streams it from there).
-let fileBase = "";
+export let fileBase = "";
 export function setFileBase(base) {
   fileBase = base;
 }
@@ -146,12 +146,12 @@ export function entryFiles(e) {
 // round from the last file to the first, and a preview is built only when
 // its file is shown. The preview kind was decided at send (files.py); Open
 // hands the set to the viewer, at the file shown.
-function viaFile(f) {
-  // A linked server's file: every link is rebuilt here from a path of the
-  // one shape /via serves, so no URL the far server chose reaches an href
+function viaFile(f, base = fileBase) {
+  // A file under a prefix: every link is rebuilt here from a path of the
+  // one shape /files serves, so no URL the server chose reaches an href
   // or a frame on this origin (a javascript: download ran with the cookie).
   const ok = typeof f.url === "string" && /^\/files\/[A-Za-z0-9_-]+\/[^/?#]+$/.test(f.url);
-  f.url = ok ? fileBase + f.url : "about:blank";
+  f.url = ok ? base + f.url : "about:blank";
   f.download = ok ? `${f.url}?download=1` : "about:blank";
   return f;
 }
@@ -161,17 +161,16 @@ export function paneFile(f) {
   const remote = fileBase !== "";
   return { file: remote ? viaFile({ ...f }) : f, remote };
 }
-function fileCard(files, glyph) {
+function fileCard(files, glyph, { base = fileBase, remote = fileBase !== "", open = opener } = {}) {
   const sent = files.map((f) => ({ ...f }));
-  const remote = fileBase !== "";
-  if (remote) for (const f of sent) viaFile(f);
+  if (base !== "" || remote) for (const f of sent) viaFile(f, base);
   const card = el("div", "fcard");
   const bar = el("div", "fbar");
   const name = el("span", "fn");
   const size = el("span", "fs");
   const { acts, set } = fileActions(remote);
   const view = iconButton(el("button", "btn primary view"), "expand", "Open");
-  view.addEventListener("click", () => opener({ files: sent, at, remote, glyph }));
+  view.addEventListener("click", () => open({ files: sent, at, remote, glyph }));
   const dock = dockButton("");
   acts.prepend(view, ...(remote ? [] : [dock]));
   bar.append(entryIcon(glyph), name, size);
@@ -1829,12 +1828,12 @@ function argsView(text, lang) {
 }
 
 const RENDERERS = {
-  user(e) {
+  user(e, opts = {}) {
     const body = el("div", "body");
     if (e.md) body.append(markdown(e.md, { breaks: true }));
     if (e.detail?.files?.length) {
       // What the person attached: one card that pages, as a file_send's.
-      const card = fileCard(e.detail.files, "file");
+      const card = fileCard(e.detail.files, "file", opts);
       card.classList.add("att");
       if (e.md) card.classList.add("after");
       body.append(card);
@@ -1892,7 +1891,7 @@ const RENDERERS = {
     return row(e, "think", body);
   },
 
-  tool(e) {
+  tool(e, opts = {}) {
     const det = e.detail || {};
     const d = el("details");
     const line = el("summary", "line");
@@ -1916,7 +1915,7 @@ const RENDERERS = {
     }
     if (det.peek) {
       const cap = el("div", "peekcap", `as of ${hhmm(det.peek.ts)}`);
-      const card = fileCard(det.peek.files, det.peek.glyph);
+      const card = fileCard(det.peek.files, det.peek.glyph, opts);
       cap.dataset.chrome = card.dataset.chrome = "";
       more.append(cap, card);
     }
@@ -1968,7 +1967,7 @@ const RENDERERS = {
     return row(e, `inbox ${e.status}`, body);
   },
 
-  file(e) {
+  file(e, opts = {}) {
     // An agent's file_send, as a card (fileCard) under its caption.
     const det = e.detail || {};
     // A linked server older than sets sends its one file's fields on the detail.
@@ -1979,7 +1978,7 @@ const RENDERERS = {
       cap.classList.add("cap");
       body.append(cap);
     }
-    body.append(fileCard(sent, e.glyph));
+    body.append(fileCard(sent, e.glyph, opts));
     return row(e, "file", body);
   },
 
@@ -2078,7 +2077,7 @@ const RENDERERS = {
     return row(e, "workflow_decision", body);
   },
 
-  artifact(e) {
+  artifact(e, opts = {}) {
     // An agent's interactive page: a card like a file's, the frame while
     // live, one line with the label after. Status and label were decided in
     // the fold; the frame's state is handed over by js/artifacts.js on init.
@@ -2094,11 +2093,11 @@ const RENDERERS = {
     const bar = el("div", "fbar");
     const acts = el("span", "acts");
     const view = iconButton(el("button", "btn primary view"), "expand", "Open");
-    view.addEventListener("click", () => opener({ artifact: e.id }));
+    view.addEventListener("click", () => (opts.open || opener)({ artifact: e.id }));
     if (e.status === "live") acts.append(view, dockButton(e.id), popButton(e.id));
     else {
       const open = iconButton(el("a", "btn open"), "open", "Open in a new tab");
-      open.href = fileUrl(det.url);
+      open.href = fileUrl(det.url, opts.base);
       open.target = "_blank";
       open.rel = "noopener noreferrer";
       acts.append(view, open);
@@ -2112,7 +2111,7 @@ const RENDERERS = {
     holder?.onEntry(e);
     if (e.status === "live" && holder) card.append(heldLine(e.id, holder.label));
     else if (e.status === "live" && !docker.frames()) card.append(heldLine(e.id, "in window 1"));
-    else if (e.status === "live") card.append(artifactStage(e));
+    else if (e.status === "live") card.append(artifactStage(e, opts));
     else {
       const what = det.label || (e.status === "closed" ? "closed by the agent" : "answered");
       card.append(el("div", "done", `${what} · ${hhmm(det.ended_ts)}`));
@@ -2179,8 +2178,8 @@ const RENDERERS = {
   },
 };
 
-export function render(entry) {
-  const r = (RENDERERS[entry.kind] || RENDERERS.system)(entry);
+export function render(entry, opts = {}) {
+  const r = (RENDERERS[entry.kind] || RENDERERS.system)(entry, opts);
   // A part that opened has its place before its first words: nothing shows yet.
   if ((entry.kind === "prose" || entry.kind === "thinking") && !entry.md && !entry.summary && !entry.detail?.more) r.hidden = true;
   return r;
@@ -2189,10 +2188,10 @@ export function render(entry) {
 // A sent file's or artifact's URL as this page may use it: on a linked
 // server's transcript, only a path of the one shape /via serves, rebuilt here,
 // so no URL the far server chose reaches an href or a frame on this origin.
-export function fileUrl(url) {
-  if (fileBase === "") return url;
+export function fileUrl(url, base = fileBase) {
+  if (base === "") return url;
   const ok = typeof url === "string" && /^\/files\/[A-Za-z0-9_-]+\/[^/?#]+$/.test(url);
-  return ok ? fileBase + url : "about:blank";
+  return ok ? base + url : "about:blank";
 }
 
 // The artifacts held elsewhere (the viewer, a pane), each with what to call
@@ -2235,13 +2234,13 @@ export function phoneButton(id) {
 }
 
 // The frame of an artifact's card, live or shown again read-only.
-export function artifactStage(e) {
+export function artifactStage(e, { base = fileBase } = {}) {
   const stage = el("div", "stage html");
   stage.classList.toggle("phone", phoneIds.has(e.id));
   const f = el("iframe");
   f.setAttribute("sandbox", "allow-scripts");
   f.loading = "lazy";
-  f.src = fileUrl(e.detail.url);
+  f.src = fileUrl(e.detail.url, base);
   f.title = e.title;
   f.dataset.artifact = e.id;
   f.dataset.status = e.status;
@@ -2264,7 +2263,7 @@ const UPDATERS = {
     node.classList.toggle("unread", e.unread);
     return true;
   },
-  artifact(e, node) {
+  artifact(e, node, prev, { base = fileBase } = {}) {
     const card = node.querySelector(".acard");
     // A page the viewer or a pane holds runs only there: the card keeps a
     // line, and the agent's state goes to that frame, when the session is shown.
@@ -2281,7 +2280,7 @@ const UPDATERS = {
     // A new caption, a new title or a new page (a resend) remounts the card.
     if (card.dataset.md !== (e.md || "")) return false;
     if (node.querySelector(".fbar .fn")?.textContent !== e.title) return false;
-    if (frame && frame.getAttribute("src") !== fileUrl(e.detail?.url)) return false;
+    if (frame && frame.getAttribute("src") !== fileUrl(e.detail?.url, base)) return false;
     // Only a state the agent set since the frame last had one: every page
     // record patches this entry, and an emit must not echo the state back.
     const rev = String(e.detail?.state_rev);
@@ -2292,7 +2291,7 @@ const UPDATERS = {
     return true;
   },
 };
-export function update(e, node, prev) {
+export function update(e, node, prev, opts = {}) {
   const u = UPDATERS[e.kind];
-  return u ? u(e, node, prev) : false;
+  return u ? u(e, node, prev, opts) : false;
 }
