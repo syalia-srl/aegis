@@ -171,6 +171,10 @@ export class TranscriptPart {
     this.wire();
     this.drawNavNow();
     this.drawOfflineNotice();
+    // A snapshot after the socket came back is the server's whole transcript,
+    // even when its store is shorter than what this tab held (a restart cuts
+    // the tail): the Transcript decides with this state.
+    this.mount.on("connection", ({ state }) => this.transcript.connection(state));
     // The session's drafts are the mount's outbox (a6): a send queued offline
     // draws here, after the last row, whichever part put it there.
     this.unsubDrafts = this.mount.outbox?.on(() => this.drawQueued());

@@ -639,6 +639,9 @@ const checkPush = () => checkRotation().catch((e) => console.warn("aegis: checki
 // signed-out page.
 function onState(state, server) {
   header.setConn(state, server);
+  // A snapshot after the socket came back is authoritative, even if the
+  // server's store is shorter than what this tab held (a restart cuts the tail).
+  transcript.connection(state);
   // For the band offline, where the welcome that names the server is out of reach.
   if (state === "open" && server) localStorage.setItem("aegis.server", server);
   // What arrived before a close is still the server's latest: kept at once.
