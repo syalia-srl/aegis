@@ -304,6 +304,27 @@ class Server:
         restart, that the host's page passes to the client."""
         return self.app.token_for(who, ttl)
 
+    def sign_in(self, response: Any, token: str, request: Any = None) -> Any:
+        """Set the session cookie on ``response`` for a token from
+        :meth:`token_for`, as the standalone page's ``?token=`` sign-in does.
+
+        A host that hands its page a token needs this too: a websocket hello
+        carries the token, but an HTTP fetch of a sent file or a page's frame
+        cannot, and a narrowing policy refuses it without the cookie. The
+        cookie is HttpOnly and SameSite=strict; pass the ``request`` so a
+        host behind https gets ``Secure`` (when omitted, any https origin the
+        server was built with does). A minted token expires after its ``ttl``,
+        so a host that mints a new one signs the browser in again with it."""
+        from .web import cookie_name, sign_in_cookie
+
+        return sign_in_cookie(
+            response,
+            request,
+            token,
+            cookie_name(self.app.roots.state_root),
+            self._origins,
+        )
+
     async def _call(self, name: str, params: dict | None = None) -> Any:
         """Run operation ``name`` as the server's admin person."""
         if self._caller is None:

@@ -29,7 +29,6 @@ from starlette.responses import HTMLResponse
 from starlette.routing import Mount, Route
 
 from aegis import Server, SessionNotFound
-from aegis.web import cookie_name
 
 try:  # as a package, under pytest
     from .policies import Named, Who
@@ -122,22 +121,19 @@ def host_app(
     srv: Server,
     page: str,
     prefix: str = "/aegis",
-    cookie: tuple[str, str] | None = None,
+    token: str = "",
 ) -> Starlette:
     """The page at ``/`` and aegis mounted at ``prefix``: what a host serves.
 
-    ``cookie`` is the host signing this browser in the way a sent file's HTTP
-    fetch needs: the same signed token the page gives mount(), set as the
-    server's session cookie. A WebSocket hello carries the token itself, but an
-    ``<img>`` or a preview's fetch cannot.
+    ``token`` signs this browser in the way a sent file's HTTP fetch needs:
+    the same signed token the page gives mount(), set as the server's session
+    cookie with ``srv.sign_in``. A WebSocket hello carries the token itself,
+    but an ``<img>`` or a preview's fetch cannot.
     """
 
-    async def index(_request):
-        headers = {}
-        if cookie:
-            name, token = cookie
-            headers["set-cookie"] = f"{name}={token}; Path=/; HttpOnly; SameSite=Lax"
-        return HTMLResponse(page, headers=headers)
+    async def index(request):
+        response = HTMLResponse(page)
+        return srv.sign_in(response, token, request) if token else response
 
     return Starlette(
         routes=[Route("/", index), Mount(prefix, srv.asgi)],
@@ -185,7 +181,7 @@ async def main(
                     srv,
                     page,
                     prefix,
-                    cookie=(cookie_name(srv.app.roots.state_root), token),
+                    token,
                 ),
                 host="127.0.0.1",
                 port=port,

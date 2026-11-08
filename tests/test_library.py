@@ -312,9 +312,11 @@ async def host_srv(tmp_path: Path, fake_claude: str):
         yield s, port
 
 
-async def serve_host(srv: Server, port: int) -> tuple[uvicorn.Server, asyncio.Task]:
+async def serve_host(
+    srv: Server, port: int, app: Starlette | None = None
+) -> tuple[uvicorn.Server, asyncio.Task]:
     """A host app with aegis mounted, on the port the fixture named."""
-    host = Starlette(
+    host = app or Starlette(
         routes=[
             Route("/", lambda _r: PlainTextResponse("host page")),
             Mount("/aegis", srv.asgi),
@@ -364,6 +366,45 @@ async def test_a_prefixed_server_keeps_the_loopback_sign_in_url(host_srv):
     srv, _ = host_srv
     assert srv.url == f"{srv.base_url}/?token={srv.token}"
     assert srv.token_for(Who("ana")) != srv.token
+
+
+async def test_a_host_signs_the_browser_in_for_sent_files(host_srv, tmp_path: Path):
+    """A minted token is enough for the websocket, but a sent file is fetched
+    over HTTP, which cannot carry that hello. The host sets the same session
+    cookie the standalone sign-in does; without it a narrowing policy refuses
+    the file."""
+    from aegis import files
+
+    srv, port = host_srv
+    who = Who("ana")
+    sid = (await srv.as_who(who).sessions.spawn()).log_id
+    src = tmp_path / "host-note.txt"
+    src.write_text("a note for the browser")
+    rec = files.store(srv.app.roots.state_root, src, log_id=sid)
+    path = "/aegis" + files.url(rec["file_id"], rec["name"])
+    token = srv.token_for(who)
+
+    async def page(request):
+        return srv.sign_in(PlainTextResponse("host page"), token, request)
+
+    host = Starlette(
+        routes=[Route("/", page), Mount("/aegis", srv.asgi)],
+    )
+    server, task = await serve_host(srv, port, app=host)
+    try:
+        async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}") as c:
+            refused = await c.get(path)
+            assert refused.status_code == 404
+            signed = await c.get("/")
+            assert signed.status_code == 200
+            cookie = signed.headers["set-cookie"].lower()
+            assert "httponly" in cookie and "samesite=strict" in cookie
+            got = await c.get(path)
+            assert got.status_code == 200
+            assert got.content == b"a note for the browser"
+    finally:
+        server.should_exit = True
+        await task
 
 
 async def test_the_host_fixture_spawns_or_reuses_one_session(host_srv, tmp_path: Path):
