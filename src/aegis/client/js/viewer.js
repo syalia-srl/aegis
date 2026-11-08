@@ -17,7 +17,7 @@
 // agent's state reaches the viewer's frame instead.
 
 import { Tray } from "./comments.js";
-import { artifactStage, dockButton, fileActions, fileBase, fileUrl, fillWorkflow, hold, markdown, phoneButton, popButton, preview, swipe } from "./entries.js";
+import { artifactStage, dockButton, fileActions, fileUrl, fillWorkflow, hold, markdown, phoneButton, popButton, preview, swipe } from "./entries.js";
 import { entryIcon, icon } from "./glyphs.js";
 import { colour, langOfPath, paint } from "./highlight.js";
 import { filesHash } from "./files.js";
@@ -154,7 +154,7 @@ async function drawText(f, body, line, isCurrent, drawn) {
 // title and status in the bar, Phone width and Open in a new tab in acts (or the `popout`
 // button a live page's pane or the viewer passes instead), the frame in the body. Who holds the page
 // (entries.hold) is the caller's business.
-export function drawArtifact(e, { bar, body, acts, popout = null, base = fileBase }) {
+export function drawArtifact(e, { bar, body, acts, popout = null, base = null }) {
   acts.append(phoneButton(e.id));
   if (popout) acts.append(popout);
   else {
@@ -162,14 +162,14 @@ export function drawArtifact(e, { bar, body, acts, popout = null, base = fileBas
     open.append(icon("open"));
     open.title = "Open in a new tab";
     open.setAttribute("aria-label", open.title);
-    open.href = fileUrl(e.detail?.url, base);
+    open.href = fileUrl(e.detail?.url, base ?? undefined);
     open.target = "_blank";
     open.rel = "noopener noreferrer";
     acts.append(open);
   }
   bar.append(entryIcon(e.glyph), el("span", "fn", e.title), el("span", "fs", e.summary));
   body.dataset.preview = "html";
-  const stage = artifactStage(e, { base });
+  const stage = artifactStage(e, { base: base ?? undefined });
   stage.querySelector("iframe").loading = "eager";
   body.append(stage);
 }

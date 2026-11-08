@@ -92,7 +92,7 @@ export function fadeTables(root) {
 
 // Where a sent file's URL is fetched from: "" on this server, `/via/<server>`
 // for a transcript from a linked one (web.py streams it from there).
-export let fileBase = "";
+let fileBase = "";
 export function setFileBase(base) {
   fileBase = base;
 }
