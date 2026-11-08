@@ -76,7 +76,7 @@ export class Mount {
 
   start() {
     this.root = makeRoot(this.el, this.opts, this.urls);
-    this.outbox = new Outbox({ root: this.root });
+    this.outbox = new Outbox({ root: this.root, t: this.t });
     // Until a composer draws in this mount, a queued draft still goes out: the
     // composer replaces this with the fuller path (the 5 s verdict and the
     // untested-harness question) when it is built.

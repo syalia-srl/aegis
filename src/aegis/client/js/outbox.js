@@ -26,10 +26,12 @@
 // or two tabs — from sending it twice.
 
 import { outboxAll, outboxAppend, outboxClaim, outboxDelete, outboxSettle } from "./devicestore.js";
+import { labelsFor } from "./labels.js";
 import { toast } from "./toast.js";
 
 const drafts = new Map(); // key -> draft, this page's copy of the store
 const instances = new Set(); // every Outbox on this page, for a change
+const english = labelsFor("en");
 // Codes that mean the server was out of reach, not that it refused: the draft
 // goes back in queue and the walk stops for that round.
 const UNREACHED = new Set(["offline", "server_offline", "timeout"]);
@@ -64,15 +66,15 @@ async function load() {
   changed();
 }
 
-const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
-
 export class Outbox {
   // `root` is the mount whose toasts this instance draws in (null: the page's
   // own root); `sender(key, params, opts)` is the session.send it delivers
-  // through, set by its owner once the connection exists.
-  constructor({ root = null, sender = null } = {}) {
+  // through, set by its owner once the connection exists; `t` is that root's
+  // label table, so a chat's toasts read in its own language.
+  constructor({ root = null, sender = null, t = english } = {}) {
     this.root = root;
     this.sender = sender;
+    this.t = t;
     this.listeners = new Set();
     this.round = Promise.resolve();
     instances.add(this);
@@ -157,9 +159,12 @@ export class Outbox {
     return next.then((out) => {
       const { sent, stale, gone, error } = out;
       const ask = stale + gone + error;
-      const look = `need${ask === 1 ? "s" : ""} a look`;
-      if (sent) toast(`${plural(sent, "queued message")} sent${ask ? ` · ${ask} ${look}` : ""}`, { root: this.root });
-      else if (ask) toast(`${plural(ask, "queued message")} ${look}`, { root: this.root });
+      const messages = (n) =>
+        `${n} ${this.t(n === 1 ? "outbox.queued.one" : "outbox.queued.other")}`;
+      const sentText = this.t(sent === 1 ? "outbox.sent.one" : "outbox.sent.other", { messages: messages(sent) });
+      const lookText = this.t(ask === 1 ? "outbox.look.one" : "outbox.look.other", { messages: messages(ask) });
+      if (sent) toast(ask ? `${sentText} · ${lookText}` : sentText, { root: this.root });
+      else if (ask) toast(lookText, { root: this.root });
       return out;
     });
   }
@@ -180,7 +185,7 @@ export class Outbox {
     // The person pressed it: a refusal that asks them (harness_untested) may ask.
     const got = await this.deliver(key, mine, { text: mine.text, ...(mine.nonce && { nonce: mine.nonce }) }, { ask: true });
     await load();
-    if (got === "unreached") toast("Not sent: the connection went", { kind: "error", root: this.root });
+    if (got === "unreached") toast(this.t("outbox.notSent"), { kind: "error", root: this.root });
   }
 }
 

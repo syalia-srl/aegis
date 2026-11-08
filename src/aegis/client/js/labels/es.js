@@ -1,7 +1,8 @@
 // Etiquetas en español: las cadenas del montaje, las que ningún componente
-// posee, y las del transcriptor. A2 trae las seis del montaje, a5 las del
-// transcriptor (su componente, transcript.js, entries.js, find.js y copy.js),
-// a7 las del compositor y b9 el resto.
+// posee, y las del transcriptor y el compositor. A2 trae las seis del montaje,
+// a5 las del transcriptor (su componente, transcript.js, entries.js, find.js y
+// copy.js), a7 las del compositor, sus adjuntos y su cola de salida, y b9 el
+// resto.
 //
 // Cada clave es <componente>.<cosa>. La interpolación es {nombre}: así la
 // tabla sigue siendo compatible con JSON (tests/test_labels.py lee ambas) y
@@ -164,5 +165,56 @@ export default {
   "copy.done": "copiado",
   "copy.failedWord": "falló",
   "copy.copied": "Copiado",
-  "copy.failed": "No se pudo copiar: {error}"
+  "copy.failed": "No se pudo copiar: {error}",
+
+  "composer.placeholder.locked": "Paso {node} del flujo {title}. Puedes leerlo; no recibe mensajes hasta que el flujo se detenga.",
+  "composer.placeholder.off": "El servidor de esta sesión no está disponible; no se puede enviar nada hasta que vuelva.",
+  "composer.placeholder.asleepIdle": "Dormida tras {idle} sin actividad. Escribir la despierta.",
+  "composer.placeholder.asleepIdleBare": "Dormida sin actividad. Escribir la despierta.",
+  "composer.placeholder.asleep": "Dormida; tu próximo mensaje la despierta.",
+  "composer.placeholder.default": "Escríbele al agente. Enter envía, Shift+Enter agrega una línea, / para comandos, Esc interrumpe.",
+  "composer.attach": "Adjuntar archivos",
+  "composer.interrupt": "Interrumpir",
+  "composer.interruptTitle": "Interrumpir (Esc)",
+  "composer.send": "Enviar",
+  "composer.sendTitle": "Enviar (Enter)",
+  "composer.effort": "esfuerzo {effort}",
+  "composer.sending": "enviando cuando terminen los adjuntos…",
+  "composer.notConfirmed": "Sin respuesta en 5 s. Envía de nuevo: no llegará dos veces.",
+  "composer.notSent": "No se envió: {error}",
+  "composer.startedOnce": "Se inició una vez: {error}",
+  "composer.untested.unknownVersion": "{label}: versión desconocida",
+  "composer.untested.range": "{head} · probada con {range}",
+  "composer.untested.between": "{min} a {max}",
+  "composer.untested.found": "encontrada: {path}",
+  "composer.untested.nothing": "nada en el PATH",
+  "composer.untested.copy": "Copiar",
+  "composer.untested.copied": "Copiado",
+  "composer.untested.copyFailed": "No se pudo copiar",
+  "composer.untested.cancel": "Cancelar",
+  "composer.untested.always": "Permitir siempre {version}",
+  "composer.untested.startOnce": "Iniciar una vez",
+  "composer.untested.titleUnknown": "No se conoce la versión de {label}",
+  "composer.untested.title": "{label} {version} no está probada",
+  "composer.archive.question": "¿Archivar {title}? Su pestaña desaparece en todos los navegadores; Reabrir en el archivo la trae de vuelta.",
+  "composer.archive.ok": "Archivar",
+  "composer.restart.question": "¿Reiniciar {handle}? Corta el turno en el que está trabajando.",
+  "composer.restart.ok": "Reiniciar",
+
+  "attach.size.bytes": "{n} B",
+  "attach.size.kb": "{n} KB",
+  "attach.size.mb": "{n} MB",
+  "attach.remove": "Quitar",
+  "attach.removeName": "Quitar {name}",
+  "attach.failedRetry": "falló · reintentar",
+  "attach.failed": "un adjunto falló; haz clic para reintentarlo o quitarlo",
+  "attach.uploading": "los adjuntos aún se están subiendo",
+
+  "outbox.queued.one": "mensaje en cola",
+  "outbox.queued.other": "mensajes en cola",
+  "outbox.sent.one": "{messages} enviado",
+  "outbox.sent.other": "{messages} enviados",
+  "outbox.look.one": "{messages} necesita revisión",
+  "outbox.look.other": "{messages} necesitan revisión",
+  "outbox.notSent": "No se envió: se cayó la conexión"
 };

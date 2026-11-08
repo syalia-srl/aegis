@@ -461,6 +461,49 @@ def test_a_spanish_mount_reads_spanish_and_the_english_one_stays_english(
     page.close()
 
 
+@pytest.mark.parametrize("width", [1280, 390])
+def test_a_spanish_composer_reads_spanish(host, browser, width):  # noqa: F811
+    """a7: the mount's box takes its placeholder and button titles from the
+    Spanish table, while the English mount beside it keeps its own (a7)."""
+    page, errors = open_page(browser, width)
+    page.goto(host["url"])
+    mounted(page)
+    prefix = page.evaluate("window.aegisHost.prefix")
+    page.add_style_tag(content="#chat2 { height: 700px; }")
+    page.evaluate(
+        """async (prefix) => {
+          const { mount } = await import(`${prefix}/aegis.js`);
+          window.__es = mount(document.getElementById("chat2"), {
+            token: window.aegisHost.token,
+            session: window.aegisHost.session,
+            layout: "chat",
+            theme: "host",
+            lang: "es",
+          });
+        }""",
+        prefix,
+    )
+    page.wait_for_function(
+        "() => document.querySelector('#chat2 .aegis #input')", timeout=30_000
+    )
+
+    assert page.get_attribute("#chat2 .aegis #input", "placeholder") == (
+        "Escríbele al agente. Enter envía, Shift+Enter agrega una línea, "
+        "/ para comandos, Esc interrumpe."
+    )
+    assert page.get_attribute("#chat2 .aegis #send", "title") == "Enviar (Enter)"
+    assert page.get_attribute("#chat2 .aegis #send", "aria-label") == "Enviar"
+    assert page.get_attribute("#chat2 .aegis #attach", "title") == ("Adjuntar archivos")
+    assert page.get_attribute("#chat2 .aegis #interrupt", "title") == (
+        "Interrumpir (Esc)"
+    )
+    # The English mount beside it still reads its own table.
+    assert page.get_attribute("#chat .aegis #send", "title") == "Send (Enter)"
+    assert page.get_attribute("#chat .aegis #attach", "title") == "Attach files"
+    assert errors == []
+    page.close()
+
+
 def test_a_missing_label_falls_back_to_english_and_warns_once(host, browser):  # noqa: F811
     """A key the table lacks falls back to English and names itself once (a5);
     a language with no table at all reads English, and the Spanish one is

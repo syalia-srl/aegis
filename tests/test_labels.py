@@ -7,9 +7,9 @@ same keys and the same ``{name}`` variables: a key added to one language and
 not the other, or a variable renamed in one, is a page that shows a key name or
 a sentence with a hole in it.
 
-The last test guards the other half of the slice: the transcript's chrome and
-rows must take their words from the table, not keep a copy in the module that
-the next translation would miss.
+The last tests guard the other half of the work: the transcript's and the
+composer's chrome and rows must take their words from the table, not keep a
+copy in the module that the next translation would miss.
 """
 
 import json
@@ -98,6 +98,81 @@ def test_every_literal_key_the_client_uses_exists():
         )
     assert used, "no label keys found: the scan is looking in the wrong place"
     assert used <= set(en), f"not in the table: {sorted(used - set(en))}"
+
+
+def test_the_composer_and_its_attachments_are_labelled():
+    """What a7 moved: the box's placeholders and buttons, the chips, the
+    upload sizes, the errors, the untested question and the outbox's toasts."""
+    keys = set(table("en"))
+    for prefix in ("composer.", "attach.", "outbox."):
+        assert any(k.startswith(prefix) for k in keys), prefix
+    # The placeholder has one key per state: translating the default must not
+    # force the locked or asleep sentence to change with it.
+    placeholders = {k for k in keys if k.startswith("composer.placeholder.")}
+    assert len(placeholders) >= 4, sorted(placeholders)
+    for key in (
+        "composer.placeholder.default",
+        "composer.placeholder.locked",
+        "composer.placeholder.off",
+        "composer.placeholder.asleep",
+        "composer.attach",
+        "composer.sendTitle",
+        "composer.interruptTitle",
+        "composer.effort",
+        "composer.sending",
+        "composer.notConfirmed",
+        "composer.untested.startOnce",
+        "composer.archive.ok",
+        "attach.size.bytes",
+        "attach.size.kb",
+        "attach.size.mb",
+        "attach.remove",
+        "attach.uploading",
+        "outbox.queued.one",
+        "outbox.sent.one",
+        "outbox.look.other",
+        "outbox.notSent",
+    ):
+        assert key in keys, key
+
+
+def test_no_composer_literal_was_left_in_the_modules():
+    """The words a7 moved live in the table only.
+
+    Same guard as a5's, for the part the chat sends from: a copy left behind
+    would keep an English button or error in a Spanish mount.
+    """
+    en = table("en")
+    moved = {
+        "composer.placeholder.default": (
+            "Message the agent. Enter sends",
+            ["parts/composer.js"],
+        ),
+        "composer.placeholder.off": (
+            "nothing can be sent until it is back",
+            ["parts/composer.js"],
+        ),
+        "composer.attach": ("Attach files", ["parts/composer.js"]),
+        "composer.sendTitle": ("Send (Enter)", ["parts/composer.js"]),
+        "composer.interruptTitle": ("Interrupt (Esc)", ["parts/composer.js"]),
+        "composer.sending": (
+            "sending when the attachments finish",
+            ["parts/composer.js"],
+        ),
+        "composer.notConfirmed": ("No answer in 5 s", ["parts/composer.js"]),
+        "composer.untested.startOnce": ("Start once", ["parts/composer.js"]),
+        "composer.archive.ok": ("Archive", ["parts/composer.js"]),
+        "attach.size.bytes": ("n} B", ["attach.js"]),
+        "attach.remove": ("Remove", ["attach.js"]),
+        "attach.uploading": ("attachments are still uploading", ["attach.js"]),
+        "outbox.notSent": ("Not sent: the connection went", ["outbox.js"]),
+        "outbox.look.one": ("needs a look", ["outbox.js"]),
+    }
+    for key, (literal, names) in moved.items():
+        assert literal in en[key], (key, literal)
+        for name in names:
+            src = (CLIENT / name).read_text(encoding="utf-8")
+            assert literal not in src, f"{literal} is still in {name}"
 
 
 def test_no_transcript_literal_was_left_in_the_modules():
