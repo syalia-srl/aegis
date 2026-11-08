@@ -273,7 +273,7 @@ function makeRoot(host, opts, urls) {
 // picked the same theme, its file. "host" loads no aegis theme at all — the
 // host's own CSS sets the variables (a3 writes the fallback block).
 function linkStyles(theme, urls) {
-  const sheets = ["css/fonts.css", "css/base.css"];
+  const sheets = ["css/fonts.css", "css/client.css"];
   if (theme !== "host" && /^[a-z][a-z0-9-]*$/.test(theme)) sheets.push(`themes/${theme}.css`);
   const have = new Set(
     [...document.querySelectorAll('link[rel~="stylesheet"]')].map((n) => n.href),

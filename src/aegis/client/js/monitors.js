@@ -310,7 +310,7 @@ function place() {
   const r = rows.get(openId)?.el.getBoundingClientRect();
   const side = document.querySelector("#a2 .side")?.getBoundingClientRect();
   if (!r || !side || !r.height) return closeMonitorCard();
-  // A phone has no room beside the drawer: base.css draws the card as a sheet.
+  // A phone has no room beside the drawer: client.css draws the card as a sheet.
   if (narrow.matches) {
     cardEl.style.removeProperty("left");
     cardEl.style.removeProperty("top");

@@ -108,7 +108,7 @@ function language(name) {
 }
 
 // Colours from the theme's variables, so the editor matches the transcript's
-// code blocks (css/base.css, .hljs-*) in every theme.
+// code blocks (css/client.css, .hljs-*) in every theme.
 function look(C) {
   const t = C.tags;
   const style = C.HighlightStyle.define([

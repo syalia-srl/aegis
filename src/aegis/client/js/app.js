@@ -60,6 +60,10 @@ import { serverNow } from "./clock.js";
 
 const $ = (id) => document.getElementById(id);
 const root = $("a2");
+// The theme is a variable block on the root itself (themes/*.css); index.html
+// applied the stored choice to <html> before the first paint, and this copies
+// it here before the first render.
+root.dataset.theme = document.documentElement.dataset.theme;
 
 // Quota is one subscription for the page: the band and the sidebar both draw
 // it. Host is subscribed only while a view shows it, the Fleet every server's
@@ -87,6 +91,7 @@ const THEMES = [
 ];
 function setTheme(name) {
   document.documentElement.dataset.theme = name;
+  root.dataset.theme = name;
   localStorage.setItem("aegis.theme", name);
   redrawFavicon();
   artifacts.theme();
@@ -3375,7 +3380,7 @@ $("sp-text").addEventListener("keydown", (ev) => {
 // changes with the window and with what sits around the box (files, hints, an
 // error), so those are watched too. A hidden view has no height to fill.
 function spawnGrow() {
-  // The tip and /feedback rows give way to a first message (base.css).
+  // The tip and /feedback rows give way to a first message (client.css).
   $("sp-hints").toggleAttribute("data-typing", $("sp-text").value !== "");
   const t = $("sp-text");
   const view = t.closest(".view");
@@ -4568,7 +4573,7 @@ $("close").addEventListener("click", () => {
   if (s) closeSession(s);
 });
 
-// -- the panel: a drawer on a phone (base.css, max-width 760px), collapsible
+// -- the panel: a drawer on a phone (client.css, max-width 760px), collapsible
 // and resizable on a desktop (side.js) ------------------------------------------
 const drawerMode = matchMedia("(max-width: 760px)");
 initSide({ onCardOpen: () => closeMonitorCard() });
@@ -4603,7 +4608,7 @@ $("side-btn").addEventListener("click", toggleSide);
 // switcher. Its count is every open session, quiet ones included, as the
 // switcher lists them. A tap opens it without the field's focus, so no
 // on-screen keyboard covers the list.
-const phoneHeader = matchMedia("(max-width:760px)"); // the one-row header (base.css)
+const phoneHeader = matchMedia("(max-width:760px)"); // the one-row header (client.css)
 function sizeTabMore() {
   const list = $("tablist");
   $("tab-more").hidden = !phoneHeader.matches && list.scrollWidth <= list.clientWidth + 1;
