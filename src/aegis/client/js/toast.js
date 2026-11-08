@@ -8,11 +8,13 @@
 // button and, with ms: Infinity, stays until it is used or dismissed.
 
 import { icon } from "./glyphs.js";
+import { byId } from "./dom.js";
+import { rootOf } from "./root.js";
 
 const MAX = 3;
 const MS = { info: 4000, error: 6000, from: 8000 };
 
-let stack = null;
+const stacks = new WeakMap(); // root -> the stack drawn in it
 let opener = () => {};
 
 // How a click on an agent's toast opens its session; app.js sets it.
@@ -27,29 +29,42 @@ function el(tag, cls, text) {
   return n;
 }
 
+// The stack belongs to the mount it draws in: two mounts on one page each keep
+// their own three, and the full layout's is the one inside its own root.
+function stackIn(root) {
+  let stack = stacks.get(root);
+  if (!stack || !stack.isConnected) {
+    stack = el("div", "toasts");
+    stack.setAttribute("role", "status");
+    stack.setAttribute("aria-live", "polite");
+    root.append(stack);
+    stacks.set(root, stack);
+  }
+  return stack;
+}
+
 // In a session the stack sits over the transcript's column, above the message
-// box and the navigator; elsewhere it keeps its corner (base.css).
-function place() {
+// box and the navigator; elsewhere it keeps its corner (base.css). Both nodes
+// are looked up under the root the stack was drawn in.
+function place(root, stack) {
   const at = (id) => {
-    const n = document.getElementById(id);
+    const n = byId(root, id);
     const r = n && !n.hidden && n.getClientRects().length ? n.getBoundingClientRect() : null;
     return r && r.width ? r : null;
   };
-  const box = document.getElementById("a2").dataset.view === "session" && at("composer");
+  const box = root.dataset.view === "session" && at("composer");
   const nav = box && at("nav");
   stack.style.right = box ? `${Math.max(8, innerWidth - box.right)}px` : "";
   stack.style.bottom = box ? `${innerHeight - Math.min(box.top, nav ? nav.top : box.top) + 8}px` : "";
 }
 
-// kind: "info" | "error"; from: {handle, id} for an agent's toast.
-export function toast(text, { kind = "info", from = null, ms, action = null } = {}) {
-  if (!stack) {
-    stack = el("div", "toasts");
-    stack.setAttribute("role", "status");
-    stack.setAttribute("aria-live", "polite");
-    document.getElementById("a2").append(stack);
-  }
-  place();
+// kind: "info" | "error"; from: {handle, id} for an agent's toast; root: the
+// mount to draw in (a part passes its own; the default is the mount of
+// whatever has focus).
+export function toast(text, { kind = "info", from = null, ms, action = null, root = null } = {}) {
+  const at = root || rootOf(document.activeElement);
+  const stack = stackIn(at);
+  place(at, stack);
   const live = () => [...stack.children].filter((n) => !n.classList.contains("out"));
   // An action toast is never merged: two deletes of one path are two Undos.
   const same = !action && live().find((n) => n.dataset.text === text);
