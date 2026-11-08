@@ -1709,12 +1709,12 @@ export function markdown(text, { breaks = false, paths = null, t = en } = {}) {
   // agent's link.
   for (const code of div.querySelectorAll(":not(pre) > code")) {
     if (code.closest("a")) continue;
-    const t = code.textContent.trim();
-    if (sureRepo(t)) {
-      asRepo(code, t);
+    const path = code.textContent.trim();
+    if (sureRepo(path)) {
+      asRepo(code, path);
       continue;
     }
-    const i = fileBase === "" && paths ? paths.indexOf(t) : -1;
+    const i = fileBase === "" && paths ? paths.indexOf(path) : -1;
     if (i < 0) continue;
     code.classList.add("ref");
     code.dataset.index = String(i);
