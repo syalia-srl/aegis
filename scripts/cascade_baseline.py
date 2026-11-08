@@ -307,7 +307,7 @@ INVENTORY: dict[str, list[str]] = {
         "#a2 .v-settings",
         "#a2 .v-settings .settings",
         "#a2 .v-settings .settings h3",
-        "#a2 .v-settings .set-harness",
+        "#set-harnesses .set-harness",
         "#a2 .v-settings .settings .chip",
         "#a2 .v-settings .settings .pick",
     ],
@@ -317,10 +317,10 @@ VIEWS = ("fleet", "session", "spawn", "settings")
 WIDTHS = (1280, 390)
 
 READY = {
-    "fleet": "#a2[data-view=fleet] .cards",
+    "fleet": "#a2[data-view=fleet] .cards .card",
     "session": "#a2[data-view=session] .tr",
     "spawn": "#a2[data-view=spawn] .spawn",
-    "settings": "#a2[data-view=settings] .settings",
+    "settings": "#set-harnesses .set-harness",
 }
 
 MEASURE_JS = """
