@@ -292,6 +292,15 @@ export class HeaderPart {
     return open;
   }
 
+  // The version and update controls the sidebar part draws: the header owns
+  // this line's node, the sidebar owns what it says.
+  setVersion(nodes, title = "") {
+    const top = byId(this.el, "ver-top");
+    top.replaceChildren(...nodes);
+    top.title = title;
+    top.hidden = false;
+  }
+
   // The sessions patch while the switcher is open, and the sessions key.
   refresh() {
     this.switcher.refresh();

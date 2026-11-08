@@ -17,21 +17,21 @@ import { Find } from "./find.js";
 import * as artifacts from "./artifacts.js";
 import { TabOrder } from "./tabs.js";
 import { setWho, who } from "./me.js";
-import { ago, byNeed, modelLine, money, patchCard, renderArchive, renderBand, renderBandQuota, renderCards, tickPlan, card as fleetCard } from "./fleet.js";
-import { age, countdown, diskRows, elapsed, hostRow, hostSeverity, mbps, netRows, providerFor, quotaSideRow, quotaTile, tile } from "./gauges.js";
-import { closeCard, initSide, restState, toggleCollapsed } from "./side.js";
+import { ago, byNeed, patchCard, renderArchive, renderBand, renderBandQuota, renderCards, tickPlan, card as fleetCard } from "./fleet.js";
+import { tile } from "./gauges.js";
 import { installKeys, renderKeys } from "./keys.js";
 import { Palette } from "./palette.js";
 import { HeaderPart } from "./parts/header.js";
-import { entryIcon, factIcon, glyph, gorgoneion, icon, iconText, LABEL } from "./glyphs.js";
+import { SidebarPart } from "./parts/sidebar.js";
+import { factIcon, glyph, gorgoneion, icon, LABEL } from "./glyphs.js";
 import { CommandMenu } from "./commands.js";
 import * as cmenu from "./menu.js";
 import { attachTabCard } from "./tabcard.js";
 import { blocksOf } from "./groups.js";
 import { clampToRow, insertIntoComposer, quoted, rangeText } from "./quote.js";
-import { closeMonitorCard, renderMonitors, tickMonitors } from "./monitors.js";
+import { closeMonitorCard, tickMonitors } from "./monitors.js";
 import { Settings } from "./settings.js";
-import { entry, Journal, opens } from "./journal.js";
+import { Journal } from "./journal.js";
 import { Usage } from "./usage.js";
 import { Knowledge } from "./knowledge.js";
 import { FilePicker, Files, filesHash, parseTarget } from "./files.js";
@@ -44,7 +44,6 @@ import "./pick.js";
 import { Dictation } from "./dictation.js";
 import { HoldToRecord } from "./record.js";
 import { Attachments } from "./attach.js";
-import { dur, planTimes } from "./plantime.js";
 import { setToastOpener, toast } from "./toast.js";
 import { Speaker } from "./speak.js";
 import { closeTerm, drawCard, openTerm } from "./termview.js";
@@ -104,6 +103,42 @@ const header = new HeaderPart(app, root, {
 // The header is the grid's first row, under the connection banner and above
 // the views (the layout owns the order in b8).
 root.insertBefore(header.el, root.querySelector("main.view"));
+
+// The session panel is a part (b3): it builds the grip and the aside
+// index.html used to hold, owns the card, the plan, repos, journal, usage,
+// quota, host, the actions, the version/update card and the drawer. The page
+// hands it the session in front and the operations only the router, the Fleet
+// and the transcript know.
+const sidebar = new SidebarPart(app, root.querySelector(".v-session"), {
+  focused: () => focused(),
+  route: () => route(),
+  view: () => root.dataset.view,
+  go: (hash) => go(hash),
+  open: (key) => openSession(key),
+  close: (s) => closeSession(s),
+  reopen: () => {
+    const r = route();
+    if (r.view === "read") reopen(r.id);
+  },
+  sleep: (key) => sleepKey(key),
+  quiet: (key, on) => quietKey(key, on),
+  autoclose: (key, on) => autocloseKey(key, on),
+  continueKey: (key) => continueKey(key),
+  restart: (key) => restartKey(key),
+  keyOf: (server, id) => keyOf(server, id),
+  forKey: (key) => app.forKey(key),
+  callFor: (key, op, params) => app.callFor(key, op, params),
+  locked: (s) => workflowLocked(s),
+  measureNet: (server) => measureNet(server),
+  revealRow: (id) => revealToolRow(id),
+  revealEntry: (source) => transcript.reveal(source),
+  closeMonitorCard: () => closeMonitorCard(),
+  drawer: () => drawerMode.matches,
+  setVersionTop: (nodes, title) => header.setVersion(nodes, title),
+  archiveInvalidate: () => {
+    archiveLoaded = false;
+  },
+});
 
 // The state the views share lives on the mount (mount.js's MountState). Quota
 // is one subscription for the page: the band and the sidebar both draw it.
@@ -675,7 +710,7 @@ function onState(state, server) {
     if (app.conn.native) root.dataset.native = "";
     else delete root.dataset.native;
     loadAgents();
-    loadVersion();
+    sidebar.loadVersion();
     filesView?.online();
   }
 }
@@ -754,17 +789,11 @@ const helpTab = new Help(app.conn, $("help"), {
 });
 installCopy($("help"), copyDeps);
 installCopy($("files"), copyDeps);
-let sideJournalTimer = null;
 const sideJournalChanged = () => {
   journal.changed();
-  // Away from the session view nothing refetches; forget what was drawn so the
-  // next renderMeta of any session does.
-  if (root.dataset.view !== "session") {
-    sideJournalFor = null;
-    return;
-  }
-  clearTimeout(sideJournalTimer);
-  sideJournalTimer = setTimeout(() => drawSideJournal(sideJournalFor, true), 300);
+  // Away from the session view nothing refetches; the panel forgets what it
+  // drew so the next render of any session does.
+  sidebar.journalChanged();
 };
 app.conn.subscribe("journal", sideJournalChanged, sideJournalChanged);
 // The usage page (usage.js): the channel says a turn was counted, the page
@@ -774,7 +803,7 @@ const usage = new Usage(app.conn, $("usage"), {
 });
 const usageChanged = () => usage.changed();
 app.conn.subscribe("usage", usageChanged, usageChanged);
-for (const id of ["band-quota-link", "s-quota-head"]) $(id).addEventListener("click", () => go("#usage"));
+$("band-quota-link").addEventListener("click", () => go("#usage"));
 // The Schedules view (schedules.js); its button counts them, red while one is
 // paused by errors.
 const schedules = new Schedules(app.conn, $("schedules"), {
@@ -1424,7 +1453,7 @@ function render() {
     renderMeta(app.state.sessions.get(r.id));
     if (newView) {
       drawQuota();
-      drawSideHost();
+      sidebar.drawHost();
     }
   } else if (r.view === "browser") {
     watchHost(null);
@@ -1506,7 +1535,7 @@ function watchHost(want) {
 
 function drawHost() {
   if (root.dataset.view === "fleet") drawBand();
-  else if (root.dataset.view === "session") drawSideHost();
+  else if (root.dataset.view === "session") sidebar.drawHost();
 }
 
 function drawBand() {
@@ -1580,145 +1609,6 @@ function renderRemotes() {
   drawBand();
 }
 
-// -- the session panel: usage and host (side.js opens their cards) ----------
-// The panel follows the session it shows: the quota its harness and model
-// spend, the host of its server.
-let sideSession = null;
-let sideQuotaKey = null; // the provider the card's quota rows were drawn for
-let sideTilesSig = null;
-
-const quotaOf = (server) => (server ? app.state.remote.get(server)?.quota : app.state.quota) || { providers: [] };
-const hostOf = (server) => (server ? app.state.remote.get(server)?.host : app.state.host);
-const sideProvider = (s) => providerFor(s, quotaOf(s.server || "").providers || []);
-
-function ctxPct(s) {
-  if (s.context_tokens == null || !s.context_window) return null;
-  return Math.min(100, Math.round((100 * s.context_tokens) / s.context_window));
-}
-
-// The tiles and the card's context: on every patch of the session, rebuilt
-// only when what they show changed.
-// A session's load (load.py): cores over the last minute and RAM.
-const loadText = (l) => `${l.cpu.toFixed(1)} cores · ${l.rss_gb.toFixed(1)} GB`;
-
-function drawSideUsage(s) {
-  const now = nowS();
-  const p = sideProvider(s);
-  const windows = p && p.state !== "failed" ? p.windows : [];
-  const pct = ctxPct(s);
-  const tokens = s.context_tokens != null ? fmtTokens(s.context_tokens) : null;
-  const cost = money(s.cost_usd);
-  $("s-load").hidden = !s.load;
-  if (s.load) $("s-load-v").textContent = loadText(s.load);
-
-  $("s-tokens").textContent = tokens ?? "no turn yet";
-  $("s-of").textContent = tokens == null ? "" : s.context_window ? `of ${fmtTokens(s.context_window)} · ${pct}%` : "tokens";
-  $("s-bar").style.width = `${pct || 0}%`;
-  $("s-ctxbar").hidden = !s.context_window;
-  $("s-ctxnote").textContent =
-    tokens != null && !s.context_window ? `${s.harness_label} does not report the model's window, so there is no share of it.` : "";
-  $("s-cost").textContent = cost;
-  // What the cache did (cache.py): red when the warm calls miss.
-  const cn = $("s-counters");
-  cn.hidden = s.cache_hit == null;
-  if (s.cache_hit != null) {
-    const hit = document.createElement("span");
-    hit.textContent = `cache ${s.cache_hit}%`;
-    hit.classList.toggle("bad", !!s.cache_alarm);
-    hit.title = s.cache_alarm ? "Below 80% while warm: something broke the cache" : "";
-    cn.replaceChildren(`tools ${s.tool_calls ?? 0} · `, hit, ` · compactions ${s.compactions ?? 0}`);
-  }
-
-  // With a share of the window, context leads and the quota follows; without
-  // one, the quota's windows take the row and context moves to the foot.
-  const lead = pct != null || !windows.length;
-  const shown = windows.slice(0, lead ? 2 : 3);
-  const left = !windows.length ? "" : lead ? cost : `${tokens ? `${tokens} ctx · ` : ""}${cost}`;
-  const next = shown.find((w) => w.resets_at != null);
-  const right = next ? countdown(next.resets_at - now) : "";
-  const sig = JSON.stringify([
-    pct,
-    tokens,
-    cost,
-    p && p.state,
-    shown.map((w) => [w.kind, Math.round(w.percent), w.severity, w.projected, Math.round(100 * (elapsed(w, now) || 0))]),
-    left,
-    right,
-  ]);
-  if (sig === sideTilesSig) return;
-  sideTilesSig = sig;
-  const tiles = [];
-  if (lead) tiles.push(tile("context", pct != null ? `${pct}%` : tokens ?? "–", { pct }));
-  for (const w of shown) tiles.push(quotaTile(p, w, now));
-  if (!windows.length) {
-    tiles.push(tile("cost", cost));
-    tiles.push(tile("quota", p ? "error" : "none", { severity: p ? "stale" : "normal", title: p ? p.note : "" }));
-  }
-  $("s-tiles").replaceChildren(...tiles);
-  $("s-foot-l").textContent = left;
-  $("s-foot-r").replaceChildren(...(right ? [icon("again"), ` ${right}`] : []));
-  $("s-foot").hidden = !left && !right;
-}
-
-// The card's quota rows: on a quota patch, the timer, a change of view, or a
-// session that now spends another provider; never on a plain sessions patch.
-function drawSideQuota(s) {
-  const p = sideProvider(s);
-  sideQuotaKey = `${s.server || ""}:${p ? p.name : ""}`;
-  const now = nowS();
-  $("s-quota-head").textContent = p ? `Quota · ${p.label}` : "Quota";
-  const head = $("s-quota-age");
-  if (!p) {
-    head.textContent = "";
-    const what = s.harness === "opencode" ? (s.model || "").split("/")[0] || "this model" : s.harness_label;
-    const n = document.createElement("p");
-    n.className = "cnote";
-    n.textContent = `aegis reads no quota for ${what}.`;
-    $("s-quota").replaceChildren(n);
-    return;
-  }
-  head.textContent = p.read_at != null ? `read ${ago(p.read_at)}` : ""; // "read just now", "read 2m ago"
-  const rows = p.state === "failed" ? [] : p.windows.map((w) => quotaSideRow(p, w, now));
-  if (p.state !== "ok") {
-    const n = document.createElement("p");
-    n.className = "cnote gnote";
-    n.textContent = p.state === "stale" ? `${p.note}; this reading is ${age(now - p.read_at)} old.` : p.note;
-    rows.push(n);
-  }
-  $("s-quota").replaceChildren(...rows);
-}
-
-function drawSideHost() {
-  const s = sideSession;
-  const server = s?.server || "";
-  const h = s && hostOf(server);
-  $("s-host-sec").hidden = !h;
-  if (!h) return;
-  const name = server || app.conn.server || "this server";
-  $("s-host-name").textContent = name;
-  $("s-host-head").textContent = `Host · ${name}`;
-  const meter = (label, pct) => tile(label, `${pct}%`, { pct, kind: "h", severity: hostSeverity(pct) });
-  const tiles = [meter("CPU", h.cpu), meter("RAM", h.ram.pct)];
-  const rows = [hostRow("CPU", h.cpu, ""), hostRow("RAM", h.ram.pct, `${h.ram.used_gb} / ${h.ram.total_gb} GB`)];
-  if (h.disk) tiles.push(meter("disk", h.disk.pct)); // the fullest
-  rows.push(...diskRows(h));
-  const net = h.net;
-  if (net) {
-    const sp = net.speed;
-    tiles.push(tile("net", net.ok ? `${net.rtt_ms} ms` : "down", { severity: net.ok ? "normal" : "critical" }));
-    if (sp?.complete) tiles.push(tile("speed", mbps(sp.bps), { small: " Mbps" }));
-  }
-  rows.push(...netRows(net, serverNow(), () => measureNet(server || null)));
-  $("s-host-tiles").replaceChildren(...tiles);
-  $("s-host-rows").replaceChildren(...rows);
-  const live = (s.server ? on(s.server) : local()).filter((m) => m.state !== "asleep" && !isTool(m));
-  const sized = live.filter((m) => m.context_window && m.context_tokens);
-  $("s-host-live").textContent = String(live.length);
-  $("s-host-ctx").textContent = sized.length
-    ? `${Math.round(sized.reduce((a, m) => a + Math.min(100, (100 * m.context_tokens) / m.context_window), 0) / sized.length)}%`
-    : "–";
-}
-
 // A linked server's quota, less the providers this server already shows for
 // the same account (each reading names its account by a hash).
 function farQuota(q) {
@@ -1735,10 +1625,8 @@ function drawQuota() {
       const r = app.state.remote.get(box.dataset.server);
       if (r) renderBandQuota(box.querySelector(".band"), { ...farQuota(r.quota), now: nowS() });
     }
-  } else if (root.dataset.view === "session" && sideSession) {
-    drawSideQuota(sideSession);
-    sideTilesSig = null; // the countdowns and ticks moved
-    drawSideUsage(sideSession);
+  } else if (root.dataset.view === "session") {
+    sidebar.drawQuota();
   }
 }
 
@@ -1904,338 +1792,6 @@ function fmtTokens(n) {
   return n >= 1000 ? `${Math.round(n / 1000)}k` : String(n);
 }
 
-// The plan in the sidebar: totals in the heading, each item's time, and the
-// doing spinner turning only while the agent works. The rows are rebuilt only
-// when the items change: a session publishes several times a second during a
-// turn, and a new row would restart the spinner's animation each time.
-function drawPlan(s) {
-  const plan = s.plan || [];
-  $("s-plan-sec").hidden = !plan.length;
-  $("s-plan").classList.toggle("live", s.attention === "working");
-  const key = JSON.stringify([s.key, plan.map((i) => [i.text, i.state])]);
-  if ($("s-plan").dataset.key !== key) {
-    $("s-plan").dataset.key = key;
-    drawPlanRows(plan);
-  }
-  tickSidePlan(s);
-}
-
-// The skills the session loaded, one row each in the order read, with how
-// many times skill_run ran its scripts.
-function drawSkills(s) {
-  const skills = s.skills || [];
-  const runs = s.skill_runs || {};
-  $("s-skills-sec").hidden = !skills.length;
-  const key = JSON.stringify([skills, runs]);
-  if ($("s-skills").dataset.key === key) return;
-  $("s-skills").dataset.key = key;
-  $("s-skills").replaceChildren(
-    ...skills.map((n) => {
-      const d = document.createElement("div");
-      const r = runs[n] || 0;
-      d.append(span("", ""), span("", n), span("t", r ? `${r} run${r > 1 ? "s" : ""}` : ""));
-      return d;
-    }),
-  );
-}
-
-// The panel keeps the two items done last and everything still to do; the
-// rest is one line whose card holds the whole plan. Each row carries its
-// index, so the clock finds its time cell in either list.
-function drawPlanRows(plan) {
-  const mark = { done: "done", doing: "working", pending: "waiting" };
-  const row = (i, k) => {
-    const d = document.createElement("div");
-    d.className = i.state;
-    d.dataset.k = k;
-    d.append(glyph(mark[i.state] || "waiting"), span("", i.text), span("t", ""));
-    return d;
-  };
-  const open = plan.findIndex((i) => i.state !== "done");
-  const from = Math.max(0, (open < 0 ? plan.length : open) - 2);
-  $("s-plan").replaceChildren(...plan.slice(from).map((i, k) => row(i, from + k)));
-  $("p-plan").hidden = !from;
-  $("s-plan-more").textContent = `+ ${from} done above`;
-  $("s-plan-all").replaceChildren(...(from ? plan.map(row) : []));
-}
-
-// The parts that move with the clock, updated in place every second: a
-// redraw would restart the spinner's animation each time.
-function tickSidePlan(s) {
-  const plan = s.plan || [];
-  const t = planTimes(s);
-  const done = plan.filter((i) => i.state === "done").length;
-  let head = `Plan ${done}/${plan.length}`;
-  if (t) head += ` · ${dur(t.work)} work · ${dur(t.idle)} idle`;
-  if (t && t.left != null) head += ` · ~${dur(t.left)} left`;
-  $("s-plan-h").textContent = head;
-  $("s-plan-h").title = head; // one line in the panel; whole here and in the card
-  $("s-plan-card-h").textContent = head;
-  for (const d of document.querySelectorAll("#s-plan > div, #s-plan-all > div")) {
-    const k = Number(d.dataset.k);
-    const i = plan[k];
-    d.lastChild.textContent = t && i && i.state !== "pending" ? dur(t.items[k]) : "";
-  }
-}
-
-// The sidebar's Journal row: the shown session's two newest entries today and
-// its count; the card lists its five newest as the Journal view draws them.
-// Fetched when the shown session changes or the journal changes.
-let sideJournalFor = null;
-let sideJournalDay = "";
-const noJournal = () => {
-  $("s-journal").textContent = "nothing yet today";
-  $("s-journal-at").textContent = "";
-  $("s-journal-peek").hidden = true;
-  $("s-journal-peek").replaceChildren();
-  $("s-journal-all").replaceChildren(span("cnote", "Nothing journaled today."));
-};
-async function drawSideJournal(key, force = false) {
-  const day = new Date().toDateString(); // "today" moves at midnight
-  if (!key || (!force && sideJournalFor === key && sideJournalDay === day)) return;
-  // Another session's rows go at once: this one never shows them while it loads.
-  if (sideJournalFor !== key) {
-    $("s-journal").textContent = "…";
-    $("s-journal-at").textContent = "";
-    $("s-journal-peek").hidden = true;
-    $("s-journal-peek").replaceChildren();
-    $("s-journal-all").replaceChildren();
-  }
-  sideJournalFor = key;
-  sideJournalDay = day;
-  const linked = key.includes("/");
-  $("s-journal-sec").hidden = linked;
-  if (linked) return;
-  let res;
-  try {
-    res = await app.conn.call("journal.rows", { session: key, since: "today", limit: 5, counts: true });
-  } catch {
-    if (sideJournalFor === key) {
-      sideJournalFor = null; // the next render retries
-      noJournal();
-    }
-    return;
-  }
-  if (sideJournalFor !== key) return;
-  if (!res.rows.length) {
-    noJournal();
-    return;
-  }
-  const c = res.counts || {};
-  const total = Object.values(c).reduce((a, b) => a + b, 0);
-  $("s-journal").textContent =
-    `${total} ${total === 1 ? "entry" : "entries"}` + (c.commit ? ` · ${c.commit} commit${c.commit === 1 ? "" : "s"}` : "");
-  $("s-journal-at").textContent = `last ${res.rows[0].time}`;
-  $("s-journal-peek").replaceChildren(...res.rows.slice(0, 2).map((r) => {
-    const line = document.createElement("div");
-    line.className = `k-${r.kind}`;
-    const g = span("g", "");
-    g.append(entryIcon(r.glyph));
-    line.append(g, span("x", (r.tag ? `${r.tag}: ` : "") + (r.hash ? `${r.hash} ` : "") + r.text), span("t", r.time));
-    return line;
-  }));
-  $("s-journal-peek").hidden = false;
-  const thread = document.createElement("div");
-  thread.className = "jthread";
-  thread.append(...res.rows.map((r) => {
-    const row = entry(r, false);
-    row.classList.add("le");
-    // On a phone the drawer covers the transcript: close it so the reveal shows.
-    opens(row, () => {
-      if (!r.source) return;
-      transcript.reveal(r.source);
-      closeCard();
-      if (drawerMode.matches) closeSide();
-    });
-    return row;
-  }));
-  $("s-journal-all").replaceChildren(thread);
-}
-
-// The sidebar's Repos row: each repo or worktree the shown session wrote to,
-// from the repos:<log_id> channel (repos/service.py), which sends the whole
-// list again only when it changed. A session on a linked server has none here.
-let reposFor = null;
-let unsubRepos = null;
-function followRepos(key) {
-  if (reposFor === key) return;
-  reposFor = key;
-  if (unsubRepos) unsubRepos();
-  unsubRepos = null;
-  $("s-repos-sec").hidden = true;
-  if (!key || key.includes("/")) return;
-  const draw = (d) => {
-    if (reposFor === key) drawRepos(d);
-  };
-  unsubRepos = app.conn.subscribe(`repos:${forKey(key).log_id}`, draw, (ops) => {
-    for (const op of ops) if (op.set) draw(op.set);
-  });
-}
-
-const rpPlural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-const rpBase = (p) => p.split("/").filter(Boolean).pop() || p;
-
-function prLink(pr) {
-  if (!pr.url) return span("rp-pr", `#${pr.n}`);
-  const a = document.createElement("a");
-  a.className = "rp-pr";
-  a.href = pr.url;
-  a.target = "_blank";
-  a.rel = "noopener";
-  a.textContent = `#${pr.n}`;
-  a.title = pr.title || "";
-  return a;
-}
-
-// The lines of one repo, its main checkout and worktrees, form one group: the
-// main checkout first, then the worktrees in the server's order (newest
-// first). The server puts the same peers on every line of a repo, one entry
-// per checkout they wrote in; a group names each peer once.
-function repoGroups(repos) {
-  const by = new Map();
-  for (const r of repos) {
-    if (!by.has(r.main)) by.set(r.main, []);
-    by.get(r.main).push(r);
-  }
-  return [...by.values()].map((lines) => {
-    lines.sort((a, b) => a.worktree - b.worktree);
-    const peers = new Map();
-    for (const r of lines) for (const p of r.peers) {
-      if (!peers.has(p.handle)) peers.set(p.handle, []);
-      if (!peers.get(p.handle).includes(p.where)) peers.get(p.handle).push(p.where);
-    }
-    return { name: lines[0].name, main: lines[0].main, lines, peers };
-  });
-}
-
-function repoLine(g) {
-  const line = document.createElement("div");
-  line.className = "rp-line";
-  if (g.peers.size) {
-    const dot = span("rp-dot", "");
-    dot.title = [...g.peers.keys()].map((h) => `${h} is also here`).join("\n");
-    line.append(dot);
-  }
-  const [r] = g.lines;
-  const where = g.lines.length > 1 ? `${g.lines.length} checkouts` : r.worktree ? rpBase(r.top) : r.branch || "detached";
-  line.append(span("n", g.name), span("rp-br", where, g.lines.length === 1 && r.worktree ? RP_ICON.worktree : ""));
-  const right = span("rp-r", "");
-  const sum = (k) => g.lines.reduce((a, l) => a + l[k], 0);
-  if (g.lines.every((l) => l.removed)) right.append(span("rp-gone", "removed"));
-  for (const op of new Set(g.lines.map((l) => l.op).filter(Boolean))) right.append(span("rp-op", op));
-  if (sum("dirty_n")) right.append(span("rp-dirty", `~${sum("dirty_n")}`));
-  if (sum("unpushed_n")) right.append(span("rp-ahead", `↑${sum("unpushed_n")}`));
-  const seen = new Set();
-  for (const l of g.lines) for (const pr of l.prs) {
-    if (pr.state !== "open" || seen.has(pr.n)) continue;
-    seen.add(pr.n);
-    right.append(prLink(pr));
-  }
-  if (g.lines.every((l) => l.clean)) right.prepend(span("rp-clean", "", RP_ICON.clean));
-  line.append(right);
-  return line;
-}
-
-function rpKv(k, v, cls = "") {
-  const d = document.createElement("div");
-  d.className = "kv";
-  const key = span(cls, k);
-  const val = typeof v === "string" ? span("", v) : v;
-  d.append(key, val);
-  return d;
-}
-
-function rpList(items, shown, total) {
-  const ul = document.createElement("ul");
-  ul.className = "rp-files";
-  for (const [text, x] of items.slice(0, shown)) {
-    const li = document.createElement("li");
-    li.append(span("", text));
-    if (x) li.append(span("x", x));
-    ul.append(li);
-  }
-  if (total > shown) {
-    const li = document.createElement("li");
-    li.className = "more";
-    li.textContent = `+${total - shown} more`;
-    ul.append(li);
-  }
-  return ul;
-}
-
-// One checkout inside its repo's section: what this session left there.
-function checkoutBlock(r, ghOk) {
-  const sec = document.createElement("div");
-  sec.className = "rp-co";
-  const h = document.createElement("h6");
-  h.append(span("", r.worktree ? `worktree ${rpBase(r.top)}` : "main checkout"));
-  if (r.worktree) h.append(span("p", r.path));
-  sec.append(h);
-  if (r.removed) sec.append(rpKv("state", "removed: the directory is gone"));
-  else if (r.branch || r.upstream) sec.append(rpKv("branch", r.upstream ? `${r.branch} → ${r.upstream}` : `${r.branch || "detached"}, no upstream`));
-  if (r.stale) sec.append(rpKv("state", "git did not answer; last known state"));
-  if (r.op) sec.append(rpKv("in progress", r.op, "rp-op"));
-  if (r.dirty_n) {
-    sec.append(rpKv("uncommitted", rpPlural(r.dirty_n, "file"), "rp-dirty"));
-    sec.append(rpList(r.dirty.map((f) => [f.path, f.stat]), 10, r.dirty_n));
-  }
-  if (r.unpushed_n) {
-    sec.append(rpKv("unpushed", rpPlural(r.unpushed_n, "commit"), "rp-ahead"));
-    sec.append(rpList(r.unpushed.map((s) => [s]), 5, r.unpushed_n));
-  }
-  if (r.clean) sec.append(rpKv("state", "clean, pushed", "rp-clean"));
-  if (r.left_n) {
-    sec.append(rpKv("left here", rpPlural(r.left_n, "commit")));
-    sec.append(rpList(r.left.map((c) => [`${c.hash} ${c.subject}`]), 5, r.left_n));
-  }
-  for (const pr of r.prs) {
-    const v = span("", "");
-    v.append(prLink(pr), document.createTextNode(` ${[pr.title, pr.state, pr.ci].filter(Boolean).join(" · ")}`));
-    sec.append(rpKv("PR", v));
-  }
-  if (r.prs.length && !ghOk) sec.append(rpKv("", "PR state unknown: gh unavailable"));
-  if (r.others_n) sec.append(rpKv("others' dirt", `${rpPlural(r.others_n, "file")} this session never wrote`));
-  return sec;
-}
-
-function repoSection(g, ghOk) {
-  const sec = document.createElement("div");
-  sec.className = "csec";
-  const h = document.createElement("h5");
-  h.className = "rp-h";
-  h.append(span("", g.name));
-  const main = g.lines.find((l) => !l.worktree);
-  h.append(span("p", main ? main.path : g.main));
-  sec.append(h, ...g.lines.map((r) => checkoutBlock(r, ghOk)));
-  for (const [handle, wheres] of g.peers) {
-    const d = document.createElement("div");
-    d.className = "rp-peer";
-    d.append(...iconText("dot", `${handle} is also here`));
-    sec.append(d, rpList(wheres.map((w) => [w]), wheres.length, wheres.length));
-  }
-  return sec;
-}
-
-function drawRepos(d) {
-  const repos = d.repos || [];
-  $("s-repos-sec").hidden = !repos.length;
-  if (!repos.length) return;
-  const groups = repoGroups(repos);
-  $("s-repos-n").textContent = String(groups.length);
-  const lines = groups.slice(0, 5).map(repoLine);
-  if (groups.length > 5) lines.push(span("rp-more", `+${groups.length - 5} more`));
-  $("s-repos").replaceChildren(...lines);
-  const sum = (k) => repos.reduce((a, r) => a + r[k], 0);
-  const open = new Set(repos.flatMap((r) => r.prs.filter((p) => p.state === "open").map((p) => `${r.main}#${p.n}`))).size;
-  $("s-repos-sum").textContent = [
-    rpPlural(groups.length, "repo"),
-    `${rpPlural(sum("dirty_n"), "file")} uncommitted`,
-    `${rpPlural(sum("unpushed_n"), "commit")} unpushed`,
-    `${rpPlural(open, "PR")} open`,
-  ].join(" · ");
-  $("s-repos-all").replaceChildren(...groups.map((g) => repoSection(g, d.gh)));
-}
-
 // A window tab: its panes, and the session's name in its title so the
 // browser's tab list tells the windows apart. A session gone from the list
 // leaves the window empty.
@@ -2248,76 +1804,26 @@ function drawWindow(r) {
 
 function renderMeta(s) {
   if (!s) return;
-  if (!editing.has("title")) $("s-title").textContent = s.title || "untitled";
-  if (!editing.has("handle")) $("s-handle").textContent = s.handle;
-  sideSession = s;
-  $("c-title").textContent = s.title || "untitled";
-  const born = s.created_at ? ` · started ${new Date(s.created_at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "";
-  $("c-sub").textContent = `${s.handle}${born}`;
-  // A launch on a version outside the tested range shows it in the warning
-  // colour (harness_versions.py, #456).
-  const u = s.untested_version;
-  const hEl = $("s-harness");
-  hEl.replaceChildren(factIcon("h", s.harness), `${s.harness_label || s.harness || ""}${u ? ` ${u.version || "?"}` : ""}`);
-  hEl.classList.toggle("warn", !!u);
-  hEl.title = u ? `${u.state === "unknown" ? "version unknown" : `${u.state} than tested`} · tested with ${u.range}` : "";
-  $("s-model").textContent = s.model_id && s.model_id !== s.model ? `${modelLine(s)} → ${s.model_id}` : modelLine(s);
-  $("s-effort").replaceChildren(factIcon("e", s.effort), s.effort || "");
-  $("s-perm").replaceChildren(factIcon("p", s.permission), s.permission || "");
-  $("s-server").textContent = s.server || app.conn.server || "this server";
-  // The handle as peers address it, handle@server, and the badge a Fleet card
-  // gives a queue worker.
-  $("s-at").textContent = s.server || app.conn.server ? `@${s.server || app.conn.server}` : "";
-  $("s-worker").hidden = !s.worker;
-  $("s-worker").textContent = s.worker ? `worker · ${s.worker.queue}` : "";
-  if (s.attention === undefined) {
-    // The archived read view: a stored meta has no attention, so the state alone.
-    $("s-status").textContent = s.state;
-    $("s-status").className = "st";
-  } else {
-    $("s-status").replaceChildren(glyph(s.attention), document.createTextNode(` ${LABEL[s.attention] || s.state}`));
-    $("s-status").className = `st at-${s.attention}`;
-  }
-  $("s-ask").hidden = !s.attention_line;
-  $("s-ask").textContent = s.attention_line || "";
-  $("s-ask").className = `askbox at-${s.attention}`;
-  drawPlan(s);
-  drawSkills(s);
+  // The panel draws its own card, plan, repos, journal, usage, quota, host,
+  // monitors and actions; the page draws the transcript, the composer and the
+  // title around them.
+  sidebar.render(s);
   if (s.key === app.state.shown) showCanvas(s);
-  drawSideJournal(s.key);
-  followRepos(s.key);
   drawReplies(s);
   drawCold(s);
   drawClosing(s);
-  $("s-cwd").textContent = s.cwd;
-  $("s-exit-row").hidden = !s.exit;
-  $("s-exit").textContent = s.exit || "";
   $("chip-model").replaceChildren(factIcon("h", s.harness), s.model);
   $("chip-model").title = s.model_id || "";
   $("chip-effort").replaceChildren(factIcon("e", s.effort), `${s.effort} effort`);
   $("chip-perm").replaceChildren(factIcon("p", s.permission), s.permission);
-  const p = sideProvider(s);
-  if (`${s.server || ""}:${p ? p.name : ""}` !== sideQuotaKey) drawSideQuota(s);
-  drawSideUsage(s);
-  drawWaiting(s);
-  const mons = s.monitors || [];
-  $("s-mon-sec").hidden = !mons.length;
-  renderMonitors($("s-monitors"), mons, revealToolRow);
   const working = s.state === "working";
   $("interrupt").hidden = !working;
   // A workflow's node is the engine's while its run lives, and a handed-off
   // session its successor's (#874).
   const held = locked(s) || !!s.continued_by;
   $("composer").hidden = !!s.continued_by;
-  $("continue").disabled = working || held;
-  $("restart").disabled = held || !!s.old;
   $("working").hidden = !working;
-  $("stop-session").disabled = s.state === "asleep" || held;
-  $("quiet-session").disabled = !["working", "waiting"].includes(s.attention) || held;
-  $("autoclose-session").disabled = held;
-  $("autoclose-session").setAttribute("aria-pressed", String(!!s.autoclose));
   $("interrupt").disabled = held;
-  $("close").disabled = held;
   if (working && workingSince == null) {
     workingSince = Date.now();
     workingShown = [0, 0];
@@ -2331,31 +1837,6 @@ function renderMeta(s) {
   if (s.asleep_why !== "idle" && warmed === app.state.shown) warmed = null;
   drawComposerHint(s);
   setTitle(`${s.title || s.handle} · aegis`);
-}
-
-// The sessions this one waits on (registry._waiting_for): a queue task's
-// worker or a spawned child, a row each; a click opens it, and a hover or a
-// long press shows its tab card (#667). A task still pending has no worker
-// yet, so its row names the queue and opens nothing.
-function drawWaiting(s) {
-  const list = s.waiting_for || [];
-  $("s-wait-sec").hidden = !list.length;
-  $("s-waiting").replaceChildren(
-    ...list.map((w) => {
-      const key = w.key && keyOf(s.server, w.key);
-      const row = document.createElement("div");
-      row.className = `kv wait${key ? " go" : ""}`;
-      const where = w.kind === "task" ? `queue ${w.queue} · ${w.status}` : w.status;
-      row.append(span("", w.handle || "no worker yet"), span("r", where));
-      if (key) {
-        row.dataset.id = key;
-        row.tabIndex = 0;
-        row.addEventListener("click", () => openSession(key));
-        row.addEventListener("keydown", (ev) => ev.key === "Enter" && openSession(key));
-      }
-      return row;
-    }),
-  );
 }
 
 // The composer's placeholder: whose session, whether its server is reachable,
@@ -2442,17 +1923,10 @@ setInterval(() => {
   }
   if (root.dataset.view === "session" && app.state.shown) {
     const s = app.state.sessions.get(app.state.shown);
-    if (s && (s.plan || []).length) tickSidePlan(s);
+    sidebar.tickPlan(s);
     drawCold(s);
   }
 }, 1000);
-
-// -- version: the running aegis and the latest release ------------------------
-// Asked again every hour, so a tab left open learns about a new release; the
-// server caches PyPI's answer for that long anyway.
-
-// A repo line's marks: a linked worktree, and nothing left to commit or push.
-const RP_ICON = { worktree: "branch", clean: "read" };
 
 function span(cls, text, name) {
   const el = document.createElement("span");
@@ -2461,164 +1935,6 @@ function span(cls, text, name) {
   if (name) el.prepend(icon(name));
   return el;
 }
-
-async function loadVersion() {
-  let v;
-  try {
-    v = await app.conn.call("server.version");
-  } catch (e) {
-    return;
-  }
-  const run = v.running;
-  const dev = run.dev;
-  const short = run.commit ? run.commit.slice(0, 7) : null;
-  const shown = dev && short ? short : run.version || "unknown";
-  const behind = v.status === "behind";
-
-  $("ver-head").textContent = `aegis on ${app.conn.server}`;
-  $("ver-run").replaceChildren(span("v", shown), ...(dev ? [span("tag", "dev")] : []));
-  // aegis-dev builds from the resolved commit, so the ref is often the commit again.
-  const ref = run.ref && !(run.commit || "").startsWith(run.ref) ? run.ref : null;
-  $("ver-ref-row").hidden = !ref;
-  $("ver-ref").textContent = ref || "";
-  $("ver-base-row").hidden = !dev || !run.version;
-  $("ver-base").textContent = run.version || "";
-  const mark = v.status === "current" ? [span("ok", " current", "read")] : behind ? [span("upd", " update", "arrow-up")] : [];
-  $("ver-latest").replaceChildren(span("v", v.latest || "unknown"), ...mark);
-  $("ver-line").replaceChildren(
-    span("", "aegis"),
-    span("v", shown),
-    ...(dev ? [span("tag", "dev")] : behind ? [span("upd", " update", "arrow-up")] : v.status === "current" ? [span("ok", "", "read")] : []),
-  );
-  $("ver-sec").hidden = false;
-
-  const top = $("ver-top");
-  top.replaceChildren(span("", shown), ...(dev ? [span("tag", "dev")] : behind ? [span("upd", "", "arrow-up")] : []));
-  verInfo = v;
-  const how = v.install?.command;
-  top.title = behind
-    ? `aegis ${run.version}; ${v.latest} is out${how ? `: ${how}` : ""}`
-    : dev
-      ? `aegis built from ${run.commit || "a source tree"}${ref ? ` (${ref})` : ""}, based on ${run.version}; latest release ${v.latest || "unknown"}`
-      : `aegis ${run.version}; latest release ${v.latest || "unknown"}`;
-  top.hidden = false;
-  drawUpdate();
-}
-setInterval(() => app.conn.open && loadVersion(), 3600 * 1000);
-
-// -- updating aegis (self_update.py, #955) --------------------------------------
-// An admin gets an Update button beside the arrow when the server knows the
-// installer that owns it. The update channel carries its steps; once the
-// server restarts, the reconnect finds a new build and reloads the page.
-let verInfo = null; // the last server.version
-let upd = { phase: "idle", lines: [], error: null, version: null };
-const UPD_STEPS = ["installing", "checking", "restarting"];
-const updRunning = () => UPD_STEPS.includes(upd.phase);
-const mayUpdate = () => verInfo?.status === "behind" && verInfo.install?.can;
-
-function updButton(label) {
-  const b = document.createElement("button");
-  b.className = "upd-btn";
-  b.textContent = label;
-  b.addEventListener("click", (ev) => {
-    ev.stopPropagation();
-    startUpdate();
-  });
-  return b;
-}
-
-async function startUpdate() {
-  const n = [...app.state.sessions.values()].filter((m) => m.server === null && m.state === "working").length;
-  const busy = n ? ` ${n} session${n > 1 ? "s are" : " is"} working: their turns stop for the restart and continue on the new version.` : "";
-  if (!(await ask(`Update aegis to ${verInfo.latest} and restart the server?${busy}`, { ok: "Update and restart" }))) return;
-  try {
-    await app.conn.call("server.update");
-  } catch (e) {
-    upd = { ...upd, phase: "failed", error: e.message };
-    drawUpdate();
-  }
-}
-
-function drawUpdate() {
-  const sec = $("ver-upd");
-  const top = $("ver-top");
-  top.querySelector(".upd-btn")?.remove();
-  top.querySelector(".upd-run")?.remove();
-  const behind = verInfo?.status === "behind";
-  sec.hidden = !behind && upd.phase === "idle";
-  if (sec.hidden) return;
-  const inst = verInfo?.install;
-  const rows = [];
-  const kv = (k, v) => {
-    const d = document.createElement("div");
-    d.className = "kv";
-    d.append(span("", k), span("", v));
-    return d;
-  };
-  const line = (cls, text) => {
-    const d = document.createElement("div");
-    d.className = cls;
-    d.textContent = text;
-    return d;
-  };
-  if (inst) rows.push(kv("installed by", inst.by));
-  if (upd.phase === "idle") {
-    if (mayUpdate()) {
-      rows.push(line("how", inst.command));
-      const acts = line("acts", "");
-      acts.append(updButton("Update"));
-      rows.push(acts);
-      top.append(updButton("Update"));
-    } else if (inst?.can) {
-      rows.push(line("how", "An admin can update this server."), line("how", inst.command));
-    } else {
-      rows.push(line("how", inst?.command ? `Update in a shell: ${inst.command}` : "Pull and reinstall in a shell."));
-    }
-  } else {
-    const ul = document.createElement("ul");
-    ul.className = "upd-steps";
-    const at = upd.phase === "failed" ? -1 : UPD_STEPS.indexOf(upd.phase);
-    const failedAt = UPD_STEPS.indexOf(upd.failed_at);
-    UPD_STEPS.forEach((step, i) => {
-      const li = document.createElement("li");
-      li.textContent = step;
-      if (at >= 0) li.className = i < at ? "done" : i === at ? "doing" : "";
-      else li.className = i < failedAt ? "done" : i === failedAt ? "bad" : "";
-      ul.append(li);
-    });
-    rows.push(ul);
-    if (upd.lines.length) {
-      const pre = document.createElement("pre");
-      pre.className = "upd-log";
-      pre.textContent = upd.lines.slice(-8).join("\n");
-      rows.push(pre);
-    }
-    if (upd.phase === "failed") {
-      rows.push(line("err-text", `${upd.error}. aegis ${verInfo?.running.version || ""} is still running.`));
-      if (mayUpdate()) {
-        const acts = line("acts", "");
-        acts.append(updButton("Try again"));
-        rows.push(acts);
-        top.append(updButton("Update"));
-      }
-    } else {
-      const run = line("upd-run", upd.phase === "restarting" ? "restarting" : "updating");
-      top.append(run);
-    }
-  }
-  sec.replaceChildren(...rows);
-}
-app.conn.subscribe(
-  "update",
-  (snap) => {
-    upd = snap;
-    drawUpdate();
-  },
-  (ops) => {
-    for (const op of ops) if ("set" in op) upd = op.set;
-    drawUpdate();
-  },
-);
 
 // -- the recap -----------------------------------------------------------------
 // Asked on landing and by the sparkle or the row's refresh. The entry arrives on
@@ -2953,13 +2269,9 @@ async function reopen(id) {
     archiveLoaded = false;
     go(`#s=${id}`);
   } catch (e) {
-    $("side-error").textContent = e.message;
+    sidebar.fail(e.message);
   }
 }
-$("reopen").addEventListener("click", () => {
-  const r = route();
-  if (r.view === "read") reopen(r.id);
-});
 
 // -- the new-tab composer -------------------------------------------------------
 // An agent is a preset: picking one fills the other chips, and changing a chip
@@ -3589,7 +2901,7 @@ function nextNeed() {
   go(`#s=${id}`);
 }
 
-// What each key in keys.js does. `input` and `editing` are declared below;
+// What each key in keys.js does. `input` is declared below;
 // a key is pressed only after this module has run.
 // A transcript key does nothing while the canvas's tabs hide the transcript.
 const onTranscript = (run) => (ev) => canvas.transcriptShown() && run(ev);
@@ -3689,18 +3001,16 @@ installKeys(
       if (header.close()) return;
       if (root.dataset.side === "open") return closeSide();
       if (!keymap.hidden) help(false);
-      else if (cmenu.close() || cmenu.unbar() || viewer.close() || find.close() || closeMonitorCard() || closeCard()) return;
-      else if (route().view === "session" && !editing.size) interrupt();
+      else if (cmenu.close() || cmenu.unbar() || viewer.close() || find.close() || closeMonitorCard() || sidebar.closeCard()) return;
+      else if (route().view === "session" && !sidebar.isEditing()) interrupt();
     },
     help: () => help(),
     side: () => toggleSide(),
     archive() {
-      const b = $("close");
-      if (route().view === "session" && !b.disabled) b.click();
+      if (route().view === "session") sidebar.archive();
     },
     quiet() {
-      const b = $("quiet-session");
-      if (route().view === "session" && !b.disabled) b.click();
+      if (route().view === "session") sidebar.quietSession();
     },
     palette: () => palette.toggle(),
     sessions: () => {
@@ -4104,7 +3414,7 @@ async function closeSession(s) {
   try {
     await callFor(s.key, "session.close");
   } catch (e) {
-    $("side-error").textContent = e.message;
+    sidebar.fail(e.message);
   }
 }
 
@@ -4380,7 +3690,7 @@ for (const [id, cmd] of [
 // A session action's error: in the panel when it is the shown session's,
 // else a toast (a card's or a tab's menu acts on any session).
 function failed(key, e) {
-  if (key === app.state.shown) $("side-error").textContent = e.message;
+  if (key === app.state.shown) sidebar.fail(e.message);
   else toast(e.message, { kind: "error" });
 }
 
@@ -4506,30 +3816,13 @@ input.addEventListener("keydown", (ev) => {
 });
 $("send").addEventListener("click", send);
 $("interrupt").addEventListener("click", interrupt);
-$("continue").addEventListener("click", () => focused() && continueKey(focused().key));
-$("restart").addEventListener("click", () => focused() && restartKey(focused().key));
-$("quiet-session").addEventListener("click", () => focused() && quietKey(focused().key, true));
-$("autoclose-session").addEventListener("click", () => focused() && autocloseKey(focused().key, !focused().autoclose));
-$("stop-session").addEventListener("click", () => focused() && sleepKey(focused().key));
-
-$("close").addEventListener("click", () => {
-  const s = focused();
-  if (s) closeSession(s);
-});
 
 // -- the panel: a drawer on a phone (client.css, max-width 760px), collapsible
-// and resizable on a desktop (side.js) ------------------------------------------
+// and resizable on a desktop (side.js, through the sidebar part) --------------
 const drawerMode = matchMedia("(max-width: 760px)");
-initSide({ onCardOpen: () => closeMonitorCard() });
 // Closing the drawer returns to the desktop state this browser keeps.
-const closeSide = () => {
-  if (root.dataset.side === "open") restState();
-};
-function toggleSide() {
-  if (!drawerMode.matches) return toggleCollapsed();
-  if (root.dataset.side === "open") closeSide();
-  else root.dataset.side = "open";
-}
+const closeSide = () => sidebar.closeDrawer();
+const toggleSide = () => sidebar.toggle();
 // A monitor's link to the tool call it waits on: the row open, as find opens it.
 const revealToolRow = (id) => {
   if (!transcript.entries.has(id)) return false;
@@ -4549,56 +3842,14 @@ document.querySelector(".v-session").addEventListener("click", (ev) => {
 });
 
 // -- rename in place -------------------------------------------------------------
-const editing = new Set();
-
-function editable(elId, field) {
-  const node = $(elId);
-  node.addEventListener("click", () => {
-    const r = route();
-    if (editing.has(field) || (r.view !== "session" && r.view !== "read")) return;
-    editing.add(field);
-    const old = node.textContent;
-    const box = document.createElement("input");
-    box.className = "rename";
-    box.value = field === "title" && old === "untitled" ? "" : old;
-    node.replaceChildren(box);
-    box.focus();
-    box.select();
-    const finish = async (save) => {
-      if (!editing.has(field)) return;
-      editing.delete(field);
-      const value = box.value.trim();
-      node.textContent = old;
-      if (!save || !value || value === old) return;
-      try {
-        await callFor(r.id, "session.rename", { [field]: value });
-        node.textContent = value;
-        archiveLoaded = false;
-        $("side-error").textContent = "";
-      } catch (e) {
-        $("side-error").textContent = e.message;
-      }
-    };
-    box.addEventListener("keydown", (ev) => {
-      if (ev.key === "Enter") finish(true);
-      if (ev.key === "Escape") {
-        ev.stopPropagation();
-        finish(false);
-      }
-    });
-    box.addEventListener("blur", () => finish(true));
-  });
-}
-editable("s-title", "title");
-editable("s-handle", "handle");
-
-// Rename… from a menu: the session opens and its handle turns into the
-// panel's own input, once the panel shows that session.
+// The panel owns the title and handle inputs (parts/sidebar.js); a menu's
+// Rename… opens the session and asks the panel for the handle's input, once the
+// panel shows that session.
 async function renameKey(key) {
   await openCard(key);
   const s = app.state.sessions.get(key);
-  for (let i = 0; i < 30 && s && $("s-handle").textContent !== s.handle; i++) await new Promise(requestAnimationFrame);
-  $("s-handle").click();
+  for (let i = 0; i < 30 && s && sidebar.handleText() !== s.handle; i++) await new Promise(requestAnimationFrame);
+  sidebar.startRename("handle");
 }
 
 // -- the card and tab menu (menu.js) --------------------------------------------
@@ -4650,18 +3901,19 @@ attachCardMenu($("cards"));
 // card on hover, with the tab menu's items as buttons, and a long press on a
 // touch screen. The same card for a session the shown one waits on (#667), to
 // the left of
-// the panel and level with its row, where the panel's own cards open.
-const waitCard = attachTabCard($("s-waiting"), {
+// the panel and level with its row, where the panel's own cards open. The row
+// is the sidebar part's; the card is the page's until b8.
+const waitCard = attachTabCard(sidebar.waiting, {
   meta: (key) => app.state.sessions.get(key),
   card: (m) => fleetCard(m, openCard, (k) => app.state.sessions.get(k) && closeSession(app.state.sessions.get(k))),
   items: sessionMenu,
   item: ".wait",
   place: (box, r) => {
-    box.style.left = `${Math.max(8, $("side").getBoundingClientRect().left - box.offsetWidth - 12)}px`;
+    box.style.left = `${Math.max(8, sidebar.el.getBoundingClientRect().left - box.offsetWidth - 12)}px`;
     box.style.top = `${Math.max(12, Math.min(r.top - 8, innerHeight - box.offsetHeight - 12))}px`;
   },
 });
-attachCardMenu($("s-waiting"), { touch: (t) => t.matches(".wait[data-id]") && waitCard.sheet(t) });
+attachCardMenu(sidebar.waiting, { touch: (t) => t.matches(".wait[data-id]") && waitCard.sheet(t) });
 
 // The New session form filled from a source session: its server, agent,
 // model and folder, and a prompt the person goes on writing. The picks come
