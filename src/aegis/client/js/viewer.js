@@ -196,11 +196,11 @@ export function contentUnit(range, root) {
 export class Viewer {
   // `point` is app.js's: items({locator, text, to, comment, leave}) gives a
   // selection's items, send(key, text) writes a session's composer.
-  constructor(root, { entry, point, base = fileBase }) {
+  constructor(root, { entry, point, base = null }) {
     this.root = root; // #viewer, inside .col
     this.entry = entry; // (id) -> the shown transcript's entry, or undefined
     this.point = point;
-    this.base = base; // the mount's file prefix; a part updates it on a switch
+    this.base = base; // the mount's file prefix; null follows entries.js's fileBase
     this.items = new Map(); // session key -> {files, at, remote, glyph, line?}, {artifact} or {workflow}
     this.key = null; // the session shown
     this.drawn = 0; // bumped by every draw, so a fetch for an older one is dropped
@@ -409,7 +409,7 @@ export class Viewer {
     if (e.status === "live") acts.append(dockButton(e.id));
     // A live page pops out into a window of its own, with the bridge behind
     // it; only an ended one opens raw in a new tab, as its card does.
-    drawArtifact(e, { bar, body, acts, popout: e.status === "live" ? popButton(e.id) : null, base: this.base });
+    drawArtifact(e, { bar, body, acts, popout: e.status === "live" ? popButton(e.id) : null, base: this.base ?? undefined });
     acts.append(this.closeButton());
     bar.append(acts);
     // By the artifact's id: a page the agent sends again is a new file, and
@@ -425,7 +425,7 @@ export class Viewer {
     const item = this.isOpen ? this.items.get(this.key) : null;
     if (item?.artifact !== e.id) return;
     const frame = this.root.querySelector("iframe[data-artifact]");
-    if (frame && frame.dataset.status === e.status && frame.getAttribute("src") === fileUrl(e.detail?.url, this.base)) return;
+    if (frame && frame.dataset.status === e.status && frame.getAttribute("src") === fileUrl(e.detail?.url, this.base ?? undefined)) return;
     this.render(e);
   }
 }

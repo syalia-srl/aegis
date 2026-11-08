@@ -109,7 +109,7 @@ export class TranscriptPart {
     });
     this.transcript = new Transcript(this.tr, this.entries, this.jump, {
       base: this.base,
-      open: (item) => this.viewer.open(item),
+      opener: (item) => this.viewer.open(item),
       onSelect: () => this.drawNav(),
       onRead: (ids) => this.read(ids),
       loadDetail: (ids) => this.detail(ids),

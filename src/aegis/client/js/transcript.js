@@ -67,15 +67,16 @@ const PAGE = 100;
 const NEAR_TOP_PX = 400;
 
 export class Transcript {
-  constructor(scroller, list, jump, { loadDetail, statPaths = null, onRead = () => {}, onSelect = () => {}, onReply = () => {}, seen = () => true, base = "", open = null } = {}) {
+  constructor(scroller, list, jump, { loadDetail, statPaths = null, onRead = () => {}, onSelect = () => {}, onReply = () => {}, seen = () => true, base = null, opener = null } = {}) {
     this.scroller = scroller;
     this.list = list;
     this.jump = jump;
-    // Where this transcript's files live: "" on the standalone page,
-    // "/aegis" under a host's prefix, and "/aegis/via/<server>" for a linked
-    // one. A part sets it before each switch; render(entry, { base }) uses it.
+    // Where this transcript's files live: null means the page's own default
+    // (entries.js's fileBase, which app.js sets per tab); "" is a mount with
+    // no prefix, and "/aegis[/via/<server>]" a host's. A part sets it before
+    // each switch; render(entry, { base }) uses it.
     this.base = base;
-    this.open = open; // what a sent file's or artifact's Open does
+    this.opener = opener; // what a sent file's or artifact's Open does
     this.entries = new Map(); // id -> entry, in transcript order
     this.nodes = new Map(); // id -> row, for the mounted suffix
     this.opened = new Map(); // id -> open, for rows whose details the reader toggled
@@ -236,7 +237,7 @@ export class Transcript {
   }
 
   mount(e) {
-    const n = render(this.whole(e), { base: this.base, open: this.open });
+    const n = render(this.whole(e), { base: this.base ?? undefined, open: this.opener });
     for (const f of n.querySelectorAll(".fence")) watch(f);
     if (this.statPaths && n.querySelector(".md code.ref[data-index]")) {
       const known = this.kinds.get(e.id);
@@ -413,7 +414,7 @@ export class Transcript {
         const done = e.kind === "prose" && !e.live && (!known || prev.live);
         const old = this.nodes.get(e.id);
         if (old) {
-          if (update(e, old, prev, { base: this.base, open: this.open })) this.nodes.set(e.id, old);
+          if (update(e, old, prev, { base: this.base ?? undefined, open: this.opener })) this.nodes.set(e.id, old);
           else {
             this.watch.unobserve(old);
             this.drop(old);

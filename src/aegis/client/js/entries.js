@@ -161,8 +161,9 @@ export function paneFile(f) {
   const remote = fileBase !== "";
   return { file: remote ? viaFile({ ...f }) : f, remote };
 }
-function fileCard(files, glyph, { base = fileBase, remote = fileBase !== "", open = opener } = {}) {
+function fileCard(files, glyph, { base = fileBase, remote = fileBase !== "", open = null } = {}) {
   const sent = files.map((f) => ({ ...f }));
+  const openerFor = open || opener; // app.js's default; a part passes its own
   if (base !== "" || remote) for (const f of sent) viaFile(f, base);
   const card = el("div", "fcard");
   const bar = el("div", "fbar");
@@ -170,7 +171,7 @@ function fileCard(files, glyph, { base = fileBase, remote = fileBase !== "", ope
   const size = el("span", "fs");
   const { acts, set } = fileActions(remote);
   const view = iconButton(el("button", "btn primary view"), "expand", "Open");
-  view.addEventListener("click", () => open({ files: sent, at, remote, glyph }));
+  view.addEventListener("click", () => openerFor({ files: sent, at, remote, glyph }));
   const dock = dockButton("");
   acts.prepend(view, ...(remote ? [] : [dock]));
   bar.append(entryIcon(glyph), name, size);
