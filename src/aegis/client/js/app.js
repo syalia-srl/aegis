@@ -7,6 +7,7 @@
 // home, `<server>/<log_id>` on a linked server (links.py).
 
 import { Mount } from "./mount.js";
+import { byId } from "./dom.js";
 import { Transcript } from "./transcript.js";
 import { artifactStage, btwFolds, entryFiles, fadeTables, fileUrl, refreshApprovals, refreshWorkflows, setApprovals, setDocker, setFileBase, setOpener, setSecrets, setSpeaker, setWorkflows, syncDock, tickWorkflows, workflowLocked, workflowTitle } from "./entries.js";
 import { setScroller } from "./highlight.js";
@@ -60,14 +61,14 @@ import { outbox } from "./outbox.js";
 import { idleFor, lifecycle } from "./lifecycle.js";
 import { serverNow } from "./clock.js";
 
-const $ = (id) => document.getElementById(id);
-const root = $("a2");
+const root = document.getElementById("a2");
 const phoneHeader = matchMedia("(max-width:760px)"); // the one-row header (client.css)
 
-// The page is one mount over the markup index.html still holds (b8 gives it
-// its parts): it adopts #a2, takes the page's shared socket, and owns the state
-// every view below reads. The theme is the one index.html applied to <html>
-// before the first paint, so the first render draws what the last one did.
+// The page is the full layout of one mount: index.html holds only its head and
+// an empty #a2, and the mount builds the rest (js/layouts/full.js). It takes
+// the page's shared socket and owns the state every view below reads. The theme
+// is the one index.html applied to <html> before the first paint, so the first
+// render draws what the last one did.
 const app = new Mount(root, {
   adopt: true,
   layout: "full",
@@ -77,6 +78,9 @@ const app = new Mount(root, {
   outbox,
 });
 app.start();
+// Every node below is found under the root the mount built; the page keeps no
+// markup of its own to ask for.
+const $ = (id) => byId(root, id);
 
 // The header is a part (b2): it builds the markup index.html used to hold and
 // owns the strip's folds, the quiet marks and the switcher. The page hands it
@@ -125,7 +129,7 @@ const sidebar = new SidebarPart(app, root.querySelector(".v-session"), {
   autoclose: (key, on) => autocloseKey(key, on),
   continueKey: (key) => continueKey(key),
   restart: (key) => restartKey(key),
-  keyOf: (server, id) => keyOf(server, id),
+  keyOf: (server, id) => app.keyOf(server, id),
   forKey: (key) => app.forKey(key),
   callFor: (key, op, params) => app.callFor(key, op, params),
   locked: (s) => workflowLocked(s),
@@ -206,19 +210,9 @@ function setTheme(name) {
 // keeps.
 const order = new TabOrder();
 
-// The key helpers the slices still call by their old names, now mount methods
-// that read this mount's links and socket. Each is deleted by the part that
-// stops using it (b2–b9); none of them keeps state.
-const keyOf = (server, logId) => app.keyOf(server, logId);
-const forKey = (key) => app.forKey(key);
-const callFor = (key, op, params = {}) => app.callFor(key, op, params);
-const linkOf = (server) => app.linkOf(server);
-const isOff = (server) => app.isOff(server);
-const withKey = (m, server = null) => app.withKey(m, server);
-
 // A docked browser's key: its pane holds the id the browser's own server
 // knows it by, and the canvas is the shown session's, on that server (#970).
-const paneKey = (id) => keyOf(forKey(app.state.shown || "").server, id);
+const paneKey = (id) => app.keyOf(app.forKey(app.state.shown || "").server, id);
 // Where a browser's views find its card and the sessions it can be given to.
 // The mount names these, so a second mount on the page cannot overwrite them.
 const browserCard = (id) => (app.state.sessions.has(paneKey(id)) ? termCard(paneKey(id)) : null);
@@ -246,7 +240,7 @@ const transcript = new Transcript($("tr"), $("entries"), $("jump"), {
     if (!app.state.shown) return;
     for (let i = 0; i < ids.length; i += 500) {
       const batch = ids.slice(i, i + 500);
-      callFor(app.state.shown, "session.read", { ids: batch }).catch(() => batch.forEach((id) => transcript.sent.delete(id)));
+      app.callFor(app.state.shown, "session.read", { ids: batch }).catch(() => batch.forEach((id) => transcript.sent.delete(id)));
     }
   },
   onSelect: drawNav,
@@ -255,27 +249,27 @@ const transcript = new Transcript($("tr"), $("entries"), $("jump"), {
   seen: () => canvas.transcriptShown(),
   loadDetail: (ids) => {
     const id = app.state.shown;
-    return callFor(id, "transcript.detail", { ids }).then((got) => (app.state.shown === id ? got : []));
+    return app.callFor(id, "transcript.detail", { ids }).then((got) => (app.state.shown === id ? got : []));
   },
   // Only this server's replies carry pending refs (entries.js), so a linked
   // server is never asked.
   statPaths: (entryId) => {
     const id = app.state.shown;
-    return callFor(id, "path.stat", { entry_id: entryId }).then((got) => {
+    return app.callFor(id, "path.stat", { entry_id: entryId }).then((got) => {
       if (app.state.shown !== id) throw new Error("another session is shown");
       return got;
     });
   },
 });
 artifacts.setup({
-  call: (op, params, key) => callFor(key || app.state.shown, op, params),
+  call: (op, params, key) => app.callFor(key || app.state.shown, op, params),
   entry: (id) => transcript.entries.get(id),
   key: () => app.state.shown,
   point: (frame, params) => pagePoint(frame, params),
   dictation: () => dictation.engine,
   toast: (message) => toast(message, { kind: "error" }),
   waitOnline: () => waitOnline(),
-  local: (key) => !forKey(key).server,
+  local: (key) => !app.forKey(key).server,
 });
 const pointing = { items: (ctx) => pointItems(ctx), send: (key, text) => toComposer(key, text) };
 const viewer = new Viewer($("viewer"), { entry: (id) => transcript.entries.get(id), point: pointing });
@@ -313,7 +307,7 @@ const canvas = new Canvas($("canvas"), {
   transcriptPane: $("tr-pane"),
   entryOf: (id) => transcript.entries.get(id),
   latestFile,
-  call: (op, params) => callFor(app.state.shown, op, params),
+  call: (op, params) => app.callFor(app.state.shown, op, params),
   // A card's Dock button hides while its item is docked, and a file card's
   // page swaps its preview for a line; a docked page's card swaps its frame
   // by itself (entries.hold).
@@ -325,7 +319,7 @@ const canvas = new Canvas($("canvas"), {
   mountBrowser: (host, id) => {
     const key = paneKey(id);
     return app.state.sessions.has(key)
-      ? mountBrowser(host, id, termCard(key), { conn: app.conn, server: forKey(key).server, sources: browserSources })
+      ? mountBrowser(host, id, termCard(key), { conn: app.conn, server: app.forKey(key).server, sources: browserSources })
       : null;
   },
 });
@@ -380,12 +374,12 @@ setScroller($("tr"));
 new ResizeObserver(() => fadeTables($("entries"))).observe($("tr"));
 const copyDeps = {
   entry: (id) => transcript.entries.get(id),
-  output: (id) => callFor(app.state.shown, "transcript.output", { id }).then((r) => r.text),
-  detail: (id) => callFor(app.state.shown, "transcript.detail", { ids: [id] }).then((got) => got[0]),
+  output: (id) => app.callFor(app.state.shown, "transcript.output", { id }).then((r) => r.text),
+  detail: (id) => app.callFor(app.state.shown, "transcript.detail", { ids: [id] }).then((got) => got[0]),
 };
 installCopy($("entries"), copyDeps);
 installCopy($("viewer"), copyDeps);
-const find = new Find($("find"), transcript, (q) => callFor(app.state.shown, "transcript.search", { q }).then((r) => r.ids));
+const find = new Find($("find"), transcript, (q) => app.callFor(app.state.shown, "transcript.search", { q }).then((r) => r.ids));
 $("find-prev").append(icon("up"));
 $("find-next").append(icon("down"));
 $("find-close").append(icon("close"));
@@ -396,6 +390,8 @@ $("nav-last").append(icon("start"));
 $("nav-up").append(icon("up"));
 $("nav-down").append(icon("down"));
 $("jump").append(icon("latest"));
+$("nav-side").append(icon("panel"));
+$("attach").append(icon("clip"));
 $("send").append(icon("send"));
 $("interrupt").append(icon("stop"));
 $("replies-g").append(icon("prompt"));
@@ -755,7 +751,7 @@ filesView = new Files(app.conn, views.files, {
     session: async (dir) => spawn.openAt(dir),
     terminal: (dir) =>
       app.conn.call("term.spawn", { profile: "shell", cwd: dir || "." }).then(
-        (card) => go(`#t=${keyOf(null, card.id)}`),
+        (card) => go(`#t=${app.keyOf(null, card.id)}`),
         (e) => toast(e.message, { kind: "error" }),
       ),
   },
@@ -795,9 +791,9 @@ const schedules = new Schedules(app.conn, views.schedules, {
   sessions: (server) => (server ? on(server) : local()),
   onCount: (n, red) => header.setSchedules(n, red),
 });
-setSecrets((op, params) => callFor(app.state.shown, op, params));
+setSecrets((op, params) => app.callFor(app.state.shown, op, params));
 // A card asks the server of the session it is shown in: names are per server.
-const shownServer = () => (app.state.shown ? forKey(app.state.shown).server : null);
+const shownServer = () => (app.state.shown ? app.forKey(app.state.shown).server : null);
 // A card a session here made across a link goes to the server it names.
 // In a far session's transcript the name is that server's word about its own
 // links, and undefined finds no schedule: it could otherwise put an Unpause for
@@ -920,30 +916,30 @@ function sessionHandlers(server) {
     (metas) => {
       for (const [k, m] of app.state.sessions) if (m.server === server) app.state.sessions.delete(k);
       for (const m of metas || []) {
-        const w = withKey(m, server);
+        const w = app.withKey(m, server);
         app.state.sessions.set(w.key, w);
       }
       if (server) app.state.remote.get(server).loaded = true;
       else booted = homeLive = true;
       onSessions();
       // The server is reachable again: what was written meanwhile goes out.
-      outbox.flushNow((key) => forKey(key).server === server);
+      outbox.flushNow((key) => app.forKey(key).server === server);
     },
     (ops) => {
       for (const op of ops) {
         if (op.upsert) {
-          const w = withKey(op.upsert, server);
+          const w = app.withKey(op.upsert, server);
           if (!app.state.sessions.has(w.key)) setChanged = true;
           app.state.sessions.set(w.key, w);
           changed.add(w.key);
         } else if (op.merge) {
-          const k = keyOf(server, op.merge.log_id);
+          const k = app.keyOf(server, op.merge.log_id);
           const held = app.state.sessions.get(k);
           if (!held) continue;
-          app.state.sessions.set(k, withKey({ ...held, ...op.merge }, server));
+          app.state.sessions.set(k, app.withKey({ ...held, ...op.merge }, server));
           changed.add(k);
         } else if (op.remove !== undefined) {
-          app.state.sessions.delete(keyOf(server, op.remove));
+          app.state.sessions.delete(app.keyOf(server, op.remove));
           setChanged = true;
           // The server archives a session before it publishes the removal, so
           // this is the moment the archive gains a row, wherever it was closed.
@@ -1018,7 +1014,7 @@ function onLinks(list) {
   }
   // A saved session of a server no longer linked will never be replaced.
   for (const [k, m] of app.state.sessions) if (m.stale && m.server && !names.has(m.server)) app.state.sessions.delete(k);
-  for (const [k, m] of app.state.sessions) if (m.server) app.state.sessions.set(k, { ...m, off: isOff(m.server) });
+  for (const [k, m] of app.state.sessions) if (m.server) app.state.sessions.set(k, { ...m, off: app.isOff(m.server) });
   // Which servers are up changes what the archive can list: read it again.
   const sig = app.state.links.map((l) => `${l.name}:${l.state}`).join(",");
   if (sig !== app.state.linksSig) {
@@ -1190,7 +1186,7 @@ const tabFocus = (r) => (r.view === "session" || r.view === "term" || r.view ===
 // The open terminal's card, with the log id and server it is reached by.
 function termCard(key) {
   const m = app.state.sessions.get(key);
-  return m && { ...m, id: forKey(key).log_id };
+  return m && { ...m, id: app.forKey(key).log_id };
 }
 // The service worker (sw.js): it keeps this build for offline use and raises
 // notifications. A new build downloads beside this one; reloading takes it.
@@ -1234,8 +1230,8 @@ const tabbed = () => app.state.ordered.filter((m) => !m.quiet);
 // Whether the list that would hold this key has arrived: a far session's
 // server's, or this server's live one rather than the device's saved list.
 function settled(key) {
-  const far = forKey(key).server;
-  return far ? app.state.linksLoaded && !(linkOf(far) && !app.state.remote.get(far)?.loaded) : homeLive;
+  const far = app.forKey(key).server;
+  return far ? app.state.linksLoaded && !(app.linkOf(far) && !app.state.remote.get(far)?.loaded) : homeLive;
 }
 
 function leaveIfGone(r) {
@@ -1257,7 +1253,7 @@ async function openCard(key) {
   // A locked node opens as it is, quiet: it gets its tab when the run ends.
   if (app.state.sessions.get(key)?.quiet && !locked(app.state.sessions.get(key))) {
     try {
-      const back = await callFor(key, "session.unquiet");
+      const back = await app.callFor(key, "session.unquiet");
       // Read again: a patch the server sent before the unquiet may have
       // replaced the meta meanwhile, still quiet, and the page would leave it.
       const m = app.state.sessions.get(key);
@@ -1413,7 +1409,7 @@ function render() {
       if (transcript.entries.has(landEntry.id)) transcript.reveal(landEntry.id);
       landEntry = null;
     }
-    watchHost(forKey(r.id).server || "");
+    watchHost(app.forKey(r.id).server || "");
     // Shown first: follow() sizes the message box, which measures 0 while hidden.
     show("session");
     follow(r.id);
@@ -1445,7 +1441,7 @@ function render() {
     follow(app.state.sessions.has(r.id) ? r.id : null);
     drawWindow(r);
   } else {
-    watchHost(forKey(r.id).server || "");
+    watchHost(app.forKey(r.id).server || "");
     show("session");
     follow(r.id);
     const m = fleet.findArchived(r.id);
@@ -1547,7 +1543,7 @@ function tellView() {
 let watchedServer = null;
 function tellWatch() {
   const key = route().view === "session" ? app.state.shown || "" : ""; // the Fleet and other views watch nothing
-  const { server, log_id } = key ? forKey(key) : { server: null, log_id: null };
+  const { server, log_id } = key ? app.forKey(key) : { server: null, log_id: null };
   if (watchedServer !== null && watchedServer !== (server || "")) {
     const off = { t: "watch", session: null, visible: false };
     if (watchedServer) off.server = watchedServer;
@@ -1595,7 +1591,7 @@ function follow(id) {
   }
   // The base before any row is drawn: a kept tab's rows mount at once, and
   // would take the last tab's server's base (#425).
-  const where = forKey(id);
+  const where = app.forKey(id);
   setFileBase(where.server ? `/via/${where.server}` : "");
   const saved = app.state.kept.get(id);
   if (saved) {
@@ -1720,7 +1716,7 @@ function renderMeta(s) {
   workingTokens = s.turn_tokens || [0, 0];
   if (!working) workingSince = null;
   // A linked server that is down: the transcript stays readable, nothing sends.
-  const down = s.off ? linkOf(s.server) : null;
+  const down = s.off ? app.linkOf(s.server) : null;
   input.disabled = $("attach").disabled = !!down || held;
   drawSending(!!down || held);
   if (s.asleep_why !== "idle" && warmed === app.state.shown) warmed = null;
@@ -1733,7 +1729,7 @@ function renderMeta(s) {
 // after the first keystroke, the waking row says so in the transcript instead.
 function drawComposerHint(s) {
   $("waking").hidden = !(s.asleep_why === "idle" && warmed === app.state.shown);
-  const down = s.off ? linkOf(s.server) : null;
+  const down = s.off ? app.linkOf(s.server) : null;
   // Chrome counts a placeholder in scrollHeight: measure again when it changes.
   const placeholder = locked(s)
     ? `Step ${s.workflow.node} of the workflow ${workflowTitle(s.workflow.run) || s.workflow.run}. You can read it; it takes no messages until the run stops.`
@@ -1828,7 +1824,7 @@ async function askRecap(force) {
   let why = "";
   let kind = "error";
   try {
-    const r = await callFor(id, "recap.request", { force });
+    const r = await app.callFor(id, "recap.request", { force });
     if (r.status === "off" || r.status === "failed") why = r.why;
     else if (r.status === "busy") {
       why = "the agent is still working; ask again when it is done";
@@ -1842,7 +1838,7 @@ async function askRecap(force) {
 $("entries").addEventListener("click", (ev) => {
   const cancel = ev.target.closest("[data-btw-cancel]");
   if (cancel && app.state.shown) {
-    callFor(app.state.shown, "btw.cancel", { id: cancel.dataset.btwCancel }).catch((e) => toast(e.message, { kind: "error" }));
+    app.callFor(app.state.shown, "btw.cancel", { id: cancel.dataset.btwCancel }).catch((e) => toast(e.message, { kind: "error" }));
     return;
   }
   const btwRow = ev.target.closest(".row.btw");
@@ -1891,7 +1887,7 @@ $("entries").addEventListener("click", async (ev) => {
   try {
     // The row comes back with the card in it; this node is replaced. Only
     // the answer says where the file sits under the root (viewer.js).
-    const files = await app.conn.call("file.peek", { log_id: forKey(app.state.shown).log_id, entry_id: b.dataset.entry });
+    const files = await app.conn.call("file.peek", { log_id: app.forKey(app.state.shown).log_id, entry_id: b.dataset.entry });
     for (const f of files) if (f.root_path) peekRoots.set(f.url, f.root_path);
   } catch (e) {
     b.nextElementSibling.textContent = e.message;
@@ -1909,7 +1905,7 @@ $("entries").addEventListener("click", async (ev) => {
   const open = async (pick) => {
     body.querySelector(":scope > .patherr")?.remove();
     try {
-      const files = await app.conn.call("file.peek", { log_id: forKey(app.state.shown).log_id, entry_id: row.dataset.id, index: Number(code.dataset.index), pick });
+      const files = await app.conn.call("file.peek", { log_id: app.forKey(app.state.shown).log_id, entry_id: row.dataset.id, index: Number(code.dataset.index), pick });
       viewer.open({ files, at: 0, remote: false, glyph: "file", line });
     } catch (e) {
       const note = document.createElement("div");
@@ -1935,7 +1931,7 @@ $("entries").addEventListener("click", async (ev) => {
 
 async function reopen(id) {
   try {
-    await callFor(id, "session.reopen");
+    await app.callFor(id, "session.reopen");
     fleet.invalidateArchive();
     go(`#s=${id}`);
   } catch (e) {
@@ -2185,7 +2181,7 @@ const waitOnline = () =>
       }
     }, 500);
   });
-const atts = new Attachments($("atts"), { call: callFor, waitOnline });
+const atts = new Attachments($("atts"), { call: (key, op, params) => app.callFor(key, op, params), waitOnline });
 $("attach").addEventListener("click", () => !offline() && $("attach-pick").click());
 $("attach-pick").addEventListener("change", (ev) => {
   atts.add([...ev.target.files]);
@@ -2209,7 +2205,7 @@ input.addEventListener("paste", (ev) => {
 // A file dropped anywhere on a session's page attaches to it; anywhere else
 // the browser would navigate away to the file.
 const carriesFiles = (ev) => ev.dataTransfer?.types.includes("Files");
-const onSession = () => $("a2").dataset.view === "session";
+const onSession = () => root.dataset.view === "session";
 document.addEventListener("dragover", (ev) => {
   if (!carriesFiles(ev)) return;
   ev.preventDefault();
@@ -2353,8 +2349,8 @@ function drawCold(s) {
 // old tab is archived once the new session has answered.
 async function handOff(s) {
   try {
-    const r = await callFor(s.key, "session.handoff");
-    go(`#s=${keyOf(s.server, r.log_id)}`);
+    const r = await app.callFor(s.key, "session.handoff");
+    go(`#s=${app.keyOf(s.server, r.log_id)}`);
   } catch (e) {
     toast(e.message, { kind: "error" });
   }
@@ -2391,11 +2387,11 @@ function drawReplies(s) {
     chips.unshift(h);
   }
   $("replies-pills").replaceChildren(...chips);
-  const next = s.continued_by && app.state.sessions.get(keyOf(s.server, s.continued_by));
+  const next = s.continued_by && app.state.sessions.get(app.keyOf(s.server, s.continued_by));
   $("handoff-done").hidden = !s.continued_by;
   const who = document.createElement(next ? "a" : "span");
   who.textContent = next ? next.handle : s.continued_by?.includes("@") ? s.continued_by : "a fresh session";
-  if (next) who.href = `#s=${keyOf(s.server, s.continued_by)}`;
+  if (next) who.href = `#s=${app.keyOf(s.server, s.continued_by)}`;
   $("handoff-done").replaceChildren(
     ...(!s.continued_by
       ? []
@@ -2430,7 +2426,7 @@ outbox.load();
 // A queued draft's send gets the composer's deadline: with no answer the socket
 // is dropped, which settles the send as unreached and the draft waits again.
 outbox.setSender((key, params, { ask: asking = false } = {}) => {
-  const call = callFor(key, "session.send", params);
+  const call = app.callFor(key, "session.send", params);
   const late = setTimeout(() => app.conn.drop(), SEND_VERDICT_MS);
   // A stopped session on an untested harness: a background flush settles the
   // draft as an error; the person's Send anyway asks, and Cancel keeps it.
@@ -2440,7 +2436,7 @@ outbox.setSender((key, params, { ask: asking = false } = {}) => {
       if (!asking || e.code !== "harness_untested" || !e.data) throw e;
       const pick = await untestedAsk(e.data);
       if (!pick) throw e;
-      return callFor(key, "session.send", { ...params, untested: pick });
+      return app.callFor(key, "session.send", { ...params, untested: pick });
     });
 });
 $("queued").addEventListener("click", (ev) => {
@@ -2489,19 +2485,19 @@ const confirmClose = async (s) => s.attention === "done" || (await askClose(s));
 
 async function archiveGroup(members) {
   if (offline() || !(await ask(`Archive these ${members.length} sessions: ${members.map((m) => m.handle).join(", ")}?`, { ok: "Archive" }))) return;
-  for (const m of members) callFor(m.key, "session.close").catch((e) => toast(`${m.handle}: ${e.message}`, { kind: "error" }));
+  for (const m of members) app.callFor(m.key, "session.close").catch((e) => toast(`${m.handle}: ${e.message}`, { kind: "error" }));
 }
 
 async function closeSession(s) {
   if (locked(s)) return toast(`${s.handle} is a step of a running workflow; it archives when the run ends`, { kind: "error" });
   if (offline() || !(await confirmClose(s))) return;
   if (isTool(s)) {
-    const { server, log_id } = forKey(s.key);
+    const { server, log_id } = app.forKey(s.key);
     const op = s.kind === "term" ? "term.close" : "browser.shut";
     return app.conn.call(op, { id: log_id }, server).catch((e) => toast(e.message, { kind: "error" }));
   }
   try {
-    await callFor(s.key, "session.close");
+    await app.callFor(s.key, "session.close");
   } catch (e) {
     sidebar.fail(e.message);
   }
@@ -2566,10 +2562,10 @@ async function sendLine(text, fromComposer, attachments = [], target = focused()
   }
   const params = attachments.length ? { text, attachments } : { text };
   // A linked server older than nonces would refuse the field.
-  if (fromComposer && !forKey(s.key).server) params.nonce = nonceFor(s.key, JSON.stringify([text, attachments]));
+  if (fromComposer && !app.forKey(s.key).server) params.nonce = nonceFor(s.key, JSON.stringify([text, attachments]));
   // Only to this server, like the nonce: a linked one older than the field would refuse it.
-  if (fromComposer && !forKey(s.key).server && spoken.has(`aegis.draft.${s.key}`)) params.dictated = true;
-  const call = callFor(s.key, "session.send", params);
+  if (fromComposer && !app.forKey(s.key).server && spoken.has(`aegis.draft.${s.key}`)) params.dictated = true;
+  const call = app.callFor(s.key, "session.send", params);
   const sent = (r) => {
     unconfirmed.delete(s.key);
     if (/^\/model\s/.test(text)) menu.forget(s.key); // its efforts may differ
@@ -2591,8 +2587,8 @@ async function sendLine(text, fromComposer, attachments = [], target = focused()
     // open its tab, on the server that runs it, as a spawn from the new tab does.
     if (/^\/(tutorial|whats-new|doctor|handoff)(\s|$)/.test(text) && r?.log_id) {
       // A handoff across a link answers with the server it went to.
-      const far = r.server && r.server !== app.conn.server ? r.server : forKey(s.key).server;
-      go(`#s=${keyOf(far, r.log_id)}`);
+      const far = r.server && r.server !== app.conn.server ? r.server : app.forKey(s.key).server;
+      go(`#s=${app.keyOf(far, r.log_id)}`);
     }
   };
   if (fromComposer) {
@@ -2613,7 +2609,7 @@ async function sendLine(text, fromComposer, attachments = [], target = focused()
       try {
         const r = await untestedRetry(
           () => Promise.reject(e),
-          (untested) => callFor(s.key, "session.send", { ...params, untested }),
+          (untested) => app.callFor(s.key, "session.send", { ...params, untested }),
         );
         if (r !== CANCELLED) sent(r);
       } catch (e2) {
@@ -2670,7 +2666,7 @@ async function sendFirst(key, text, files, dictated) {
     return;
   }
   try {
-    await callFor(key, "session.send", { text, attachments: ready.ids, ...(dictated && text && { dictated }) });
+    await app.callFor(key, "session.send", { text, attachments: ready.ids, ...(dictated && text && { dictated }) });
     atts.clear(key);
   } catch (e) {
     toast(e.message, { kind: "error" });
@@ -2708,9 +2704,9 @@ const send = async () => {
 // call instead of each asking the server again.
 async function loadCommands(key) {
   const [cat, pages, agents] = await Promise.all([
-    callFor(key, "commands.list"),
-    app.conn.call("help.pages", {}, forKey(key).server).catch(() => []),
-    spawnAgents(forKey(key).server),
+    app.callFor(key, "commands.list"),
+    app.conn.call("help.pages", {}, app.forKey(key).server).catch(() => []),
+    spawnAgents(app.forKey(key).server),
   ]);
   return { ...cat, agents, tutorials: pages.filter((p) => p.kind === "tutorial") };
 }
@@ -2772,7 +2768,7 @@ async function interruptKey(key) {
   const s = app.state.sessions.get(key);
   if (!s || s.state !== "working") return;
   try {
-    await callFor(key, "session.interrupt");
+    await app.callFor(key, "session.interrupt");
   } catch (e) {
     toast(e.message, { kind: "error" });
   }
@@ -2782,7 +2778,7 @@ const interrupt = () => focused() && interruptKey(focused().key);
 async function quietKey(key, on) {
   if (offline() || !app.state.sessions.has(key)) return;
   try {
-    await callFor(key, on ? "session.quiet" : "session.unquiet");
+    await app.callFor(key, on ? "session.quiet" : "session.unquiet");
   } catch (e) {
     failed(key, e);
   }
@@ -2793,7 +2789,7 @@ async function quietKey(key, on) {
 async function autocloseKey(key, on) {
   if (offline() || !app.state.sessions.has(key)) return;
   try {
-    await callFor(key, "session.autoclose", { on });
+    await app.callFor(key, "session.autoclose", { on });
   } catch (e) {
     failed(key, e);
   }
@@ -2806,10 +2802,10 @@ async function sleepKey(key) {
   const s = app.state.sessions.get(key);
   if (offline() || !s) return;
   // A check that fails cannot say nothing would die: ask then too.
-  const kills = s.old || s.state === "asleep" ? [] : await callFor(key, "session.kills").catch(() => ["aegis could not check what would end with it"]);
+  const kills = s.old || s.state === "asleep" ? [] : await app.callFor(key, "session.kills").catch(() => ["aegis could not check what would end with it"]);
   if (kills.length && !(await ask(`Sleep ${s.handle}? ${kills.join("; ")}.`, { ok: "Sleep" }))) return;
   try {
-    await callFor(key, "session.stop");
+    await app.callFor(key, "session.stop");
   } catch (e) {
     failed(key, e);
   }
@@ -2824,8 +2820,8 @@ async function wakeKey(key) {
     // An older server's warm takes only log_id.
     const wake = s.old ? {} : { wake: true };
     await untestedRetry(
-      () => callFor(key, "session.warm", wake),
-      (untested) => callFor(key, "session.warm", { ...wake, untested }),
+      () => app.callFor(key, "session.warm", wake),
+      (untested) => app.callFor(key, "session.warm", { ...wake, untested }),
     );
   } catch (e) {
     failed(key, e);
@@ -2842,8 +2838,8 @@ async function restartKey(key) {
   if (!(await confirmRestart(s))) return;
   try {
     await untestedRetry(
-      () => callFor(key, "session.restart"),
-      (untested) => callFor(key, "session.restart", { untested }),
+      () => app.callFor(key, "session.restart"),
+      (untested) => app.callFor(key, "session.restart", { untested }),
     );
   } catch (e) {
     failed(key, e);
@@ -2861,7 +2857,7 @@ function warmIfParked() {
   if (!s || s.asleep_why !== "idle" || warmed === app.state.shown) return;
   warmed = app.state.shown;
   const key = app.state.shown;
-  callFor(key, "session.warm", { log_id: forKey(key).log_id }).catch(() => {
+  app.callFor(key, "session.warm", { log_id: app.forKey(key).log_id }).catch(() => {
     if (warmed !== key) return;
     warmed = null;
     if (app.state.shown === key) drawComposerHint(app.state.sessions.get(key));
@@ -3200,7 +3196,7 @@ function sentItems(row) {
 // A Read, Write or Edit row's file, in the viewer (file.peek, as its Show button).
 async function openToolFile(id) {
   try {
-    const files = await app.conn.call("file.peek", { log_id: forKey(app.state.shown).log_id, entry_id: id });
+    const files = await app.conn.call("file.peek", { log_id: app.forKey(app.state.shown).log_id, entry_id: id });
     for (const f of files) if (f.root_path) peekRoots.set(f.url, f.root_path);
     viewer.open({ files, at: 0, remote: false, glyph: "file" });
   } catch (err) {

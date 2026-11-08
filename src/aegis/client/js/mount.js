@@ -23,6 +23,7 @@ import { installGlyphs } from "./glyphs.js";
 import { labelsFor } from "./labels.js";
 import { lifecycle } from "./lifecycle.js";
 import { Outbox } from "./outbox.js";
+import { buildFull } from "./layouts/full.js";
 import { ComposerPart } from "./parts/composer.js";
 import { TranscriptPart } from "./parts/transcript.js";
 
@@ -54,8 +55,8 @@ export class Mount {
       session: null,
       token: "",
       // `adopt`: build no root, take the element the host gives us as one. The
-      // standalone page does this over the markup index.html still holds (b1);
-      // a host that has an element of its own passes only `layout`.
+      // standalone page does this over its empty #a2 (b8); a host that has an
+      // element of its own passes only `layout`.
       adopt: false,
       // The page's own outbox, when it already has one: the full layout's
       // module singleton (outbox.js) is what its queued row and the browser
@@ -122,10 +123,17 @@ export class Mount {
     this.mountLayout();
   }
 
-  // Phase A composes the chat layout only. "full" is accepted (the standalone
-  // page passes it at b1) but composes nothing until b8.
+  // The standalone client's page: the full layout builds the netbanner, the
+  // boot view and the session view in this root, and app.js composes the parts
+  // it holds. It keeps the id the browser suite addresses (b8). A chat composes
+  // one transcript and, unless the host asked for none, its box.
   mountLayout() {
-    if (this.opts.layout === "full") return;
+    if (this.opts.layout === "full") {
+      this.root.id = "a2";
+      this.root.classList.add("app");
+      buildFull(this.root);
+      return;
+    }
     if (this.opts.layout !== "chat") throw new Error(`aegis: no layout ${this.opts.layout}`);
     const chat = el("div", "aegis-chat");
     this.root.append(chat);
@@ -365,8 +373,8 @@ function el(tag, cls) {
 
 // The root the mount owns: a .aegis element inside the host's, its theme, the
 // stylesheets it needs and the glyph sprite. The host decides nothing. With
-// `adopt`, the host's element is the root: the standalone page gives it the
-// markup index.html holds until b8, and it only gains the class and the theme.
+// `adopt`, the host's element is the root: the standalone page gives it an
+// empty #a2, and the mount fills it with the full layout.
 function makeRoot(host, opts, urls) {
   const root = opts.adopt && host ? host : el("div", "aegis");
   root.classList.add("aegis");
