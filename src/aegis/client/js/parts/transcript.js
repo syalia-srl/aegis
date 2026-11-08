@@ -320,7 +320,7 @@ export class TranscriptPart {
         this.drawNav();
       },
       (error) => {
-        if (gen === this.gen) this.mount.emit("error", { session: this.key, error });
+        if (gen === this.gen) this.mount.fail(this.key, error);
       },
       () => (this.transcript.rev >= 0 ? this.transcript.rev : null),
       server,
@@ -362,7 +362,7 @@ export class TranscriptPart {
       .callFor(key, "transcript.detail", { ids })
       .then((got) => (this.key === key ? got : []))
       .catch((error) => {
-        if (this.key === key) this.mount.emit("error", { session: key, error });
+        if (this.key === key) this.mount.fail(key, error);
         throw error;
       });
   }
@@ -454,7 +454,7 @@ export class TranscriptPart {
     const outbox = this.mount.outbox;
     if (act === "discard") outbox.discard(key);
     if (act === "send")
-      outbox.sendAnyway(key).catch((error) => this.mount.emit("error", { session: key, error }));
+      outbox.sendAnyway(key).catch((error) => this.mount.fail(key, error));
     if (act === "copy")
       navigator.clipboard.writeText(d.text).then(
         () => toast("Copied", { root: this.mount.root }),
@@ -573,11 +573,11 @@ export class TranscriptPart {
   send(text) {
     if (this.mount.composer) {
       return Promise.resolve(this.mount.composer.send(text)).catch((error) => {
-        this.mount.emit("error", { session: this.key, error });
+        this.mount.fail(this.key, error);
       });
     }
     return this.mount.callFor(this.key, "session.send", { text }).catch((error) => {
-      this.mount.emit("error", { session: this.key, error });
+      this.mount.fail(this.key, error);
     });
   }
 
@@ -612,7 +612,7 @@ export class TranscriptPart {
       const next = keyOf(forKey(key).server, r.log_id);
       this.mount.follow(next);
     } catch (error) {
-      this.mount.emit("error", { session: key, error });
+      this.mount.fail(key, error);
     }
   }
 
@@ -621,13 +621,13 @@ export class TranscriptPart {
     try {
       await this.mount.callFor(key, "session.close");
     } catch (error) {
-      this.mount.emit("error", { session: key, error });
+      this.mount.fail(key, error);
     }
   }
 
   recap() {
     this.mount.callFor(this.key, "recap.request", { force: true }).catch((error) => {
-      this.mount.emit("error", { session: this.key, error });
+      this.mount.fail(this.key, error);
     });
   }
 
