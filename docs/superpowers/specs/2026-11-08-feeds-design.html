@@ -241,7 +241,7 @@ svg text{font-family:var(--font-mono)}
 
 <main>
 <h1>Feeds</h1>
-<div class="meta"><span>spec</span><span>·</span><span>status: approved, not built</span><span>·</span><span>issue <a href="https://github.com/syalia-srl/aegis/issues/998">#998</a></span></div>
+<div class="meta"><span>spec</span><span>·</span><span>status: approved; engine and both sources built (#998), the card next</span><span>·</span><span>issue <a href="https://github.com/syalia-srl/aegis/issues/998">#998</a></span></div>
 <p class="lede">A feed binds a source that grows, a file of lines or a command with a cursor, to the session that started it. Each new batch of items wakes that session as one inbox message, aegis keeps the cursor so no item is missed or sent twice in normal operation, and the feed stays armed until it is cancelled or its session closes. Its card shows how many items came, when, and where each one's wait went.</p>
 
 <h2 id="delivers"><span class="n">01</span>What this delivers</h2>
@@ -367,7 +367,7 @@ gh issue list --state open --json number --jq 'map(.number) | max' &gt; "$AEGIS_
 <p>The first run gets an empty cursor. Exit 0 with items but no <code>$AEGIS_FEED_NEXT</code> written keeps the old cursor and counts as an error, because the next run would return the same items. Exit 0 with empty stdout and a new cursor moves the cursor and delivers nothing.</p>
 
 <h2 id="delivery-rule"><span class="n">05</span>Delivery and the cursor</h2>
-<p>A feed keeps two positions: how far it has read the source, and how far it has delivered. What lies between is pending. For a file both are byte offsets, and aegis reads the pending range again when it sends. For a command, the pending items sit in the feed's buffer. Each pending item carries the time a poll first saw it, which is what the card's wait figures are measured from.</p>
+<p>A feed keeps how far it has read the source and the items it read and has not delivered, its pending items, saved with it. As built, a file feed keeps its pending items like a command feed rather than reading its pending range again at send time: a filter's output and a truncation between read and send made the re-read wrong, and one buffer serves both sources. Each pending item carries the time a poll first saw it, which is what the card's wait figures are measured from.</p>
 <div class="duo">
 <div class="card"><h4>An idle or asleep session</h4>
 <ol>
@@ -384,7 +384,7 @@ gh issue list --state open --json number --jq 'map(.number) | max' &gt; "$AEGIS_
 <li>Past the cap, the rest is a new batch that goes out when that turn ends.</li>
 </ol></div>
 </div>
-<p>When the quota gate is closed, the block waits in the feed rather than in the session's held list, and goes when the gate opens (<code>app.on_quota</code> asks the feeds too). A paused feed answers the flush with nothing.</p>
+<p>When the quota gate is closed, the block is held in the session as any inbox message is, marked for the quota, and goes when the gate opens. A paused feed answers the turn's end with nothing.</p>
 <p>A restart loses no item. The read position may lag, so the first poll reads again what the last one read; delivered positions are only ever saved after a send. Pending arrival times are saved with the feed, so a wait measured across a restart stays right.</p>
 
 <h2 id="message"><span class="n">06</span>The message</h2>
@@ -463,8 +463,7 @@ Nothing else waits. Live feeds here: group-chat. feed_pause or feed_cancel with 
 <h2 id="slices"><span class="n">10</span>Delivery</h2>
 <p>Three pull requests, each usable on its own, each with its tests, help text and changelog fragment.</p>
 <ol>
-<li><strong>The engine and file feeds.</strong> <code>feeds.py</code>, the five tools, file sources, the message, the flush hook, the held notice item, handoff and close, <code>feeds.json</code> and boot. The row on the card shows name, state and counts. A new help page <code>src/aegis/help/feeds.md</code> and the primer line.</li>
-<li><strong>Command feeds.</strong> The cursor contract, the buffer and its cap, the error pause.</li>
+<li><strong>The engine, file feeds and command feeds</strong> (built: the command source shares the poll loop and buffer, so it came with the engine). <code>feeds.py</code>, the five tools, file sources, the message, the flush hook, the held notice item, handoff and close, <code>feeds.json</code> and boot. The row on the card shows name, state and counts. A new help page <code>src/aegis/help/feeds.md</code> and the primer line.</li>
 <li><strong>The card.</strong> The history on the server, the card in the client, the sparkline, the Fleet chip and the person's buttons. Screenshots at desktop and phone width.</li>
 </ol>
 

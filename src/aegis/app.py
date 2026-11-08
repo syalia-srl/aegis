@@ -101,6 +101,7 @@ from .exit import Exits
 from .links import LinkError, Links, probe
 from .mcp import PATH as MCP_PATH, Tokens, build_mcp
 from . import refs
+from .feeds import Feeds
 from .monitors import Monitors, iso_now
 from .names import valid_handle
 from .notice_ops import register_notice_ops
@@ -502,6 +503,8 @@ class App:
         )
         self.tokens = Tokens()
         self.monitors = Monitors(self.sessions, roots.state_root / "monitors.json")
+        self.feeds = Feeds(self.sessions, roots.state_root / "feeds.json")
+        self.sessions.feeds = self.feeds
         self.config = Config(roots.config_root, self._on_config, server_name)
         self._config_task: asyncio.Task | None = None
         self._versions_task: asyncio.Task | None = None
@@ -1551,6 +1554,7 @@ class App:
         # The Files view's deletes are kept 30 days (fs_trash.py).
         fs_trash.purge(self.roots.state_root)
         self.monitors.boot()
+        self.feeds.boot()
         # No session notice until every source has set its items (notices.py).
         self.notices.boot_begin()
         # The tasks load first, so a worker continued below that ends its turn
@@ -1567,6 +1571,7 @@ class App:
             if s.continued_by == "pending" and not s.in_turn:
                 await self.start_pending_handoff(s)
         self.monitors.arm_all()
+        self.feeds.arm_all()
         await self.queues.resume_after_boot(resume)
         for s in list(self.sessions.sessions.values()):
             self.nudges.refresh(s)
@@ -1656,6 +1661,7 @@ class App:
         await self.load.stop()
         await self.net.stop()
         await self.monitors.shutdown()
+        await self.feeds.shutdown()
         await self.recaps.shutdown()
         if self.sessions.sign_in is not None:
             await self.sessions.sign_in.shutdown()
@@ -2393,6 +2399,7 @@ class App:
             old.mark_continued(None)
             raise
         old.mark_continued(s.log_id)
+        self.feeds.move(old.log_id, s.log_id)
         try:
             await s.send(prompt)
         except (BrokenPipeError, ConnectionResetError, FileNotFoundError) as e:
@@ -2848,7 +2855,8 @@ class App:
             far = self._far_of(p)
             # What would wake a session nobody can write to, or lose its result.
             # A run follows its owner's successor only on this server.
-            if wakers := reg.wakers(old, run=far is not None):
+            # A run and feeds follow their owner's successor only on this server.
+            if wakers := reg.wakers(old, run=far is not None, feeds=far is not None):
                 raise OpError(
                     "has_wakers",
                     f"{old.handle} still waits on {', '.join(wakers)}; "
