@@ -1,0 +1,25 @@
+$ curl -s http://127.0.0.1:58621/aegis/manifest.json | jq '{build, version, prefix, files: (.files|length), bytes, first: .files[0:3]}'
+{
+  "build": "fe7f0333a724",
+  "version": "2.22.0",
+  "prefix": "/aegis",
+  "files": 224,
+  "bytes": 4132584,
+  "first": [
+    {
+      "url": "/aegis/static/css/artifact.css",
+      "bytes": 1744,
+      "hash": "78d138dd8ca8551c44e247276b936f85ae52a8ad422a23a4bd319d8f08a8c90d"
+    },
+    {
+      "url": "/aegis/static/css/client.css",
+      "bytes": 208107,
+      "hash": "e847f2d2ea49c1ceefa458092a48627348b0fd5a3287aff49c3d35a70aa686ef"
+    },
+    {
+      "url": "/aegis/static/css/fonts.css",
+      "bytes": 3836,
+      "hash": "44e4ba331e2f8519563a45f7b1bd4d7d2ca013aca81341ff6ea7068789a2737b"
+    }
+  ]
+}
