@@ -577,6 +577,9 @@ function markOffline(state) {
     root.dataset.offline = "";
   }
   markNeedsNet();
+  // The band's line says how old the device copy is while offline: opening or
+  // closing the socket changes it, not only the next snapshot.
+  if (root.dataset.view === "fleet") drawBand();
 }
 
 // The token no longer works: what this device kept goes before the sign-in
@@ -1520,9 +1523,10 @@ function drawHost() {
 
 function drawBand() {
   if (root.dataset.view !== "fleet") return;
-  // Saved cards say how old they are.
-  const stale = local().some((m) => m.stale);
-  renderBand($("band"), { metas: local(), host, server: conn.server || localStorage.getItem("aegis.server") || "", link: stale ? seenText() : links.length ? "this server" : "", off: stale, measure: () => measureNet(null) });
+  // Saved cards say how old they are while the socket is not open. Once it
+  // opens the live snapshot is on its way, and the band is no longer offline.
+  const saved = !conn.open && local().some((m) => m.stale);
+  renderBand($("band"), { metas: local(), host, server: conn.server || localStorage.getItem("aegis.server") || "", link: saved ? seenText() : links.length ? "this server" : "", off: saved, measure: () => measureNet(null) });
   for (const l of links) {
     const box = $("remotes").querySelector(`[data-server="${CSS.escape(l.name)}"]`);
     if (!box) continue;
