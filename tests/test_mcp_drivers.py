@@ -78,11 +78,13 @@ def test_opencode_config_has_both_servers_and_allows_their_tools():
         "url": "http://n/mcp",
         "headers": {"Authorization": "Bearer SECRET-1"},
         "oauth": False,
+        "codemode": False,
     }
     assert servers["phone"] == {
         "type": "local",
         "command": ["uv", "run", "phone"],
         "environment": {"PHONE_STATE": "SECRET-2"},
+        "codemode": False,
     }
     allowed = {r["action"] for r in cfg["permissions"] if r["effect"] == "allow"}
     assert {"aegis_*", "notes_*", "phone_*"} <= allowed
