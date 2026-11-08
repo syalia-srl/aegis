@@ -29,6 +29,7 @@ from starlette.responses import HTMLResponse
 from starlette.routing import Mount, Route
 
 from aegis import Server, SessionNotFound
+from aegis.web import cookie_name
 
 try:  # as a package, under pytest
     from .policies import Named, Who
@@ -117,11 +118,26 @@ async def read_or_spawn(srv: Server, who: Who, path: Path) -> str:
     return session.log_id
 
 
-def host_app(srv: Server, page: str, prefix: str = "/aegis") -> Starlette:
-    """The page at ``/`` and aegis mounted at ``prefix``: what a host serves."""
+def host_app(
+    srv: Server,
+    page: str,
+    prefix: str = "/aegis",
+    cookie: tuple[str, str] | None = None,
+) -> Starlette:
+    """The page at ``/`` and aegis mounted at ``prefix``: what a host serves.
+
+    ``cookie`` is the host signing this browser in the way a sent file's HTTP
+    fetch needs: the same signed token the page gives mount(), set as the
+    server's session cookie. A WebSocket hello carries the token itself, but an
+    ``<img>`` or a preview's fetch cannot.
+    """
 
     async def index(_request):
-        return HTMLResponse(page)
+        headers = {}
+        if cookie:
+            name, token = cookie
+            headers["set-cookie"] = f"{name}={token}; Path=/; HttpOnly; SameSite=Lax"
+        return HTMLResponse(page, headers=headers)
 
     return Starlette(
         routes=[Route("/", index), Mount(prefix, srv.asgi)],
@@ -152,8 +168,9 @@ async def main(
         second = first.parent / f"{first.name}-2"
         sid = await read_or_spawn(srv, who, first)
         sid2 = await read_or_spawn(srv, who, second)
+        token = srv.token_for(who)
         page = (
-            HOST_PAGE.replace("__TOKEN__", srv.token_for(who))
+            HOST_PAGE.replace("__TOKEN__", token)
             .replace("__SESSION2__", sid2)
             .replace("__SESSION__", sid)
             .replace("__PREFIX__", prefix)
@@ -164,7 +181,12 @@ async def main(
         )
         await uvicorn.Server(
             uvicorn.Config(
-                host_app(srv, page, prefix),
+                host_app(
+                    srv,
+                    page,
+                    prefix,
+                    cookie=(cookie_name(srv.app.roots.state_root), token),
+                ),
                 host="127.0.0.1",
                 port=port,
                 log_level="warning",

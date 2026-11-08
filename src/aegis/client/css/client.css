@@ -20,6 +20,12 @@
    host put it in a panel or a sheet. */
 .aegis[data-layout=full]{height:100dvh;display:grid;grid-template-rows:auto 1fr;grid-template-columns:minmax(0,1fr)}
 .aegis[data-layout=chat]{height:100%;display:flex;flex-direction:column;min-height:0}
+/* A chat's transcript fills the element the host gave mount(); the composer
+   (a6) will sit under it. A host that wants a bare answer pane hides the
+   navigator with .aegis .nav{display:none} (the documented contract). */
+.aegis[data-layout=chat] .aegis-chat{flex:1;min-height:0;display:flex;flex-direction:column}
+.aegis[data-layout=chat] .aegis-chat>.tr-pane{flex:1;min-height:0}
+.aegis[data-layout=chat] .nav .side-btn{display:none}
 /* A root that names a theme and brought no stylesheet of its own (a host
    that loads client.css alone) starts from ink's palette. Zero specificity,
    so a host's own rule on the root wins. A root with data-theme=host

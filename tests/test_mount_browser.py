@@ -78,7 +78,7 @@ def host(tmp_path: Path, fake_claude: str):
         threading.Thread(
             target=drained.extend, args=(proc.stdout,), daemon=True
         ).start()
-        yield info
+        yield info | {"root": str(tmp_path)}
         assert proc.poll() is None, "".join(drained)
     finally:
         if proc.poll() is None:
@@ -103,12 +103,48 @@ def mounted(page) -> None:
     """The root is built, the welcome arrived, and the mount holds the
     sessions snapshot (a turn driven before it lands would be one the mount
     joined halfway)."""
+    # The host decides how tall a chat is (the plan's styling contract); the
+    # fixture page itself gains this in a8, and this slice needs a box to fit.
+    page.add_style_tag(content="#chat { height: 700px; }")
     page.wait_for_function(
         "() => document.querySelector('#chat > .aegis')"
         " && window.__wsMsgs.some((m) => m.t === 'welcome')"
         " && window.__wsMsgs.some((m) => m.t === 'snapshot' && m.channel === 'sessions')",
         timeout=30_000,
     )
+
+
+SEND = """async ([sid, text]) => {
+  const { PROTO } = await import(`${window.aegisHost.prefix}/static/js/protocol.js`);
+  const url = location.origin.replace(/^http/, "ws") + window.aegisHost.prefix + "/ws";
+  const ws = new WebSocket(url);
+  await new Promise((ok, no) => {
+    ws.addEventListener("open", ok, { once: true });
+    ws.addEventListener("error", no, { once: true });
+  });
+  const reply = new Promise((ok) => {
+    ws.addEventListener("message", (ev) => {
+      const m = JSON.parse(ev.data);
+      if (m.t === "welcome") {
+        ws.send(JSON.stringify({ t: "call", id: 1, op: "session.send",
+          params: { log_id: sid, text } }));
+      }
+      if (m.t === "reply" && m.id === 1) {
+        ws.close();
+        ok(m);
+      }
+    });
+  });
+  ws.send(JSON.stringify({ t: "hello", proto: PROTO, token: window.aegisHost.token }));
+  const got = await reply;
+  if (got.error) throw new Error(JSON.stringify(got.error));
+}"""
+
+
+def send(page, sid: str, text: str) -> None:
+    """A message into the fixture's session, over the same protocol a page
+    uses, so the turn reaches the mount on its own subscription."""
+    page.evaluate(SEND, [sid, text])
 
 
 @pytest.mark.parametrize("width", [1280, 390])
@@ -238,5 +274,129 @@ def test_turn_end_fires_once_for_the_mounts_own_session(host, browser):  # noqa:
     assert isinstance(turns[0]["cost_usd"], (int, float))
     assert turns[0]["cost_usd"] > 0
     assert page.evaluate("window.__turns2.length") == 0
+    assert errors == []
+    page.close()
+
+
+@pytest.mark.parametrize("width", [1280, 390])
+def test_the_chat_draws_rows_a_tool_opens_and_entries_are_reported(
+    host,
+    browser,  # noqa: F811
+    width,
+):
+    """A chat following one session draws what the server sends: two turns'
+    prose as two rows, a tool row that opens, and one entry event per upsert."""
+    page, errors = open_page(browser, width)
+    page.goto(host["url"])
+    mounted(page)
+    # The chat fills the element the host gave it; the transcript fills the chat.
+    assert (
+        page.evaluate(
+            "document.querySelector('#chat .aegis').getBoundingClientRect().height"
+        )
+        == 700
+    )
+    assert (
+        page.evaluate(
+            "document.querySelector('#chat .tr-pane').getBoundingClientRect().height"
+        )
+        > 500
+    )
+    page.evaluate("""() => {
+      window.__entries = [];
+      window.__chat.on("entry", (e) => window.__entries.push(e));
+    }""")
+    send(page, host["session"], "first message to the chat")
+    page.wait_for_function(
+        """() => [...document.querySelectorAll("#chat .aegis #entries .row.prose .body")]
+          .some((b) => b.textContent.includes("first message to the chat"))""",
+        timeout=60_000,
+    )
+    send(page, host["session"], "second message to the chat")
+    page.wait_for_function(
+        """() => [...document.querySelectorAll("#chat .aegis #entries .row.prose .body")]
+          .some((b) => b.textContent.includes("second message to the chat"))""",
+        timeout=60_000,
+    )
+    rows = page.locator("#chat .aegis #entries .row.prose .body").all_inner_texts()
+    assert len([r for r in rows if "message to the chat" in r]) == 2
+
+    send(page, host["session"], "/many 3")
+    tool = page.locator("#chat .aegis #entries .row.tool").first
+    tool.wait_for(timeout=60_000)
+    tool.locator("details > summary").click()
+    assert tool.locator("details").get_attribute("open") is not None
+
+    page.wait_for_function("() => window.__entries.length > 0", timeout=60_000)
+    got = page.evaluate("window.__entries")
+    assert all(e["session"] == host["session"] for e in got)
+    assert any(e["entry"]["kind"] == "prose" for e in got)
+    assert any(e["entry"]["kind"] == "tool" for e in got)
+    assert errors == []
+    page.close()
+
+
+def test_a_sent_file_opens_in_the_mounts_viewer(host, browser):  # noqa: F811
+    """A file_send's card opens in the part's own viewer, under #chat, and the
+    file is fetched through the host's prefix."""
+    note = Path(host["root"]) / "host-note.txt"
+    note.write_text("a note sent from the host page\n")
+    page, errors = open_page(browser, 1280)
+    page.goto(host["url"])
+    mounted(page)
+    send(
+        page,
+        host["session"],
+        "/mcp file_send "
+        + json.dumps({"paths": [str(note)], "caption": "from the test"}),
+    )
+    row = page.locator("#chat .aegis #entries .row.file")
+    row.wait_for(timeout=60_000)
+    row.locator(".btn.view").click()
+    viewer = page.locator("#chat .aegis .viewer")
+    viewer.wait_for(state="visible", timeout=10_000)
+    page.wait_for_function(
+        """() => document.querySelector("#chat .aegis .viewer .vbody")?.textContent
+          .includes("a note sent from the host page")""",
+        timeout=30_000,
+    )
+    # A second mount's viewer would be another .viewer; this one belongs to the
+    # part's own root and the host's page holds no #a2.
+    assert page.locator("#chat .aegis .viewer").count() == 1
+    assert page.evaluate("document.getElementById('a2')") is None
+    assert errors == []
+    page.close()
+
+
+def test_scrolling_up_mounts_the_rows_above_the_window(host, browser):  # noqa: F811
+    """The transcript keeps a window of rows; a scroll to the top mounts the
+    entries the snapshot left above it."""
+    page, errors = open_page(browser, 1280)
+    page.goto(host["url"])
+    mounted(page)
+    send(page, host["session"], "/many 205")
+    page.wait_for_function(
+        '() => document.querySelectorAll("#chat .aegis #entries > .row").length >= 200',
+        timeout=120_000,
+    )
+    at_bottom = page.evaluate(
+        'document.querySelectorAll("#chat .aegis #entries > .row").length'
+    )
+    assert 200 <= at_bottom < 205  # a window, not the whole transcript
+    page.evaluate("""() => {
+      const tr = document.querySelector("#chat .aegis .tr");
+      tr.scrollTop = 0;
+      tr.dispatchEvent(new Event("scroll"));
+    }""")
+    page.wait_for_function(
+        f'() => document.querySelectorAll("#chat .aegis #entries > .row").length > {at_bottom}',
+        timeout=30_000,
+    )
+    assert (
+        page.evaluate(
+            'document.querySelectorAll("#chat .aegis #entries > .row").length'
+        )
+        > at_bottom
+    )
     assert errors == []
     page.close()
