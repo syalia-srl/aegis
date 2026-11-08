@@ -80,6 +80,11 @@ CLIENT_DIR = Path(__file__).parent / "client"
 # The service worker lives outside CLIENT_DIR, so /static never serves it: it is
 # served only from the root, where its scope is the whole client.
 SERVICE_WORKER = Path(__file__).parent / "sw.js"
+# The client's public entry, served at <prefix>/aegis.js. It lives outside
+# CLIENT_DIR for the same reason: /static serves files from the URL they sit at,
+# and a copy at /static/js/aegis.js would resolve its relative mount.js import
+# to /static/js/static/js/mount.js.
+ENTRY_MODULE = Path(__file__).parent / "aegis.js"
 
 
 POINT_TAG = b'<script src="/static/js/pagepoint.js"></script>'
@@ -411,7 +416,7 @@ def build_web(
 
     version = running()["version"] or "dev"
 
-    def listing() -> dict:
+    def listing(with_entry: bool = False) -> dict:
         doc = client_files(version, prefix)
         body = json.dumps(manifest)
         doc["files"].append(
@@ -421,6 +426,17 @@ def build_web(
                 "hash": hashlib.sha256(body.encode()).hexdigest(),
             }
         )
+        if with_entry:
+            # The public entry is not under /static, so client_files cannot
+            # name it: a host's worker caches it from here (life#101).
+            st = ENTRY_MODULE.stat()
+            doc["files"].append(
+                {
+                    "url": f"{prefix}/aegis.js",
+                    "bytes": st.st_size,
+                    "hash": _file_hash(ENTRY_MODULE, st),
+                }
+            )
         doc["bytes"] = sum(f["bytes"] for f in doc["files"])
         return doc
 
@@ -437,9 +453,12 @@ def build_web(
     async def manifest_json(request):
         """The client's files for a host's own service worker: the same hashed
         listing, with the build, the version and the mount prefix, so the
-        host knows what to cache and when it moved. aegis installs no worker
-        in an embed; the page's is the host's."""
-        return JSONResponse(listing(), headers={"Cache-Control": "no-cache"})
+        host knows what to cache and when it moved. It also names the public
+        entry at <prefix>/aegis.js, which /static does not serve. aegis
+        installs no worker in an embed; the page's is the host's."""
+        return JSONResponse(
+            listing(with_entry=True), headers={"Cache-Control": "no-cache"}
+        )
 
     async def webmanifest(request):
         """What Chrome installs: the server's name, so two servers differ on a
@@ -451,9 +470,8 @@ def build_web(
         """The client's public entry, ``<prefix>/aegis.js``: a host imports
         ``mount`` from it (a2). Read on every request so an edit shows at
         once, like the rest of the client."""
-        path = CLIENT_DIR / "js" / "aegis.js"
         return Response(
-            path.read_text(),
+            ENTRY_MODULE.read_text(),
             media_type="text/javascript",
             headers={"Cache-Control": "no-cache"},
         )
