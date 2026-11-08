@@ -78,6 +78,13 @@ export class DictationPart {
     return this.dictation.state;
   }
 
+  // The engine itself, for the modules that drive a recording from outside a
+  // box: an artifact frame's aegis.dictate starts one in a shim field and stops
+  // it from the page's own bar (artifacts.js), and only the engine knows how.
+  get engine() {
+    return this.dictation;
+  }
+
   // A long press stays a tap while a take or a dictation is running, or while
   // the box cannot start one at all (no connection).
   busy() {

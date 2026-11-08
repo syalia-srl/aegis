@@ -236,7 +236,7 @@ artifacts.setup({
   entry: (id) => transcript.entries.get(id),
   key: () => app.state.shown,
   point: (frame, params) => pagePoint(frame, params),
-  dictation: () => dictation,
+  dictation: () => dictation.engine,
   toast: (message) => toast(message, { kind: "error" }),
   waitOnline: () => waitOnline(),
   local: (key) => !forKey(key).server,
