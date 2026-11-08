@@ -225,7 +225,7 @@ export class ComposerPart {
       n.title = title;
       n.classList.toggle("click", !!this.menu);
     };
-    chip("chip-model", "h", s?.model, s?.model || "", s?.model_id || "");
+    chip("chip-model", "h", s?.harness, s?.model || "", s?.model_id || "");
     chip("chip-effort", "e", s?.effort, s ? `${s.effort} effort` : "");
     chip("chip-perm", "p", s?.permission, s?.permission || "");
   }
