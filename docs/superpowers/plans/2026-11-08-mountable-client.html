@@ -974,7 +974,7 @@ uv run pytest -q -m browser tests/test_browser.py -k spawn</script>
 <p>The Fleet mounts into a root; the files pass unchanged; <code>make gates</code>; shots of the Fleet with linked servers and the archive at 1280/390.</p>
 </div></details>
 
-<details class="task" id="b7-remaining-views" data-state="pending">
+<details class="task" id="b7-remaining-views" data-state="done">
 <summary><span class="num">B7</span><span><span class="ttl">The remaining views and the terminal and browser views</span><span class="files">js/parts/views.js (new) · js/parts/terminal.js (new) · js/parts/browser.js (new) · js/settings.js · js/journal.js · js/usage.js · js/knowledge.js · js/files.js · js/schedules.js · js/help.js · js/palette.js · js/switcher.js · js/termview.js · js/browserview.js · js/app.js · index.html · tests/test_settings_coverage_browser.py · tests/test_help_browser.py</span></span><span class="state"></span></summary>
 <div class="body">
 <p>Settings, Journal, Usage, Knowledge, Files, Schedules, Help, the palette, the switcher, the keymap, the terminal and the server browser. Each module already builds its own DOM inside a root; this slice gives it a container that is part of the mount and a lifecycle (<code>open</code>, <code>close</code>, <code>show(id)</code>) that does not reach into the page.</p>
