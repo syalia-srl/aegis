@@ -63,8 +63,8 @@ Each one has:
 - `priming:` (optional) a system prompt every session from this agent gets;
 - `keep_harness_tools:` (optional, Claude Code) a list of Claude Code tools
   this agent keeps although aegis replaces them (below);
-- `harness_tools: false`, `isolated: true`, `primer: false`,
-  `notices: false` (optional) make it a product agent: only its MCP tools,
+- `harness_tools:`, `isolated:`, `primer:` and `notices:` (optional; set
+  to false, true, false and false) make it a product agent: only its MCP tools,
   none of the machine's harness config, its priming as the whole prompt, and
   no nudges or notices. `help_read library#product-agents` says what each does.
 
