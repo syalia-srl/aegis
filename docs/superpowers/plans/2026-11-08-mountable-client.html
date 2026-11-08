@@ -878,7 +878,7 @@ uv run pytest -q -m browser tests/test_mount_browser.py</script>
 <h2>Phase B — the rest of #961</h2>
 <p>Nine slices, in this order, on a second branch, <code>961-mountable-client-b</code>, branched from <code>main</code> after phase A merges, with one PR for the phase. They run one at a time in one worktree, each by one agent that commits and pushes; workers do not open PRs, and after each slice the nightly suite runs on CI on the branch against the phase's baseline while the main agent reviews the diff. They keep the full client working after each one: the parts are adopted by <code>app.js</code> slice by slice, and <code>index.html</code> loses its markup in the same slice that moves it.</p>
 
-<details class="task" id="b1-full-mount-state" data-state="pending">
+<details class="task" id="b1-full-mount-state" data-state="done">
 <summary><span class="num">B1</span><span><span class="ttl">The full layout's mount and its state</span><span class="files">js/mount.js · js/app.js · js/protocol.js · tests/test_browser.py</span></span><span class="state"></span></summary>
 <div class="body">
 <p>Before any part moves, <code>app.js</code> becomes a client of a mount. The mount adopts the existing <code>#a2</code> element (<code>adopt: true</code>: no new root, the element gains <code>.aegis</code> and <code>data-theme</code>), acquires the socket, and owns the state the page shares. This is the slice that pays the indirection once.</p>
