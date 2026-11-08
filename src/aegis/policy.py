@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from .app import App
     from .ops import Operation
 
-Action = Literal["list", "read", "write"]
+Action = Literal["list", "read", "write", "spawn"]
 EventKind = Literal["start", "turn_end", "entry", "stop", "close", "file"]
 
 
@@ -203,7 +203,9 @@ class HostPolicy:
         if op.server and who is not None:
             raise Refused(f"{op.name} acts on the whole server")
 
-    def can(self, who: Any, action: Action, session: SessionView) -> bool:
+    def can(self, who: Any, action: Action, session: SessionView | None) -> bool:
+        """Whether ``who`` may ``action`` a session, or, when ``session`` is
+        None, may run a session-less operation. The default allows."""
         return True
 
     def catalog(self, who: Any) -> Catalog:

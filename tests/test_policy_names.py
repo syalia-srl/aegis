@@ -14,7 +14,7 @@ from aegis.ops import Caller, OpError, Principal
 from aegis.policy import Refused
 from aegis.roots import make_roots
 
-from .policies import Named, Who
+from .policies import Named, RefuseAll, Who
 
 SESSIONISH = {
     "log_id",
@@ -179,6 +179,45 @@ def test_every_op_with_an_id_field_declares_it(hidden):
         and not (f == "id" and "log_id" in dict(op.names))
     ]
     assert missing == []
+
+
+async def test_every_operation_asks_a_policy_that_refuses_everything(
+    tmp_path, monkeypatch
+):
+    """The spec's registry walk (#959 section 10, #993): every operation asks
+    can, and a host that refuses there stops it with ``refused``. A policy
+    that returns False instead hides a named session as missing, which the
+    hidden-session test below pins."""
+
+    class Loud(RefuseAll):
+        def can(self, who, action, session):
+            raise Refused("nothing is allowed")
+
+    app = App(make_roots(tmp_path, None), policy=Loud())
+    app.sessions.archived[ANA_S] = {
+        "log_id": ANA_S,
+        "handle": "ana-one",
+        "owner": "ana",
+        "agent": "opus",
+        "archived": True,
+    }
+    monkeypatch.setattr(app, "session_of", lambda kind, value: ANA_S)
+    walked, wrong = 0, []
+    for op in app.registry._ops.values():
+        field = op.names[0][0] if op.names else None
+        params = fill(op, field, ANA_S) if field is not None else {}
+        try:
+            await app.registry.call(op.name, params, BEN)
+        except OpError as e:
+            if e.code != "refused":
+                wrong.append((op.name, e.code, e.message[:80]))
+        except Exception as e:  # an operation that skipped the policy ran
+            wrong.append((op.name, type(e).__name__, str(e)[:80]))
+        else:
+            wrong.append((op.name, "ran", ""))
+        walked += 1
+    assert not wrong, "\n".join(map(str, wrong))
+    assert walked == len(app.registry._ops) >= 100
 
 
 async def test_a_hidden_session_answers_as_missing_from_every_op_that_names_it(hidden):

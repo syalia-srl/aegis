@@ -37,7 +37,7 @@ class Named(HostPolicy):
 
     def can(self, who, action, session) -> bool:
         name = who.name if isinstance(who, Who) else None
-        if name is None:
+        if name is None or session is None:
             return True
         if session.owner in self.hidden.get(name, set()):
             return False

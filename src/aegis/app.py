@@ -2564,7 +2564,7 @@ class App:
         r = self.registry
         reg = self.sessions
 
-        @r.op("agents.list", agent=True, read=True)
+        @r.op("agents.list", agent=True, read=True, access="read")
         async def agents_list(_, caller):
             """The agents you can spawn, each a preset of harness, model, effort
             and permission. session_spawn starts one and can override those."""
@@ -2594,7 +2594,7 @@ class App:
                 "config_error": self.config.current().error,
             }
 
-        @r.op("session.spawn", SpawnParams, agent=True)
+        @r.op("session.spawn", SpawnParams, agent=True, work=True)
         async def spawn(p: SpawnParams, caller):
             """Start a new session from an agent, overriding its harness, model,
             effort or permission if you need to, and send it `prompt` as its
@@ -3009,7 +3009,7 @@ class App:
             cat = await self.catalogs.get(s)
             return listing(cat, caller, skills, s.spec.knowledge_native)
 
-        @r.op("commands.preview", PreviewParams)
+        @r.op("commands.preview", PreviewParams, access="read")
         async def commands_preview(p: PreviewParams, caller):
             """What the new tab's menu offers before its session exists (#632):
             aegis's commands, and the harness's when a session in that
@@ -3195,7 +3195,7 @@ class App:
                 s.check_lock()
             return reg.rename(log_id, p.handle, p.title)
 
-        @r.op("archive.list", ArchiveParams)
+        @r.op("archive.list", ArchiveParams, access="read")
         async def archive_list(p: ArchiveParams, caller):
             """A page of closed sessions, newest first, across this server and
             the servers it links (archive.py). ``total`` and ``counts`` are of
@@ -3341,7 +3341,7 @@ class App:
             )
             return {"kinds": kinds + ["code"] * (len(paths) - len(head))}
 
-        @r.op("link.list", server=True)
+        @r.op("link.list", server=True, access="read")
         async def link_list(_, caller):
             """The servers this one links, with their state; never their tokens."""
             return [link.wire() for link in self.links.links()]
@@ -3366,7 +3366,7 @@ class App:
         async def link_remove(p: LinkName, caller):
             self.links.remove(p.name)
 
-        @r.op("link.incoming", server=True)
+        @r.op("link.incoming", server=True, access="read")
         async def link_incoming(_, caller):
             """The servers that linked this one, so their agents
             reach this one over their link, and what each took as an exit."""
@@ -3389,7 +3389,7 @@ class App:
             )
             return {"exit_via": p.name}
 
-        @r.op("server.paused")
+        @r.op("server.paused", access="read")
         async def server_paused(p, caller):
             """The pause in force (pause.py), or null."""
             return {"paused": self.paused}
@@ -3402,7 +3402,7 @@ class App:
             )
             return {"paused": self.paused, "ended": ended}
 
-        @r.op("server.resume", server=True)
+        @r.op("server.resume", server=True, work=True)
         async def server_resume(p, caller):
             """Resume every session the pause held, and the work it held."""
             await self.resume_all()
@@ -3417,12 +3417,12 @@ class App:
             self.push.subscriptions.remove_owner(p.name)
             return {"token": token}
 
-        @r.op("server.version")
+        @r.op("server.version", access="read")
         async def server_version(_, caller):
             install = await self.updater.install()
             return await self.versions.wire() | {"install": install.wire()}
 
-        @r.op("server.update", server=True)
+        @r.op("server.update", server=True, work=True)
         async def server_update(_, caller):
             """Upgrade aegis with the installer that owns it, check the new
             build, and restart onto it (self_update.py). Progress is on the
@@ -3438,7 +3438,7 @@ class App:
             t.add_done_callback(self._background.discard)
             return {"started": True}
 
-        @r.op("net.measure")
+        @r.op("net.measure", access="read")
         async def net_measure(_, caller):
             """A speed reading now, whatever its cadence says; the host channel
             carries the result, and so does the return value."""
@@ -3447,7 +3447,7 @@ class App:
             await self.net.measure()
             return self.net.wire()
 
-        @r.op("quota.read", agent=True, read=True)
+        @r.op("quota.read", agent=True, read=True, access="read")
         async def quota_read(_, caller):
             """How much of each subscription window is left: per provider, each
             window's percent used, severity, projected percent at reset and
