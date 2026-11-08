@@ -2,15 +2,25 @@
 srv.ops, with the fake claude behind it (spec 2026-10-23-library-server)."""
 
 import asyncio
+import json
 import signal
+import socket
 import subprocess
 import sys
 from pathlib import Path
 
 import httpx
 import pytest
+import uvicorn
+from starlette.applications import Starlette
+from starlette.responses import PlainTextResponse
+from starlette.routing import Mount, Route
+from websockets.asyncio.client import connect
 
 from aegis import OpError, Server, Session, SessionNotFound, StartError, Turn
+from aegis.web import PROTO
+
+from .policies import Named, Who
 from aegis.api import (
     Prose,
     RunInfo,
@@ -275,3 +285,92 @@ async def test_a_schedule_is_created_fired_paused_and_deleted(srv: Server):
     await sch.delete()
     with pytest.raises(ScheduleNotFound):
         await srv.schedules.get("hourly-tick")
+
+
+# -- a host mounts the client under a prefix (plan 2026-11-08, slice a1) ------
+
+
+def free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+@pytest.fixture
+async def host_srv(tmp_path: Path, fake_claude: str):
+    """A Server for a host: named people, a prefix, and the host's origin."""
+    (tmp_path / ".aegis.yaml").write_text(CONFIG)
+    port = free_port()
+    async with Server(
+        tmp_path,
+        claude=fake_claude,
+        name="lab",
+        policy=Named(),
+        prefix="/aegis",
+        origins=[f"http://127.0.0.1:{port}"],
+    ) as s:
+        yield s, port
+
+
+async def serve_host(srv: Server, port: int) -> tuple[uvicorn.Server, asyncio.Task]:
+    """A host app with aegis mounted, on the port the fixture named."""
+    host = Starlette(
+        routes=[
+            Route("/", lambda _r: PlainTextResponse("host page")),
+            Mount("/aegis", srv.asgi),
+        ]
+    )
+    server = uvicorn.Server(
+        uvicorn.Config(host, host="127.0.0.1", port=port, log_level="warning")
+    )
+    task = asyncio.create_task(server.serve())
+    for _ in range(1000):
+        if server.started:
+            return server, task
+        await asyncio.sleep(0.01)
+    raise AssertionError("the host app did not start")
+
+
+async def test_asgi_mounts_at_the_hosts_prefix(host_srv):
+    srv, port = host_srv
+    server, task = await serve_host(srv, port)
+    try:
+        async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}") as c:
+            page = await c.get("/aegis/")
+            assert page.status_code == 200
+            assert 'href="/aegis/static/css/base.css"' in page.text
+            entry = await c.get("/aegis/aegis.js")
+            assert entry.status_code == 200
+            assert entry.headers["content-type"].startswith("text/javascript")
+            manifest = (await c.get("/aegis/manifest.json")).json()
+            assert manifest["prefix"] == "/aegis"
+        async with connect(
+            f"ws://127.0.0.1:{port}/aegis/ws",
+            origin=f"http://127.0.0.1:{port}",
+        ) as ws:
+            await ws.send(
+                json.dumps(
+                    {"t": "hello", "token": srv.token_for(Who("ana")), "proto": PROTO}
+                )
+            )
+            welcome = json.loads(await ws.recv())
+            assert welcome["t"] == "welcome" and welcome["me"]["name"] == "ana"
+    finally:
+        server.should_exit = True
+        await task
+
+
+async def test_a_prefixed_server_keeps_the_loopback_sign_in_url(host_srv):
+    srv, _ = host_srv
+    assert srv.url == f"{srv.base_url}/?token={srv.token}"
+    assert srv.token_for(Who("ana")) != srv.token
+
+
+async def test_the_host_fixture_spawns_or_reuses_one_session(host_srv, tmp_path: Path):
+    from .host_fixture import read_or_spawn
+
+    srv, _ = host_srv
+    first = await read_or_spawn(srv, Who("ana"), tmp_path / "session")
+    again = await read_or_spawn(srv, Who("ana"), tmp_path / "session")
+    assert (first, again) == (first, first)
+    assert await srv.as_who(Who("ana")).sessions.get(first) is not None
