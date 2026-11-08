@@ -100,10 +100,13 @@ def open_page(pw, width: int):
 
 
 def mounted(page) -> None:
-    """The root is built and the socket's welcome has arrived."""
+    """The root is built, the welcome arrived, and the mount holds the
+    sessions snapshot (a turn driven before it lands would be one the mount
+    joined halfway)."""
     page.wait_for_function(
         "() => document.querySelector('#chat > .aegis')"
-        " && window.__wsMsgs.some((m) => m.t === 'welcome')",
+        " && window.__wsMsgs.some((m) => m.t === 'welcome')"
+        " && window.__wsMsgs.some((m) => m.t === 'snapshot' && m.channel === 'sessions')",
         timeout=30_000,
     )
 
@@ -159,5 +162,81 @@ def test_a_second_mount_shares_the_socket_and_destroy_lets_both_go(host, browser
     page.evaluate("window.__chat2.destroy()")
     page.wait_for_function("() => window.__ws[0].closed === true", timeout=10_000)
     assert page.locator("#chat2 > .aegis").count() == 0
+    assert errors == []
+    page.close()
+
+
+def test_turn_end_fires_once_for_the_mounts_own_session(host, browser):  # noqa: F811
+    """A chat reports the turn of the session it follows, and a second mount
+    following another session on the same socket stays silent."""
+    page, errors = open_page(browser, 1280)
+    page.goto(host["url"])
+    mounted(page)
+    prefix = page.evaluate("window.aegisHost.prefix")
+    page.evaluate(
+        """async (prefix) => {
+          const { mount } = await import(`${prefix}/aegis.js`);
+          window.__turns = [];
+          window.__turns2 = [];
+          window.__chat.on("turnEnd", (t) => window.__turns.push(t));
+          window.__chat2 = mount(document.getElementById("chat2"), {
+            token: window.aegisHost.token,
+            session: window.aegisHost.session2,
+            layout: "chat",
+            theme: "host",
+          });
+          window.__chat2.on("turnEnd", (t) => window.__turns2.push(t));
+        }""",
+        prefix,
+    )
+    page.wait_for_function("() => document.querySelector('#chat2 > .aegis')")
+    # One turn of Ana's session, sent the way a page sends one: a call over
+    # the same protocol and token. The reply only says the message was
+    # delivered; the turn's end arrives on the sessions channel.
+    page.evaluate(
+        """async ([sid, text]) => {
+          const { PROTO } = await import(`${window.aegisHost.prefix}/static/js/protocol.js`);
+          const url =
+            location.origin.replace(/^http/, "ws") + window.aegisHost.prefix + "/ws";
+          const ws = new WebSocket(url);
+          await new Promise((ok, no) => {
+            ws.addEventListener("open", ok, { once: true });
+            ws.addEventListener("error", no, { once: true });
+          });
+          const reply = new Promise((ok) => {
+            ws.addEventListener("message", (ev) => {
+              const m = JSON.parse(ev.data);
+              if (m.t === "welcome") {
+                ws.send(
+                  JSON.stringify({
+                    t: "call",
+                    id: 1,
+                    op: "session.send",
+                    params: { log_id: sid, text },
+                  }),
+                );
+              }
+              if (m.t === "reply" && m.id === 1) {
+                ws.close();
+                ok(m);
+              }
+            });
+          });
+          ws.send(
+            JSON.stringify({ t: "hello", proto: PROTO, token: window.aegisHost.token }),
+          );
+          const got = await reply;
+          if (got.error) throw new Error(JSON.stringify(got.error));
+        }""",
+        [host["session"], "hello from the turnEnd test"],
+    )
+    page.wait_for_function("() => window.__turns.length > 0", timeout=60_000)
+    page.wait_for_timeout(1500)  # a turnEnd the filter failed to stop lands here
+    turns = page.evaluate("window.__turns")
+    assert len(turns) == 1
+    assert turns[0]["session"] == host["session"]
+    assert isinstance(turns[0]["cost_usd"], (int, float))
+    assert turns[0]["cost_usd"] > 0
+    assert page.evaluate("window.__turns2.length") == 0
     assert errors == []
     page.close()
