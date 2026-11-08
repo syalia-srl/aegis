@@ -719,7 +719,7 @@ def register_agent_ops(app: App) -> None:
             if m.id != but
         ]
 
-    @r.op("monitor.start", MonitorStart, agent=True)
+    @r.op("monitor.start", MonitorStart, agent=True, work=True)
     async def monitor_start(p: MonitorStart, caller):
         """Watch a long-running process without polling: bash conditions run every
         interval_s, and you are woken through your inbox when `done` or `fail` exits 0
@@ -816,7 +816,7 @@ def register_agent_ops(app: App) -> None:
         app.monitors.cancel(m.id)
         return {"cancelled": m.id, "remaining": roster(m.owner)}
 
-    @r.op("monitor.list", NoArgs, agent=True, read=True)
+    @r.op("monitor.list", NoArgs, agent=True, read=True, access="read")
     async def monitor_list(_, caller):
         """Your live monitors."""
         me = app.who(caller)
@@ -834,7 +834,7 @@ def register_agent_ops(app: App) -> None:
             for m in items
         ]
 
-    @r.op("queue.enqueue", Enqueue, agent=True)
+    @r.op("queue.enqueue", Enqueue, agent=True, work=True)
     async def queue_enqueue(p: Enqueue, caller):
         """Hand a self-contained task to a fresh worker on a queue. Returns at once
         with the task id; the worker's final message reaches your inbox when it
@@ -1097,7 +1097,7 @@ def register_agent_ops(app: App) -> None:
         lines = [x for e in entries[-p.last * 3 :] if (x := _render(e, p.tools))]
         return "\n".join(lines[-p.last :]) or "(nothing yet)"
 
-    @r.op("session.list", NoArgs, agent=True, read=True)
+    @r.op("session.list", NoArgs, agent=True, read=True, access="read")
     async def session_list(_, caller):
         """The open sessions on this server, each with its state, what it needs
         (attention and its line, what it waits on), its plan and what it is
@@ -1544,7 +1544,7 @@ def register_agent_ops(app: App) -> None:
         toasted[s.log_id] = [*recent, now]
         return {"shown": app.toast(p.text, p.kind, s)}
 
-    @r.op("meta", NoArgs, agent=True, read=True)
+    @r.op("meta", NoArgs, agent=True, read=True, access="read")
     async def meta(_, caller):
         """How aegis works for you, and its tools."""
         s = reg.sessions.get(caller.log_id or "")

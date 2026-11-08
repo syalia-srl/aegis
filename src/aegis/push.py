@@ -552,7 +552,7 @@ def register_push_ops(app: App) -> Push:
             raise OpError("unknown_subscription", f"no push subscription {id}")
         return row
 
-    @r.op("push.key")
+    @r.op("push.key", access="read")
     async def push_key(_, caller):
         """This server's VAPID public key, base64url: a browser subscribes with it."""
         return {"key": webpush.b64e(webpush.raw_public(push.key))}
@@ -604,7 +604,7 @@ def register_push_ops(app: App) -> Push:
         mine(p.id, caller)
         push.subscriptions.remove(p.id)
 
-    @r.op("push.list")
+    @r.op("push.list", access="read")
     async def push_list(_, caller):
         """The caller's subscriptions, every one for an admin, without keys."""
         rows = [

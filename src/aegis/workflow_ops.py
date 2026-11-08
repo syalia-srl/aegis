@@ -197,7 +197,7 @@ def register_workflow_ops(app: App) -> None:
                 "not_yours", "only the session that armed a workflow can stop it"
             )
 
-    @r.op("workflow.lint", Definition, agent=True, read=True)
+    @r.op("workflow.lint", Definition, agent=True, read=True, access="read")
     async def workflow_lint(p: Definition, caller):
         """Check a workflow without arming it: every error with its YAML path.
         Arming runs the same check."""
@@ -207,7 +207,7 @@ def register_workflow_ops(app: App) -> None:
         out: dict = {"errors": [f"{e.path}: {e.message}" for e in errors]}
         return out | ({"id": got.id} if got is not None and not errors else {})
 
-    @r.op("workflow.arm", Arm, agent=True, names=(("run", "run"),))
+    @r.op("workflow.arm", Arm, agent=True, names=(("run", "run"),), work=True)
     async def workflow_arm(p: Arm, caller):
         """Arm a workflow: a YAML tree in which every node says, in one sentence
         for the person, what it does. It is linted, drawn as a card under this
@@ -285,14 +285,14 @@ def register_workflow_ops(app: App) -> None:
             "ids_written": generated(p.definition) - generated(s.text),
         }
 
-    @r.op("workflow.list", NoParams, agent=True, read=True)
+    @r.op("workflow.list", NoParams, agent=True, read=True, access="read")
     async def workflow_list(_, caller):
         """The saved workflows a person can run with /workflow <id> <text>:
         built in and the project's, each with its title, args schema,
         version, who saved it, and what is wrong with it if it does not lint."""
         return app.saved.listing(wf._agents())
 
-    @r.op("workflow.read", WorkflowId)
+    @r.op("workflow.read", WorkflowId, access="read")
     async def workflow_read(p: WorkflowId, caller):
         """A saved workflow for Settings → Workflows: its file's text, to
         export, and its steps as the card draws them. A person's: an agent

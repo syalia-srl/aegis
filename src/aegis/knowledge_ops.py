@@ -576,7 +576,7 @@ def register_knowledge_ops(app: App) -> None:
             raise OpError("not_found", f"no memory named {name!r}")
         return it
 
-    @r.op("memory.search", Search, agent=True, read=True)
+    @r.op("memory.search", Search, agent=True, read=True, access="read")
     async def memory_search(p: Search, caller):
         """Search your memories (facts about the person, their projects and how
         they want you to work) with your own words. Returns the best names with
@@ -599,7 +599,7 @@ def register_knowledge_ops(app: App) -> None:
             ]
         }
 
-    @r.op("memory.read", ReadMemories, agent=True, read=True)
+    @r.op("memory.read", ReadMemories, agent=True, read=True, access="read")
     async def memory_read(p: ReadMemories, caller):
         """Read one or more memories in full, by name: the ones the hint on
         your message names, or memory_search's hits."""
@@ -722,7 +722,7 @@ def register_knowledge_ops(app: App) -> None:
             out["card"] = record_card(s, "deleted", held, sha)
         return out
 
-    @r.op("skill.search", SearchSkills, agent=True, read=True)
+    @r.op("skill.search", SearchSkills, agent=True, read=True, access="read")
     async def skill_search(p: SearchSkills, caller):
         """Search your skills (procedures for a kind of task, such as cutting
         a release) with your own words, before you start a task. Returns the
@@ -785,7 +785,7 @@ def register_knowledge_ops(app: App) -> None:
         except SkillToolError as e:
             raise OpError("mcp_failed", f"the skill's server: {e}") from e
 
-    @r.op("skill.read", ReadSkill, agent=True, read=True)
+    @r.op("skill.read", ReadSkill, agent=True, read=True, access="read")
     async def skill_read(p: ReadSkill, caller):
         """Load a skill: returns its SKILL.md, which you then follow, and the
         files of its folder. With file, returns that one file instead, up to
@@ -862,7 +862,7 @@ def register_knowledge_ops(app: App) -> None:
         card = await after_save(caller, owner, asked, held, p.name, sha)
         return saved_answer(p.name, status, card, p.asked and not asked)
 
-    @r.op("skill.run", RunSkill, agent=True)
+    @r.op("skill.run", RunSkill, agent=True, work=True)
     async def skill_run(p: RunSkill, caller):
         """Run a script a skill you loaded declares under aegis.scripts, with
         arguments, in a fresh copy of the skill's folder. Returns its exit
@@ -935,7 +935,7 @@ def register_knowledge_ops(app: App) -> None:
             "timed_out": timed_out,
         }
 
-    @r.op("skill.tool", CallSkillTool, agent=True)
+    @r.op("skill.tool", CallSkillTool, agent=True, work=True)
     async def skill_tool(p: CallSkillTool, caller):
         """Call a tool of the MCP server a skill you loaded brings; skill_read
         lists those tools and their arguments. Only this session reaches the
@@ -1390,7 +1390,7 @@ def register_knowledge_ops(app: App) -> None:
             )
         return "ok"
 
-    @r.op("knowledge.stats", Stats, agent=True, read=True)
+    @r.op("knowledge.stats", Stats, agent=True, read=True, access="read")
     async def knowledge_stats(p: Stats, caller):
         """How your skills and memories are used: per item, how often it was
         hinted, read, invoked or run, when it was last used, and its flags
@@ -1471,7 +1471,7 @@ def register_knowledge_ops(app: App) -> None:
             )
         return {"native": app.knowledge_native(owner)}
 
-    @r.op("knowledge.list", ListItems)
+    @r.op("knowledge.list", ListItems, access="read")
     async def knowledge_list(p: ListItems, caller):
         """The caller's own skills and memories for the Knowledge view:
         proposals first, then skills and memories by name, or by score for a
@@ -1507,7 +1507,7 @@ def register_knowledge_ops(app: App) -> None:
             raise OpError("not_found", f"no item named {name!r}")
         return it
 
-    @r.op("knowledge.get", ItemRef)
+    @r.op("knowledge.get", ItemRef, access="read")
     async def knowledge_get(p: ItemRef, caller):
         """One item for the view: its file's whole text, the stamp an edit
         sends back, and a skill's files."""
@@ -1574,7 +1574,7 @@ def register_knowledge_ops(app: App) -> None:
             "stamp": await asyncio.to_thread(stamp_of, now),
         }
 
-    @r.op("knowledge.history", ItemRef)
+    @r.op("knowledge.history", ItemRef, access="read")
     async def knowledge_history(p: ItemRef, caller):
         """The commits that changed an item, newest first, a deleted one's
         included."""
