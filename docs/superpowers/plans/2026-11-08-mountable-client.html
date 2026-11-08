@@ -911,7 +911,7 @@ uv run pytest -q -m browser tests/test_mount_browser.py</script>
 <p>A header mounts into a given element and finds <code>#tablist</code> under it, never by id over the page; both files pass unchanged; <code>make gates</code>; shots of the strip with groups and on a phone.</p>
 </div></details>
 
-<details class="task" id="b3-sidebar" data-state="pending">
+<details class="task" id="b3-sidebar" data-state="done">
 <summary><span class="num">B3</span><span><span class="ttl">The sidebar part</span><span class="files">js/parts/sidebar.js (new) · js/side.js · js/monitors.js · js/usage.js · js/gauges.js · js/app.js · index.html · css/client.css · tests/test_pages_browser.py · tests/test_usage_browser.py</span></span><span class="state"></span></summary>
 <div class="body">
 <p>The session panel: title and handle rename, the session card, plan, skills, repos, journal, waiting, monitors, usage, quota, host, the session actions, the version/update card and the phone drawer. This is the biggest move (127 lookups, 111 strings); it is mostly a move of <code>renderMeta</code> and the <code>draw*</code> functions, not new code.</p>
