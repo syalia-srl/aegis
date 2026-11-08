@@ -311,6 +311,15 @@ byte count and hash, plus `build`, `version` and `prefix`, so your own service
 worker caches the client and knows when it changed. aegis installs no worker in
 an embed: the page's worker is yours.
 
+**Offline.** A mounted chat works with no connection, which is what a phone in
+a WebView, or a notebook with the laptop shut, needs. A message typed while the
+socket is down stays on the device as that session's draft and draws as the
+transcript's queued row; the reconnect sends it once, never twice. A draft
+written before the session moved on is not sent blind: the queued row says so
+and offers `Send anyway`, so the person decides. Your service worker caches the
+files `/aegis/manifest.json` lists — and that page's own last transcript, which
+the device kept — so the chat opens with no network at all.
+
 **Behind a proxy.** A proxy in front of the loopback port works the same: the
 browser's URLs keep the prefix and the proxy strips it before the port, so pass
 `prefix=` exactly what the browser sees. Everything aegis hands the page is a
