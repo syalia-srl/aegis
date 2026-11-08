@@ -6,7 +6,7 @@
 // the focus in the URL hash. A session is known by its key: its log id at
 // home, `<server>/<log_id>` on a linked server (links.py).
 
-import { Connection } from "./protocol.js";
+import { Mount } from "./mount.js";
 import { Transcript } from "./transcript.js";
 import { artifactStage, btwFolds, entryFiles, fadeTables, fileUrl, refreshApprovals, refreshWorkflows, setApprovals, setDocker, setFileBase, setOpener, setSecrets, setSpeaker, setWorkflows, syncDock, tickWorkflows, workflowLocked, workflowTitle } from "./entries.js";
 import { setScroller } from "./highlight.js";
@@ -23,7 +23,7 @@ import { closeCard, initSide, restState, toggleCollapsed } from "./side.js";
 import { installKeys, renderKeys } from "./keys.js";
 import { Palette } from "./palette.js";
 import { Switcher } from "./switcher.js";
-import { entryIcon, factIcon, glyph, gorgoneion, icon, iconText, installGlyphs, LABEL } from "./glyphs.js";
+import { entryIcon, factIcon, glyph, gorgoneion, icon, iconText, LABEL } from "./glyphs.js";
 import { CommandMenu } from "./commands.js";
 import * as cmenu from "./menu.js";
 import { attachTabCard } from "./tabcard.js";
@@ -60,17 +60,25 @@ import { serverNow } from "./clock.js";
 
 const $ = (id) => document.getElementById(id);
 const root = $("a2");
-// The theme is a variable block on the root itself (themes/*.css); index.html
-// applied the stored choice to <html> before the first paint, and this copies
-// it here before the first render.
-root.dataset.theme = document.documentElement.dataset.theme;
 
-// Quota is one subscription for the page: the band and the sidebar both draw
-// it. Host is subscribed only while a view shows it, the Fleet every server's
-// and a session its own server's, so a server nobody watches samples nothing.
-let quota = { providers: [] };
-let host = null;
-let unsubHost = null;
+// The page is one mount over the markup index.html still holds (b8 gives it
+// its parts): it adopts #a2, takes the page's shared socket, and owns the state
+// every view below reads. The theme is the one index.html applied to <html>
+// before the first paint, so the first render draws what the last one did.
+const app = new Mount(root, {
+  adopt: true,
+  layout: "full",
+  theme: localStorage.getItem("aegis.theme") || document.documentElement.dataset.theme || "ink",
+  // The page's outbox is outbox.js's singleton (the queued row and the browser
+  // suite call it by that name), handed to the mount that owns its flush.
+  outbox,
+});
+app.start();
+
+// The state the views share lives on the mount (mount.js's MountState). Quota
+// is one subscription for the page: the band and the sidebar both draw it.
+// Host is subscribed only while a view shows it, the Fleet every server's and a
+// session its own server's, so a server nobody watches samples nothing.
 let quotaDrawnFor = null; // the view the quota rows were last drawn for
 const nowS = serverNow;
 
@@ -98,34 +106,26 @@ function setTheme(name) {
 }
 
 // -- state ----------------------------------------------------------------
-const sessions = new Map(); // key -> meta, from every server's `sessions` channel
-let links = []; // the home server's links, from the `links` channel
-let linksLoaded = false; // the first `links` snapshot has arrived
-let linksArrived;
-const linksReady = new Promise((ok) => (linksArrived = ok)); // resolves with it
-let linksSig = ""; // the links' names and states the archive was last read for
-const remote = new Map(); // linked server -> {unsubs, quota, host, unsubHost, loaded, state}
-
-// A session's key, and back. Server names never hold a slash (links.py).
-const keyOf = (server, logId) => (server ? `${server}/${logId}` : logId);
-function forKey(key) {
-  const i = key.indexOf("/");
-  return i < 0 ? { server: null, log_id: key } : { server: key.slice(0, i), log_id: key.slice(i + 1) };
-}
-// An operation on a session, on whichever server holds it.
-function callFor(key, op, params = {}) {
-  const { server, log_id } = forKey(key);
-  return conn.call(op, { ...params, log_id }, server);
-}
-const linkOf = (server) => links.find((l) => l.name === server);
-const isOff = (server) => !!server && linkOf(server)?.state !== "linked";
-const withKey = (m, server = null) => ({ ...lifecycle(m), server, key: keyOf(server, m.log_id), off: isOff(server) });
+// Sessions, links, remote servers, quota, host, the tab order, the shown key
+// and the kept transcripts live on the mount (mount.js, "The state for the
+// page"); every read and write below goes through app.state. What stays here
+// is the page's drawing memo, which describes no data the server or device
+// keeps.
 const order = new TabOrder();
-let ordered = []; // metas in this browser's tab order
-let shown = null; // the key of the session whose transcript is subscribed
+
+// The key helpers the slices still call by their old names, now mount methods
+// that read this mount's links and socket. Each is deleted by the part that
+// stops using it (b2–b9); none of them keeps state.
+const keyOf = (server, logId) => app.keyOf(server, logId);
+const forKey = (key) => app.forKey(key);
+const callFor = (key, op, params = {}) => app.callFor(key, op, params);
+const linkOf = (server) => app.linkOf(server);
+const isOff = (server) => app.isOff(server);
+const withKey = (m, server = null) => app.withKey(m, server);
+
 // A docked browser's key: its pane holds the id the browser's own server
 // knows it by, and the canvas is the shown session's, on that server (#970).
-const paneKey = (id) => keyOf(forKey(shown || "").server, id);
+const paneKey = (id) => keyOf(forKey(app.state.shown || "").server, id);
 // The last session shown in this browser tab, where Files' quotes go; a
 // reload of the Files view keeps it.
 let lastShown = sessionStorage.getItem("aegis.lastShown");
@@ -142,10 +142,10 @@ const transcript = new Transcript($("tr"), $("entries"), $("jump"), {
   // A failed report is retried by the next tick: the ids stay unread in the view.
   // One call carries at most 500 ids, the operation's cap.
   onRead: (ids) => {
-    if (!shown) return;
+    if (!app.state.shown) return;
     for (let i = 0; i < ids.length; i += 500) {
       const batch = ids.slice(i, i + 500);
-      callFor(shown, "session.read", { ids: batch }).catch(() => batch.forEach((id) => transcript.sent.delete(id)));
+      callFor(app.state.shown, "session.read", { ids: batch }).catch(() => batch.forEach((id) => transcript.sent.delete(id)));
     }
   },
   onSelect: drawNav,
@@ -153,23 +153,23 @@ const transcript = new Transcript($("tr"), $("entries"), $("jump"), {
   // In tab mode with another tab open the transcript is laid out but hidden.
   seen: () => canvas.transcriptShown(),
   loadDetail: (ids) => {
-    const id = shown;
-    return callFor(id, "transcript.detail", { ids }).then((got) => (shown === id ? got : []));
+    const id = app.state.shown;
+    return callFor(id, "transcript.detail", { ids }).then((got) => (app.state.shown === id ? got : []));
   },
   // Only this server's replies carry pending refs (entries.js), so a linked
   // server is never asked.
   statPaths: (entryId) => {
-    const id = shown;
+    const id = app.state.shown;
     return callFor(id, "path.stat", { entry_id: entryId }).then((got) => {
-      if (shown !== id) throw new Error("another session is shown");
+      if (app.state.shown !== id) throw new Error("another session is shown");
       return got;
     });
   },
 });
 artifacts.setup({
-  call: (op, params, key) => callFor(key || shown, op, params),
+  call: (op, params, key) => callFor(key || app.state.shown, op, params),
   entry: (id) => transcript.entries.get(id),
-  key: () => shown,
+  key: () => app.state.shown,
   point: (frame, params) => pagePoint(frame, params),
   dictation: () => dictation,
   toast: (message) => toast(message, { kind: "error" }),
@@ -193,7 +193,7 @@ const itemId = (item) => {
 setOpener((item) => {
   const id = itemId(item);
   const away = id && canvas.elsewhere(id);
-  if (away) openWindow(shown, away);
+  if (away) openWindow(app.state.shown, away);
   else if (!(id && canvas.flash(id))) viewer.open(item);
 });
 // The newest stored file with a key, for its pane: sent files, input
@@ -212,17 +212,17 @@ const canvas = new Canvas($("canvas"), {
   transcriptPane: $("tr-pane"),
   entryOf: (id) => transcript.entries.get(id),
   latestFile,
-  call: (op, params) => callFor(shown, op, params),
+  call: (op, params) => callFor(app.state.shown, op, params),
   // A card's Dock button hides while its item is docked, and a file card's
   // page swaps its preview for a line; a docked page's card swaps its frame
   // by itself (entries.hold).
   onChange: () => syncDock(),
   refuse: (message) => toast(message, { kind: "error" }),
-  openWindow: (n, tab) => openWindow(shown, n, tab),
+  openWindow: (n, tab) => openWindow(app.state.shown, n, tab),
   // A browser the session drives, docked: its own view of the stream.
   mountBrowser: (host, id) => {
     const key = paneKey(id);
-    return sessions.has(key) ? mountBrowser(host, id, termCard(key), { conn, server: forKey(key).server }) : null;
+    return app.state.sessions.has(key) ? mountBrowser(host, id, termCard(key), { conn: app.conn, server: forKey(key).server }) : null;
   },
 });
 // Dock on a card or the viewer's bar. The viewer lets go of what it docks.
@@ -239,7 +239,7 @@ setDocker({
   can: (id) => canvas.writable && !canvas.has(id) && !canvas.elsewhere(id),
   docked: (id) => canvas.has(id) || canvas.elsewhere(id) || false,
   show: (id) => canvas.flash(id),
-  open: (n) => openWindow(shown, n),
+  open: (n) => openWindow(app.state.shown, n),
   pop: (id) => {
     leaveViewer(id);
     canvas.popOut(id);
@@ -276,16 +276,15 @@ setScroller($("tr"));
 new ResizeObserver(() => fadeTables($("entries"))).observe($("tr"));
 const copyDeps = {
   entry: (id) => transcript.entries.get(id),
-  output: (id) => callFor(shown, "transcript.output", { id }).then((r) => r.text),
-  detail: (id) => callFor(shown, "transcript.detail", { ids: [id] }).then((got) => got[0]),
+  output: (id) => callFor(app.state.shown, "transcript.output", { id }).then((r) => r.text),
+  detail: (id) => callFor(app.state.shown, "transcript.detail", { ids: [id] }).then((got) => got[0]),
 };
 installCopy($("entries"), copyDeps);
 installCopy($("viewer"), copyDeps);
-const find = new Find($("find"), transcript, (q) => callFor(shown, "transcript.search", { q }).then((r) => r.ids));
+const find = new Find($("find"), transcript, (q) => callFor(app.state.shown, "transcript.search", { q }).then((r) => r.ids));
 $("find-prev").append(icon("up"));
 $("find-next").append(icon("down"));
 $("find-close").append(icon("close"));
-installGlyphs();
 // The navigator: previous / next agent message, the position, and the latest.
 $("nav-recap").prepend(icon("sparkle"));
 $("nav-needs").prepend(glyph("needs_you"));
@@ -342,7 +341,7 @@ function drawNavNow() {
   navFrame = 0;
   const { index, total, unread } = transcript.position();
   const r = route();
-  const needs = byNeed(ordered).filter((m) => r.view !== "session" || m.key !== r.id).length;
+  const needs = byNeed(app.state.ordered).filter((m) => r.view !== "session" || m.key !== r.id).length;
   const now = {
     hidden: !transcript.entries.size,
     text: total ? `${index}/${total}` : "",
@@ -381,7 +380,7 @@ $("nav-fold").addEventListener("click", () => foldLevel((transcript.foldLevel + 
 // composer's toggle, beside the mic, follows a session, reading each new reply as it arrives;
 // which sessions are followed is this tab's, kept across a reload.
 const speaker = new Speaker({
-  prepare: () => conn.call("speech.prepare"),
+  prepare: () => app.conn.call("speech.prepare"),
   row: (id) => transcript.nodes.get(id) || null,
   onError: (message) => toast(`Read aloud: ${message}`, { kind: "error" }),
 });
@@ -389,16 +388,16 @@ setSpeaker(speaker);
 const followed = new Set(JSON.parse(sessionStorage.getItem("aegis.speakFollow") || "[]"));
 $("speak-follow").append(icon("speak"));
 function drawSpeak() {
-  const on = !!shown && followed.has(shown);
+  const on = !!app.state.shown && followed.has(app.state.shown);
   $("speak-follow").classList.toggle("on", on);
   $("speak-follow").setAttribute("aria-pressed", String(on));
   $("speak-follow").title = on ? "Stop reading new replies aloud" : "Read new replies aloud";
   speaker.setFollowing(on);
 }
 $("speak-follow").addEventListener("click", () => {
-  if (!shown) return;
-  if (followed.has(shown)) followed.delete(shown);
-  else followed.add(shown);
+  if (!app.state.shown) return;
+  if (followed.has(app.state.shown)) followed.delete(app.state.shown);
+  else followed.add(app.state.shown);
   sessionStorage.setItem("aegis.speakFollow", JSON.stringify([...followed]));
   drawSpeak();
 });
@@ -416,7 +415,7 @@ let fleetOrder = localStorage.getItem("aegis.fleetOrder") || "attention";
 const unfoldedGroups = new Set(JSON.parse(localStorage.getItem("aegis.fleet-open") || "[]"));
 const fleetStacks = {
   get here() {
-    return conn.server || localStorage.getItem("aegis.server") || "";
+    return app.conn.server || localStorage.getItem("aegis.server") || "";
   },
   open: unfoldedGroups,
   onToggle: (key) => {
@@ -556,8 +555,8 @@ function drawBanner() {
   const down = closedSince > 0 && Date.now() - closedSince >= BANNER_AFTER_MS;
   $("netbanner").hidden = !down;
   if (!down) return;
-  const s = Math.ceil((conn.retryAt - Date.now()) / 1000);
-  const retry = conn.retryAt && s > 0 ? `retrying in ${s} s` : "retrying now";
+  const s = Math.ceil((app.conn.retryAt - Date.now()) / 1000);
+  const retry = app.conn.retryAt && s > 0 ? `retrying in ${s} s` : "retrying now";
   $("netbanner-t").textContent = [seenText(), retry].filter(Boolean).join(" · ");
 }
 
@@ -595,9 +594,9 @@ function signedOut() {
   clearTimeout(fleetSave);
   clearTimeout(trSave);
   fleetSave = trSave = null;
-  sessions.clear();
-  kept.clear();
-  ordered = [];
+  app.state.sessions.clear();
+  app.state.kept.clear();
+  app.state.ordered = [];
   transcript.clear();
   renderTabs($("tablist"), [], null, tabActions);
   clearDevice().then(showLogin);
@@ -618,59 +617,62 @@ function bannerState(state) {
 // This device's push against the server's row (pushpanel.js): on every
 // connect, and whenever the page comes back in front.
 const checkPush = () => checkRotation().catch((e) => console.warn("aegis: checking push failed", e));
-const conn = new Connection(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`, {
-  onState(state, server) {
-    $("conn-dot").className = `dot ${state === "open" ? "ready" : state === "connecting" ? "ghost" : "err"}`;
-    $("conn-text").textContent =
-      state === "open" ? server : state === "connecting" ? "connecting" : state === "closed" ? "disconnected, retrying" : state;
-    markHdrMenu();
-    // For the band offline, where the welcome that names the server is out of reach.
-    if (state === "open" && server) localStorage.setItem("aegis.server", server);
-    // What arrived before a close is still the server's latest: kept at once.
-    if (state === "closed" && live) {
-      if (fleetSave) flushFleet(true);
-      if (trSave) flushTranscript(true);
-    }
-    markOffline(state);
-    drawOfflineNotice();
-    bannerState(state);
-    if (state === "unauthorized") signedOut();
-    if (state === "version") {
-      show(
-        "boot",
-        // With a worker, a reload would serve this same build again: the new
-        // one is fetched and taken as soon as it is ready (appworker.js).
-        navigator.serviceWorker
-          ? "This page and the server speak different protocol versions. Updating aegis…"
-          : "This page and the server speak different protocol versions. Reload the page.",
-      );
-      setAutoApply();
-    }
-    if (state === "closed") wasClosed = true;
-    if (state === "open") {
-      if (conn.build && PAGE_BUILD && !PAGE_BUILD.startsWith("__") && conn.build !== PAGE_BUILD) takeBuild(conn.build);
-      else if (wasClosed) checkForUpdate();
-      wasClosed = false;
-      setWho(conn.me, conn.owner);
-      checkPush(); // after setWho: the rows are this token's
-      // Whether this browser runs on the server's desktop (Open natively).
-      if (conn.native) root.dataset.native = "";
-      else delete root.dataset.native;
-      loadAgents();
-      loadVersion();
-      filesView?.online();
-    }
-  },
-});
+
+// The page's socket is the mount's (acquire, from mount.start): this only
+// hears every state it passes through and draws the header, the banner and the
+// signed-out page.
+function onState(state, server) {
+  $("conn-dot").className = `dot ${state === "open" ? "ready" : state === "connecting" ? "ghost" : "err"}`;
+  $("conn-text").textContent =
+    state === "open" ? server : state === "connecting" ? "connecting" : state === "closed" ? "disconnected, retrying" : state;
+  markHdrMenu();
+  // For the band offline, where the welcome that names the server is out of reach.
+  if (state === "open" && server) localStorage.setItem("aegis.server", server);
+  // What arrived before a close is still the server's latest: kept at once.
+  if (state === "closed" && live) {
+    if (fleetSave) flushFleet(true);
+    if (trSave) flushTranscript(true);
+  }
+  markOffline(state);
+  drawOfflineNotice();
+  bannerState(state);
+  if (state === "unauthorized") signedOut();
+  if (state === "version") {
+    show(
+      "boot",
+      // With a worker, a reload would serve this same build again: the new
+      // one is fetched and taken as soon as it is ready (appworker.js).
+      navigator.serviceWorker
+        ? "This page and the server speak different protocol versions. Updating aegis…"
+        : "This page and the server speak different protocol versions. Reload the page.",
+    );
+    setAutoApply();
+  }
+  if (state === "closed") wasClosed = true;
+  if (state === "open") {
+    if (app.conn.build && PAGE_BUILD && !PAGE_BUILD.startsWith("__") && app.conn.build !== PAGE_BUILD) takeBuild(app.conn.build);
+    else if (wasClosed) checkForUpdate();
+    wasClosed = false;
+    setWho(app.conn.me, app.conn.owner);
+    checkPush(); // after setWho: the rows are this token's
+    // Whether this browser runs on the server's desktop (Open natively).
+    if (app.conn.native) root.dataset.native = "";
+    else delete root.dataset.native;
+    loadAgents();
+    loadVersion();
+    filesView?.online();
+  }
+}
+app.on("connection", ({ state, server }) => onState(state, server));
 // Retry at once when the network or the app comes back, or when asked.
-$("netbanner-retry").addEventListener("click", () => conn.retryNow());
-window.addEventListener("online", () => conn.retryNow());
+$("netbanner-retry").addEventListener("click", () => app.conn.retryNow());
+window.addEventListener("online", () => app.conn.retryNow());
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) return;
-  conn.retryNow();
-  if (conn.open) checkPush(); // otherwise the connect does
+  app.conn.retryNow();
+  if (app.conn.open) checkPush(); // otherwise the connect does
 });
-const settings = new Settings(conn, $("settings"), {
+const settings = new Settings(app.conn, $("settings"), {
   themes: THEMES,
   setTheme,
   speaker,
@@ -678,7 +680,7 @@ const settings = new Settings(conn, $("settings"), {
   openSession: (id) => openSession(id),
 });
 let landEntry = null; // {key, id}: reveal this entry once its transcript lands
-const journal = new Journal(conn, $("journal"), {
+const journal = new Journal(app.conn, $("journal"), {
   onOpen: (r) => {
     landEntry = r.source ? { key: r.log_id, id: r.source } : null;
     go(r.open ? `#s=${r.log_id}` : `#read=${r.log_id}`);
@@ -686,19 +688,19 @@ const journal = new Journal(conn, $("journal"), {
 });
 // The Knowledge view routes its rows and Back through the URL, so the
 // browser's Back closes an open item.
-const knowledgeView = new Knowledge(conn, $("knowledge"), {
+const knowledgeView = new Knowledge(app.conn, $("knowledge"), {
   onOpen: (name) => go(`#knowledge=${encodeURIComponent(name)}`),
   onBack: () => go("#knowledge"),
 });
 // Alt+O's picker opens a file in the Files view; Shift+Enter in a new browser tab.
-filePicker = new FilePicker($("fpick"), conn, (path, line, newTab) => {
+filePicker = new FilePicker($("fpick"), app.conn, (path, line, newTab) => {
   const hash = filesHash(path, line);
   if (newTab) window.open(location.pathname + location.search + hash, "_blank");
   else go(hash);
 });
 // Files' pointing writes to the session last shown in this window: the Files
 // view itself shows none.
-filesView = new Files(conn, $("files"), {
+filesView = new Files(app.conn, $("files"), {
   toast,
   go,
   onPick: () => filePicker.open(),
@@ -716,7 +718,7 @@ filesView = new Files(conn, $("files"), {
       $("sp-cwd").value = dir ? `${roster.cwd}/${dir}` : roster.cwd;
     },
     terminal: (dir) =>
-      conn.call("term.spawn", { profile: "shell", cwd: dir || "." }).then(
+      app.conn.call("term.spawn", { profile: "shell", cwd: dir || "." }).then(
         (card) => go(`#t=${keyOf(null, card.id)}`),
         (e) => toast(e.message, { kind: "error" }),
       ),
@@ -726,7 +728,7 @@ filesView = new Files(conn, $("files"), {
 // as the transcript's do.
 // Guided tour: what /tutorial <page> does, on default_agent, for any page. A
 // failure shows as an error toast, since the Help tab belongs to no session.
-const helpTab = new Help(conn, $("help"), {
+const helpTab = new Help(app.conn, $("help"), {
   go,
   onKeys: () => help(true),
   onStart: (id, tutorial) =>
@@ -748,18 +750,18 @@ const sideJournalChanged = () => {
   clearTimeout(sideJournalTimer);
   sideJournalTimer = setTimeout(() => drawSideJournal(sideJournalFor, true), 300);
 };
-conn.subscribe("journal", sideJournalChanged, sideJournalChanged);
+app.conn.subscribe("journal", sideJournalChanged, sideJournalChanged);
 // The usage page (usage.js): the channel says a turn was counted, the page
 // asks again while it is shown.
-const usage = new Usage(conn, $("usage"), {
+const usage = new Usage(app.conn, $("usage"), {
   onOpen: (r) => go(r.open ? `#s=${r.session}` : `#read=${r.session}`),
 });
 const usageChanged = () => usage.changed();
-conn.subscribe("usage", usageChanged, usageChanged);
+app.conn.subscribe("usage", usageChanged, usageChanged);
 for (const id of ["band-quota-link", "s-quota-head"]) $(id).addEventListener("click", () => go("#usage"));
 // The Schedules view (schedules.js); its button counts them, red while one is
 // paused by errors.
-const schedules = new Schedules(conn, $("schedules"), {
+const schedules = new Schedules(app.conn, $("schedules"), {
   go,
   sessions: (server) => (server ? on(server) : local()),
   onCount: (n, red) => {
@@ -768,9 +770,9 @@ const schedules = new Schedules(conn, $("schedules"), {
     markHdrMenu();
   },
 });
-setSecrets((op, params) => callFor(shown, op, params));
+setSecrets((op, params) => callFor(app.state.shown, op, params));
 // A card asks the server of the session it is shown in: names are per server.
-const shownServer = () => (shown ? forKey(shown).server : null);
+const shownServer = () => (app.state.shown ? forKey(app.state.shown).server : null);
 // A card a session here made across a link goes to the server it names.
 // In a far session's transcript the name is that server's word about its own
 // links, and undefined finds no schedule: it could otherwise put an Unpause for
@@ -778,7 +780,7 @@ const shownServer = () => (shown ? forKey(shown).server : null);
 const cardServer = (named) => (!named ? shownServer() : shownServer() ? undefined : named);
 setApprovals({
   schedule: (name, named) => schedules.on(cardServer(named)).get(name) || null,
-  call: (op, params, named) => conn.call(op, params, cardServer(named)),
+  call: (op, params, named) => app.conn.call(op, params, cardServer(named)),
 });
 const scheduleHandlers = (server) => [
   (list) => {
@@ -790,7 +792,7 @@ const scheduleHandlers = (server) => [
     refreshApprovals();
   },
 ];
-conn.subscribe("schedules", ...scheduleHandlers(null));
+app.conn.subscribe("schedules", ...scheduleHandlers(null));
 
 // The workflow runs (workflows.py), for their cards in the transcript and
 // their canvas panes. A running card counts its times up once a second.
@@ -814,7 +816,7 @@ function wfGet(run) {
       d.w = { ...w, run };
       wfChanged(new Set([run]));
     };
-    d.unsub = conn.subscribe(
+    d.unsub = app.conn.subscribe(
       `workflow:${run}`,
       land,
       (ops) => {
@@ -840,7 +842,7 @@ setInterval(wfForget, 10000);
 setWorkflows({
   get: wfGet,
   summary: (run) => wfRuns.get(run) || null,
-  call: (op, params) => conn.call(op, params, wfRuns.get(params.run)?.server),
+  call: (op, params) => app.conn.call(op, params, wfRuns.get(params.run)?.server),
   view: (files, line, remote) => viewer.open({ files, at: 0, remote, glyph: "file", line }),
 });
 const locked = workflowLocked;
@@ -849,7 +851,7 @@ const wfChanged = (runs) => {
   refreshWorkflows(runs);
   canvas.syncStrip(); // a docked run's tab takes its title
   // The shown session may be a node of a run that just ended: its box unlocks.
-  const s = sessions.get(shown);
+  const s = app.state.sessions.get(app.state.shown);
   if (s?.workflow && (!runs || runs.has(s.workflow.run))) renderMeta(s);
 };
 // A far server cannot take over a run id already held by another server, and
@@ -881,7 +883,7 @@ function wfHandlers(server) {
     },
   ];
 }
-conn.subscribe("workflow-runs", ...wfHandlers(null));
+app.conn.subscribe("workflow-runs", ...wfHandlers(null));
 setInterval(() => {
   if ([...wfRuns.values()].some((w) => w.status === "running")) tickWorkflows();
 }, 1000);
@@ -891,12 +893,12 @@ setInterval(() => {
 function sessionHandlers(server) {
   return [
     (metas) => {
-      for (const [k, m] of sessions) if (m.server === server) sessions.delete(k);
+      for (const [k, m] of app.state.sessions) if (m.server === server) app.state.sessions.delete(k);
       for (const m of metas || []) {
         const w = withKey(m, server);
-        sessions.set(w.key, w);
+        app.state.sessions.set(w.key, w);
       }
-      if (server) remote.get(server).loaded = true;
+      if (server) app.state.remote.get(server).loaded = true;
       else booted = homeLive = true;
       onSessions();
       // The server is reachable again: what was written meanwhile goes out.
@@ -906,22 +908,22 @@ function sessionHandlers(server) {
       for (const op of ops) {
         if (op.upsert) {
           const w = withKey(op.upsert, server);
-          if (!sessions.has(w.key)) setChanged = true;
-          sessions.set(w.key, w);
+          if (!app.state.sessions.has(w.key)) setChanged = true;
+          app.state.sessions.set(w.key, w);
           changed.add(w.key);
         } else if (op.merge) {
           const k = keyOf(server, op.merge.log_id);
-          const held = sessions.get(k);
+          const held = app.state.sessions.get(k);
           if (!held) continue;
-          sessions.set(k, withKey({ ...held, ...op.merge }, server));
+          app.state.sessions.set(k, withKey({ ...held, ...op.merge }, server));
           changed.add(k);
         } else if (op.remove !== undefined) {
-          sessions.delete(keyOf(server, op.remove));
+          app.state.sessions.delete(keyOf(server, op.remove));
           setChanged = true;
           // The server archives a session before it publishes the removal, so
           // this is the moment the archive gains a row, wherever it was closed.
           // A close carries the row; anything else reads the page again.
-          if (op.archived) archiveGained({ ...op.archived, server: server ?? conn.server });
+          if (op.archived) archiveGained({ ...op.archived, server: server ?? app.conn.server });
           else archiveLoaded = false;
         }
       }
@@ -941,37 +943,37 @@ function sessionHandlers(server) {
     },
   ];
 }
-conn.subscribe("sessions", ...sessionHandlers(null));
+app.conn.subscribe("sessions", ...sessionHandlers(null));
 
 // The servers this one links. A link that comes back resubscribes everything
 // on it, each with the revision it holds; one removed takes its sessions along.
 function onLinks(list) {
-  links = list || [];
-  linksLoaded = true;
-  linksArrived();
-  settings.onLinks(links, conn.server);
+  app.state.links = list || [];
+  app.state.linksLoaded = true;
+  app.state.linksArrived();
+  settings.onLinks(app.state.links, app.conn.server);
   drawServerPick();
-  schedules.onLinks(links, conn.server);
-  const names = new Set(links.map((l) => l.name));
-  for (const [name, r] of remote) {
+  schedules.onLinks(app.state.links, app.conn.server);
+  const names = new Set(app.state.links.map((l) => l.name));
+  for (const [name, r] of app.state.remote) {
     if (names.has(name)) continue;
     for (const u of r.unsubs) u();
     r.unsubHost?.();
-    remote.delete(name);
-    for (const [k, m] of sessions) if (m.server === name) sessions.delete(k);
+    app.state.remote.delete(name);
+    for (const [k, m] of app.state.sessions) if (m.server === name) app.state.sessions.delete(k);
     for (const [run, w] of wfRuns) if (w.server === name) wfRuns.delete(run);
     wfChanged();
   }
-  for (const l of links) {
-    let r = remote.get(l.name);
+  for (const l of app.state.links) {
+    let r = app.state.remote.get(l.name);
     if (!r) {
       r = { unsubs: [], quota: { providers: [] }, host: null, unsubHost: null, loaded: false, state: l.state };
-      remote.set(l.name, r);
+      app.state.remote.set(l.name, r);
       r.unsubs.push(
-        conn.subscribe("sessions", ...sessionHandlers(l.name), undefined, undefined, l.name),
-        conn.subscribe("workflow-runs", ...wfHandlers(l.name), undefined, undefined, l.name),
-        conn.subscribe("schedules", ...scheduleHandlers(l.name), undefined, undefined, l.name),
-        conn.subscribe(
+        app.conn.subscribe("sessions", ...sessionHandlers(l.name), undefined, undefined, l.name),
+        app.conn.subscribe("workflow-runs", ...wfHandlers(l.name), undefined, undefined, l.name),
+        app.conn.subscribe("schedules", ...scheduleHandlers(l.name), undefined, undefined, l.name),
+        app.conn.subscribe(
           "quota",
           (snap) => {
             r.quota = snap || { providers: [] };
@@ -986,23 +988,23 @@ function onLinks(list) {
           l.name,
         ),
       );
-    } else if (l.state === "linked" && r.state !== "linked") conn.resubscribe(l.name);
+    } else if (l.state === "linked" && r.state !== "linked") app.conn.resubscribe(l.name);
     r.state = l.state;
   }
   // A saved session of a server no longer linked will never be replaced.
-  for (const [k, m] of sessions) if (m.stale && m.server && !names.has(m.server)) sessions.delete(k);
-  for (const [k, m] of sessions) if (m.server) sessions.set(k, { ...m, off: isOff(m.server) });
+  for (const [k, m] of app.state.sessions) if (m.stale && m.server && !names.has(m.server)) app.state.sessions.delete(k);
+  for (const [k, m] of app.state.sessions) if (m.server) app.state.sessions.set(k, { ...m, off: isOff(m.server) });
   // Which servers are up changes what the archive can list: read it again.
-  const sig = links.map((l) => `${l.name}:${l.state}`).join(",");
-  if (sig !== linksSig) {
-    linksSig = sig;
+  const sig = app.state.links.map((l) => `${l.name}:${l.state}`).join(",");
+  if (sig !== app.state.linksSig) {
+    app.state.linksSig = sig;
     archiveLoaded = false;
     if (booted && root.dataset.view === "fleet") loadArchive();
   }
   if (root.dataset.view === "fleet") watchHost("all");
   if (booted) onSessions();
 }
-conn.subscribe(
+app.conn.subscribe(
   "links",
   onLinks,
   (ops) => {
@@ -1010,18 +1012,18 @@ conn.subscribe(
   },
   () => onLinks([]), // a server without links
 );
-conn.subscribe(
+app.conn.subscribe(
   "quota",
   (snap) => {
-    quota = snap || { providers: [] };
+    app.state.quota = snap || { providers: [] };
     drawQuota();
   },
   (ops) => {
-    for (const op of ops) if (op.set) quota = op.set;
+    for (const op of ops) if (op.set) app.state.quota = op.set;
     drawQuota();
   },
 );
-conn.subscribe(
+app.conn.subscribe(
   "config",
   (w) => settings.onHomeConfig(w),
   (ops) => {
@@ -1029,7 +1031,6 @@ conn.subscribe(
     loadAgents();
   },
 );
-conn.connect();
 
 // The Fleet this device saw last, drawn at once: with no connection it is all
 // there is, and with one it shows until the live snapshot replaces it. A saved
@@ -1045,7 +1046,7 @@ loadFleet().then((saved) => {
   if (!saved || booted || refused) return;
   seenAt = saved.saved_at;
   // An older client saved stopped and parked: read them as asleep (#479).
-  for (const m of saved.metas) sessions.set(m.key, { ...lifecycle(m), stale: true });
+  for (const m of saved.metas) app.state.sessions.set(m.key, { ...lifecycle(m), stale: true });
   booted = true;
   onSessions();
 });
@@ -1057,19 +1058,19 @@ loadFleet().then((saved) => {
 const SAVE_MS = 2000;
 let fleetSave = null;
 function keepFleet() {
-  if (!fleetSave && conn.open) fleetSave = setTimeout(flushFleet, SAVE_MS);
+  if (!fleetSave && app.conn.open) fleetSave = setTimeout(flushFleet, SAVE_MS);
 }
 // `closing`: the socket has just closed, and what the page holds is still
 // what it last carried.
 function flushFleet(closing = false) {
   clearTimeout(fleetSave);
   fleetSave = null;
-  if ((conn.open || closing) && homeLive) saveFleet([...sessions.values()].filter((m) => !m.stale));
+  if ((app.conn.open || closing) && homeLive) saveFleet([...app.state.sessions.values()].filter((m) => !m.stale));
 }
 // The shown transcript, likewise, after each snapshot, delta and patch.
 let trSave = null;
 function keepTranscript() {
-  if (!trSave && conn.open && shown) trSave = setTimeout(flushTranscript, SAVE_MS);
+  if (!trSave && app.conn.open && app.state.shown) trSave = setTimeout(flushTranscript, SAVE_MS);
 }
 function flushTranscript(closing = false) {
   clearTimeout(trSave);
@@ -1077,9 +1078,9 @@ function flushTranscript(closing = false) {
   // Not mid-turn: streamed entries exist only in the server's memory until the
   // turn ends, so a copy taken now could bring back half-written rows after a
   // restart. The turn's last patch arms the save again.
-  if (sessions.get(shown)?.state === "working") return;
-  if ((conn.open || closing) && shown && transcript.rev >= 0)
-    saveTranscript(shown, { entries: [...transcript.entries.values()], rev: transcript.rev });
+  if (app.state.sessions.get(app.state.shown)?.state === "working") return;
+  if ((app.conn.open || closing) && app.state.shown && transcript.rev >= 0)
+    saveTranscript(app.state.shown, { entries: [...transcript.entries.values()], rev: transcript.rev });
 }
 // Going hidden writes the Fleet even unchanged: its saved_at is when this
 // device last saw the server, which is what "seen N min ago" says offline.
@@ -1091,7 +1092,7 @@ document.addEventListener("visibilitychange", () => {
 
 // Offline, a session with nothing kept on this device says so.
 function drawOfflineNotice() {
-  $("tr-offline").hidden = live || !shown || transcript.entries.size > 0;
+  $("tr-offline").hidden = live || !app.state.shown || transcript.entries.size > 0;
 }
 
 // Patches that only update sessions the page already shows redraw once a
@@ -1105,7 +1106,7 @@ function flushSessions() {
   const ids = changed;
   changed = new Set();
   if (!booted) return;
-  ordered = ordered.map((m) => sessions.get(m.key)).filter(Boolean);
+  app.state.ordered = app.state.ordered.map((m) => app.state.sessions.get(m.key)).filter(Boolean);
   switcher.refresh();
   sizeTabMore(); // its count includes quiet sessions, which have no tab
   // A session that went quiet or came back changes the set of tabs (#386).
@@ -1116,29 +1117,34 @@ function flushSessions() {
   }
   const r = route();
   let whole = false; // a grouped tab redraws the bar (tabs.js patchTab)
-  for (const id of ids) if (sessions.has(id) && !patchTab($("tablist"), sessions.get(id), tabFocus(r), tabActions)) whole = true;
+  for (const id of ids) if (app.state.sessions.has(id) && !patchTab($("tablist"), app.state.sessions.get(id), tabFocus(r), tabActions)) whole = true;
   if (whole) renderTabs($("tablist"), tabbed(), tabFocus(r), tabActions);
   if (r.view === "fleet") {
-    const home = [...ids].filter((id) => !sessions.get(id)?.server);
-    const regroup = home.some((id) => !patchCard($("cards"), sessions.get(id), openCard, fleetOrder, closeById));
+    const home = [...ids].filter((id) => !app.state.sessions.get(id)?.server);
+    const regroup = home.some((id) => !patchCard($("cards"), app.state.sessions.get(id), openCard, fleetOrder, closeById));
     if (regroup) renderCards($("cards"), local().filter(kindShown), openCard, fleetOrder, closeById, fleetStacks);
     if (home.length < ids.size) renderRemotes();
     fleetMark(false);
     drawBand();
     markNeedsNet(); // the cards' Archive buttons
-  } else if (r.view === "session" && ids.has(r.id)) renderMeta(sessions.get(r.id));
+  } else if (r.view === "session" && ids.has(r.id)) renderMeta(app.state.sessions.get(r.id));
   else if (r.view === "term" && ids.has(r.id)) drawCard(termCard(r.id));
   else if (r.view === "window" && ids.has(r.id)) drawWindow(r);
   // A browser shows in its tab and in canvas panes: every view redraws.
-  for (const id of ids) if (sessions.get(id)?.kind === "browser") drawBrowser(termCard(id));
+  for (const id of ids) if (app.state.sessions.get(id)?.kind === "browser") drawBrowser(termCard(id));
   drawNav(); // the needs count
 }
 
 function onSessions() {
   // A terminal's card has no created_at; it starts when it started.
   const since = (m) => m.created_at ?? m.started_at ?? 0;
-  const ids = order.arrange([...sessions.values()].sort((a, b) => since(a) - since(b)).map((m) => m.key));
-  ordered = ids.map((id) => sessions.get(id));
+  const ids = order.arrange(
+    [...app.state.sessions.values()].sort((a, b) => since(a) - since(b)).map((m) => m.key),
+    // The device's copy before this server's snapshot: it may not hold every
+    // tab yet, so it must not narrow the order it was read from.
+    homeLive,
+  );
+  app.state.ordered = ids.map((id) => app.state.sessions.get(id));
   switcher.refresh();
   sizeTabMore(); // its count includes quiet sessions, which have no tab
   render();
@@ -1152,7 +1158,7 @@ function onSessions() {
 // the page was closed would ping on every cold start.
 let homeLive = false;
 function ping() {
-  if (homeLive) updatePing([...sessions.values()].filter((m) => !m.stale && !isTool(m)), { onOpen: openSession });
+  if (homeLive) updatePing([...app.state.sessions.values()].filter((m) => !m.stale && !isTool(m)), { onOpen: openSession });
 }
 
 // -- rendering -----------------------------------------------------------------
@@ -1160,16 +1166,16 @@ function ping() {
 // another view: window 1's pages would run in it a second time.
 const openSession = (id) => route().view === "window" || go(hashOf(id));
 // A tab's hash: a terminal's view, or a session's.
-const hashOf = (key) => ({ term: `#t=${key}`, browser: `#b=${key}` })[sessions.get(key)?.kind] || `#s=${key}`;
+const hashOf = (key) => ({ term: `#t=${key}`, browser: `#b=${key}` })[app.state.sessions.get(key)?.kind] || `#s=${key}`;
 const tabFocus = (r) => (r.view === "session" || r.view === "term" || r.view === "browser" ? r.id : null);
 // Where a browser's views find its card and the sessions it can be given to.
 browserSources({
-  card: (id) => (sessions.has(paneKey(id)) ? termCard(paneKey(id)) : null),
+  card: (id) => (app.state.sessions.has(paneKey(id)) ? termCard(paneKey(id)) : null),
   sessions: () => local().filter((m) => !isTool(m) && m.state !== "asleep"),
 });
 // The open terminal's card, with the log id and server it is reached by.
 function termCard(key) {
-  const m = sessions.get(key);
+  const m = app.state.sessions.get(key);
   return m && { ...m, id: forKey(key).log_id };
 }
 // The service worker (sw.js): it keeps this build for offline use and raises
@@ -1179,13 +1185,13 @@ startWorker({
     toast("A new version of aegis is ready.", { ms: Infinity, action: { label: "Reload", run: applyUpdate } }),
 });
 startInstall($("install-offer"));
-setupPush((op, params) => conn.call(op, params));
+setupPush((op, params) => app.conn.call(op, params));
 listenForOpen(openSession);
 setToastOpener(openSession);
 // Toasts from the server (App.toast): every browser shows each one once, and
 // an agent's goes to the desktop too while the page is hidden. The snapshot is
 // always empty, so a reconnect replays nothing.
-conn.subscribe(
+app.conn.subscribe(
   "toasts",
   () => {},
   (ops) => {
@@ -1199,7 +1205,7 @@ conn.subscribe(
 // Close for the Fleet's Archive button and a middle click on a card or a tab:
 // the session as it is now, not as the card or tab drew it.
 const closeById = (id) => {
-  const s = sessions.get(id);
+  const s = app.state.sessions.get(id);
   if (s) closeSession(s);
 };
 // Folded groups in the bar (#586), this browser's own like the tab order.
@@ -1212,7 +1218,7 @@ const tabActions = {
     onSessions();
   },
   get here() {
-    return conn.server || localStorage.getItem("aegis.server") || "";
+    return app.conn.server || localStorage.getItem("aegis.server") || "";
   },
   folds: tabFolds,
   saveFolds: () => localStorage.setItem("aegis.tab-folds", JSON.stringify([...tabFolds])),
@@ -1224,14 +1230,14 @@ const tabActions = {
 };
 
 // This server's sessions, and a linked server's, in tab order.
-const local = () => ordered.filter((m) => !m.server);
+const local = () => app.state.ordered.filter((m) => !m.server);
 
 // Quiet sessions have no tab (#386). The view leaves a session only when it was
 // seen visible and then turned quiet, so a link to a quiet one still opens it,
 // even when the saved Fleet or a linked server's list arrives after the page.
-const tabbed = () => ordered.filter((m) => !m.quiet);
+const tabbed = () => app.state.ordered.filter((m) => !m.quiet);
 const quietSeen = new Map(); // key -> whether it was quiet when last drawn
-const quietChanged = () => ordered.some((m) => !!m.quiet !== (quietSeen.get(m.key) ?? !!m.quiet));
+const quietChanged = () => app.state.ordered.some((m) => !!m.quiet !== (quietSeen.get(m.key) ?? !!m.quiet));
 
 // Archiving the open tab, here or elsewhere, leaves it the same way: to the next
 // tab, not to the Fleet. The order is the one last drawn, which still holds it.
@@ -1239,16 +1245,16 @@ const quietChanged = () => ordered.some((m) => !!m.quiet !== (quietSeen.get(m.ke
 // server's, or this server's live one rather than the device's saved list.
 function settled(key) {
   const far = forKey(key).server;
-  return far ? linksLoaded && !(linkOf(far) && !remote.get(far)?.loaded) : homeLive;
+  return far ? app.state.linksLoaded && !(linkOf(far) && !app.state.remote.get(far)?.loaded) : homeLive;
 }
 
 function leaveIfGone(r) {
   const id = tabFocus(r);
   const was = [...quietSeen.keys()];
   const drawn = id && quietSeen.get(id) === false;
-  const fresh = drawn && (sessions.get(id) ? r.view === "session" && sessions.get(id).quiet : settled(id));
+  const fresh = drawn && (app.state.sessions.get(id) ? r.view === "session" && app.state.sessions.get(id).quiet : settled(id));
   quietSeen.clear();
-  for (const m of ordered) quietSeen.set(m.key, !!m.quiet);
+  for (const m of app.state.ordered) quietSeen.set(m.key, !!m.quiet);
   if (!fresh) return false;
   const at = was.indexOf(id);
   const next = was.slice(at + 1).concat(was.slice(0, at).reverse()).find((k) => quietSeen.get(k) === false);
@@ -1259,12 +1265,12 @@ function leaveIfGone(r) {
 // A click on a quiet card brings the session back to the tab bar, then opens it.
 async function openCard(key) {
   // A locked node opens as it is, quiet: it gets its tab when the run ends.
-  if (sessions.get(key)?.quiet && !locked(sessions.get(key))) {
+  if (app.state.sessions.get(key)?.quiet && !locked(app.state.sessions.get(key))) {
     try {
       const back = await callFor(key, "session.unquiet");
       // Read again: a patch the server sent before the unquiet may have
       // replaced the meta meanwhile, still quiet, and the page would leave it.
-      const m = sessions.get(key);
+      const m = app.state.sessions.get(key);
       if (m) Object.assign(m, back, { quiet: false });
     } catch (e) {
       toast(e.message, { kind: "error" });
@@ -1274,7 +1280,7 @@ async function openCard(key) {
   }
   openSession(key);
 }
-const on = (server) => ordered.filter((m) => m.server === server);
+const on = (server) => app.state.ordered.filter((m) => m.server === server);
 
 let menuView = null; // the view the open menu or bar belongs to (render)
 function render() {
@@ -1313,27 +1319,27 @@ function render() {
   if (r.view !== "browser") closeBrowser();
   if (leaveIfGone(r)) return;
   // A session's link to a terminal, or the reverse, opens the right view.
-  if ((r.view === "session" || r.view === "term" || r.view === "browser") && sessions.has(r.id) && `#${r.view[0]}=${r.id}` !== hashOf(r.id)) {
+  if ((r.view === "session" || r.view === "term" || r.view === "browser") && app.state.sessions.has(r.id) && `#${r.view[0]}=${r.id}` !== hashOf(r.id)) {
     history.replaceState(null, "", hashOf(r.id));
     return render();
   }
   // A reload into a closed terminal: its row comes from term.closed.
-  if (r.view === "term" && !sessions.has(r.id) && !closedTerms.has(r.id) && homeLive && !closedTermsLoaded) {
+  if (r.view === "term" && !app.state.sessions.has(r.id) && !closedTerms.has(r.id) && homeLive && !closedTermsLoaded) {
     loadClosedTerms().then(render);
     return;
   }
-  if (r.view === "term" && !sessions.has(r.id) && closedTerms.has(r.id)) {
+  if (r.view === "term" && !app.state.sessions.has(r.id) && closedTerms.has(r.id)) {
     const card = { ...closedTerms.get(r.id), state: "ended", reason: "closed", archived: true };
     renderTabs($("tablist"), tabbed(), null, tabActions);
     $("tab-fleet").classList.remove("on");
     watchHost(null);
     follow(null);
     show("term");
-    openTerm(card.id, card, { conn }).catch((e) => toast(e.message, { kind: "error" }));
+    openTerm(card.id, card, { conn: app.conn }).catch((e) => toast(e.message, { kind: "error" }));
     setTitle(`${card.name} · aegis`);
     return;
   }
-  if ((r.view === "session" || r.view === "term") && !sessions.has(r.id)) {
+  if ((r.view === "session" || r.view === "term") && !app.state.sessions.has(r.id)) {
     // A far session whose server's list has not arrived yet waits for it; a
     // home one waits for the live list, since a notification's tap or a link
     // opens a session the device's saved list may predate.
@@ -1430,7 +1436,7 @@ function render() {
     // now, or never when it is gone. Otherwise it lands with the transcript.
     // Only on the render that read the link: a later one may come before the
     // transcript lands, and must leave the row waiting for it.
-    if (r.at && landEntry?.key === r.id && shown === r.id) {
+    if (r.at && landEntry?.key === r.id && app.state.shown === r.id) {
       if (transcript.entries.has(landEntry.id)) transcript.reveal(landEntry.id);
       landEntry = null;
     }
@@ -1438,7 +1444,7 @@ function render() {
     // Shown first: follow() sizes the message box, which measures 0 while hidden.
     show("session");
     follow(r.id);
-    renderMeta(sessions.get(r.id));
+    renderMeta(app.state.sessions.get(r.id));
     if (newView) {
       drawQuota();
       drawSideHost();
@@ -1446,24 +1452,24 @@ function render() {
   } else if (r.view === "browser") {
     watchHost(null);
     follow(null);
-    if (!sessions.has(r.id)) return homeLive && go("#");
+    if (!app.state.sessions.has(r.id)) return homeLive && go("#");
     show("browser");
     const card = termCard(r.id);
-    openBrowser(card.id, card, { conn, server: card.server ?? null });
+    openBrowser(card.id, card, { conn: app.conn, server: card.server ?? null });
     setTitle(`${card.name} · aegis`);
   } else if (r.view === "term") {
     watchHost(null);
     follow(null);
     show("term");
     const card = termCard(r.id);
-    openTerm(card.id, card, { conn, server: card.server ?? null }).catch((e) => toast(e.message, { kind: "error" }));
+    openTerm(card.id, card, { conn: app.conn, server: card.server ?? null }).catch((e) => toast(e.message, { kind: "error" }));
     setTitle(`${card.name} · aegis`);
   } else if (r.view === "window") {
     // The session's card and transcript, as the session view has them (the
     // panes need the entries), with only window n drawn.
     watchHost(null);
     show("window");
-    follow(sessions.has(r.id) ? r.id : null);
+    follow(app.state.sessions.has(r.id) ? r.id : null);
     drawWindow(r);
   } else {
     watchHost(forKey(r.id).server || "");
@@ -1480,9 +1486,9 @@ function render() {
 // one), null for nothing.
 function watchHost(want) {
   const wants = (name) => want === "all" || want === name;
-  for (const [name, r] of remote) {
+  for (const [name, r] of app.state.remote) {
     if (wants(name) && !r.unsubHost)
-      r.unsubHost = conn.subscribe(
+      r.unsubHost = app.conn.subscribe(
         "host",
         (snap) => {
           r.host = snap;
@@ -1502,22 +1508,22 @@ function watchHost(want) {
       r.host = null;
     }
   }
-  if (wants("") && !unsubHost) {
-    unsubHost = conn.subscribe(
+  if (wants("") && !app.state.unsubHost) {
+    app.state.unsubHost = app.conn.subscribe(
       "host",
       (snap) => {
-        host = snap;
+        app.state.host = snap;
         drawHost();
       },
       (ops) => {
-        for (const op of ops) if ("set" in op) host = op.set;
+        for (const op of ops) if ("set" in op) app.state.host = op.set;
         drawHost();
       },
     );
-  } else if (!wants("") && unsubHost) {
-    unsubHost();
-    unsubHost = null;
-    host = null;
+  } else if (!wants("") && app.state.unsubHost) {
+    app.state.unsubHost();
+    app.state.unsubHost = null;
+    app.state.host = null;
   }
 }
 
@@ -1530,12 +1536,12 @@ function drawBand() {
   if (root.dataset.view !== "fleet") return;
   // Saved cards say how old they are while the socket is not open. Once it
   // opens the live snapshot is on its way, and the band is no longer offline.
-  const saved = !conn.open && local().some((m) => m.stale);
-  renderBand($("band"), { metas: local(), host, server: conn.server || localStorage.getItem("aegis.server") || "", link: saved ? seenText() : links.length ? "this server" : "", off: saved, measure: () => measureNet(null) });
-  for (const l of links) {
+  const saved = !app.conn.open && local().some((m) => m.stale);
+  renderBand($("band"), { metas: local(), host: app.state.host, server: app.conn.server || localStorage.getItem("aegis.server") || "", link: saved ? seenText() : app.state.links.length ? "this server" : "", off: saved, measure: () => measureNet(null) });
+  for (const l of app.state.links) {
     const box = $("remotes").querySelector(`[data-server="${CSS.escape(l.name)}"]`);
     if (!box) continue;
-    const r = remote.get(l.name);
+    const r = app.state.remote.get(l.name);
     renderBand(box.querySelector(".band"), {
       metas: on(l.name),
       host: r?.host,
@@ -1550,7 +1556,7 @@ function drawBand() {
 // A speed reading now, on the server the row belongs to; the host channel
 // brings the result, "measuring…" first.
 function measureNet(server) {
-  conn.call("net.measure", {}, server).catch((e) => toast(e.message, { kind: "error" }));
+  app.conn.call("net.measure", {}, server).catch((e) => toast(e.message, { kind: "error" }));
 }
 
 // The line beside a linked server's name in its band.
@@ -1568,9 +1574,9 @@ function linkLine(l) {
 // cards. The band is a copy of this server's, so a theme styles both alike.
 function renderRemotes() {
   const host = $("remotes");
-  const names = new Set(links.map((l) => l.name));
+  const names = new Set(app.state.links.map((l) => l.name));
   for (const box of [...host.children]) if (!names.has(box.dataset.server)) box.remove();
-  for (const l of links) {
+  for (const l of app.state.links) {
     let box = host.querySelector(`[data-server="${CSS.escape(l.name)}"]`);
     if (!box) {
       box = document.createElement("div");
@@ -1586,7 +1592,7 @@ function renderRemotes() {
       attachCardMenu(cards);
       box.append(band, cards);
       host.append(box);
-      const r = remote.get(l.name);
+      const r = app.state.remote.get(l.name);
       if (r) renderBandQuota(band, { ...farQuota(r.quota), now: nowS() });
     }
     host.append(box); // keep the links' order
@@ -1604,8 +1610,8 @@ let sideSession = null;
 let sideQuotaKey = null; // the provider the card's quota rows were drawn for
 let sideTilesSig = null;
 
-const quotaOf = (server) => (server ? remote.get(server)?.quota : quota) || { providers: [] };
-const hostOf = (server) => (server ? remote.get(server)?.host : host);
+const quotaOf = (server) => (server ? app.state.remote.get(server)?.quota : app.state.quota) || { providers: [] };
+const hostOf = (server) => (server ? app.state.remote.get(server)?.host : app.state.host);
 const sideProvider = (s) => providerFor(s, quotaOf(s.server || "").providers || []);
 
 function ctxPct(s) {
@@ -1711,7 +1717,7 @@ function drawSideHost() {
   const h = s && hostOf(server);
   $("s-host-sec").hidden = !h;
   if (!h) return;
-  const name = server || conn.server || "this server";
+  const name = server || app.conn.server || "this server";
   $("s-host-name").textContent = name;
   $("s-host-head").textContent = `Host · ${name}`;
   const meter = (label, pct) => tile(label, `${pct}%`, { pct, kind: "h", severity: hostSeverity(pct) });
@@ -1739,17 +1745,17 @@ function drawSideHost() {
 // A linked server's quota, less the providers this server already shows for
 // the same account (each reading names its account by a hash).
 function farQuota(q) {
-  const mine = new Set((quota.providers || []).filter((p) => p.account).map((p) => `${p.name}:${p.account}`));
+  const mine = new Set((app.state.quota.providers || []).filter((p) => p.account).map((p) => `${p.name}:${p.account}`));
   const providers = q.providers || [];
   const dup = (p) => p.account && mine.has(`${p.name}:${p.account}`);
-  return { quota: { providers: providers.filter((p) => !dup(p)) }, same: providers.filter(dup), home: conn.server };
+  return { quota: { providers: providers.filter((p) => !dup(p)) }, same: providers.filter(dup), home: app.conn.server };
 }
 
 function drawQuota() {
   if (root.dataset.view === "fleet") {
-    renderBandQuota($("band"), { quota, now: nowS() });
+    renderBandQuota($("band"), { quota: app.state.quota, now: nowS() });
     for (const box of $("remotes").children) {
-      const r = remote.get(box.dataset.server);
+      const r = app.state.remote.get(box.dataset.server);
       if (r) renderBandQuota(box.querySelector(".band"), { ...farQuota(r.quota), now: nowS() });
     }
   } else if (root.dataset.view === "session" && sideSession) {
@@ -1765,7 +1771,6 @@ setInterval(drawQuota, 30 * 1000);
 // The last TAB_CACHE tabs left, newest last: a return to one shows it at once
 // and asks only for what changed since (transcript/wire.py, Fold.snapshot).
 const TAB_CACHE = 8;
-const kept = new Map(); // key -> transcript.stash()
 
 let follows = 0; // which follow() a device read answers
 
@@ -1777,7 +1782,7 @@ function tellView() {
   const win = route().view === "window";
   navigator.serviceWorker?.controller?.postMessage({
     t: "view",
-    key: win ? "" : shown || "",
+    key: win ? "" : app.state.shown || "",
     visible: !document.hidden && document.hasFocus(),
     window: win,
   });
@@ -1787,17 +1792,17 @@ function tellView() {
 // session someone looks at keeps its harness. A hidden page counts as away.
 let watchedServer = null;
 function tellWatch() {
-  const key = route().view === "session" ? shown || "" : ""; // the Fleet and other views watch nothing
+  const key = route().view === "session" ? app.state.shown || "" : ""; // the Fleet and other views watch nothing
   const { server, log_id } = key ? forKey(key) : { server: null, log_id: null };
   if (watchedServer !== null && watchedServer !== (server || "")) {
     const off = { t: "watch", session: null, visible: false };
     if (watchedServer) off.server = watchedServer;
-    conn.post(off);
+    app.conn.post(off);
   }
   watchedServer = server || "";
   const msg = { t: "watch", session: log_id, visible: !!log_id && !document.hidden };
   if (server) msg.server = server;
-  conn.post(msg);
+  app.conn.post(msg);
 }
 window.addEventListener("hashchange", tellWatch);
 for (const ev of ["focus", "blur"]) window.addEventListener(ev, tellView);
@@ -1807,23 +1812,23 @@ document.addEventListener("visibilitychange", tellView);
 navigator.serviceWorker?.addEventListener("controllerchange", tellView);
 
 function follow(id) {
-  if (shown === id) return;
+  if (app.state.shown === id) return;
   if (trSave) flushTranscript(); // before its rows go
   closeSide();
   if (unsubTranscript) unsubTranscript();
   unsubTranscript = null;
-  if (shown) {
-    kept.delete(shown);
-    kept.set(shown, transcript.stash());
-    while (kept.size > TAB_CACHE) kept.delete(kept.keys().next().value);
+  if (app.state.shown) {
+    app.state.kept.delete(app.state.shown);
+    app.state.kept.set(app.state.shown, transcript.stash());
+    while (app.state.kept.size > TAB_CACHE) app.state.kept.delete(app.state.kept.keys().next().value);
   } else transcript.clear();
   drawNavNow(); // at once: the old session's navigator goes with its rows
   find.close(false); // it searched the old session
   if (dictation.target?.el === input) dictation.stop("tab"); // a recording belongs to its session
   speaker.stop(); // what is being read belongs to the session on screen
-  shown = id;
+  app.state.shown = id;
   drawSpeak();
-  if (sessions.has(id)) sessionStorage.setItem("aegis.lastShown", (lastShown = id));
+  if (app.state.sessions.has(id)) sessionStorage.setItem("aegis.lastShown", (lastShown = id));
   tellView();
   const turn = ++follows;
   const first = early;
@@ -1838,19 +1843,19 @@ function follow(id) {
   // would take the last tab's server's base (#425).
   const where = forKey(id);
   setFileBase(where.server ? `/via/${where.server}` : "");
-  const saved = kept.get(id);
+  const saved = app.state.kept.get(id);
   if (saved) {
-    kept.delete(id);
+    app.state.kept.delete(id);
     transcript.restore(saved);
   }
   // The divider is placed by the first snapshot or delta after this switch,
   // and kept across a resubscribe of the same session.
   let placed = false;
   viewer.show(id); // after the base: a far artifact's frame is built from it
-  if (sessions.get(id)) showCanvas(sessions.get(id));
+  if (app.state.sessions.get(id)) showCanvas(app.state.sessions.get(id));
   else canvas.clear();
   const subscribe = () => {
-    unsubTranscript = conn.subscribe(
+    unsubTranscript = app.conn.subscribe(
       `transcript:${where.log_id}`,
       (data) => {
         // A server that cannot resume from the revision asked (the session was
@@ -1862,7 +1867,7 @@ function follow(id) {
         keepTranscript();
         drawOfflineNotice();
         if (!placed) {
-          transcript.setSince(sinceText(sessions.get(id)));
+          transcript.setSince(sinceText(app.state.sessions.get(id)));
           askRecap(false); // the server decides whether it is worth one
           if (landUnread === id) transcript.firstUnread();
           landUnread = null;
@@ -2026,7 +2031,7 @@ async function drawSideJournal(key, force = false) {
   if (linked) return;
   let res;
   try {
-    res = await conn.call("journal.rows", { session: key, since: "today", limit: 5, counts: true });
+    res = await app.conn.call("journal.rows", { session: key, since: "today", limit: 5, counts: true });
   } catch {
     if (sideJournalFor === key) {
       sideJournalFor = null; // the next render retries
@@ -2085,7 +2090,7 @@ function followRepos(key) {
   const draw = (d) => {
     if (reposFor === key) drawRepos(d);
   };
-  unsubRepos = conn.subscribe(`repos:${forKey(key).log_id}`, draw, (ops) => {
+  unsubRepos = app.conn.subscribe(`repos:${forKey(key).log_id}`, draw, (ops) => {
     for (const op of ops) if (op.set) draw(op.set);
   });
 }
@@ -2258,7 +2263,7 @@ function drawRepos(d) {
 // browser's tab list tells the windows apart. A session gone from the list
 // leaves the window empty.
 function drawWindow(r) {
-  const s = sessions.get(r.id);
+  const s = app.state.sessions.get(r.id);
   if (s) showCanvas(s);
   else canvas.clear();
   setTitle(`${s ? s.title || s.handle : "aegis"} · window ${r.n}`);
@@ -2282,10 +2287,10 @@ function renderMeta(s) {
   $("s-model").textContent = s.model_id && s.model_id !== s.model ? `${modelLine(s)} → ${s.model_id}` : modelLine(s);
   $("s-effort").replaceChildren(factIcon("e", s.effort), s.effort || "");
   $("s-perm").replaceChildren(factIcon("p", s.permission), s.permission || "");
-  $("s-server").textContent = s.server || conn.server || "this server";
+  $("s-server").textContent = s.server || app.conn.server || "this server";
   // The handle as peers address it, handle@server, and the badge a Fleet card
   // gives a queue worker.
-  $("s-at").textContent = s.server || conn.server ? `@${s.server || conn.server}` : "";
+  $("s-at").textContent = s.server || app.conn.server ? `@${s.server || app.conn.server}` : "";
   $("s-worker").hidden = !s.worker;
   $("s-worker").textContent = s.worker ? `worker · ${s.worker.queue}` : "";
   if (s.attention === undefined) {
@@ -2301,7 +2306,7 @@ function renderMeta(s) {
   $("s-ask").className = `askbox at-${s.attention}`;
   drawPlan(s);
   drawSkills(s);
-  if (s.key === shown) showCanvas(s);
+  if (s.key === app.state.shown) showCanvas(s);
   drawSideJournal(s.key);
   followRepos(s.key);
   drawReplies(s);
@@ -2346,7 +2351,7 @@ function renderMeta(s) {
   const down = s.off ? linkOf(s.server) : null;
   input.disabled = $("attach").disabled = !!down || held;
   drawSending(!!down || held);
-  if (s.asleep_why !== "idle" && warmed === shown) warmed = null;
+  if (s.asleep_why !== "idle" && warmed === app.state.shown) warmed = null;
   drawComposerHint(s);
   setTitle(`${s.title || s.handle} · aegis`);
 }
@@ -2380,7 +2385,7 @@ function drawWaiting(s) {
 // and whether a message resumes it. While a parked session's harness resumes
 // after the first keystroke, the waking row says so in the transcript instead.
 function drawComposerHint(s) {
-  $("waking").hidden = !(s.asleep_why === "idle" && warmed === shown);
+  $("waking").hidden = !(s.asleep_why === "idle" && warmed === app.state.shown);
   const down = s.off ? linkOf(s.server) : null;
   // Chrome counts a placeholder in scrollHeight: measure again when it changes.
   const placeholder = locked(s)
@@ -2452,14 +2457,14 @@ setInterval(() => {
   tickMonitors();
   if (root.dataset.view === "fleet" && local().some((m) => m.stale)) drawBand();
   if (root.dataset.view === "fleet") for (const c of document.querySelectorAll(".card")) {
-    const m = sessions.get(c.dataset.id);
+    const m = app.state.sessions.get(c.dataset.id);
     if (m && !isTool(m)) {
       c.querySelector(".when").textContent = ago(m.last_activity);
       tickPlan(c, m);
     }
   }
-  if (root.dataset.view === "session" && shown) {
-    const s = sessions.get(shown);
+  if (root.dataset.view === "session" && app.state.shown) {
+    const s = app.state.sessions.get(app.state.shown);
     if (s && (s.plan || []).length) tickSidePlan(s);
     drawCold(s);
   }
@@ -2483,7 +2488,7 @@ function span(cls, text, name) {
 async function loadVersion() {
   let v;
   try {
-    v = await conn.call("server.version");
+    v = await app.conn.call("server.version");
   } catch (e) {
     return;
   }
@@ -2493,7 +2498,7 @@ async function loadVersion() {
   const shown = dev && short ? short : run.version || "unknown";
   const behind = v.status === "behind";
 
-  $("ver-head").textContent = `aegis on ${conn.server}`;
+  $("ver-head").textContent = `aegis on ${app.conn.server}`;
   $("ver-run").replaceChildren(span("v", shown), ...(dev ? [span("tag", "dev")] : []));
   // aegis-dev builds from the resolved commit, so the ref is often the commit again.
   const ref = run.ref && !(run.commit || "").startsWith(run.ref) ? run.ref : null;
@@ -2522,7 +2527,7 @@ async function loadVersion() {
   top.hidden = false;
   drawUpdate();
 }
-setInterval(() => conn.open && loadVersion(), 3600 * 1000);
+setInterval(() => app.conn.open && loadVersion(), 3600 * 1000);
 
 // -- updating aegis (self_update.py, #955) --------------------------------------
 // An admin gets an Update button beside the arrow when the server knows the
@@ -2546,11 +2551,11 @@ function updButton(label) {
 }
 
 async function startUpdate() {
-  const n = [...sessions.values()].filter((m) => m.server === null && m.state === "working").length;
+  const n = [...app.state.sessions.values()].filter((m) => m.server === null && m.state === "working").length;
   const busy = n ? ` ${n} session${n > 1 ? "s are" : " is"} working: their turns stop for the restart and continue on the new version.` : "";
   if (!(await ask(`Update aegis to ${verInfo.latest} and restart the server?${busy}`, { ok: "Update and restart" }))) return;
   try {
-    await conn.call("server.update");
+    await app.conn.call("server.update");
   } catch (e) {
     upd = { ...upd, phase: "failed", error: e.message };
     drawUpdate();
@@ -2626,7 +2631,7 @@ function drawUpdate() {
   }
   sec.replaceChildren(...rows);
 }
-conn.subscribe(
+app.conn.subscribe(
   "update",
   (snap) => {
     upd = snap;
@@ -2643,7 +2648,7 @@ conn.subscribe(
 // the transcript channel; the answer only says why there is none, and only to a
 // person who asked: the request on landing never writes a hint.
 async function askRecap(force) {
-  const id = shown;
+  const id = app.state.shown;
   if (!id) return;
   let why = "";
   let kind = "error";
@@ -2657,12 +2662,12 @@ async function askRecap(force) {
   } catch (e) {
     why = e.message;
   }
-  if (force && why && shown === id) toast(why, { kind });
+  if (force && why && app.state.shown === id) toast(why, { kind });
 }
 $("entries").addEventListener("click", (ev) => {
   const cancel = ev.target.closest("[data-btw-cancel]");
-  if (cancel && shown) {
-    callFor(shown, "btw.cancel", { id: cancel.dataset.btwCancel }).catch((e) => toast(e.message, { kind: "error" }));
+  if (cancel && app.state.shown) {
+    callFor(app.state.shown, "btw.cancel", { id: cancel.dataset.btwCancel }).catch((e) => toast(e.message, { kind: "error" }));
     return;
   }
   const btwRow = ev.target.closest(".row.btw");
@@ -2674,7 +2679,7 @@ $("entries").addEventListener("click", (ev) => {
 });
 // Coming back to the page is landing again; the server decides.
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && shown) askRecap(false);
+  if (document.visibilityState === "visible" && app.state.shown) askRecap(false);
 });
 
 // -- Open natively on a sent file's card, or in the viewer's bar --------------
@@ -2683,7 +2688,7 @@ document.querySelector(".v-session .col").addEventListener("click", async (ev) =
   if (!b) return;
   b.disabled = true;
   try {
-    await conn.call("file.open", { file_id: b.dataset.fileId, name: b.dataset.name });
+    await app.conn.call("file.open", { file_id: b.dataset.fileId, name: b.dataset.name });
   } catch (e) {
     toast(e.message, { kind: "error" });
   } finally {
@@ -2711,7 +2716,7 @@ $("entries").addEventListener("click", async (ev) => {
   try {
     // The row comes back with the card in it; this node is replaced. Only
     // the answer says where the file sits under the root (viewer.js).
-    const files = await conn.call("file.peek", { log_id: forKey(shown).log_id, entry_id: b.dataset.entry });
+    const files = await app.conn.call("file.peek", { log_id: forKey(app.state.shown).log_id, entry_id: b.dataset.entry });
     for (const f of files) if (f.root_path) peekRoots.set(f.url, f.root_path);
   } catch (e) {
     b.nextElementSibling.textContent = e.message;
@@ -2729,7 +2734,7 @@ $("entries").addEventListener("click", async (ev) => {
   const open = async (pick) => {
     body.querySelector(":scope > .patherr")?.remove();
     try {
-      const files = await conn.call("file.peek", { log_id: forKey(shown).log_id, entry_id: row.dataset.id, index: Number(code.dataset.index), pick });
+      const files = await app.conn.call("file.peek", { log_id: forKey(app.state.shown).log_id, entry_id: row.dataset.id, index: Number(code.dataset.index), pick });
       viewer.open({ files, at: 0, remote: false, glyph: "file", line });
     } catch (e) {
       const note = document.createElement("div");
@@ -2775,9 +2780,9 @@ async function loadArchive(more = false) {
   if (archiveWorkers) params.workers = true;
   if (more && archiveCursor) params.cursor = archiveCursor;
   try {
-    const r = await conn.call("archive.list", params);
+    const r = await app.conn.call("archive.list", params);
     // Every row names its server; this server's rows are keyed by log id alone.
-    const items = r.items.map((m) => withKey(m, m.server && m.server !== conn.server ? m.server : null));
+    const items = r.items.map((m) => withKey(m, m.server && m.server !== app.conn.server ? m.server : null));
     archived = more ? [...archived, ...items] : items;
     archiveCursor = r.cursor;
     if (!more) {
@@ -2836,7 +2841,7 @@ function archiveGained(m) {
     archiveLoaded = false;
     return;
   }
-  const row = withKey(m, m.server !== conn.server ? m.server : null);
+  const row = withKey(m, m.server !== app.conn.server ? m.server : null);
   if (archived.some((x) => x.key === row.key)) return;
   if (m.worker) archiveWorkerCount += 1;
   if (!m.worker || archiveWorkers) {
@@ -2860,7 +2865,7 @@ let closedTermsLoaded = false;
 async function loadClosedTerms() {
   let rows = [];
   try {
-    rows = await conn.call("term.closed");
+    rows = await app.conn.call("term.closed");
     closedTermsLoaded = true;
   } catch {
     // Offline, or a server without terminals: the section stays empty.
@@ -2903,8 +2908,8 @@ $("arch-workers").addEventListener("click", () => {
 // count, and a down one named so its rows are not silently missing.
 function drawArchiveServers() {
   const box = $("arch-servers");
-  box.hidden = !links.length;
-  if (!links.length) return;
+  box.hidden = !app.state.links.length;
+  if (!app.state.links.length) return;
   const all = Object.values(archiveCounts).reduce((a, n) => a + n, 0);
   const pick = (label, server, n) => {
     const b = document.createElement("button");
@@ -2921,7 +2926,7 @@ function drawArchiveServers() {
   const off = (name) => Object.assign(document.createElement("span"), { className: "off", textContent: `${name} offline` });
   box.replaceChildren(
     pick("All", null, all),
-    ...Object.entries(archiveCounts).map(([name, n]) => pick(name, name === conn.server ? conn.server : name, n)),
+    ...Object.entries(archiveCounts).map(([name, n]) => pick(name, name === app.conn.server ? app.conn.server : name, n)),
     ...archiveOffline.map(off),
   );
 }
@@ -2996,15 +3001,15 @@ let helpState = null;
 
 function drawServerPick() {
   const pick = $("sp-server");
-  const show = links.length > 0;
+  const show = app.state.links.length > 0;
   pick.hidden = $("sp-sep").hidden = !show;
   if (!show) {
     if (spServer !== null) setSpServer(null);
     return;
   }
   pick.options = [
-    { value: "", label: conn.server || "this server" },
-    ...links.map((l) => ({
+    { value: "", label: app.conn.server || "this server" },
+    ...app.state.links.map((l) => ({
       value: l.name,
       label: l.state === "linked" ? l.name : `${l.name} (${l.state})`,
       disabled: l.state !== "linked",
@@ -3047,7 +3052,7 @@ function drawProfiles(list, server) {
       what.textContent = p.error || p.cmd || "login shell";
       b.append(name, " ", what);
       b.addEventListener("click", () =>
-        conn.call("term.spawn", { profile: p.name }, server).then(
+        app.conn.call("term.spawn", { profile: p.name }, server).then(
           (card) => go(`#t=${keyOf(server, card.id)}`),
           (e) => toast(e.message, { kind: "error" }),
         ),
@@ -3070,7 +3075,7 @@ function drawBrowserEntry(server) {
   what.textContent = "a page on the server";
   b.append(name, " ", what);
   b.addEventListener("click", () =>
-    conn.call("browser.spawn", { url: "about:blank" }, server).then(
+    app.conn.call("browser.spawn", { url: "about:blank" }, server).then(
       (card) => go(`#b=${keyOf(server, card.id)}`),
       (e) => toast(e.message, { kind: "error" }),
     ),
@@ -3088,10 +3093,10 @@ function loadAgents() {
   return agentsLoading;
 }
 async function fetchAgents() {
-  conn.call("term.profiles", {}, spServer).then(
+  app.conn.call("term.profiles", {}, spServer).then(
     (list) => drawProfiles(list, spServer),
     () => drawProfiles([], spServer), // a server without terminals
-  ).then(() => conn.call("browser.available", {}, spServer)).then(
+  ).then(() => app.conn.call("browser.available", {}, spServer)).then(
     (a) => a.ok && drawBrowserEntry(spServer),
     () => {}, // a server from before browsers
   );
@@ -3099,7 +3104,7 @@ async function fetchAgents() {
   // from values an edit to .aegis.yaml has since changed.
   const was = current();
   try {
-    roster = await conn.call("agents.list", {}, spServer);
+    roster = await app.conn.call("agents.list", {}, spServer);
   } catch (e) {
     toast(e.message, { kind: "error" });
     return;
@@ -3143,7 +3148,7 @@ async function loadSpModels() {
   const server = spServer;
   let found;
   try {
-    found = await conn.call("config.detect", {}, server);
+    found = await app.conn.call("config.detect", {}, server);
   } catch {
     return; // the agents' models stay on offer, and any text is still taken
   }
@@ -3271,8 +3276,8 @@ async function spawnFromComposer() {
   if (spawnFrom && !spServer) params.from_session = spawnFrom;
   try {
     const r = await untestedRetry(
-      () => conn.call("session.spawn", params, spServer),
-      (untested) => conn.call("session.spawn", { ...params, untested }, spServer),
+      () => app.conn.call("session.spawn", params, spServer),
+      (untested) => app.conn.call("session.spawn", { ...params, untested }, spServer),
     );
     if (r === CANCELLED) return; // the typed text stays
     spawnFrom = null;
@@ -3287,7 +3292,7 @@ async function spawnFromComposer() {
     if (held) sendFirst(key, text, spAtts.take("spawn"), dictated);
     else if (command) {
       // The session's patch lands before spawn's reply; a far one may not have.
-      const s = sessions.get(key);
+      const s = app.state.sessions.get(key);
       if (s) sendLine(text, false, [], s);
       else sendFirst(key, text, []);
     }
@@ -3333,8 +3338,8 @@ async function loadPreview() {
     previews.set(
       k,
       Promise.all([
-        conn.call("commands.preview", params, spServer),
-        conn.call("help.pages", {}, spServer).catch(() => []),
+        app.conn.call("commands.preview", params, spServer),
+        app.conn.call("help.pages", {}, spServer).catch(() => []),
         spawnAgents(spServer),
       ]).then(([cat, pages, agents]) => ({ ...cat, agents, tutorials: pages.filter((pg) => pg.kind === "tutorial") })),
     );
@@ -3408,7 +3413,7 @@ for (const el of [$("sp-text").closest(".view"), $("sp-atts"), $("sp-hints"), $(
 async function loadHints() {
   delete $("sp-hints").dataset.ready;
   try {
-    helpState = await conn.call("help.state", {});
+    helpState = await app.conn.call("help.state", {});
   } catch {
     helpState = null; // no hint rather than a wrong one
   }
@@ -3529,8 +3534,8 @@ function ranHint(kind) {
 // page) so the hint hides; a tour of another page or a question marks nothing.
 async function startGuide(params, kind = "tutorial", marks = true) {
   const r = await untestedRetry(
-    () => conn.call("help.guide", { kind, ...params }),
-    (untested) => conn.call("help.guide", { kind, ...params, untested }),
+    () => app.conn.call("help.guide", { kind, ...params }),
+    (untested) => app.conn.call("help.guide", { kind, ...params, untested }),
   );
   if (r === CANCELLED) return null;
   if (marks) ranHint(kind);
@@ -3563,7 +3568,7 @@ async function guideFromComposer(kind, btn) {
 async function dismissHint(kind, row) {
   row.hidden = true;
   try {
-    await conn.call("help.dismiss", { what: kind });
+    await app.conn.call("help.dismiss", { what: kind });
     ranHint(kind);
   } catch (e) {
     toast(e.message, { kind: "error" });
@@ -3607,9 +3612,9 @@ keymap.addEventListener("click", (ev) => ev.target === keymap && help(false));
 const palette = new Palette($("palette"), () => route().view);
 // Alt+P and the strip's "N ▾" button (#781): every open session, by server.
 const switcher = new Switcher($("switcher"), {
-  metas: () => ordered,
+  metas: () => app.state.ordered,
   here: () => fleetStacks.here || "this server",
-  links: () => links,
+  links: () => app.state.links,
   current: () => tabFocus(route()),
   open: (key) => openCard(key),
 });
@@ -3618,7 +3623,7 @@ const switcher = new Switcher($("switcher"), {
 // one; from the top when this one is not in the list, as after reading a
 // review, which drops it.
 function nextNeed() {
-  const list = byNeed(ordered);
+  const list = byNeed(app.state.ordered);
   if (!list.length) return toast("Nobody needs you");
   const r = route();
   const i = r.view === "session" ? list.findIndex((m) => m.key === r.id) : -1;
@@ -3795,7 +3800,7 @@ function nonceFor(key, what) {
 let blocked = false;
 function drawSending(why = blocked) {
   blocked = why;
-  const on = !!shown && sending.has(shown);
+  const on = !!app.state.shown && sending.has(app.state.shown);
   $("composer").classList.toggle("sending", on);
   input.readOnly = on;
   $("send").disabled = on || blocked;
@@ -3805,7 +3810,7 @@ function drawSending(why = blocked) {
 const waitOnline = () =>
   new Promise((resolve) => {
     const t = setInterval(() => {
-      if (conn.open) {
+      if (app.conn.open) {
         clearInterval(t);
         resolve();
       }
@@ -3875,7 +3880,7 @@ const mics = () => [
   [$("sp-mic"), $("sp-text")],
 ];
 const dictation = new Dictation({
-  prepare: () => conn.call("dictation.prepare"),
+  prepare: () => app.conn.call("dictation.prepare"),
   onState(state) {
     for (const [b, el] of mics()) b.dataset.state = dictation.target?.el === el ? state : "idle";
     artifacts.dictationState(state);
@@ -3894,8 +3899,8 @@ const dictation = new Dictation({
 // "spawn": their send tells the server, which adds a note for the agent (#579).
 const spoken = new Set();
 const sessionTarget = () => {
-  const key = `aegis.draft.${shown}`;
-  return { el: input, key, current: () => `aegis.draft.${shown}`, heard: () => spoken.add(key) };
+  const key = `aegis.draft.${app.state.shown}`;
+  return { el: input, key, current: () => `aegis.draft.${app.state.shown}`, heard: () => spoken.add(key) };
 };
 const spawnTarget = () => ({ el: $("sp-text"), key: null, current: () => null, heard: () => spoken.add("spawn") });
 if (!navigator.mediaDevices) {
@@ -3917,11 +3922,11 @@ const recorder = new HoldToRecord({
       return;
     }
     atts.add([file], ctx.key);
-    if (shown === ctx.key && onSession()) send();
+    if (app.state.shown === ctx.key && onSession()) send();
     else toast("The recording waits in its session's box: send it from there");
   },
 });
-recorder.attach($("mic"), () => ({ key: shown }));
+recorder.attach($("mic"), () => ({ key: app.state.shown }));
 recorder.attach($("sp-mic"), () => ({ spawn: true }));
 for (const [b] of mics()) if (!b.disabled) b.title += " · hold to record audio";
 $("mic").addEventListener("click", () => !offline() && dictation.toggle(sessionTarget(), "button"));
@@ -3980,7 +3985,7 @@ new ResizeObserver(([e]) => {
 
 function focused() {
   const r = route();
-  return r.view === "session" ? sessions.get(r.id) : null;
+  return r.view === "session" ? app.state.sessions.get(r.id) : null;
 }
 
 // The agent's suggested next messages, from its turn_end. Redrawn only when they
@@ -4048,7 +4053,7 @@ function drawReplies(s) {
     chips.unshift(h);
   }
   $("replies-pills").replaceChildren(...chips);
-  const next = s.continued_by && sessions.get(keyOf(s.server, s.continued_by));
+  const next = s.continued_by && app.state.sessions.get(keyOf(s.server, s.continued_by));
   $("handoff-done").hidden = !s.continued_by;
   const who = document.createElement(next ? "a" : "span");
   who.textContent = next ? next.handle : s.continued_by?.includes("@") ? s.continued_by : "a fresh session";
@@ -4073,7 +4078,7 @@ const QUEUED_LABEL = {
 };
 function drawQueued() {
   const box = $("queued");
-  const d = shown && outbox.draftFor(shown);
+  const d = app.state.shown && outbox.draftFor(app.state.shown);
   box.hidden = !d;
   if (!d) return;
   for (const st of ["sending", "stale", "gone", "error"]) box.classList.toggle(st, d.state === st);
@@ -4088,7 +4093,7 @@ outbox.load();
 // is dropped, which settles the send as unreached and the draft waits again.
 outbox.setSender((key, params, { ask: asking = false } = {}) => {
   const call = callFor(key, "session.send", params);
-  const late = setTimeout(() => conn.drop(), SEND_VERDICT_MS);
+  const late = setTimeout(() => app.conn.drop(), SEND_VERDICT_MS);
   // A stopped session on an untested harness: a background flush settles the
   // draft as an error; the person's Send anyway asks, and Cancel keeps it.
   return call
@@ -4102,7 +4107,7 @@ outbox.setSender((key, params, { ask: asking = false } = {}) => {
 });
 $("queued").addEventListener("click", (ev) => {
   const act = ev.target.closest("[data-act]")?.dataset.act;
-  const key = shown;
+  const key = app.state.shown;
   const d = key && outbox.draftFor(key);
   if (!act || !d) return;
   if (act === "discard") outbox.discard(key);
@@ -4155,7 +4160,7 @@ async function closeSession(s) {
   if (isTool(s)) {
     const { server, log_id } = forKey(s.key);
     const op = s.kind === "term" ? "term.close" : "browser.shut";
-    return conn.call(op, { id: log_id }, server).catch((e) => toast(e.message, { kind: "error" }));
+    return app.conn.call(op, { id: log_id }, server).catch((e) => toast(e.message, { kind: "error" }));
   }
   try {
     await callFor(s.key, "session.close");
@@ -4198,22 +4203,22 @@ async function sendLine(text, fromComposer, attachments = [], target = focused()
   if (text === "/restart" && !(await confirmRestart(s))) return;
   // With no way to the session's server, plain text waits as its draft on this
   // device (outbox.js); a command or files still need the connection.
-  const rev = shown === s.key ? transcript.rev : -1;
+  const rev = app.state.shown === s.key ? transcript.rev : -1;
   const waitAsDraft = async (nonce) => {
     await outbox.queue(s.key, text, rev, nonce);
     if (fromComposer) {
       localStorage.removeItem(`aegis.draft.${s.key}`);
       spoken.delete(`aegis.draft.${s.key}`); // the outbox keeps no mark
     }
-    if (fromComposer && shown === s.key) {
+    if (fromComposer && app.state.shown === s.key) {
       input.value = "";
       autosize();
       menu.close();
       $("composer").classList.remove("bad");
     }
-    if (shown === s.key) transcript.toBottom();
+    if (app.state.shown === s.key) transcript.toBottom();
   };
-  if ((!conn.open || s.off) && !text.startsWith("/") && !attachments.length) return waitAsDraft();
+  if ((!app.conn.open || s.off) && !text.startsWith("/") && !attachments.length) return waitAsDraft();
   const box = $("replies");
   const was = box.hidden;
   const aside = /^\/btw(\s|$)/.test(text);
@@ -4235,7 +4240,7 @@ async function sendLine(text, fromComposer, attachments = [], target = focused()
       spoken.delete(`aegis.draft.${s.key}`);
       atts.clear(s.key);
     }
-    if (fromComposer && shown === s.key) {
+    if (fromComposer && app.state.shown === s.key) {
       input.value = "";
       autosize();
       // Clearing the box fires no input event; an open menu would take the next Esc.
@@ -4243,19 +4248,19 @@ async function sendLine(text, fromComposer, attachments = [], target = focused()
       $("composer").classList.remove("bad");
       $("send-error").textContent = "";
     }
-    if (shown === s.key) transcript.toBottom();
+    if (app.state.shown === s.key) transcript.toBottom();
     // /tutorial and /whats-new start a guide in a new session (help.guide):
     // open its tab, on the server that runs it, as a spawn from the new tab does.
     if (/^\/(tutorial|whats-new|doctor|handoff)(\s|$)/.test(text) && r?.log_id) {
       // A handoff across a link answers with the server it went to.
-      const far = r.server && r.server !== conn.server ? r.server : forKey(s.key).server;
+      const far = r.server && r.server !== app.conn.server ? r.server : forKey(s.key).server;
       go(`#s=${keyOf(far, r.log_id)}`);
     }
   };
   if (fromComposer) {
     sending.add(s.key);
     drawSending();
-    if (shown === s.key) $("send-error").textContent = "";
+    if (app.state.shown === s.key) $("send-error").textContent = "";
   }
   try {
     sent(await (fromComposer ? answered(call) : call));
@@ -4289,16 +4294,16 @@ async function sendLine(text, fromComposer, attachments = [], target = focused()
       call.catch(() => {}); // the drop rejects it; the draft carries on
       unconfirmed.delete(s.key);
       await waitAsDraft(params.nonce);
-      conn.drop();
+      app.conn.drop();
       return;
     }
     // A command or files: the box is the person's again, with the text, and
     // says so. An answer that comes later still settles it, unless they rewrote it.
-    if (shown === s.key) $("send-error").textContent = NOT_CONFIRMED;
-    const still = () => (shown === s.key ? input.value.trim() : localStorage.getItem(`aegis.draft.${s.key}`)?.trim()) === text;
+    if (app.state.shown === s.key) $("send-error").textContent = NOT_CONFIRMED;
+    const still = () => (app.state.shown === s.key ? input.value.trim() : localStorage.getItem(`aegis.draft.${s.key}`)?.trim()) === text;
     call.then(
       (r) => still() && sent(r),
-      (e) => still() && shown === s.key && ($("send-error").textContent = `Not sent: ${e.message}`),
+      (e) => still() && app.state.shown === s.key && ($("send-error").textContent = `Not sent: ${e.message}`),
     );
   } finally {
     if (fromComposer) {
@@ -4349,7 +4354,7 @@ const send = async () => {
     } finally {
       waiting.delete(s.key);
     }
-    if (shown === s.key) $("send-error").textContent = "";
+    if (app.state.shown === s.key) $("send-error").textContent = "";
   }
   const ready = atts.ready(s.key);
   if (ready.error) {
@@ -4368,7 +4373,7 @@ const catalogs = new Map();
 async function loadCommands(key) {
   const [cat, pages, agents] = await Promise.all([
     callFor(key, "commands.list"),
-    conn.call("help.pages", {}, forKey(key).server).catch(() => []),
+    app.conn.call("help.pages", {}, forKey(key).server).catch(() => []),
     spawnAgents(forKey(key).server),
   ]);
   return { ...cat, agents, tutorials: pages.filter((p) => p.kind === "tutorial") };
@@ -4378,7 +4383,7 @@ async function loadCommands(key) {
 // is down, or refuses the call (a member's), offers none.
 async function spawnAgents(server) {
   const roster = async (srv, far) => {
-    const r = await conn.call("agents.list", {}, srv).catch(() => null);
+    const r = await app.conn.call("agents.list", {}, srv).catch(() => null);
     if (!r) return [];
     const on = far ? ` · on ${srv}` : "";
     return r.agents
@@ -4386,7 +4391,7 @@ async function spawnAgents(server) {
       .sort((a, b) => (b.name === r.default) - (a.name === r.default))
       .map((a) => ({ v: far ? `${a.name}@${srv}` : a.name, model: a.model, doc: `${a.harness} · ${a.model}${on}`, source: "" }));
   };
-  const far = server ? [] : links.filter((l) => l.state === "linked").map((l) => roster(l.name, true));
+  const far = server ? [] : app.state.links.filter((l) => l.state === "linked").map((l) => roster(l.name, true));
   return (await Promise.all([roster(server, false), ...far])).flat();
 }
 async function loadCatalog() {
@@ -4412,7 +4417,7 @@ const menu = new CommandMenu({
   setLine: (v) => {
     input.value = v;
     autosize();
-    if (shown) localStorage.setItem(`aegis.draft.${shown}`, v);
+    if (app.state.shown) localStorage.setItem(`aegis.draft.${app.state.shown}`, v);
     input.focus();
   },
   meta: () => focused(),
@@ -4436,12 +4441,12 @@ for (const [id, cmd] of [
 // A session action's error: in the panel when it is the shown session's,
 // else a toast (a card's or a tab's menu acts on any session).
 function failed(key, e) {
-  if (key === shown) $("side-error").textContent = e.message;
+  if (key === app.state.shown) $("side-error").textContent = e.message;
   else toast(e.message, { kind: "error" });
 }
 
 async function interruptKey(key) {
-  const s = sessions.get(key);
+  const s = app.state.sessions.get(key);
   if (!s || s.state !== "working") return;
   try {
     await callFor(key, "session.interrupt");
@@ -4452,7 +4457,7 @@ async function interruptKey(key) {
 const interrupt = () => focused() && interruptKey(focused().key);
 
 async function quietKey(key, on) {
-  if (offline() || !sessions.has(key)) return;
+  if (offline() || !app.state.sessions.has(key)) return;
   try {
     await callFor(key, on ? "session.quiet" : "session.unquiet");
   } catch (e) {
@@ -4463,7 +4468,7 @@ async function quietKey(key, on) {
 // Autoclose (#691): the agent may then end only done with close, review or
 // needs_you, so a session it finishes closes itself.
 async function autocloseKey(key, on) {
-  if (offline() || !sessions.has(key)) return;
+  if (offline() || !app.state.sessions.has(key)) return;
   try {
     await callFor(key, "session.autoclose", { on });
   } catch (e) {
@@ -4475,7 +4480,7 @@ async function autocloseKey(key, on) {
 // (session.kills: background tasks, timers, processes it left running)
 // is asked about first. A server older than #479 has no such op.
 async function sleepKey(key) {
-  const s = sessions.get(key);
+  const s = app.state.sessions.get(key);
   if (offline() || !s) return;
   // A check that fails cannot say nothing would die: ask then too.
   const kills = s.old || s.state === "asleep" ? [] : await callFor(key, "session.kills").catch(() => ["aegis could not check what would end with it"]);
@@ -4490,7 +4495,7 @@ async function sleepKey(key) {
 // Wake starts an asleep session's process and sends nothing (session.warm),
 // asking first about an untested harness version, as a send does.
 async function wakeKey(key) {
-  const s = sessions.get(key);
+  const s = app.state.sessions.get(key);
   if (offline() || !s) return;
   try {
     // An older server's warm takes only log_id.
@@ -4509,7 +4514,7 @@ async function wakeKey(key) {
 const confirmRestart = async (s) =>
   s.state !== "working" || (await ask(`Restart ${s.handle}? It cuts the turn it is working on.`, { ok: "Restart" }));
 async function restartKey(key) {
-  const s = sessions.get(key);
+  const s = app.state.sessions.get(key);
   if (offline() || !s) return;
   if (!(await confirmRestart(s))) return;
   try {
@@ -4524,27 +4529,27 @@ async function restartKey(key) {
 
 // A nudge after an interrupt, an error or a sleep: a message to an asleep
 // session wakes it, so Continue is one sentence to the agent.
-const continueKey = (key) => !offline() && sessions.has(key) && sendLine("Continue", false, [], sessions.get(key));
+const continueKey = (key) => !offline() && app.state.sessions.has(key) && sendLine("Continue", false, [], app.state.sessions.get(key));
 
 // The first keystroke to a parked session starts its harness while the person
 // types (session.warm); once per parked stretch (warmed, above).
 function warmIfParked() {
-  const s = shown && sessions.get(shown);
-  if (!s || s.asleep_why !== "idle" || warmed === shown) return;
-  warmed = shown;
-  const key = shown;
+  const s = app.state.shown && app.state.sessions.get(app.state.shown);
+  if (!s || s.asleep_why !== "idle" || warmed === app.state.shown) return;
+  warmed = app.state.shown;
+  const key = app.state.shown;
   callFor(key, "session.warm", { log_id: forKey(key).log_id }).catch(() => {
     if (warmed !== key) return;
     warmed = null;
-    if (shown === key) drawComposerHint(sessions.get(key));
+    if (app.state.shown === key) drawComposerHint(app.state.sessions.get(key));
   });
   drawComposerHint(s);
 }
 input.addEventListener("input", async () => {
   warmIfParked();
   autosize();
-  if (shown) localStorage.setItem(`aegis.draft.${shown}`, input.value);
-  if (!input.value.trim()) spoken.delete(`aegis.draft.${shown}`); // a box emptied by hand starts over
+  if (app.state.shown) localStorage.setItem(`aegis.draft.${app.state.shown}`, input.value);
+  if (!input.value.trim()) spoken.delete(`aegis.draft.${app.state.shown}`); // a box emptied by hand starts over
   const v = input.value;
   if (v.startsWith("/") && !v.startsWith("//")) {
     if (menu.isOpen) menu.refresh();
@@ -4612,7 +4617,7 @@ const phoneHeader = matchMedia("(max-width:760px)"); // the one-row header (clie
 function sizeTabMore() {
   const list = $("tablist");
   $("tab-more").hidden = !phoneHeader.matches && list.scrollWidth <= list.clientWidth + 1;
-  $("tab-more").replaceChildren(`${ordered.length} `, icon("caret-d"));
+  $("tab-more").replaceChildren(`${app.state.ordered.length} `, icon("caret-d"));
 }
 new ResizeObserver(sizeTabMore).observe($("tablist"));
 new MutationObserver(sizeTabMore).observe($("tablist"), { childList: true });
@@ -4696,7 +4701,7 @@ editable("s-handle", "handle");
 // panel's own input, once the panel shows that session.
 async function renameKey(key) {
   await openCard(key);
-  const s = sessions.get(key);
+  const s = app.state.sessions.get(key);
   for (let i = 0; i < 30 && s && $("s-handle").textContent !== s.handle; i++) await new Promise(requestAnimationFrame);
   $("s-handle").click();
 }
@@ -4706,7 +4711,7 @@ async function renameKey(key) {
 // member's session offers only opening it; a guard that blocks an action
 // (a workflow's step, no connection) leaves it disabled with the reason.
 function sessionMenu(key) {
-  const s = sessions.get(key);
+  const s = app.state.sessions.get(key);
   if (!s) return null;
   const opening = [
     { id: "open", label: "Open", icon: "arrow", run: () => openCard(key) },
@@ -4750,16 +4755,16 @@ attachCardMenu($("cards"));
 // items as buttons; on a touch screen a long press opens it as a sheet instead
 // of the menu.
 const tabCard = attachTabCard($("tablist"), {
-  meta: (key) => sessions.get(key),
-  card: (m) => fleetCard(m, openCard, (k) => sessions.get(k) && closeSession(sessions.get(k))),
+  meta: (key) => app.state.sessions.get(key),
+  card: (m) => fleetCard(m, openCard, (k) => app.state.sessions.get(k) && closeSession(app.state.sessions.get(k))),
   items: sessionMenu,
 });
 attachCardMenu($("tablist"), { touch: (t) => t.matches(".tab[data-id]") && tabCard.sheet(t) });
 // The same card for a session the shown one waits on (#667), to the left of
 // the panel and level with its row, where the panel's own cards open.
 const waitCard = attachTabCard($("s-waiting"), {
-  meta: (key) => sessions.get(key),
-  card: (m) => fleetCard(m, openCard, (k) => sessions.get(k) && closeSession(sessions.get(k))),
+  meta: (key) => app.state.sessions.get(key),
+  card: (m) => fleetCard(m, openCard, (k) => app.state.sessions.get(k) && closeSession(app.state.sessions.get(k))),
   items: sessionMenu,
   item: ".wait",
   place: (box, r) => {
@@ -4806,8 +4811,8 @@ async function fillSpawn(q) {
   spawnGrow();
   if (shared.files.length) spAtts.add(shared.files, "spawn");
   const server = q.get("server") || "";
-  if (server && server !== conn.server) {
-    await linksReady;
+  if (server && server !== app.conn.server) {
+    await app.state.linksReady;
     if (linkOf(server)?.state !== "linked") return toast(`${server} is not a linked server: the session would start on this one`, { kind: "error" });
     await setSpServer(server);
   }
@@ -4830,7 +4835,7 @@ async function takeShare(id) {
 // a touch can clear the selection before a button's click lands.
 function selectionItems(range) {
   const text = rangeText(range);
-  const s = shown && sessions.get(shown);
+  const s = app.state.shown && app.state.sessions.get(app.state.shown);
   if (!text || !s) return null;
   // Another member's session takes no message from this person (drawSending),
   // so the items that write to its composer are left out, as sessionMenu does.
@@ -4859,7 +4864,7 @@ cmenu.bar($("entries"), selectionItems);
 // session whose composer gets it; with none, or another member's, New session
 // alone writes it. `leave` runs first (the viewer closes over the composer).
 function pointItems({ locator, text, to, comment, leave = () => {} }) {
-  const s = to && sessions.get(to);
+  const s = to && app.state.sessions.get(to);
   const own = !!s;
   const q = `${locator}\n${quoted(text)}`;
   return [
@@ -4913,7 +4918,7 @@ function pagePoint(frame, { kind, x, y, rect, touch, locator = {}, text = "" }) 
   const items = pointItems({
     locator: `\`${path}\`${where ? ` ${where}` : ""}`,
     text: quote,
-    to: files ? lastShown : shown,
+    to: files ? lastShown : app.state.shown,
     leave: inViewer ? () => viewer.close() : undefined,
     comment: tray && (() => trayNow()?.add({ locator: where || `\`${path}\``, quote, at: locator })),
   });
@@ -4938,14 +4943,14 @@ function pagePoint(frame, { kind, x, y, rect, touch, locator = {}, text = "" }) 
 // edits ask before it leaves. No session to go to: the New session form.
 // True when the text landed.
 async function toComposer(key, text, opts) {
-  const s = key && sessions.get(key);
+  const s = key && app.state.sessions.get(key);
   if (!s) return newSessionWith(null, text);
   // A window tab (#w=) follows the session too, but draws no composer.
-  if (shown !== key || route().view !== "session") {
+  if (app.state.shown !== key || route().view !== "session") {
     if (filesView.leaving(route(hashOf(key))) && !(await filesView.confirmLeave())) return false;
     go(hashOf(key));
   }
-  if (shown !== key || route().view !== "session") return false;
+  if (app.state.shown !== key || route().view !== "session") return false;
   insertIntoComposer(text, opts);
   return true;
 }
@@ -4969,7 +4974,7 @@ function newSessionWith(s, text) {
 function rowMenu(t, ev) {
   const id = t.dataset?.id;
   const e = id && transcript.entries.get(id);
-  const s = shown && sessions.get(shown);
+  const s = app.state.shown && app.state.sessions.get(app.state.shown);
   if (!e || !s) return null;
   const sel = getSelection();
   const range = sel.rangeCount && !sel.isCollapsed ? clampToRow(sel.getRangeAt(0), t) : null;
@@ -4981,10 +4986,10 @@ function rowMenu(t, ev) {
   // session meanwhile, the quote is dropped rather than written to that
   // session's composer.
   const quote = (then) => {
-    const from = shown;
+    const from = app.state.shown;
     rowText(id, copyDeps).then(
       (text) => {
-        if (shown !== from) return toast("The quote was dropped: you left the session it came from.");
+        if (app.state.shown !== from) return toast("The quote was dropped: you left the session it came from.");
         if (text) then(quoted(text.trim()));
       },
       (err) => toast(err.message, { kind: "error" }),
@@ -5003,7 +5008,7 @@ function rowMenu(t, ev) {
     id: "link",
     label: "Copy link",
     icon: "link",
-    run: () => navigator.clipboard.writeText(`${location.origin}${location.pathname}#s=${shown}&at=${id}`).catch((err) => toast(`Copy failed: ${err.message || err}`, { kind: "error" })),
+    run: () => navigator.clipboard.writeText(`${location.origin}${location.pathname}#s=${app.state.shown}&at=${id}`).catch((err) => toast(`Copy failed: ${err.message || err}`, { kind: "error" })),
   };
   let groups = null;
   if (e.kind === "prose" || e.kind === "inbox") groups = [[reply, fresh], [copy, link]];
@@ -5042,7 +5047,7 @@ function sentItems(row) {
 // A Read, Write or Edit row's file, in the viewer (file.peek, as its Show button).
 async function openToolFile(id) {
   try {
-    const files = await conn.call("file.peek", { log_id: forKey(shown).log_id, entry_id: id });
+    const files = await app.conn.call("file.peek", { log_id: forKey(app.state.shown).log_id, entry_id: id });
     for (const f of files) if (f.root_path) peekRoots.set(f.url, f.root_path);
     viewer.open({ files, at: 0, remote: false, glyph: "file" });
   } catch (err) {

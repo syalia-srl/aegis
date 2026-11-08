@@ -922,6 +922,10 @@ variables and nothing else.
 as it asks for: `mount()` (`js/mount.js`) builds one `.aegis` root inside the
 element the host named, and composes into it the parts the layout asks for — a
 chat is one session's transcript and, unless it is switched off, its composer.
+The standalone page is one mount too, adopting the `#a2` element and the markup
+`index.html` still holds (`adopt`), and that mount owns the state its views
+share: every server's sessions, the links, each link's quota and host, the
+browser's tab order, the session shown and the transcripts kept for it.
 A part owns the markup it draws, looks every node up under its own element and
 never asks the page for an id, and every stylesheet a mount loads is scoped to
 `.aegis`, so a host page keeps its own `#tabs`, its own `#composer` and its own

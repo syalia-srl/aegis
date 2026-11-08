@@ -27,12 +27,16 @@ export class TabOrder {
     localStorage.setItem(this.key, JSON.stringify(ids));
   }
 
-  arrange(openIds) {
+  // `save: false` while the page draws the device's copy of the Fleet: a
+  // session it did not keep yet is not one the person closed, and dropping it
+  // from the order here would move every tab after a reload that beat the
+  // Fleet's next save.
+  arrange(openIds, save = true) {
     const open = new Set(openIds);
     const kept = this.load().filter((id) => open.has(id));
     const known = new Set(kept);
     const ids = [...kept, ...openIds.filter((id) => !known.has(id))];
-    this.save(ids);
+    if (save) this.save(ids);
     return ids;
   }
 
