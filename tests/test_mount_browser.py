@@ -400,3 +400,99 @@ def test_scrolling_up_mounts_the_rows_above_the_window(host, browser):  # noqa: 
     )
     assert errors == []
     page.close()
+
+
+@pytest.mark.parametrize("width", [1280, 390])
+def test_a_spanish_mount_reads_spanish_and_the_english_one_stays_english(
+    host,
+    browser,  # noqa: F811
+    width,
+):
+    """Two mounts on one page keep their own tables (a5): the Spanish chat's
+    chrome and the rows it draws are Spanish, and the first chat is untouched."""
+    page, errors = open_page(browser, width)
+    page.goto(host["url"])
+    mounted(page)
+    prefix = page.evaluate("window.aegisHost.prefix")
+    page.add_style_tag(content="#chat2 { height: 700px; }")
+    page.evaluate(
+        """async (prefix) => {
+          const { mount } = await import(`${prefix}/aegis.js`);
+          window.__es = mount(document.getElementById("chat2"), {
+            token: window.aegisHost.token,
+            session: window.aegisHost.session,
+            layout: "chat",
+            theme: "host",
+            lang: "es",
+          });
+        }""",
+        prefix,
+    )
+    page.wait_for_function(
+        "() => document.querySelector('#chat2 .aegis #find-q')", timeout=30_000
+    )
+
+    # The chrome: placeholders, titles and the find bar's own words.
+    assert page.get_attribute("#chat2 .aegis #find-q", "placeholder") == (
+        "Buscar en la transcripción"
+    )
+    assert page.get_attribute("#chat2 .aegis #nav-up", "title") == (
+        "Mensaje anterior del agente (Alt+↑)"
+    )
+    assert page.get_attribute("#chat2 .aegis #nav-recap", "aria-label") == (
+        "Resumir dónde va esta sesión"
+    )
+    # The English mount beside it still reads its own table.
+    assert page.get_attribute("#chat .aegis #find-q", "placeholder") == (
+        "Find in transcript"
+    )
+
+    # A row drawn from the server's data carries Spanish actions too: the
+    # copy button above the person's message is one of them.
+    send(page, host["session"], "a message the Spanish chat draws")
+    copy = page.locator("#chat2 .aegis #entries .row.user .body > .copy").first
+    copy.wait_for(timeout=60_000)
+    assert copy.get_attribute("title") == "Copiar el mensaje"
+    assert page.get_attribute("#chat2 .aegis #nav-fold", "title") is not None
+    assert page.get_attribute("#chat2 .aegis #nav-fold", "title").startswith(
+        "Todo a la vista"
+    )
+    assert errors == []
+    page.close()
+
+
+def test_a_missing_label_falls_back_to_english_and_warns_once(host, browser):  # noqa: F811
+    """A key the table lacks falls back to English and names itself once (a5);
+    a language with no table at all reads English, and the Spanish one is
+    Spanish."""
+    page, errors = open_page(browser, 1280)
+    page.goto(host["url"])
+    mounted(page)
+    prefix = page.evaluate("window.aegisHost.prefix")
+    got = page.evaluate(
+        """async (prefix) => {
+          const { labelsFor } = await import(`${prefix}/static/js/labels.js`);
+          const seen = [];
+          const warn = console.warn;
+          console.warn = (...a) => seen.push(a.join(" "));
+          const es = labelsFor("es", {});
+          const missing = es("no.such.key");
+          const again = es("no.such.key");
+          console.warn = warn;
+          return {
+            missing,
+            again,
+            warnings: seen.filter((w) => w.includes("no.such.key")),
+            french: labelsFor("fr", {})("toast.dismiss"),
+            spanish: es("toast.dismiss"),
+          };
+        }""",
+        prefix,
+    )
+    assert got["missing"] == "no.such.key"  # absent everywhere: the key itself
+    assert got["again"] == "no.such.key"
+    assert len(got["warnings"]) == 1  # logged by name once, not per call
+    assert got["french"] == "Dismiss"  # no French table: English
+    assert got["spanish"] == "Descartar"
+    assert errors == []
+    page.close()
