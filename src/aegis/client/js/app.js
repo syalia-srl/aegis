@@ -54,7 +54,7 @@ import { closeInstallDialog, startInstall } from "./install.js";
 import { checkRotation, closePushPanel, openPushPanel, pushSupported, setupPush } from "./pushpanel.js";
 import { clearDevice, loadFleet, loadTranscript, saveFleet, saveTranscript } from "./devicestore.js";
 import { markNeedsNet, offline } from "./net.js";
-import { discard, draftFor, flushNow, loadDrafts, onDrafts, queue, sendAnyway, setSender } from "./outbox.js";
+import { outbox } from "./outbox.js";
 import { idleFor, lifecycle } from "./lifecycle.js";
 import { serverNow } from "./clock.js";
 
@@ -900,7 +900,7 @@ function sessionHandlers(server) {
       else booted = homeLive = true;
       onSessions();
       // The server is reachable again: what was written meanwhile goes out.
-      flushNow((key) => forKey(key).server === server);
+      outbox.flushNow((key) => forKey(key).server === server);
     },
     (ops) => {
       for (const op of ops) {
@@ -4073,7 +4073,7 @@ const QUEUED_LABEL = {
 };
 function drawQueued() {
   const box = $("queued");
-  const d = shown && draftFor(shown);
+  const d = shown && outbox.draftFor(shown);
   box.hidden = !d;
   if (!d) return;
   for (const st of ["sending", "stale", "gone", "error"]) box.classList.toggle(st, d.state === st);
@@ -4082,11 +4082,11 @@ function drawQueued() {
   box.querySelector(".text").textContent = d.text;
   if (transcript.following) transcript.toBottom();
 }
-onDrafts(drawQueued);
-loadDrafts();
+outbox.on(drawQueued);
+outbox.load();
 // A queued draft's send gets the composer's deadline: with no answer the socket
 // is dropped, which settles the send as unreached and the draft waits again.
-setSender((key, params, { ask: asking = false } = {}) => {
+outbox.setSender((key, params, { ask: asking = false } = {}) => {
   const call = callFor(key, "session.send", params);
   const late = setTimeout(() => conn.drop(), SEND_VERDICT_MS);
   // A stopped session on an untested harness: a background flush settles the
@@ -4103,10 +4103,10 @@ setSender((key, params, { ask: asking = false } = {}) => {
 $("queued").addEventListener("click", (ev) => {
   const act = ev.target.closest("[data-act]")?.dataset.act;
   const key = shown;
-  const d = key && draftFor(key);
+  const d = key && outbox.draftFor(key);
   if (!act || !d) return;
-  if (act === "discard") discard(key);
-  if (act === "send") sendAnyway(key).catch((e) => toast(e.message, { kind: "error" }));
+  if (act === "discard") outbox.discard(key);
+  if (act === "send") outbox.sendAnyway(key).catch((e) => toast(e.message, { kind: "error" }));
   if (act === "copy")
     navigator.clipboard.writeText(d.text).then(
       () => toast("Copied"),
@@ -4117,7 +4117,7 @@ $("queued").addEventListener("click", (ev) => {
     localStorage.setItem(`aegis.draft.${key}`, input.value);
     autosize();
     input.focus();
-    discard(key);
+    outbox.discard(key);
   }
 });
 
@@ -4200,7 +4200,7 @@ async function sendLine(text, fromComposer, attachments = [], target = focused()
   // device (outbox.js); a command or files still need the connection.
   const rev = shown === s.key ? transcript.rev : -1;
   const waitAsDraft = async (nonce) => {
-    await queue(s.key, text, rev, nonce);
+    await outbox.queue(s.key, text, rev, nonce);
     if (fromComposer) {
       localStorage.removeItem(`aegis.draft.${s.key}`);
       spoken.delete(`aegis.draft.${s.key}`); // the outbox keeps no mark

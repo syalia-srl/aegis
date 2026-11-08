@@ -19,6 +19,7 @@ import { byId } from "../dom.js";
 import { Find } from "../find.js";
 import { icon, glyph } from "../glyphs.js";
 import { forKey, keyOf } from "../mount.js";
+import { toast } from "../toast.js";
 import { Transcript } from "../transcript.js";
 import { Viewer } from "../viewer.js";
 
@@ -84,6 +85,15 @@ const T_ATTRS = [
 ];
 
 const fmtTokens = (n) => (n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
+
+// What a queued draft says about itself (a6). The words move to the label
+// table in a7.
+const QUEUED_LABEL = {
+  queued: "queued · goes out when the connection is back",
+  sending: "sending…",
+  stale: "The session moved on since you wrote this",
+  gone: "The session is closed",
+};
 
 export class TranscriptPart {
   constructor(mount, host) {
@@ -161,6 +171,9 @@ export class TranscriptPart {
     this.wire();
     this.drawNavNow();
     this.drawOfflineNotice();
+    // The session's drafts are the mount's outbox (a6): a send queued offline
+    // draws here, after the last row, whichever part put it there.
+    this.unsubDrafts = this.mount.outbox?.on(() => this.drawQueued());
   }
 
   // The part's own words, from the mount's table. Every key the markup names
@@ -212,6 +225,7 @@ export class TranscriptPart {
     this.navFold.addEventListener("click", () => this.setFold((this.transcript.foldLevel + 1) % 3));
     byId(this.pane, "coldnote-go").addEventListener("click", () => this.handOff());
     byId(this.pane, "closing-btn").addEventListener("click", () => this.archive());
+    this.queued.addEventListener("click", (ev) => this.queuedAct(ev));
     this.setFold(0);
     this.workingTimer = setInterval(() => this.tickWorking(), 60);
   }
@@ -372,7 +386,6 @@ export class TranscriptPart {
     }
     if (!working) this.startedAt = null;
     this.workingTokens = s?.turn_tokens || [0, 0];
-    this.waking.hidden = true; // no composer warms a session in this slice
     this.drawReplies(s);
     this.drawCold(s);
     this.drawClosing(s);
@@ -419,9 +432,40 @@ export class TranscriptPart {
     }
   }
 
-  drawQueued(s) {
-    // a6 owns the outbox; this slice builds the row and leaves it empty.
-    if (!this.queued.hidden) this.queued.hidden = true;
+  drawQueued() {
+    const d = this.key ? this.mount.outbox?.draftFor(this.key) : null;
+    this.queued.hidden = !d;
+    if (!d) return;
+    for (const st of ["sending", "stale", "gone", "error"]) this.queued.classList.toggle(st, d.state === st);
+    // A refusal the person should read, word for word: a quota gate, an owner.
+    byId(this.pane, "queued-lbl").textContent =
+      d.state === "error" ? `Not sent: ${d.error}` : QUEUED_LABEL[d.state] || QUEUED_LABEL.queued;
+    this.queued.querySelector(".text").textContent = d.text;
+    if (this.transcript.following) this.transcript.toBottom();
+  }
+
+  // Copy, send anyway, edit or discard the session's draft: the same four the
+  // full layout's queued row offers.
+  queuedAct(ev) {
+    const act = ev.target.closest("[data-act]")?.dataset.act;
+    const key = this.key;
+    const d = key && this.mount.outbox?.draftFor(key);
+    if (!act || !d) return;
+    const outbox = this.mount.outbox;
+    if (act === "discard") outbox.discard(key);
+    if (act === "send")
+      outbox.sendAnyway(key).catch((error) => this.mount.emit("error", { session: key, error }));
+    if (act === "copy")
+      navigator.clipboard.writeText(d.text).then(
+        () => toast("Copied", { root: this.mount.root }),
+        () => toast("Could not copy", { kind: "error", root: this.mount.root }),
+      );
+    if (act === "edit") {
+      // A transcript-only mount has no box to edit into: the draft stays.
+      if (!this.mount.composer) return;
+      this.mount.composer.edit(d.text);
+      outbox.discard(key);
+    }
   }
 
   drawReplies(s) {
@@ -524,10 +568,41 @@ export class TranscriptPart {
   }
 
   // -- the calls a row makes -------------------------------------------------
+  // A reply pill sends as the composer does when there is one: the same 5 s
+  // verdict, the same nonce, the same draft when the connection is gone.
   send(text) {
+    if (this.mount.composer) {
+      return Promise.resolve(this.mount.composer.send(text)).catch((error) => {
+        this.mount.emit("error", { session: this.key, error });
+      });
+    }
     return this.mount.callFor(this.key, "session.send", { text }).catch((error) => {
       this.mount.emit("error", { session: this.key, error });
     });
+  }
+
+  // -- what the composer asks of the transcript ------------------------------
+  // The waking row says a parked session's harness is starting because the
+  // person began typing (a6).
+  setWaking(on) {
+    if (!this.waking) return;
+    this.waking.hidden = !on;
+  }
+
+  // The revision this part holds, for a draft written now (outbox.js).
+  revision() {
+    return this.transcript.rev;
+  }
+
+  // Any send answers the turn the reply pills belonged to; the marker is
+  // dropped so the next drawReplies redraws them.
+  clearReplies() {
+    this.replies.hidden = true;
+    delete this.replies.dataset.key;
+  }
+
+  toBottom() {
+    if (this.transcript.following) this.transcript.toBottom();
   }
 
   async handOff() {
@@ -560,6 +635,7 @@ export class TranscriptPart {
     this.gen++;
     this.unsub?.();
     this.unsub = null;
+    this.unsubDrafts?.();
     clearTimeout(this.saveTimer);
     clearInterval(this.workingTimer);
     if (this.navFrame) cancelAnimationFrame(this.navFrame);
