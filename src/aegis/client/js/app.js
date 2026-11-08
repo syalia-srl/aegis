@@ -19,7 +19,6 @@ import * as artifacts from "./artifacts.js";
 import { TabOrder } from "./tabs.js";
 import { setWho, who } from "./me.js";
 import { byNeed, card as fleetCard } from "./fleet.js";
-import { tile } from "./gauges.js";
 import { installKeys, renderKeys } from "./keys.js";
 import { Palette } from "./palette.js";
 import { HeaderPart } from "./parts/header.js";
