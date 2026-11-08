@@ -90,6 +90,12 @@ export class ComposerPart {
     this.error = n("send-error");
     this.interruptBtn = n("interrupt");
     this.outbox = mount.outbox;
+    // Operator details the host may keep off a product's chat (#994). The
+    // full layout asks for them, and the default is on.
+    this.controls = mount.opts.controls !== false;
+    if (!this.controls) {
+      for (const id of ["chip-model", "chip-effort", "chip-perm"]) n(id).hidden = true;
+    }
 
     this.icons();
     this.atts = new Attachments(this.attsTray, {

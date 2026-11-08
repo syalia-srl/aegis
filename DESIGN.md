@@ -362,13 +362,18 @@ pydantic params model. A websocket `call` is one projection of the registry, MCP
 tools are another, and plugins add operations to it. Nothing reaches the client as
 an action that is not an operation, so a subsystem cannot exist for agents and be
 missing from the UI. The retired September client died of the opposite: a protocol
-in which every subsystem needed its own fields.
+in which every subsystem needed its own fields. Under a host policy every call
+asks `can` before it runs: an operation that names a session asks `list`, `read`
+or `write` on it, and one that names none asks `spawn` when it starts work or
+`read`/`write` otherwise, with `session=None` (#993).
 
 **Agents call the same operations, as MCP tools named after them.** An operation
 marked for agents is served at `/mcp` under its name with the dot as an underscore,
 so `monitor.start` is `mcp__aegis__monitor_start`. The caller is the session whose
 token the request carries; the token is minted for each harness process and rides
-in the `X-Aegis-Session` header of its MCP config. No tool takes the caller's handle as an argument,
+in the `X-Aegis-Session` header of its MCP config. That endpoint is on the
+Server's own loopback listener only; the app a host mounts at its prefix leaves
+it out (#993). No tool takes the caller's handle as an argument,
 because an argument can be wrong and the token cannot.
 
 **The same operations run from the agent's shell.** aegis exports the endpoint
@@ -928,7 +933,9 @@ variables and nothing else.
 **A client is a set of mounts.** The page is not one client but as many mounts
 as it asks for: `mount()` (`js/mount.js`) builds one `.aegis` root inside the
 element the host named, and composes into it the parts the layout asks for — a
-chat is one session's transcript and, unless it is switched off, its composer.
+chat is one session's transcript and, unless it is switched off, its composer;
+a product chat may also switch off the composer's model, effort and permission
+chips (`controls: false`, #994).
 A part owns the markup it draws, looks every node up under its own element and
 never asks the page for an id, and every stylesheet a mount loads is scoped to
 `.aegis`, so a host page keeps its own `#tabs`, its own `#composer` and its own

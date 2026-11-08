@@ -219,7 +219,7 @@ def register_help_ops(app: App) -> None:
     r = app.registry
     index = Index(load())
 
-    @r.op("help.search", Search, agent=True, read=True)
+    @r.op("help.search", Search, agent=True, read=True, access="read")
     async def help_search(p: Search, caller):
         """Search aegis's help pages: how to use its tools, commands and
         features, written for the version this server runs. Returns the best
@@ -231,7 +231,7 @@ def register_help_ops(app: App) -> None:
             return {"hits": [], "pages": index.listing()}
         return {"hits": [asdict(h) for h in hits]}
 
-    @r.op("help.read", Read, agent=True, read=True)
+    @r.op("help.read", Read, agent=True, read=True, access="read")
     async def help_read(p: Read, caller):
         """Read a help page, or one section of it, as Markdown. `page` takes a
         page id or a ref from help_search."""
@@ -243,7 +243,7 @@ def register_help_ops(app: App) -> None:
                 "unknown_section" if known else "unknown_page", e.args[0]
             ) from None
 
-    @r.op("help.pages")
+    @r.op("help.pages", access="read")
     async def help_pages(_, caller):
         """Every help page for the Help tab's list: id, title, kind and the
         when: line, in the index's order. A person's operation; an agent
@@ -262,7 +262,7 @@ def register_help_ops(app: App) -> None:
         owns = any(app.owner_of(i) == name for i in (*reg.sessions, *reg.archived))
         return name, state.get(name, owns_sessions=owns, installed=installed())
 
-    @r.op("help.state")
+    @r.op("help.state", access="read")
     async def help_state(_, caller):
         """What the new tab offers this person: the tutorial hint while they
         have started no tutorial, and the release to tour while it is newer

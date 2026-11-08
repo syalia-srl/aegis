@@ -9,8 +9,9 @@ a listener would spawn agents with no aegis tools. It installs no signal
 handlers; the host program stops it by leaving the block.
 
 ``prefix`` is where the host mounts ``srv.asgi``. Only the URLs aegis generates
-carry it, and the MCP routes keep their root paths on the loopback listener, so
-the listener's page is not browsable under a prefix: the host serves it.
+carry it, and the MCP routes stay on the loopback listener alone, so a host's
+public prefix never serves ``/mcp``; the listener's page is not browsable under
+a prefix, and the host serves it.
 
 One Server runs per process at a time: ``launch.configure`` sets a mode every
 child process reads, and two servers would share it (spec 2026-10-23).
@@ -215,7 +216,16 @@ class Server:
             self._origins,
             self._prefix,
         )
-        self._asgi = web
+        # The listener keeps /mcp for harness children; the app a host mounts
+        # on its public prefix does not (#993).
+        self._asgi = build_web(
+            self._app,
+            self.token,
+            allowed_hosts(self._host, port),
+            self._origins,
+            self._prefix,
+            mcp=False,
+        )
         self._caller = Caller(
             "user", principal=self._app.principals.resolve(self.token)
         )

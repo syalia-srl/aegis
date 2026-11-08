@@ -142,7 +142,7 @@ def register_layout_ops(app: App) -> None:
         return s.set_layout(new, "person")
 
     # -- the agent -------------------------------------------------------------
-    @r.op("layout.read", agent=True, read=True)
+    @r.op("layout.read", agent=True, read=True, access="read")
     async def read(p, caller):
         """Your canvas as it stands: the windows the person sees, each a list of
         columns with their width shares, each column a stack of panes with

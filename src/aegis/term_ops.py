@@ -41,7 +41,7 @@ class TermResize(TermRef):
 def register_term_ops(app: App) -> None:
     r, terms = app.registry, app.terminals
 
-    @r.op("term.profiles", server=True)
+    @r.op("term.profiles", server=True, access="read")
     async def profiles(_, caller):
         """The terminal profiles the + picker offers, the built-in shell first."""
         keys = ("cmd", "cwd", "restart", "error")
@@ -50,7 +50,7 @@ def register_term_ops(app: App) -> None:
             for n, p in terms.profiles().items()
         ]
 
-    @r.op("term.spawn", TermSpawn, server=True)
+    @r.op("term.spawn", TermSpawn, server=True, work=True)
     async def spawn(p: TermSpawn, caller):
         """Start a terminal from a profile, in its folder or in ``cwd``; the
         caller owns it."""
@@ -73,7 +73,7 @@ def register_term_ops(app: App) -> None:
     async def close(p: TermRef, caller):
         await terms.close(p.id)
 
-    @r.op("term.closed", server=True)
+    @r.op("term.closed", server=True, access="read")
     async def closed(_, caller):
         """Closed terminals on this server, newest first, for the archive."""
         return terms.closed()
