@@ -866,8 +866,7 @@ class Session:
         if missing := [
             k
             for k in CONTAINS
-            if k not in self.harness.contains
-            and getattr(self.spec, k) != SWITCHES[k]
+            if k not in self.harness.contains and getattr(self.spec, k) != SWITCHES[k]
         ]:
             text = f"{self.harness.label} cannot run with {', '.join(missing)} yet"
             self._record(

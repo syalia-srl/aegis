@@ -159,8 +159,17 @@ def _agent(name: str, raw: Any) -> Agent:
         error=error or keep_error or mcp_error or switch_error,
         models=models or ((values["model"],) if values["model"] else ()),
         repeated=repeated,
-        **{k: v if isinstance(v, bool) else SWITCHES[k] for k, v in switches.items()},
+        harness_tools=_flag(switches, "harness_tools"),
+        isolated=_flag(switches, "isolated"),
+        primer=_flag(switches, "primer"),
+        notices=_flag(switches, "notices"),
     )
+
+
+def _flag(switches: dict, key: str) -> bool:
+    """A switch as the file has it, or its default when it is not a bool."""
+    v = switches[key]
+    return v if isinstance(v, bool) else SWITCHES[key]
 
 
 def _models(d: dict) -> tuple[tuple[str, ...], tuple[str, ...], str | None]:

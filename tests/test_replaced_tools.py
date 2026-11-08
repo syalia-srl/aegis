@@ -138,7 +138,9 @@ async def test_real_claude_starts_without_the_replaced_tools_but_the_kept_one(
 def test_without_harness_tools_claude_gets_an_empty_tools_list(tmp_path):
     from dataclasses import replace
 
-    lean = replace(launch(tmp_path, ("http://127.0.0.1:1/mcp", "t")), harness_tools=False)
+    lean = replace(
+        launch(tmp_path, ("http://127.0.0.1:1/mcp", "t")), harness_tools=False
+    )
     argv = ClaudeSession("claude", lean)._proc.argv
     assert argv[argv.index("--tools") + 1] == "" and disallowed(argv) == []
     assert "--strict-mcp-config" in argv

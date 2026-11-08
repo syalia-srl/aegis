@@ -214,12 +214,18 @@ async def test_spawn_may_set_the_four_product_switches(world):
 
 def test_the_product_switches_survive_the_spawn_record():
     s = SpawnSpec(
-        agent="a", model="m", effort="high", permission="full", cwd=Path("/w"),
+        agent="a",
+        model="m",
+        effort="high",
+        permission="full",
+        cwd=Path("/w"),
         **SWITCHES,
     )
     back = SpawnSpec.from_record(s.record(), Path("/x"))
     assert {k: getattr(back, k) for k in SWITCHES} == SWITCHES
-    plain = SpawnSpec(agent="a", model="m", effort="high", permission="full", cwd=Path("/w"))
+    plain = SpawnSpec(
+        agent="a", model="m", effort="high", permission="full", cwd=Path("/w")
+    )
     assert not set(SWITCHES) & set(plain.record())
 
 
