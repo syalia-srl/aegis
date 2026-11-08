@@ -894,7 +894,7 @@ uv run pytest -q -m browser tests/test_mount_browser.py</script>
 <p>No module-level session, link, quota or host state remains in <code>app.js</code>; <code>test_browser.py</code> passes unchanged; <code>make gates</code>; the phase's PR benchmark table shows no regression (this slice adds no work per frame).</p>
 </div></details>
 
-<details class="task" id="b2-tab-strip" data-state="pending">
+<details class="task" id="b2-tab-strip" data-state="doing">
 <summary><span class="num">B2</span><span><span class="ttl">The tab strip and header part</span><span class="files">js/parts/header.js (new) · js/tabs.js · js/tabcard.js · js/switcher.js · js/keys.js · js/app.js · index.html · css/client.css · tests/test_tabbar_browser.py · tests/test_tabcard_browser.py</span></span><span class="state"></span></summary>
 <div class="body">
 <p>The whole <code>&lt;header class="tabs"&gt;</code>: the burger and phone menu, Fleet, the tab list with folds and groups, the overflow button and switcher, New session, the connection dot, the header's view buttons and the bell. <code>renderTabs</code>/<code>patchTab</code> already take the list; the part supplies it and the actions.</p>

@@ -15,14 +15,14 @@ import { Canvas } from "./canvas.js";
 import { copyRow, installCopy, rowText } from "./copy.js";
 import { Find } from "./find.js";
 import * as artifacts from "./artifacts.js";
-import { TabOrder, patchTab, renderTabs, stepMove } from "./tabs.js";
+import { TabOrder } from "./tabs.js";
 import { setWho, who } from "./me.js";
 import { ago, byNeed, modelLine, money, patchCard, renderArchive, renderBand, renderBandQuota, renderCards, tickPlan, card as fleetCard } from "./fleet.js";
 import { age, countdown, diskRows, elapsed, hostRow, hostSeverity, mbps, netRows, providerFor, quotaSideRow, quotaTile, tile } from "./gauges.js";
 import { closeCard, initSide, restState, toggleCollapsed } from "./side.js";
 import { installKeys, renderKeys } from "./keys.js";
 import { Palette } from "./palette.js";
-import { Switcher } from "./switcher.js";
+import { HeaderPart } from "./parts/header.js";
 import { entryIcon, factIcon, glyph, gorgoneion, icon, iconText, LABEL } from "./glyphs.js";
 import { CommandMenu } from "./commands.js";
 import * as cmenu from "./menu.js";
@@ -37,7 +37,7 @@ import { Knowledge } from "./knowledge.js";
 import { FilePicker, Files, filesHash, parseTarget } from "./files.js";
 import { Schedules } from "./schedules.js";
 import { Help } from "./help.js";
-import { installBell, listenForOpen, pingToast, redrawFavicon, setTitle, updatePing } from "./ping.js";
+import { listenForOpen, pingToast, redrawFavicon, setTitle, updatePing } from "./ping.js";
 import { ask, cancelAsk, choose } from "./dialog.js";
 import { modelMeta } from "./models.js";
 import "./pick.js";
@@ -51,7 +51,7 @@ import { closeTerm, drawCard, openTerm } from "./termview.js";
 import { browserSources, closeBrowser, drawBrowser, mountBrowser, openBrowser } from "./browserview.js";
 import { applyUpdate, checkForUpdate, setAutoApply, startWorker, takeBuild } from "./appworker.js";
 import { closeInstallDialog, startInstall } from "./install.js";
-import { checkRotation, closePushPanel, openPushPanel, pushSupported, setupPush } from "./pushpanel.js";
+import { checkRotation, closePushPanel, openPushPanel, setupPush } from "./pushpanel.js";
 import { clearDevice, loadFleet, loadTranscript, saveFleet, saveTranscript } from "./devicestore.js";
 import { markNeedsNet, offline } from "./net.js";
 import { outbox } from "./outbox.js";
@@ -60,6 +60,7 @@ import { serverNow } from "./clock.js";
 
 const $ = (id) => document.getElementById(id);
 const root = $("a2");
+const phoneHeader = matchMedia("(max-width:760px)"); // the one-row header (client.css)
 
 // The page is one mount over the markup index.html still holds (b8 gives it
 // its parts): it adopts #a2, takes the page's shared socket, and owns the state
@@ -74,6 +75,35 @@ const app = new Mount(root, {
   outbox,
 });
 app.start();
+
+// The header is a part (b2): it builds the markup index.html used to hold and
+// owns the strip's folds, the quiet marks and the switcher. The page hands it
+// the actions only the router and the Fleet know.
+const header = new HeaderPart(app, root, {
+  open: (id) => openSession(id),
+  openCard: (key) => openCard(key),
+  close: (id) => closeById(id),
+  move: (keys, before) => {
+    order.move(keys, before);
+    onSessions();
+  },
+  here: () => app.conn.server || localStorage.getItem("aegis.server") || "",
+  focusId: () => tabFocus(route()),
+  go: (hash) => go(hash),
+  hashOf: (key) => hashOf(key),
+  spawn: () => {
+    spawnFrom = null;
+    if (!offline()) go("#new");
+  },
+  files: () => go(filesView?.path ? filesHash(filesView.path) : "#files"),
+  side: () => toggleSide(),
+  push: (bell, anchor) => openPushPanel(phoneHeader.matches ? anchor : bell),
+  menu: (key) => sessionMenu(key),
+  card: (m) => fleetCard(m, openCard, (k) => app.state.sessions.get(k) && closeSession(app.state.sessions.get(k))),
+});
+// The header is the grid's first row, under the connection banner and above
+// the views (the layout owns the order in b8).
+root.insertBefore(header.el, root.querySelector("main.view"));
 
 // The state the views share lives on the mount (mount.js's MountState). Quota
 // is one subscription for the page: the band and the sidebar both draw it.
@@ -292,15 +322,6 @@ $("nav-last").append(icon("start"));
 $("nav-up").append(icon("up"));
 $("nav-down").append(icon("down"));
 $("jump").append(icon("latest"));
-$("hdr-burger").append(icon("menu"));
-$("menu-fleet").append(icon("fleet"));
-$("bell").append(icon("bell"));
-$("settings-btn").prepend(icon("gear"));
-$("journal-btn").append(icon("book"));
-$("knowledge-btn").append(icon("knowledge"));
-$("usage-btn").append(icon("usage"));
-$("files-btn").append(icon("folder"));
-$("schedules-btn").prepend(icon("clock"));
 $("send").append(icon("send"));
 $("sp-go").append(icon("send"));
 $("hint-tutorial-x").append(icon("close"));
@@ -317,8 +338,6 @@ $("closing-g").append(glyph("done"));
 $("sp-mark").prepend(gorgoneion());
 $("boot-mark").append(gorgoneion());
 $("band-mark").append(gorgoneion());
-// On a phone the bell closes its menu, so the panel hangs from the menu button.
-installBell($("bell"), pushSupported() ? (bell) => openPushPanel(phoneHeader.matches ? $("hdr-burger") : bell) : null);
 $("nav-up").addEventListener("click", () => transcript.message(-1));
 $("nav-down").addEventListener("click", () => transcript.message(1));
 $("nav-pos").addEventListener("click", () => transcript.firstUnread());
@@ -598,7 +617,7 @@ function signedOut() {
   app.state.kept.clear();
   app.state.ordered = [];
   transcript.clear();
-  renderTabs($("tablist"), [], null, tabActions);
+  header.render([], null, "boot");
   clearDevice().then(showLogin);
 }
 function bannerState(state) {
@@ -622,10 +641,7 @@ const checkPush = () => checkRotation().catch((e) => console.warn("aegis: checki
 // hears every state it passes through and draws the header, the banner and the
 // signed-out page.
 function onState(state, server) {
-  $("conn-dot").className = `dot ${state === "open" ? "ready" : state === "connecting" ? "ghost" : "err"}`;
-  $("conn-text").textContent =
-    state === "open" ? server : state === "connecting" ? "connecting" : state === "closed" ? "disconnected, retrying" : state;
-  markHdrMenu();
+  header.setConn(state, server);
   // For the band offline, where the welcome that names the server is out of reach.
   if (state === "open" && server) localStorage.setItem("aegis.server", server);
   // What arrived before a close is still the server's latest: kept at once.
@@ -764,11 +780,7 @@ for (const id of ["band-quota-link", "s-quota-head"]) $(id).addEventListener("cl
 const schedules = new Schedules(app.conn, $("schedules"), {
   go,
   sessions: (server) => (server ? on(server) : local()),
-  onCount: (n, red) => {
-    $("schedules-n").textContent = n ? String(n) : "";
-    $("schedules-n").classList.toggle("err", red);
-    markHdrMenu();
-  },
+  onCount: (n, red) => header.setSchedules(n, red),
 });
 setSecrets((op, params) => callFor(app.state.shown, op, params));
 // A card asks the server of the session it is shown in: names are per server.
@@ -1107,18 +1119,18 @@ function flushSessions() {
   changed = new Set();
   if (!booted) return;
   app.state.ordered = app.state.ordered.map((m) => app.state.sessions.get(m.key)).filter(Boolean);
-  switcher.refresh();
-  sizeTabMore(); // its count includes quiet sessions, which have no tab
+  header.refresh();
+  header.size(); // its count includes quiet sessions, which have no tab
   // A session that went quiet or came back changes the set of tabs (#386).
-  if (quietChanged()) {
+  if (header.quietChanged()) {
     render();
     drawNav();
     return;
   }
   const r = route();
   let whole = false; // a grouped tab redraws the bar (tabs.js patchTab)
-  for (const id of ids) if (app.state.sessions.has(id) && !patchTab($("tablist"), app.state.sessions.get(id), tabFocus(r), tabActions)) whole = true;
-  if (whole) renderTabs($("tablist"), tabbed(), tabFocus(r), tabActions);
+  for (const id of ids) if (app.state.sessions.has(id) && !header.patch(app.state.sessions.get(id), tabFocus(r))) whole = true;
+  if (whole) header.render(tabbed(), tabFocus(r), r.view);
   if (r.view === "fleet") {
     const home = [...ids].filter((id) => !app.state.sessions.get(id)?.server);
     const regroup = home.some((id) => !patchCard($("cards"), app.state.sessions.get(id), openCard, fleetOrder, closeById));
@@ -1145,8 +1157,8 @@ function onSessions() {
     homeLive,
   );
   app.state.ordered = ids.map((id) => app.state.sessions.get(id));
-  switcher.refresh();
-  sizeTabMore(); // its count includes quiet sessions, which have no tab
+  header.refresh();
+  header.size(); // its count includes quiet sessions, which have no tab
   render();
   drawNav(); // the needs count
   ping();
@@ -1208,27 +1220,6 @@ const closeById = (id) => {
   const s = app.state.sessions.get(id);
   if (s) closeSession(s);
 };
-// Folded groups in the bar (#586), this browser's own like the tab order.
-const tabFolds = new Set(JSON.parse(localStorage.getItem("aegis.tab-folds") || "[]"));
-const tabActions = {
-  onFocus: openSession,
-  onClose: closeById,
-  onMove: (keys, before) => {
-    order.move(keys, before);
-    onSessions();
-  },
-  get here() {
-    return app.conn.server || localStorage.getItem("aegis.server") || "";
-  },
-  folds: tabFolds,
-  saveFolds: () => localStorage.setItem("aegis.tab-folds", JSON.stringify([...tabFolds])),
-  onFold: (key) => {
-    if (!tabFolds.delete(key)) tabFolds.add(key);
-    tabActions.saveFolds();
-    renderTabs($("tablist"), tabbed(), tabFocus(route()), tabActions);
-  },
-};
-
 // This server's sessions, and a linked server's, in tab order.
 const local = () => app.state.ordered.filter((m) => !m.server);
 
@@ -1236,8 +1227,6 @@ const local = () => app.state.ordered.filter((m) => !m.server);
 // seen visible and then turned quiet, so a link to a quiet one still opens it,
 // even when the saved Fleet or a linked server's list arrives after the page.
 const tabbed = () => app.state.ordered.filter((m) => !m.quiet);
-const quietSeen = new Map(); // key -> whether it was quiet when last drawn
-const quietChanged = () => app.state.ordered.some((m) => !!m.quiet !== (quietSeen.get(m.key) ?? !!m.quiet));
 
 // Archiving the open tab, here or elsewhere, leaves it the same way: to the next
 // tab, not to the Fleet. The order is the one last drawn, which still holds it.
@@ -1250,14 +1239,14 @@ function settled(key) {
 
 function leaveIfGone(r) {
   const id = tabFocus(r);
-  const was = [...quietSeen.keys()];
-  const drawn = id && quietSeen.get(id) === false;
+  const was = [...header.quietSeen.keys()];
+  const drawn = id && header.quietSeen.get(id) === false;
   const fresh = drawn && (app.state.sessions.get(id) ? r.view === "session" && app.state.sessions.get(id).quiet : settled(id));
-  quietSeen.clear();
-  for (const m of app.state.ordered) quietSeen.set(m.key, !!m.quiet);
+  header.quietSeen.clear();
+  for (const m of app.state.ordered) header.quietSeen.set(m.key, !!m.quiet);
   if (!fresh) return false;
   const at = was.indexOf(id);
-  const next = was.slice(at + 1).concat(was.slice(0, at).reverse()).find((k) => quietSeen.get(k) === false);
+  const next = was.slice(at + 1).concat(was.slice(0, at).reverse()).find((k) => header.quietSeen.get(k) === false);
   go(next ? hashOf(next) : "#fleet");
   return true;
 }
@@ -1276,7 +1265,7 @@ async function openCard(key) {
       toast(e.message, { kind: "error" });
       return;
     }
-    quietSeen.set(key, false);
+    header.quietSeen.set(key, false);
   }
   openSession(key);
 }
@@ -1330,8 +1319,7 @@ function render() {
   }
   if (r.view === "term" && !app.state.sessions.has(r.id) && closedTerms.has(r.id)) {
     const card = { ...closedTerms.get(r.id), state: "ended", reason: "closed", archived: true };
-    renderTabs($("tablist"), tabbed(), null, tabActions);
-    $("tab-fleet").classList.remove("on");
+    header.render(tabbed(), null, "term");
     watchHost(null);
     follow(null);
     show("term");
@@ -1347,20 +1335,9 @@ function render() {
     go("#fleet"); // a link to a session no tab held: gone before this page drew it
     return;
   }
-  renderTabs($("tablist"), tabbed(), tabFocus(r), tabActions);
-  $("tablist").querySelector(".tab.on")?.scrollIntoView({ block: "nearest", inline: "nearest" });
-  $("tab-fleet").classList.toggle("on", r.view === "fleet");
-  $("menu-fleet").classList.toggle("on", r.view === "fleet");
-  $("tab-add").classList.toggle("on", r.view === "spawn");
-  $("settings-btn").classList.toggle("on", r.view === "settings");
-  $("journal-btn").classList.toggle("on", r.view === "journal");
+  header.render(tabbed(), tabFocus(r), r.view);
   if (r.view !== "usage") usage.close();
-  $("knowledge-btn").classList.toggle("on", r.view === "knowledge");
-  $("usage-btn").classList.toggle("on", r.view === "usage");
-  $("files-btn").classList.toggle("on", r.view === "files");
-  $("schedules-btn").classList.toggle("on", r.view === "schedules");
   if (r.view !== "schedules") schedules.close();
-  $("help-btn").classList.toggle("on", r.view === "help");
   root.dataset.mode = r.view === "read" ? "read" : "live";
   // Quota rows redraw on a quota patch, the timer, or a change of view; never
   // on a sessions patch, which would take the hover tooltip with them.
@@ -3590,34 +3567,13 @@ for (const [kind, id] of [
   $(id).addEventListener("click", () => guideFromComposer(kind, $(id)));
 }
 
-// -- tab bar and keys -----------------------------------------------------------
-$("tab-fleet").addEventListener("click", () => go("#fleet"));
-$("menu-fleet").addEventListener("click", () => go("#fleet"));
-$("tab-add").addEventListener("click", () => {
-  spawnFrom = null;
-  if (!offline()) go("#new");
-});
+// -- keys -----------------------------------------------------------------------
 // The ? list: drawn once from the key table.
 const keymap = $("keymap");
 renderKeys(keymap);
 const help = (open = keymap.hidden) => (keymap.hidden = !open);
-$("help-btn").addEventListener("click", () => go("#help"));
-$("settings-btn").addEventListener("click", () => go("#settings"));
-$("journal-btn").addEventListener("click", () => go("#journal"));
-$("knowledge-btn").addEventListener("click", () => go("#knowledge"));
-$("usage-btn").addEventListener("click", () => go("#usage"));
-$("files-btn").addEventListener("click", () => go(filesView.path ? filesHash(filesView.path) : "#files"));
-$("schedules-btn").addEventListener("click", () => go("#schedules"));
 keymap.addEventListener("click", (ev) => ev.target === keymap && help(false));
 const palette = new Palette($("palette"), () => route().view);
-// Alt+P and the strip's "N ▾" button (#781): every open session, by server.
-const switcher = new Switcher($("switcher"), {
-  metas: () => app.state.ordered,
-  here: () => fleetStacks.here || "this server",
-  links: () => app.state.links,
-  current: () => tabFocus(route()),
-  open: (key) => openCard(key),
-});
 
 // Alt+J and the navigator's button. In byNeed's order, from the tab after this
 // one; from the top when this one is not in the list, as after reading a
@@ -3663,10 +3619,10 @@ installKeys(
       }
     },
     needs: nextNeed,
-    tabPrev: () => cycle(-1),
-    tabNext: () => cycle(1),
-    tabLeft: () => stepTab(-1),
-    tabRight: () => stepTab(1),
+    tabPrev: () => header.cycle(-1),
+    tabNext: () => header.cycle(1),
+    tabLeft: () => header.stepTab(-1),
+    tabRight: () => header.stepTab(1),
     next: onTranscript(() => transcript.move(1)),
     prev: onTranscript(() => transcript.move(-1)),
     turnNext: onTranscript(() => transcript.moveTurn(1)),
@@ -3730,10 +3686,7 @@ installKeys(
     },
     escape() {
       if (recorder.discard() || cancelAsk() || closeInstallDialog() || closePushPanel()) return;
-      if (root.dataset.menu === "open") {
-        setHdrMenu(false);
-        return $("hdr-burger").focus();
-      }
+      if (header.close()) return;
       if (root.dataset.side === "open") return closeSide();
       if (!keymap.hidden) help(false);
       else if (cmenu.close() || cmenu.unbar() || viewer.close() || find.close() || closeMonitorCard() || closeCard()) return;
@@ -3752,25 +3705,11 @@ installKeys(
     palette: () => palette.toggle(),
     sessions: () => {
       palette.close();
-      switcher.open();
+      header.sessions();
     },
   },
   () => (booted ? route().view : "boot"),
 );
-
-// Alt+[ and Alt+]: the Fleet, then the tabs, round.
-function cycle(d) {
-  const all = ["#fleet", ...tabbed().map((m) => hashOf(m.key))];
-  const i = all.indexOf(location.hash || "#fleet");
-  go(all[i < 0 ? (d > 0 ? 0 : all.length - 1) : (i + d + all.length) % all.length]);
-}
-
-// Alt+Shift+[ and Alt+Shift+]: the tab in front one place over (#661).
-function stepTab(d) {
-  const id = tabFocus(route());
-  const step = id && stepMove($("tablist"), id, d);
-  if (step) tabActions.onMove(...step);
-}
 
 // -- composer ---------------------------------------------------------------
 const input = $("input");
@@ -4600,52 +4539,8 @@ const revealToolRow = (id) => {
   return true;
 };
 
-// The header's height, for the drawer to start under it: it wraps to two rows
-// on a phone and grows with the safe area.
-const header = document.querySelector("#a2 > .tabs");
-new ResizeObserver(() => root.style.setProperty("--hdr", `${header.getBoundingClientRect().height}px`)).observe(header);
 // The navigator floats just above the composer, which grows with its lines.
 new ResizeObserver(() => root.style.setProperty("--composer-h", `${$("composer").offsetHeight}px`)).observe($("composer"));
-$("side-btn").addEventListener("click", toggleSide);
-
-// The strip's button (#586, #781): while the tabs overflow, and always on a
-// phone, where the header has no room for another, it opens the session
-// switcher. Its count is every open session, quiet ones included, as the
-// switcher lists them. A tap opens it without the field's focus, so no
-// on-screen keyboard covers the list.
-const phoneHeader = matchMedia("(max-width:760px)"); // the one-row header (client.css)
-function sizeTabMore() {
-  const list = $("tablist");
-  $("tab-more").hidden = !phoneHeader.matches && list.scrollWidth <= list.clientWidth + 1;
-  $("tab-more").replaceChildren(`${app.state.ordered.length} `, icon("caret-d"));
-}
-new ResizeObserver(sizeTabMore).observe($("tablist"));
-new MutationObserver(sizeTabMore).observe($("tablist"), { childList: true });
-phoneHeader.addEventListener("change", sizeTabMore);
-$("tab-more").addEventListener("click", () => switcher.open({ focus: !matchMedia("(pointer:coarse)").matches }));
-
-// The phone header's menu (#896): the controls a one-row header has no room
-// for. A pick, a tap beside it, Escape or another view closes it.
-function setHdrMenu(open) {
-  if (open) root.dataset.menu = "open";
-  else delete root.dataset.menu;
-  $("hdr-burger").setAttribute("aria-expanded", String(open));
-}
-// The closed menu still says when something in it needs attention.
-function markHdrMenu() {
-  const err = (id) => $(id).classList.contains("err");
-  $("hdr-burger").classList.toggle("alert", err("conn-dot") || err("schedules-n"));
-}
-$("hdr-burger").addEventListener("click", () => {
-  setHdrMenu(true);
-  $("menu-fleet").focus({ preventScroll: true });
-});
-$("hdr-scrim").addEventListener("click", () => setHdrMenu(false));
-$("hdr-menu").addEventListener("click", (ev) => {
-  if (ev.target.closest("button")) setHdrMenu(false);
-});
-window.addEventListener("hashchange", () => setHdrMenu(false));
-phoneHeader.addEventListener("change", () => setHdrMenu(false));
 $("nav-side").addEventListener("click", toggleSide);
 // The dimmed transcript is the session view's own ::after, so a tap on it
 // lands on the view itself and goes no further.
@@ -4725,7 +4620,7 @@ function sessionMenu(key) {
       : undefined;
   const close = [{ id: "archive", label: "Archive", icon: "archive", danger: true, disabled: why, run: () => closeSession(s) }];
   // A group's head archives the whole group, after one question (#586).
-  const group = blocksOf(tabbed(), tabActions.here).find((b) => b.head.key === key && b.members.length > 1);
+  const group = blocksOf(tabbed(), header.tabActions.here).find((b) => b.head.key === key && b.members.length > 1);
   if (group) close.push({ id: "archivegroup", label: "Archive group…", icon: "archive", danger: true, disabled: why, run: () => archiveGroup(group.members) });
   if (isTool(s)) return { title, groups: [opening, close] };
   if (s.quiet) opening.push({ id: "unquiet", label: "Unquiet", icon: "unquiet", disabled: why, run: () => quietKey(key, false) });
@@ -4751,16 +4646,10 @@ function attachCardMenu(box, opts = {}) {
   cmenu.attach(box, cardMenu, { selector: ".card[data-id], .tab[data-id], .wait[data-id]", ...opts });
 }
 attachCardMenu($("cards"));
-// The tab card (#586): a session tab's Fleet card on hover, with the tab menu's
-// items as buttons; on a touch screen a long press opens it as a sheet instead
-// of the menu.
-const tabCard = attachTabCard($("tablist"), {
-  meta: (key) => app.state.sessions.get(key),
-  card: (m) => fleetCard(m, openCard, (k) => app.state.sessions.get(k) && closeSession(app.state.sessions.get(k))),
-  items: sessionMenu,
-});
-attachCardMenu($("tablist"), { touch: (t) => t.matches(".tab[data-id]") && tabCard.sheet(t) });
-// The same card for a session the shown one waits on (#667), to the left of
+// The tab card (#586) belongs to the header part (b2): a session tab's Fleet
+// card on hover, with the tab menu's items as buttons, and a long press on a
+// touch screen. The same card for a session the shown one waits on (#667), to
+// the left of
 // the panel and level with its row, where the panel's own cards open.
 const waitCard = attachTabCard($("s-waiting"), {
   meta: (key) => app.state.sessions.get(key),
