@@ -49,6 +49,7 @@ from urllib.parse import urlsplit
 
 from starlette.applications import Starlette
 import httpx
+from starlette.requests import Request
 from starlette.responses import (
     FileResponse,
     HTMLResponse,
@@ -247,6 +248,40 @@ def cookie_name(state_root: Path) -> str:
     return "aegis_" + hashlib.sha256(str(state_root).encode()).hexdigest()[:8]
 
 
+def sign_in_cookie(
+    response: Response,
+    request: Request | None,
+    token: str,
+    cookie: str,
+    origins: Iterable[str] = (),
+) -> Response:
+    """``response`` carrying the session cookie with ``token``: HttpOnly, so no
+    script on the page can read it; Secure behind an https origin.
+
+    The same cookie the page's ``?token=`` sign-in sets (web.py's index), for a
+    host whose own page hands the client a token from ``Server.token_for``: an
+    HTTP fetch of a sent file or a page's frame cannot carry the websocket
+    hello's token, so the browser needs the cookie too. A later token replaces
+    it with another call.
+    """
+    public = {urlsplit(o).netloc: o for o in map(public_origin, origins)}
+    if request is None:
+        secure = any(o.startswith("https://") for o in public.values())
+    else:
+        origin = public.get(request.headers.get("host", ""), "")
+        secure = origin.startswith("https://")
+    response.set_cookie(
+        cookie,
+        token,
+        max_age=COOKIE_MAX_AGE_S,
+        path="/",
+        httponly=True,
+        samesite="strict",
+        secure=secure,
+    )
+    return response
+
+
 class ClientFiles(StaticFiles):
     """The client's files, revalidated on every load (``no-cache`` plus the
     ETag Starlette already sends), so an edit to the client shows on the next
@@ -306,6 +341,7 @@ def build_web(
     origins: Iterable[str] = (),
     prefix: str = "",
 ) -> Starlette:
+    origins = list(origins)
     # Host header -> the one origin a socket naming that host must come from.
     public = {urlsplit(o).netloc: o for o in map(public_origin, origins)}
     app.push.origins = list(public.values())  # the VAPID contact (push.py)
@@ -327,18 +363,8 @@ def build_web(
     def signed_in(response: Response, request, given: str) -> Response:
         """``response`` carrying the cookie with the token that was presented:
         HttpOnly, so no script on the page can read it; Secure behind an https
-        origin."""
-        origin = public.get(request.headers.get("host", ""), "")
-        response.set_cookie(
-            cookie,
-            given,
-            max_age=COOKIE_MAX_AGE_S,
-            path="/",
-            httponly=True,
-            samesite="strict",
-            secure=origin.startswith("https://"),
-        )
-        return response
+        origin. A host's own page uses Server.sign_in for the same cookie."""
+        return sign_in_cookie(response, request, given, cookie, origins)
 
     async def index(request):
         """The page. ``?token=`` from the URL `aegis serve` printed becomes the
