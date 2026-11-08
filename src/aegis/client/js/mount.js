@@ -194,25 +194,37 @@ export class Mount {
     const now = meta.state === "working";
     if (now && !was && prev) {
       // The patch that enters working: the cost before this turn is the
-      // cumulative figure it will add to. A session first heard of already
+      // cumulative figure it will add to (a fresh session has none yet, which
+      // is a cumulative cost of zero). A session first heard of already
       // working is a turn this mount joined halfway; it is not tracked, so its
       // end reports no cost rather than part of one.
       this._working.add(key);
-      this._costAt.set(key, typeof meta.cost_usd === "number" ? meta.cost_usd : null);
+      this._costAt.set(key, Number.isFinite(meta.cost_usd) ? meta.cost_usd : 0);
       return;
     }
     if (was && !now) {
       const start = this._costAt.get(key);
-      const end = typeof meta.cost_usd === "number" ? meta.cost_usd : null;
+      const end = Number.isFinite(meta.cost_usd) ? meta.cost_usd : null;
       const seen = this._working.has(key);
       this._forget(key);
+      if (!this.reportsTurn(key)) return;
       this.emit("turnEnd", {
         session: key,
-        cost_usd: seen && start != null && end != null ? end - start : null,
+        cost_usd: seen && end != null ? end - start : null,
         line: meta.attention_line || null,
         meta,
       });
     }
+  }
+
+  // Which sessions this mount reports turns for. A chat follows one session,
+  // and a page may hold one chat per host tab (skene's seven), so it reports
+  // only the session it shows; otherwise every mount would fire for every
+  // turn on the server. The full layout shows every session the caller may
+  // see and reports them all (b1). The cost tracking above stays per key, so a
+  // follow() to another session mid-turn still has the start it recorded.
+  reportsTurn(key) {
+    return this.opts.layout === "full" || key === this.state.shown;
   }
 
   _forget(key) {
