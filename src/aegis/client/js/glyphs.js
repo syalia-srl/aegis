@@ -129,8 +129,13 @@ export const LABEL = {
   done: "done",
 };
 
-export function installGlyphs() {
-  if (document.getElementById("glyphs")) return;
+// The sprite goes inside the mount that draws it, so a mount's icons are
+// removed with it. Idempotent per root: a second call for the same root is a
+// no-op, while another mount on the page gets its own sprite (the ids repeat
+// between them, as every other id does; a <use> finds the first one, and they
+// are the same symbols).
+export function installGlyphs(root = document.body) {
+  if (root.querySelector(":scope > #glyphs")) return;
   const svg = document.createElementNS(NS, "svg");
   svg.id = "glyphs";
   svg.setAttribute("width", "0");
@@ -138,7 +143,7 @@ export function installGlyphs() {
   svg.setAttribute("aria-hidden", "true");
   svg.style.position = "absolute";
   svg.innerHTML = SPRITE;
-  document.body.prepend(svg);
+  root.prepend(svg);
 }
 
 export function glyph(attention) {

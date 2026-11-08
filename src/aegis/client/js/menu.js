@@ -13,6 +13,7 @@
 // The menu's only key listener is on its own node: keys.js owns the page's.
 
 import { icon } from "./glyphs.js";
+import { rootOf } from "./root.js";
 import { clampToRow, rangeText } from "./quote.js";
 
 export const LONG_PRESS = 500; // ms a touch holds before the menu opens
@@ -192,7 +193,7 @@ export function open(menu, at, target, { onClose, focus = true, settle = 0 } = {
         node.append(b);
       }
     });
-  document.getElementById("a2").append(node);
+  rootOf(target || at.anchor).append(node);
   const w = node.offsetWidth;
   const h = node.offsetHeight;
   let x = at.x;
@@ -366,7 +367,7 @@ function showBar(items, range, row, root, settle = 0) {
     });
     node.append(b);
   }
-  document.getElementById("a2").append(node);
+  rootOf(root || document.activeElement).append(node);
   bar_ = { node, range, row, root };
   addEventListener("hashchange", unbar);
   place();
