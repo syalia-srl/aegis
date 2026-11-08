@@ -922,9 +922,11 @@ variables and nothing else.
 as it asks for: `mount()` (`js/mount.js`) builds one `.aegis` root inside the
 element the host named, and composes into it the parts the layout asks for — a
 chat is one session's transcript and, unless it is switched off, its composer.
-The standalone page is one mount too, adopting the `#a2` element and the markup
-`index.html` still holds (`adopt`), and that mount owns the state its views
-share: every server's sessions, the links, each link's quota and host, the
+The standalone page is one mount too, adopting its empty `#a2` element
+(`adopt`): `layout: "full"` makes `js/layouts/full.js` build the netbanner, the
+boot view and the session view into that root, and `index.html` keeps only its
+head, the empty element and the module script. That mount owns the state its
+views share: every server's sessions, the links, each link's quota and host, the
 browser's tab order, the session shown and the transcripts kept for it. Its
 views are parts as well: the Fleet, the new-session form, Settings, Journal,
 Usage, Knowledge, Files, Schedules, Help, the terminal and the browser each
