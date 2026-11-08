@@ -55,7 +55,7 @@ HOST_PAGE = """\
 <div id="chat"></div>
 <div id="chat2"></div>
 <script>
-window.aegisHost = {token: "__TOKEN__", session: "__SESSION__", prefix: "__PREFIX__"};
+window.aegisHost = {token: "__TOKEN__", session: "__SESSION__", session2: "__SESSION2__", prefix: "__PREFIX__"};
 // What the test reads: every socket the page opens and every message it hears.
 // Wrapping WebSocket here runs before the module script below, which is
 // deferred until parsing ends.
@@ -148,13 +148,20 @@ async def main(
         origins=[origin],
     ) as srv:
         who = Who("ana")
-        sid = await read_or_spawn(srv, who, session_file or root / "host-session")
+        first = session_file or root / "host-session"
+        second = first.parent / f"{first.name}-2"
+        sid = await read_or_spawn(srv, who, first)
+        sid2 = await read_or_spawn(srv, who, second)
         page = (
             HOST_PAGE.replace("__TOKEN__", srv.token_for(who))
+            .replace("__SESSION2__", sid2)
             .replace("__SESSION__", sid)
             .replace("__PREFIX__", prefix)
         )
-        print(json.dumps({"url": f"{origin}/", "session": sid}), flush=True)
+        print(
+            json.dumps({"url": f"{origin}/", "session": sid, "session2": sid2}),
+            flush=True,
+        )
         await uvicorn.Server(
             uvicorn.Config(
                 host_app(srv, page, prefix),
