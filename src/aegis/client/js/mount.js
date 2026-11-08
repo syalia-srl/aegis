@@ -16,6 +16,7 @@
 import { acquire } from "./connection.js";
 import { installGlyphs } from "./glyphs.js";
 import { labelsFor } from "./labels.js";
+import { TranscriptPart } from "./parts/transcript.js";
 
 // Where this module came from: <prefix>/static/js/. Everything else is
 // relative to it, so a mount needs no configuration to find its server.
@@ -86,7 +87,9 @@ export class Mount {
   mountLayout() {
     if (this.opts.layout === "full") return;
     if (this.opts.layout !== "chat") throw new Error(`aegis: no layout ${this.opts.layout}`);
-    this.root.append(el("div", "aegis-chat"));
+    const chat = el("div", "aegis-chat");
+    this.root.append(chat);
+    this.transcript = this.add(new TranscriptPart(this, chat));
     this.follow(this.opts.session);
   }
 
@@ -166,6 +169,7 @@ export class Mount {
       if (meta.state !== "working") this._forget(meta.key);
     }
     for (const key of [...this._working]) if (!seen.has(key)) this._forget(key);
+    this.transcript?.sessionChanged(this.state.shown, this.state.sessions.get(this.state.shown));
   }
 
   _patch(ops) {
@@ -179,7 +183,12 @@ export class Mount {
       } else if (op.remove !== undefined) {
         this.state.sessions.delete(op.remove);
         this._forget(op.remove);
-        if (this.state.shown === op.remove) this.state.shown = null;
+        if (this.state.shown === op.remove) {
+          this.state.shown = null;
+          this.transcript?.show(null);
+        } else {
+          this.transcript?.sessionChanged(op.remove, undefined);
+        }
       }
     }
   }
@@ -190,6 +199,7 @@ export class Mount {
     const prev = this.state.sessions.get(key);
     const meta = { ...raw, key };
     this.state.sessions.set(key, meta);
+    this.transcript?.sessionChanged(key, meta);
     const was = prev?.state === "working";
     const now = meta.state === "working";
     if (now && !was && prev) {
