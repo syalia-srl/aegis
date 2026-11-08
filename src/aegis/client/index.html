@@ -4,24 +4,24 @@
 <meta charset="utf-8">
 <meta name="aegis-build" content="__AEGIS_BUILD__">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
-<link rel="manifest" href="/manifest.webmanifest">
+<link rel="manifest" href="__AEGIS_PREFIX__/manifest.webmanifest">
 <meta name="theme-color" content="#0b0a09">
-<link rel="icon" href="/static/icons/aegis-192.png">
+<link rel="icon" href="__AEGIS_PREFIX__/static/icons/aegis-192.png">
 <title>aegis</title>
 <link rel="icon" id="favicon" href="data:,">
-<link rel="stylesheet" href="/static/css/fonts.css">
-<link rel="stylesheet" href="/static/css/base.css">
-<link rel="stylesheet" href="/static/vendor/xterm/xterm.css">
-<link rel="stylesheet" href="/static/themes/ink.css">
-<link rel="stylesheet" href="/static/themes/logbook.css">
-<link rel="stylesheet" href="/static/themes/electric.css">
-<link rel="stylesheet" href="/static/themes/phosphor.css">
-<link rel="stylesheet" href="/static/themes/blueprint.css">
-<link rel="stylesheet" href="/static/themes/amphora.css">
-<link rel="stylesheet" href="/static/themes/riso.css">
-<link rel="stylesheet" href="/static/themes/solari.css">
-<link rel="stylesheet" href="/static/themes/aizome.css">
-<link rel="stylesheet" href="/static/themes/poster.css">
+<link rel="stylesheet" href="__AEGIS_PREFIX__/static/css/fonts.css">
+<link rel="stylesheet" href="__AEGIS_PREFIX__/static/css/base.css">
+<link rel="stylesheet" href="__AEGIS_PREFIX__/static/vendor/xterm/xterm.css">
+<link rel="stylesheet" href="__AEGIS_PREFIX__/static/themes/ink.css">
+<link rel="stylesheet" href="__AEGIS_PREFIX__/static/themes/logbook.css">
+<link rel="stylesheet" href="__AEGIS_PREFIX__/static/themes/electric.css">
+<link rel="stylesheet" href="__AEGIS_PREFIX__/static/themes/phosphor.css">
+<link rel="stylesheet" href="__AEGIS_PREFIX__/static/themes/blueprint.css">
+<link rel="stylesheet" href="__AEGIS_PREFIX__/static/themes/amphora.css">
+<link rel="stylesheet" href="__AEGIS_PREFIX__/static/themes/riso.css">
+<link rel="stylesheet" href="__AEGIS_PREFIX__/static/themes/solari.css">
+<link rel="stylesheet" href="__AEGIS_PREFIX__/static/themes/aizome.css">
+<link rel="stylesheet" href="__AEGIS_PREFIX__/static/themes/poster.css">
 <script>
 // The theme once called syalia is electric now.
 if (localStorage.getItem("aegis.theme") === "syalia") localStorage.setItem("aegis.theme", "electric");
@@ -322,6 +322,6 @@ document.documentElement.dataset.theme = localStorage.getItem("aegis.theme") || 
   <div class="palette switcher" id="switcher" hidden></div>
 </div>
 <div id="probes" hidden aria-hidden="true"></div>
-<script type="module" src="/static/js/app.js"></script>
+<script type="module" src="__AEGIS_PREFIX__/static/js/app.js"></script>
 </body>
 </html>
