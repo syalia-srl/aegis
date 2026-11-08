@@ -4,6 +4,7 @@
 // tab onto the card. A key, a press elsewhere or a change of view closes it.
 // The session panel's Waiting on rows open the same card (#667).
 import { icon } from "./glyphs.js";
+import { rootOf } from "./root.js";
 
 export const OPEN_MS = 300;
 export const CLOSE_MS = 220;
@@ -16,8 +17,9 @@ export function attachTabCard(list, { meta, card, items, item = ".tab", place = 
   const sel = `${item}[data-id]`;
   const box = Object.assign(document.createElement("div"), { className: "tabcard" });
   box.hidden = true;
-  // Inside #a2, where the theme's variables and the Fleet card's rules apply (#657).
-  document.getElementById("a2").append(box);
+  // Inside the mount's root, where the theme's variables and the Fleet card's
+  // rules apply (#657).
+  rootOf(list).append(box);
   let key = null;
   let tab = null;
   let asSheet = false;
