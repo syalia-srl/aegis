@@ -25,8 +25,8 @@ import { HeaderPart } from "./parts/header.js";
 import { SidebarPart } from "./parts/sidebar.js";
 import { CommandsPart } from "./parts/commands.js";
 import { DictationPart } from "./parts/dictation.js";
+import { SpawnPart } from "./parts/spawn.js";
 import { factIcon, glyph, gorgoneion, icon, LABEL } from "./glyphs.js";
-import { CommandMenu } from "./commands.js";
 import * as cmenu from "./menu.js";
 import { attachTabCard } from "./tabcard.js";
 import { blocksOf } from "./groups.js";
@@ -41,7 +41,6 @@ import { Schedules } from "./schedules.js";
 import { Help } from "./help.js";
 import { listenForOpen, pingToast, redrawFavicon, setTitle, updatePing } from "./ping.js";
 import { ask, cancelAsk, choose } from "./dialog.js";
-import { modelMeta } from "./models.js";
 import "./pick.js";
 import { Attachments } from "./attach.js";
 import { setToastOpener, toast } from "./toast.js";
@@ -90,10 +89,7 @@ const header = new HeaderPart(app, root, {
   focusId: () => tabFocus(route()),
   go: (hash) => go(hash),
   hashOf: (key) => hashOf(key),
-  spawn: () => {
-    spawnFrom = null;
-    if (!offline()) go("#new");
-  },
+  spawn: () => spawn.open(),
   files: () => go(filesView?.path ? filesHash(filesView.path) : "#files"),
   side: () => toggleSide(),
   push: (bell, anchor) => openPushPanel(phoneHeader.matches ? anchor : bell),
@@ -358,11 +354,6 @@ $("nav-up").append(icon("up"));
 $("nav-down").append(icon("down"));
 $("jump").append(icon("latest"));
 $("send").append(icon("send"));
-$("sp-go").append(icon("send"));
-$("hint-tutorial-x").append(icon("close"));
-$("hint-whats-new-x").append(icon("close"));
-$("hint-doctor-more").append(icon("caret-r"));
-$("hint-tip").querySelector(".lab").append(icon("sparkle"));
 $("interrupt").append(icon("stop"));
 $("replies-g").append(icon("prompt"));
 $("queued-g").append(icon("prompt"));
@@ -370,7 +361,6 @@ $("working-g").append(icon("think"));
 $("waking-g").append(icon("think"));
 $("coldnote-g").append(icon("wait"));
 $("closing-g").append(glyph("done"));
-$("sp-mark").prepend(gorgoneion());
 $("boot-mark").append(gorgoneion());
 $("band-mark").append(gorgoneion());
 $("nav-up").addEventListener("click", () => transcript.message(-1));
@@ -709,7 +699,7 @@ function onState(state, server) {
     // Whether this browser runs on the server's desktop (Open natively).
     if (app.conn.native) root.dataset.native = "";
     else delete root.dataset.native;
-    loadAgents();
+    spawn.loadAgents();
     sidebar.loadVersion();
     filesView?.online();
   }
@@ -760,14 +750,7 @@ filesView = new Files(app.conn, $("files"), {
   // server's harness folder (roster.cwd).
   here: {
     insert: (path) => toComposer(lastShown, `\`${path}\``, { caret: true }),
-    session: async (dir) => {
-      spawnFrom = null;
-      go("#new");
-      spawnGrow();
-      await setSpServer(null);
-      await agentsLoading; // roster.cwd comes with the roster
-      $("sp-cwd").value = dir ? `${roster.cwd}/${dir}` : roster.cwd;
-    },
+    session: async (dir) => spawn.openAt(dir),
     terminal: (dir) =>
       app.conn.call("term.spawn", { profile: "shell", cwd: dir || "." }).then(
         (card) => go(`#t=${keyOf(null, card.id)}`),
@@ -783,9 +766,9 @@ const helpTab = new Help(app.conn, $("help"), {
   go,
   onKeys: () => help(true),
   onStart: (id, tutorial) =>
-    startGuide({ page: id }, "tutorial", tutorial).catch((e) => toast(e.message, { kind: "error" })),
+    spawn.startGuide({ page: id }, "tutorial", tutorial).catch((e) => toast(e.message, { kind: "error" })),
   onAsk: (question, page) =>
-    startGuide({ question, page }, "ask", false).catch((e) => toast(e.message, { kind: "error" })),
+    spawn.startGuide({ question, page }, "ask", false).catch((e) => toast(e.message, { kind: "error" })),
 });
 installCopy($("help"), copyDeps);
 installCopy($("files"), copyDeps);
@@ -993,7 +976,7 @@ function onLinks(list) {
   app.state.linksLoaded = true;
   app.state.linksArrived();
   settings.onLinks(app.state.links, app.conn.server);
-  drawServerPick();
+  spawn.drawServerPick();
   schedules.onLinks(app.state.links, app.conn.server);
   const names = new Set(app.state.links.map((l) => l.name));
   for (const [name, r] of app.state.remote) {
@@ -1069,7 +1052,7 @@ app.conn.subscribe(
   (w) => settings.onHomeConfig(w),
   (ops) => {
     for (const op of ops) if (op.set) settings.onHomeConfig(op.set);
-    loadAgents();
+    spawn.loadAgents();
   },
 );
 
@@ -1323,7 +1306,7 @@ function render() {
   // A fill is read once too, so a reload or Back never fills the form again.
   if (r.fill) {
     history.replaceState(null, "", "#new");
-    fillSpawn(r.fill);
+    spawn.show(r.fill);
   }
   // A menu or the selection bar is about the view it opened in. go() moves
   // with pushState, which fires no hashchange, so the change is caught here.
@@ -1389,8 +1372,8 @@ function render() {
     watchHost(null);
     follow(null);
     show("spawn");
-    if (newView) loadHints();
-    $("sp-text").focus();
+    if (newView) spawn.loadHints();
+    spawn.focus();
     setTitle("New session · aegis");
   } else if (r.view === "settings") {
     watchHost(null);
@@ -2273,218 +2256,6 @@ async function reopen(id) {
   }
 }
 
-// -- the new-tab composer -------------------------------------------------------
-// An agent is a preset: picking one fills the other chips, and changing a chip
-// marks the agent `name*` until reset. Enter spawns and sends in one call.
-let roster = { agents: [], harnesses: [], models: {}, default: null, cwd: "" };
-// What each harness can run, by server: the catalog `config.detect` reads from
-// the harness itself, the one the server validates a model change against. The
-// agents' own models are on offer until it answers, and after it.
-let spModels = { server: undefined, by: {} };
-// The server a new session starts on: null for this one. Its directory line
-// names it once a server is linked, since a path exists on one machine only.
-let spServer = null;
-// What help.state said for this person when the new tab last opened; null
-// until it answers, and then no hint shows.
-let helpState = null;
-
-function drawServerPick() {
-  const pick = $("sp-server");
-  const show = app.state.links.length > 0;
-  pick.hidden = $("sp-sep").hidden = !show;
-  if (!show) {
-    if (spServer !== null) setSpServer(null);
-    return;
-  }
-  pick.options = [
-    { value: "", label: app.conn.server || "this server" },
-    ...app.state.links.map((l) => ({
-      value: l.name,
-      label: l.state === "linked" ? l.name : `${l.name} (${l.state})`,
-      disabled: l.state !== "linked",
-    })),
-  ];
-  if (spServer && linkOf(spServer)?.state !== "linked") setSpServer(null);
-  pick.value = spServer || "";
-}
-
-// Resolves once the picked server's roster has loaded.
-function setSpServer(server) {
-  if (server === spServer) return Promise.resolve();
-  spServer = server;
-  $("sp-server").value = server || "";
-  $("sp-cwd").value = ""; // the other machine's directories
-  delete $("sp-agent").dataset.picked;
-  const loaded = loadAgents();
-  drawHints();
-  return loaded;
-}
-$("sp-server").addEventListener("change", () => setSpServer($("sp-server").value || null));
-const LAST_AGENT = "aegis.lastAgent";
-const PICKS = ["harness", "model", "effort", "permission"];
-
-// The + view's Terminals group: one button per profile on the picked server,
-// the built-in shell first.
-function drawProfiles(list, server) {
-  $("sp-terms").hidden = !list.length;
-  const host = document.querySelector("#sp-terms .sp-term-list");
-  host.replaceChildren(
-    ...list.map((p) => {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.dataset.profile = p.name;
-      b.disabled = Boolean(p.error);
-      b.title = p.error || p.cmd || "your login shell";
-      const name = document.createElement("b");
-      name.textContent = p.name;
-      const what = document.createElement("span");
-      what.textContent = p.error || p.cmd || "login shell";
-      b.append(name, " ", what);
-      b.addEventListener("click", () =>
-        app.conn.call("term.spawn", { profile: p.name }, server).then(
-          (card) => go(`#t=${keyOf(server, card.id)}`),
-          (e) => toast(e.message, { kind: "error" }),
-        ),
-      );
-      return b;
-    }),
-  );
-}
-
-// A browser under the terminals: a page on the server, held by the person.
-function drawBrowserEntry(server) {
-  const host = document.querySelector("#sp-terms .sp-term-list");
-  const b = document.createElement("button");
-  b.type = "button";
-  b.dataset.browser = "";
-  b.title = "a browser on the server you and an agent can share";
-  const name = document.createElement("b");
-  name.textContent = "browser";
-  const what = document.createElement("span");
-  what.textContent = "a page on the server";
-  b.append(name, " ", what);
-  b.addEventListener("click", () =>
-    app.conn.call("browser.spawn", { url: "about:blank" }, server).then(
-      (card) => go(`#b=${keyOf(server, card.id)}`),
-      (e) => toast(e.message, { kind: "error" }),
-    ),
-  );
-  $("sp-terms").hidden = false;
-  host.querySelector("[data-browser]")?.remove();
-  host.append(b);
-}
-
-// The roster load in flight, so a caller can wait for the one already
-// running (openSpawnWith right after a connect).
-let agentsLoading = Promise.resolve();
-function loadAgents() {
-  agentsLoading = fetchAgents();
-  return agentsLoading;
-}
-async function fetchAgents() {
-  app.conn.call("term.profiles", {}, spServer).then(
-    (list) => drawProfiles(list, spServer),
-    () => drawProfiles([], spServer), // a server without terminals
-  ).then(() => app.conn.call("browser.available", {}, spServer)).then(
-    (a) => a.ok && drawBrowserEntry(spServer),
-    () => {}, // a server from before browsers
-  );
-  // The picked agent as the chips last knew it, to tell the person's overrides
-  // from values an edit to .aegis.yaml has since changed.
-  const was = current();
-  try {
-    roster = await app.conn.call("agents.list", {}, spServer);
-  } catch (e) {
-    toast(e.message, { kind: "error" });
-    return;
-  }
-  // A reconnect or a config change rebuilds the options; the chips keep what
-  // the person set and follow the agent everywhere else.
-  const before = Object.fromEntries(PICKS.map((k) => [k, $(`sp-${k}`).value]));
-  $("sp-harness").options = roster.harnesses.map((h) => ({
-    value: h.name,
-    label: h.supported ? h.name : `${h.name} (not supported yet)`,
-    disabled: !h.supported,
-  }));
-  $("sp-agent").options = roster.agents.map((a) => {
-    const why = a.error || (a.enabled ? "" : `${a.harness} is not supported yet`);
-    return { value: a.name, label: why ? `${a.name} (${why})` : a.name, disabled: !a.enabled };
-  });
-  const usable = roster.agents.filter((a) => a.enabled).map((a) => a.name);
-  const keep = $("sp-agent").dataset.picked;
-  const start = [keep, localStorage.getItem(LAST_AGENT), roster.default].find((n) => usable.includes(n)) || usable[0];
-  if (!$("sp-cwd").value) $("sp-cwd").value = roster.cwd;
-  $("sp-error").textContent = roster.config_error
-    ? `.aegis.yaml does not parse; aegis is using the last version that did. ${roster.config_error}`
-    : roster.agents.length
-      ? ""
-      : "No agents yet. Set them up in Settings (Alt+S).";
-  if (keep && usable.includes(keep)) {
-    $("sp-agent").value = keep;
-    const now = current();
-    for (const k of PICKS) $(`sp-${k}`).value = was && before[k] === was[k] ? now[k] : before[k];
-    fillModels($("sp-harness").value);
-    markDiffs();
-  } else if (start) pickAgent(start);
-  loadSpModels();
-}
-
-function current() {
-  return roster.agents.find((a) => a.name === $("sp-agent").value);
-}
-
-async function loadSpModels() {
-  const server = spServer;
-  let found;
-  try {
-    found = await app.conn.call("config.detect", {}, server);
-  } catch {
-    return; // the agents' models stay on offer, and any text is still taken
-  }
-  if (server !== spServer) return;
-  spModels = { server, by: Object.fromEntries(found.map((f) => [f.harness, f.models])) };
-  fillModels($("sp-harness").value);
-}
-
-function fillModels(harness) {
-  const listed = spModels.server === spServer ? spModels.by[harness] || [] : [];
-  const have = new Set(listed.map((m) => m.value));
-  const named = (roster.models[harness] || []).filter((m) => !have.has(m));
-  $("sp-model").options = [
-    ...listed.map((m) => ({ value: m.value, label: m.value, meta: modelMeta(m) })),
-    ...named,
-  ];
-}
-
-function pickAgent(name) {
-  const a = roster.agents.find((x) => x.name === name);
-  if (!a) return;
-  $("sp-agent").value = a.name;
-  $("sp-agent").dataset.picked = a.name;
-  fillModels(a.harness);
-  for (const k of PICKS) $(`sp-${k}`).value = a[k];
-  markDiffs();
-}
-
-function overrides() {
-  const a = current();
-  const out = {};
-  if (!a) return out;
-  for (const k of PICKS) {
-    const v = $(`sp-${k}`).value.trim();
-    if (v && v !== a[k]) out[k] = v;
-  }
-  return out;
-}
-
-function markDiffs() {
-  const a = current();
-  const diff = overrides();
-  for (const k of PICKS) $(`sp-${k}`).classList.toggle("diff", k in diff);
-  const changed = Object.keys(diff).length > 0;
-  $("sp-reset").hidden = !changed;
-  $("sp-agent").suffix = changed ? "*" : "";
-}
 
 // A harness version outside the tested range (harness_versions.py): the
 // server refused the launch once with what it found; ask the person whether to
@@ -2545,340 +2316,6 @@ async function untestedRetry(call, again) {
   }
 }
 
-async function spawnFromComposer() {
-  const a = current();
-  if (!a || $("sp-go").disabled || offline()) return;
-  $("sp-go").disabled = true;
-  $("sp-error").textContent = "";
-  await dictation.finish($("sp-text"));
-  const text = $("sp-text").value.trim();
-  const params = { agent: a.name, cwd: $("sp-cwd").value.trim() || null, ...overrides() };
-  // With files or dictated text, the session starts empty: the files upload
-  // into its inbox and go out with the text as its first message (sendFirst),
-  // which carries the dictated mark a spawn's prompt has no field for.
-  const dictated = spoken.has("spawn") && !spServer; // a linked server may predate the field
-  const held = spAtts.list("spawn").length > 0 || dictated;
-  // A / line runs as a command in the new session, as typed there (#570):
-  // as spawn's prompt the harness would get it as plain text.
-  const command = text.startsWith("/") && !text.startsWith("//");
-  if (text && !held && !command) params.prompt = text;
-  if (spawnFrom && !spServer) params.from_session = spawnFrom;
-  try {
-    const r = await untestedRetry(
-      () => app.conn.call("session.spawn", params, spServer),
-      (untested) => app.conn.call("session.spawn", { ...params, untested }, spServer),
-    );
-    if (r === CANCELLED) return; // the typed text stays
-    spawnFrom = null;
-    localStorage.setItem(LAST_AGENT, a.name);
-    $("sp-text").value = "";
-    spMenu.close();
-    spawnGrow();
-    pickAgent(a.name);
-    const key = keyOf(spServer, r.log_id);
-    go(`#s=${key}`);
-    spoken.delete("spawn");
-    if (held) sendFirst(key, text, spAtts.take("spawn"), dictated);
-    else if (command) {
-      // The session's patch lands before spawn's reply; a far one may not have.
-      const s = app.state.sessions.get(key);
-      if (s) sendLine(text, false, [], s);
-      else sendFirst(key, text, []);
-    }
-  } catch (e) {
-    toast(e.message, { kind: "error" });
-  } finally {
-    $("sp-go").disabled = false;
-  }
-}
-
-$("sp-effort").options = ["low", "medium", "high", "xhigh", "max"].map((e) => ({ value: e, label: `effort ${e}` }));
-$("sp-permission").options = ["read", "write", "auto", "full"].map((p) => ({ value: p, label: `perm ${p}` }));
-$("sp-agent").addEventListener("change", () => pickAgent($("sp-agent").value));
-$("sp-harness").addEventListener("change", () => {
-  fillModels($("sp-harness").value);
-  markDiffs();
-});
-for (const k of ["model", "effort", "permission"]) $(`sp-${k}`).addEventListener("input", markDiffs);
-$("sp-reset").addEventListener("click", () => pickAgent($("sp-agent").value));
-$("spawn").addEventListener("submit", (ev) => {
-  ev.preventDefault();
-  spawnFromComposer();
-});
-// Enter in a field would submit the form and spawn a half-written session;
-// there it means "done with this field". In an open chip it is the chip's pick.
-for (const id of ["sp-model", "sp-cwd"]) {
-  $(id).addEventListener("keydown", (ev) => {
-    if (ev.key === "Enter" && !ev.isComposing && !ev.defaultPrevented) {
-      ev.preventDefault();
-      $("sp-text").focus();
-    }
-  });
-}
-// Enter spawns and sends; on a touch screen it adds a line, as in a session.
-// The new tab's menu (#632): aegis's commands before the session exists, and
-// the harness's when a session in that directory has already listed them. A
-// whole command typed here runs in the new session (#570).
-const previews = new Map();
-async function loadPreview() {
-  const params = { harness: $("sp-harness").value, cwd: $("sp-cwd").value.trim() || null };
-  const k = JSON.stringify([spServer, params]);
-  if (!previews.has(k)) {
-    previews.set(
-      k,
-      Promise.all([
-        app.conn.call("commands.preview", params, spServer),
-        app.conn.call("help.pages", {}, spServer).catch(() => []),
-        spawnAgents(spServer),
-      ]).then(([cat, pages, agents]) => ({ ...cat, agents, tutorials: pages.filter((pg) => pg.kind === "tutorial") })),
-    );
-  }
-  try {
-    return await previews.get(k);
-  } catch {
-    previews.delete(k); // a server without the op: no menu, as before
-    return null;
-  }
-}
-const spMenu = new CommandMenu({
-  box: $("sp-cmd-menu"),
-  rows: $("sp-cmd-rows"),
-  filter: $("sp-cmd-filter"),
-  load: loadPreview,
-  run: () => spawnFromComposer(),
-  getLine: () => $("sp-text").value,
-  setLine: (v) => {
-    $("sp-text").value = v;
-    spawnGrow();
-    $("sp-text").focus();
-  },
-  meta: () => ({ model: $("sp-model").value }),
-});
-$("sp-text").addEventListener("input", async () => {
-  const v = $("sp-text").value;
-  if (v.startsWith("/") && !v.startsWith("//")) {
-    if (spMenu.isOpen) spMenu.refresh();
-    else await spMenu.openInline();
-  } else if (spMenu.isOpen) spMenu.close();
-});
-$("sp-text").addEventListener("keydown", (ev) => {
-  if (spMenu.onKey(ev)) return;
-  if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing && !touch.matches) {
-    ev.preventDefault();
-    spawnFromComposer();
-  }
-});
-
-// The first message grows with its text until the form fills the view, and only
-// then scrolls (#384): the new tab has nothing else to show. The room left
-// changes with the window and with what sits around the box (files, hints, an
-// error), so those are watched too. A hidden view has no height to fill.
-function spawnGrow() {
-  // The tip and /feedback rows give way to a first message (client.css).
-  $("sp-hints").toggleAttribute("data-typing", $("sp-text").value !== "");
-  const t = $("sp-text");
-  const view = t.closest(".view");
-  if (!view.clientHeight) return;
-  stackActs(t);
-  t.style.height = "";
-  const css = getComputedStyle(view);
-  const pad = parseFloat(css.paddingTop) + parseFloat(css.paddingBottom);
-  const room = view.clientHeight - pad - ($("spawn").offsetHeight - t.offsetHeight);
-  t.style.height = `${Math.max(t.offsetHeight, Math.min(t.scrollHeight, room))}px`;
-}
-$("sp-text").addEventListener("input", spawnGrow);
-const spawnRoom = new ResizeObserver(spawnGrow);
-for (const el of [$("sp-text").closest(".view"), $("sp-atts"), $("sp-hints"), $("sp-error")]) spawnRoom.observe(el);
-
-// -- the new tab's hints --------------------------------------------------------
-// The rows under the chips. /tutorial while this person has started no
-// tutorial, /whats-new while the release it runs is newer than their last
-// tour, /feedback always. For an admin, the doctor row while the server's last
-// doctor run found a problem (doctor_watch.py). Last, one hint from the help
-// pages at a time. The record is the server's, per principal (helpstate.py),
-// read each time the new tab opens, so every device shows the same rows. The
-// actions act on this server only: a linked server keeps its own record and
-// may not know help.guide. The tip stays, since the Help tab is this server's.
-async function loadHints() {
-  delete $("sp-hints").dataset.ready;
-  try {
-    helpState = await app.conn.call("help.state", {});
-  } catch {
-    helpState = null; // no hint rather than a wrong one
-  }
-  tips = shuffled(helpState?.hints || []);
-  drawHints();
-  rotateTip(true);
-  $("sp-hints").dataset.ready = "";
-}
-
-function drawHints() {
-  const away = !helpState || spServer !== null;
-  $("hint-tutorial").hidden = away || helpState.tutorial;
-  $("hint-whats-new").hidden = away || !helpState.whats_new;
-  $("hint-whats-new-v").textContent = helpState?.whats_new || "";
-  $("hint-feedback").hidden = away;
-  drawDoctor(away ? null : helpState.doctor);
-}
-
-// The doctor row: a count, /doctor, and the findings folded under the caret,
-// each named after what it is about rather than the doctor's dotted key.
-const HARNESS_LABEL = { "claude-code": "Claude Code", opencode: "OpenCode", codex: "Codex", cursor: "Cursor Agent" };
-function findingLabel(where) {
-  const [head, name] = where.split(".");
-  if (head === "agents" && name) return `Agent ${name}`;
-  if (head === "queues" && name) return `Queue ${name}`;
-  if (head === "harness" && name) return HARNESS_LABEL[name] || name;
-  if (head === "service" && name) {
-    // service.<unit>.<Directive>, and a unit's name has its own dot.
-    const rest = where.slice(8);
-    const cut = rest.search(/\.[A-Z][A-Za-z]*$/);
-    return cut < 0 ? `Service ${rest}` : `Service ${rest.slice(0, cut)} · ${rest.slice(cut + 1)}`;
-  }
-  return { file: ".aegis.yaml", default_agent: "The default agent", state: "The state directory" }[where] || where;
-}
-const counted = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
-function drawDoctor(d) {
-  const row = $("hint-doctor");
-  row.hidden = !d;
-  if (!d) return;
-  row.classList.toggle("err", d.errors > 0);
-  row.classList.toggle("warn", d.errors === 0);
-  const parts = [d.errors && counted(d.errors, "error"), d.warns && counted(d.warns, "warning")].filter(Boolean);
-  const sum = $("hint-doctor-sum");
-  sum.replaceChildren("This server's setup has ", Object.assign(document.createElement("b"), { textContent: parts.join(" and ") }),
-    `. Fix ${d.findings.length === 1 ? "it" : "them"} with`);
-  const items = d.findings.map((f) => {
-    const li = document.createElement("li");
-    li.className = f.level;
-    li.append(Object.assign(document.createElement("span"), { className: "w", textContent: findingLabel(f.where) }), f.message);
-    return li;
-  });
-  const tail = Object.assign(document.createElement("li"), { className: "tail" });
-  const a = Object.assign(document.createElement("a"), { href: "#settings", textContent: "Settings" });
-  tail.append("Each one is also marked on its row in ", a, ".");
-  $("hint-doctor-list").replaceChildren(...items, tail);
-}
-$("hint-doctor-more").addEventListener("click", () => {
-  const open = $("hint-doctor").classList.toggle("open");
-  $("hint-doctor-list").hidden = !open;
-  $("hint-doctor-more").setAttribute("aria-expanded", String(open));
-});
-
-// The tip: one hint at a time, the next every TIP_MS, held while the pointer
-// or the keyboard is on it or the page is hidden. A click opens its help page.
-const TIP_MS = 8000;
-let tips = [];
-let tipAt = 0;
-let tipHeld = false;
-let tipTimer = null;
-function shuffled(list) {
-  const out = list.slice();
-  for (let i = out.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [out[i], out[j]] = [out[j], out[i]];
-  }
-  return out;
-}
-function showTip(fade) {
-  const go = $("hint-tip-go");
-  const put = () => {
-    const tip = tips[tipAt % tips.length];
-    go.textContent = tip.text;
-    go.title = tip.text;
-    go.dataset.ref = tip.ref;
-    go.classList.remove("fade");
-  };
-  if (!fade || matchMedia("(prefers-reduced-motion: reduce)").matches) return put();
-  go.classList.add("fade");
-  setTimeout(put, 300);
-}
-function rotateTip(fresh = false) {
-  clearInterval(tipTimer);
-  $("hint-tip").hidden = !tips.length;
-  if (!tips.length) return;
-  if (fresh) tipAt = 0;
-  showTip(false);
-  tipTimer = setInterval(() => {
-    if (tipHeld || document.hidden || $("hint-tip").closest(".view")?.hidden) return;
-    tipAt++;
-    showTip(true);
-  }, TIP_MS);
-}
-for (const [ev, held] of [["mouseenter", true], ["mouseleave", false], ["focusin", true], ["focusout", false]]) {
-  $("hint-tip").addEventListener(ev, () => (tipHeld = held));
-}
-$("hint-tip-go").addEventListener("click", (e) => go(`#help=${encodeURIComponent(e.currentTarget.dataset.ref)}`));
-
-// What running or dismissing a hint records, as the server records it
-// (help_ops.help_guide, help_dismiss), so the hint hides without a new read.
-function ranHint(kind) {
-  if (!helpState) return;
-  helpState = kind === "tutorial" ? { ...helpState, tutorial: true } : { ...helpState, whats_new: null };
-}
-
-// A guide session (help.guide), and its tab, as a spawn from the new tab
-// opens one. `params` are spawn fields; none at all means default_agent.
-// `marks`: whether the server records this as the tutorial taken (a tutorial
-// page) so the hint hides; a tour of another page or a question marks nothing.
-async function startGuide(params, kind = "tutorial", marks = true) {
-  const r = await untestedRetry(
-    () => app.conn.call("help.guide", { kind, ...params }),
-    (untested) => app.conn.call("help.guide", { kind, ...params, untested }),
-  );
-  if (r === CANCELLED) return null;
-  if (marks) ranHint(kind);
-  drawHints();
-  go(`#s=${r.log_id}`);
-  return r;
-}
-
-// A hint runs what Enter would, with the chips as they stand.
-async function guideFromComposer(kind, btn) {
-  const a = current();
-  if (!a || btn.disabled) return;
-  btn.disabled = true;
-  $("sp-error").textContent = "";
-  try {
-    const marks = kind === "tutorial" || kind === "whats_new";
-    // /doctor runs in the config root unless the person typed a directory.
-    await startGuide({ agent: a.name, cwd: $("sp-cwd").value.trim() || null, ...overrides() }, kind, marks);
-    localStorage.setItem(LAST_AGENT, a.name);
-    pickAgent(a.name);
-  } catch (e) {
-    toast(e.message, { kind: "error" });
-    if (kind === "doctor") loadHints(); // fixed meanwhile: the row goes
-  } finally {
-    btn.disabled = false;
-  }
-}
-
-// The cross records what running the hint would, and starts nothing.
-async function dismissHint(kind, row) {
-  row.hidden = true;
-  try {
-    await app.conn.call("help.dismiss", { what: kind });
-    ranHint(kind);
-  } catch (e) {
-    toast(e.message, { kind: "error" });
-    drawHints();
-  }
-}
-
-for (const [kind, id] of [
-  ["tutorial", "hint-tutorial"],
-  ["whats_new", "hint-whats-new"],
-]) {
-  $(`${id}-go`).addEventListener("click", () => guideFromComposer(kind, $(`${id}-go`)));
-  $(`${id}-x`).addEventListener("click", () => dismissHint(kind, $(id)));
-}
-for (const [kind, id] of [
-  ["feedback", "hint-feedback-go"],
-  ["doctor", "hint-doctor-go"],
-]) {
-  $(id).addEventListener("click", () => guideFromComposer(kind, $(id)));
-}
-
 // -- keys -----------------------------------------------------------------------
 // The ? list: drawn once from the key table.
 const keymap = $("keymap");
@@ -2911,13 +2348,13 @@ installKeys(
       const v = route().view;
       if (v === "session") input.focus();
       // The new tab's message box: Enter there spawns and sends.
-      else if (v === "spawn") $("sp-text").focus();
+      else if (v === "spawn") spawn.focus();
     },
     dictate() {
       if (offline()) return;
       const v = route().view;
-      if (!navigator.mediaDevices || (v !== "session" && v !== "spawn")) return;
-      dictation.toggle(v === "spawn" ? $("sp-text") : input, "key");
+      if (v === "spawn") spawn.dictate();
+      else if (v === "session" && navigator.mediaDevices) dictation.toggle(input, "key");
     },
     browse() {
       const v = route().view;
@@ -2965,10 +2402,7 @@ installKeys(
       if (v === "session" || v === "read") cmenu.openFor(transcript.selected && transcript.nodes.get(transcript.selected));
       else if (v === "fleet") cmenu.openFor(fleetItems().find((x) => x.dataset.id === fleetSel));
     },
-    spawn: () => {
-      spawnFrom = null;
-      if (!offline()) go("#new"); // a new session needs the server
-    },
+    spawn: () => spawn.open(),
     settings: () => go("#settings"),
     journal: () => go("#journal"),
     usage: () => go("#usage"),
@@ -3066,19 +2500,11 @@ const waitOnline = () =>
     }, 500);
   });
 const atts = new Attachments($("atts"), { call: callFor, waitOnline });
-// The new tab's files wait as chips until its session exists (spawnFromComposer).
-const spAtts = new Attachments($("sp-atts"), { call: callFor, waitOnline, hold: true });
-spAtts.show("spawn");
-for (const [btn, pick, tray, key] of [
-  ["attach", "attach-pick", atts, null],
-  ["sp-attach", "sp-attach-pick", spAtts, "spawn"],
-]) {
-  $(btn).addEventListener("click", () => !offline() && $(pick).click());
-  $(pick).addEventListener("change", (ev) => {
-    tray.add([...ev.target.files], key ?? undefined);
-    ev.target.value = "";
-  });
-}
+$("attach").addEventListener("click", () => !offline() && $("attach-pick").click());
+$("attach-pick").addEventListener("change", (ev) => {
+  atts.add([...ev.target.files]);
+  ev.target.value = "";
+});
 // A pasted screenshot is called image.png by every browser: name it by time.
 function pasted(ev) {
   const got = [...(ev.clipboardData?.files || [])];
@@ -3094,50 +2520,36 @@ input.addEventListener("paste", (ev) => {
   const files = pasted(ev);
   if (files) atts.add(files);
 });
-$("sp-text").addEventListener("paste", (ev) => {
-  const files = pasted(ev);
-  if (files) spAtts.add(files, "spawn");
-});
 // A file dropped anywhere on a session's page attaches to it; anywhere else
 // the browser would navigate away to the file.
 const carriesFiles = (ev) => ev.dataTransfer?.types.includes("Files");
 const onSession = () => $("a2").dataset.view === "session";
-const onSpawn = () => $("a2").dataset.view === "spawn";
 document.addEventListener("dragover", (ev) => {
   if (!carriesFiles(ev)) return;
   ev.preventDefault();
   $("composer").classList.toggle("dropping", onSession());
-  $("spawn").classList.toggle("dropping", onSpawn());
 });
 document.addEventListener("dragleave", (ev) => {
   if (ev.relatedTarget) return;
   $("composer").classList.remove("dropping");
-  $("spawn").classList.remove("dropping");
 });
 document.addEventListener("drop", (ev) => {
   if (!carriesFiles(ev)) return;
   ev.preventDefault();
   $("composer").classList.remove("dropping");
-  $("spawn").classList.remove("dropping");
   if (onSession()) atts.add([...ev.dataTransfer.files]);
-  else if (onSpawn()) spAtts.add([...ev.dataTransfer.files], "spawn");
 });
 
-// -- dictation: the mic in both message boxes (parts/dictation.js) -----------
+// -- dictation: the session's message box (parts/dictation.js) ---------------
 // The page's one dictation part. The session's box owns it and builds the mic
-// index.html used to hold; the new tab's first-message box is a second box of
-// the same engine until b5 moves that view into a part of its own.
-// The drafts that got dictated text since their last send, by draft key and
-// "spawn": their send tells the server, which adds a note for the agent (#579).
+// index.html used to hold; the new tab's first-message box joins it from the
+// spawn part.
+// The drafts that got dictated text since their last send, by draft key:
+// their send tells the server, which adds a note for the agent (#579).
 const spoken = new Set();
 const onTake = (file, ms, ctx) => {
   // A take that ends after its tab was left waits in that session's tray
   // rather than going out unseen (record.js, #932).
-  if (ctx?.spawn) {
-    spAtts.add([file], "spawn");
-    if (onSpawn()) spawnFromComposer();
-    return;
-  }
   if (!ctx?.key) return;
   atts.add([file], ctx.key);
   if (app.state.shown === ctx.key && onSession()) send();
@@ -3156,17 +2568,25 @@ const dictation = new DictationPart(app, $("composer"), {
   onLevel: () => artifacts.dictationCheck(),
   onTake,
 });
-dictation.add($("spawn"), {
-  input: () => $("sp-text"),
-  mic: $("sp-mic"),
-  heard: () => spoken.add("spawn"),
-  ctx: () => ({ spawn: true }),
-  onTake,
-});
 // On a touch screen Enter adds a line and the button sends: the key sits where
 // a mistap lands, and half a message costs a turn.
 const touch = matchMedia("(pointer: coarse)");
-if (touch.matches) $("sp-text").placeholder = "What should the agent do?";
+
+// The New session view is a part (b5): it builds the markup index.html used to
+// hold and finds every node under it. The page hands it what only it knows —
+// navigation, the session's first send, the untested-harness question, the
+// agents of a server for its menu, and the page's dictation engine.
+const spawn = new SpawnPart(app, root, {
+  go,
+  untestedRetry,
+  cancelled: CANCELLED,
+  sendFirst,
+  sendLine,
+  stackActs,
+  pasted,
+  agents: spawnAgents,
+  dictation,
+});
 
 // The buttons sit beside one line of text and drop under a longer one, so its
 // lines get the box's whole width (#575). It measures at the narrow width every
@@ -3883,62 +3303,6 @@ const waitCard = attachTabCard(sidebar.waiting, {
 });
 attachCardMenu(sidebar.waiting, { touch: (t) => t.matches(".wait[data-id]") && waitCard.sheet(t) });
 
-// The New session form filled from a source session: its server, agent,
-// model and folder, and a prompt the person goes on writing. The picks come
-// from the source's server's roster once it has loaded, the same way on every
-// server: pickAgent resets the chips to that agent, so nothing a person set in
-// the form before carries over. What the form's text held stays after the prompt.
-// The local session the New session form was opened from: the new session
-// joins its group (#586). The + tab and a spawn clear it.
-let spawnFrom = null;
-async function openSpawnWith({ server = null, agent, model, cwd, prompt, from = null }) {
-  spawnFrom = from;
-  $("sp-text").value = prompt + $("sp-text").value;
-  go("#new");
-  spawnGrow();
-  $("sp-agent").dataset.picked = agent;
-  await setSpServer(server || null);
-  await agentsLoading; // the boot's or a reconnect's load may still be out
-  if (roster.agents.some((a) => a.name === agent)) pickAgent(agent);
-  if (model && model !== "default") {
-    $("sp-model").value = model;
-    markDiffs();
-  }
-  $("sp-cwd").value = cwd || "";
-}
-
-// The New session form filled from a link or a share (#735), never sent: the
-// prompt goes before what the form held, shared files become its chips, and
-// the server and folder are picked once the links and roster have loaded. A
-// server that is not linked is refused aloud rather than swapped for this one
-// with the person none the wiser.
-async function fillSpawn(q) {
-  const shared = q.get("share") && self.caches ? await takeShare(q.get("share")) : { text: "", files: [] };
-  const prompt = [q.get("prompt") || "", shared.text].filter(Boolean).join("\n\n");
-  const t = $("sp-text");
-  t.value = prompt + (prompt && t.value ? "\n\n" : "") + t.value;
-  spawnGrow();
-  if (shared.files.length) spAtts.add(shared.files, "spawn");
-  const server = q.get("server") || "";
-  if (server && server !== app.conn.server) {
-    await app.state.linksReady;
-    if (linkOf(server)?.state !== "linked") return toast(`${server} is not a linked server: the session would start on this one`, { kind: "error" });
-    await setSpServer(server);
-  }
-  await agentsLoading;
-  if (q.get("cwd")) $("sp-cwd").value = q.get("cwd");
-}
-
-// What the service worker kept of a share (sw.js stash), taken out once.
-async function takeShare(id) {
-  const cache = await caches.open("aegis.share");
-  const meta = await cache.match(`/share/${id}`);
-  if (!meta) return { text: "", files: [] }; // taken already, or replaced by a newer share
-  const { text, files } = await meta.json();
-  const blobs = await Promise.all(files.map((_, i) => cache.match(`/share/${id}/${i}`).then((r) => r?.blob())));
-  await caches.delete("aegis.share");
-  return { text, files: files.flatMap((f, i) => (blobs[i] ? [new File([blobs[i]], f.name, { type: f.type })] : [])) };
-}
 
 // What a selection in the transcript offers (spec 05). The text is taken now:
 // a touch can clear the selection before a button's click lands.
@@ -3955,7 +3319,7 @@ function selectionItems(range) {
       id: "new",
       label: "New session",
       icon: "start",
-      run: () => openSpawnWith({ server: s.server, agent: s.agent, model: s.model, cwd: s.cwd, from: s.server ? null : s.key, prompt: `From ${s.handle}:\n${quoted(text)}\n\n` }),
+      run: () => spawn.openWith({ server: s.server, agent: s.agent, model: s.model, cwd: s.cwd, from: s.server ? null : s.key, prompt: `From ${s.handle}:\n${quoted(text)}\n\n` }),
     },
     {
       id: "copy",
@@ -4067,13 +3431,8 @@ async function toComposer(key, text, opts) {
 // The New session form with `text` for its prompt: from session `s`'s agent,
 // model and folder, or the form's own picks. The text is in the form at once.
 function newSessionWith(s, text) {
-  if (s) openSpawnWith({ server: s.server, agent: s.agent, model: s.model, cwd: s.cwd, from: s.server ? null : s.key, prompt: `From ${s.handle}:\n${text}\n\n` });
-  else {
-    spawnFrom = null;
-    $("sp-text").value = `${text}\n\n${$("sp-text").value}`;
-    go("#new");
-    spawnGrow();
-  }
+  if (s) spawn.openWith({ server: s.server, agent: s.agent, model: s.model, cwd: s.cwd, from: s.server ? null : s.key, prompt: `From ${s.handle}:\n${text}\n\n` });
+  else spawn.prefill(text);
   return true;
 }
 
@@ -4109,7 +3468,7 @@ function rowMenu(t, ev) {
     id: "new",
     label: "New session",
     icon: "start",
-    run: () => quote((q) => openSpawnWith({ server: s.server, agent: s.agent, model: s.model, cwd: s.cwd, from: s.server ? null : s.key, prompt: `From ${s.handle}:\n${q}\n\n` })),
+    run: () => quote((q) => spawn.openWith({ server: s.server, agent: s.agent, model: s.model, cwd: s.cwd, from: s.server ? null : s.key, prompt: `From ${s.handle}:\n${q}\n\n` })),
   };
   const copy = { id: "copy", label: "Copy", icon: "copy", key: "c", run: () => copyRow(id, transcript.nodes.get(id), copyDeps) };
   // A part still streaming has an id the whole block will replace: no link.
