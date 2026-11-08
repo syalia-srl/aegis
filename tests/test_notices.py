@@ -104,6 +104,7 @@ def session(
             owner=owner,
             spawned_by=spawned_by,
             spawned_from=spawned_from,
+            notices=True,
         ),
         worker=worker,
         schedule=None,

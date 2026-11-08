@@ -1100,7 +1100,7 @@ export class Settings {
       this.draw();
     }, "link danger");
     const fold = h("details", { className: "set-priming", open: !!a.priming }, h("summary", { textContent: a.priming ? "Priming" : "Add a priming" }), priming);
-    card.append(name, h("div", { className: "picks" }, harness, effort, permission), casc, h("div", { className: "set-card-foot" }, fold, this.keepFold(a), this.mcpFold(a), this.exitFold(a), star, del));
+    card.append(name, h("div", { className: "picks" }, harness, effort, permission), casc, h("div", { className: "set-card-foot" }, fold, this.keepFold(a), this.mcpFold(a), this.productFold(a), this.exitFold(a), star, del));
     if (isDefault) card.classList.add("is-default");
     return card;
   }
@@ -1155,6 +1155,34 @@ export class Settings {
     });
     const fold = h("details", { className: "set-priming set-mcp", open: on.length > 0 }, summary, h("p", { className: "set-none", textContent: "Its sessions get these servers beside aegis's own, and call their tools without asking." }), h("div", { className: "set-tools" }, ...toggles));
     fold.dataset.key = "agents.*.mcp";
+    return fold;
+  }
+
+  // A product agent's switches (#983): each toggle turns one away from its
+  // default, so a pressed toggle is a key the file writes.
+  productFold(a) {
+    const switches = [
+      ["harness_tools", true, "No harness tools"],
+      ["isolated", false, "Isolated"],
+      ["primer", true, "No aegis prompt"],
+      ["notices", true, "No notices"],
+    ];
+    const summary = h("summary");
+    const on = () => switches.filter(([k, d]) => (a[k] ?? d) !== d).map(([, , label]) => label);
+    const say = () => (summary.textContent = on().length ? on().join(", ") : "Run as a product agent");
+    say();
+    const toggles = switches.map(([k, d, label]) => {
+      const b = button(label, null, () => {
+        a[k] = (a[k] ?? d) === d ? !d : d;
+        b.setAttribute("aria-pressed", String(a[k] !== d));
+        say();
+        this.touch();
+      }, "set-tool");
+      b.setAttribute("aria-pressed", String((a[k] ?? d) !== d));
+      return b;
+    });
+    const fold = h("details", { className: "set-priming set-product", open: on().length > 0 }, summary, h("p", { className: "set-none", textContent: "For an agent a program runs: only its MCP tools, none of this machine's harness config, the program's prompt alone, and no nudges or notices." }), h("div", { className: "set-tools" }, ...toggles));
+    fold.dataset.key = "agents.*.harness_tools agents.*.isolated agents.*.primer agents.*.notices";
     return fold;
   }
 

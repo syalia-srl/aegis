@@ -59,7 +59,7 @@ from .claude.stream import (
     Title,
     ToolCall,
 )
-from .harness import Launch, Process, harness_for
+from .harness import CONTAINS, Launch, Process, harness_for, isolated_dirs
 from .meta import MetaStore
 from .names import default_title
 from .ops import OpError
@@ -247,6 +247,10 @@ class Archived(Exception):
     """A message was sent to an archived session."""
 
 
+# The product-agent switches and their defaults (SpawnSpec, #983).
+SWITCHES = {"harness_tools": True, "isolated": False, "primer": True, "notices": True}
+
+
 @dataclass(frozen=True)
 class SpawnSpec:
     """What a session's process runs with, fixed at spawn and recorded in the
@@ -299,6 +303,11 @@ class SpawnSpec:
     # A host's strings for this session (policy.SpawnRequest.tags), copied to
     # every session it starts; shown to no one (#959).
     tags: dict[str, str] = dataclasses.field(default_factory=dict)
+    # A product agent's switches (policy.SpawnRequest, #983), fixed at spawn.
+    harness_tools: bool = True
+    isolated: bool = False
+    primer: bool = True
+    notices: bool = True
 
     def record(self) -> dict:
         """The fields a spawn record and a meta carry."""
@@ -334,6 +343,9 @@ class SpawnSpec:
             d["knowledge_native"] = True
         if self.tags:
             d["tags"] = dict(self.tags)
+        for k, default in SWITCHES.items():
+            if getattr(self, k) != default:
+                d[k] = getattr(self, k)
         return d
 
     @classmethod
@@ -359,6 +371,7 @@ class SpawnSpec:
             cascade=_cascade_of(d.get("cascade")),
             knowledge_native=bool(d.get("knowledge_native")),
             tags=dict(d.get("tags") or {}),
+            **{k: bool(d.get(k, default)) for k, default in SWITCHES.items()},
         )
 
 
@@ -850,6 +863,21 @@ class Session:
                 }
             )
             raise
+        if missing := [
+            k
+            for k in CONTAINS
+            if k not in self.harness.contains and getattr(self.spec, k) != SWITCHES[k]
+        ]:
+            text = f"{self.harness.label} cannot run with {', '.join(missing)} yet"
+            self._record(
+                {"kind": "harness_error", "text": f"This session cannot start: {text}"}
+            )
+            raise OpError("unsupported", text)
+        cwd, home = self.spec.cwd, None
+        if self.spec.isolated:
+            cwd, home = await asyncio.to_thread(
+                isolated_dirs, self.state_root, self.harness.name, self.log_id
+            )
         mcp, system_prompt = self._host.spawn_args(self)
         inbox = await asyncio.to_thread(
             attachments.ensure_inbox, self.state_root, self.log_id
@@ -858,7 +886,7 @@ class Session:
         proc = self.harness.process(
             Launch(
                 via=self.exit_via,
-                cwd=self.spec.cwd,
+                cwd=cwd,
                 model=self.spec.model,
                 effort=self.spec.effort,
                 permission=self.spec.permission,
@@ -876,6 +904,8 @@ class Session:
                 knowledge_native=self.spec.knowledge_native,
                 env=self.host_env,
                 extra_mcp=extra_mcp,
+                harness_tools=self.spec.harness_tools,
+                home=home,
             )
         )
         # Before the start: a harness can speak while it starts (OpenCode's
@@ -1048,6 +1078,8 @@ class Session:
         msg = {"header": header, "body": body, "ts": time.time()}
         if by_person:
             msg["by_person"] = True
+        if not (msg := self._quiet(msg)):
+            return "sent"  # aegis's own news, which a product agent never gets
         if urgent and self.status == "working" and self.harness.steers_mid_turn:
             # Steered in as a person's mid-turn message is: a user message at
             # the next tool boundary (Claude Code) or a turn/steer (Codex).
@@ -1068,9 +1100,19 @@ class Session:
         self._publish_now()
         self._host.status_changed(self)
 
+    def _quiet(self, msg: dict) -> dict | None:
+        """``msg`` as a session with notices off gets it (#983): aegis's own
+        messages dropped, except a cut turn's continuation, under a header
+        that does not name aegis. Unchanged when notices are on."""
+        if self.spec.notices or not msg["header"].startswith(AEGIS_HEADER):
+            return msg
+        if msg["header"].startswith(CONTINUED):
+            return msg | {"header": "> continue"}
+        return None
+
     async def _flush_held(self) -> None:
         self._flushing = True
-        batch, self.held = self.held, []
+        batch, self.held = [m for m in map(self._quiet, self.held) if m], []
         try:
             if batch:
                 # Before the send gathers notices: the "held" warning ends here.
@@ -1130,7 +1172,7 @@ class Session:
             self._set(title=default_title(typed or text))
         if self.cascade_exhausted:
             self.cascade_exhausted = False  # a new turn starts
-        if not text.startswith("/"):
+        if not text.startswith("/") and self.spec.notices:
             await self._host.know_how_ready(self)
             # The hint first, then the notices. The record and the harness get
             # the same text, so the fold pairs them; the fold splits the
@@ -1674,6 +1716,12 @@ def _cascade_of(raw: Any) -> tuple[str, ...]:
     if isinstance(raw, dict):
         raw = raw.get("models")
     return tuple(str(m) for m in raw) if isinstance(raw, list) else ()
+
+
+# aegis's own inbox headers, and the restart and crash ones among them
+# (restarts.header) that continue a cut turn.
+AEGIS_HEADER = "> from aegis:"
+CONTINUED = ("> from aegis:restart", "> from aegis:crash")
 
 
 def _inbox_text(batch: list[dict]) -> str:

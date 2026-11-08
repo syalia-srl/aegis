@@ -101,3 +101,30 @@ async def test_a_raising_or_slow_on_event_never_delays_a_turn(world_with):
     t0 = time.monotonic()
     await turn(s, "/md hi")
     assert time.monotonic() - t0 < 2
+
+
+class Brief(StandalonePolicy):
+    def tools(self, who, session):
+        return {"turn_end", "meta"}
+
+    async def spawn(self, who, req):
+        return req.replace(primer=False, system_prompt="You edit the document.")
+
+
+async def test_meta_lists_only_the_sessions_tools(world_with):
+    w = await world_with(Brief())
+    s = await w.spawn()
+    said = await w.app.registry.call("meta", {}, Caller("agent", s.log_id))
+    assert "Tools: meta, turn_end." in said or "Tools: turn_end, meta." in said
+    assert "plan_update" not in said
+
+
+async def test_without_the_primer_the_prompt_is_the_hosts_alone(world_with):
+    w = await world_with(Brief())
+    s = await w.spawn()
+    _, prompt = w.app.sessions.spawn_args(s)
+    assert prompt == "You edit the document."
+    said = await w.app.registry.call("meta", {}, Caller("agent", s.log_id))
+    assert (
+        said.startswith("You edit the document.") and "aegis, a workplace" not in said
+    )

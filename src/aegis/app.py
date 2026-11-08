@@ -1266,6 +1266,10 @@ class App:
             env={},
             system_prompt=None,
             tags=tags,
+            harness_tools=spec.harness_tools,
+            isolated=spec.isolated,
+            primer=spec.primer,
+            notices=spec.notices,
         )
         self._offered(who, req)
         req = await self.policy.spawn(who, req)
@@ -1284,6 +1288,10 @@ class App:
             cwd=Path(req.cwd),
             priming=priming,
             tags=dict(req.tags),
+            harness_tools=req.harness_tools,
+            isolated=req.isolated,
+            primer=req.primer,
+            notices=req.notices,
         )
         return spec, dict(req.env)
 

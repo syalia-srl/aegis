@@ -194,3 +194,45 @@ def test_tags_survive_the_spawn_record():
         tags={"org": "north"},
     )
     assert SpawnSpec.from_record(s.record(), Path("/x")).tags == {"org": "north"}
+
+
+SWITCHES = {"harness_tools": False, "isolated": True, "primer": False, "notices": False}
+
+
+async def test_spawn_may_set_the_four_product_switches(world):
+    world.gate.rewrite = dict(SWITCHES)
+    s = await spawn(world.app)
+    _, req = world.gate.seen[0]
+    assert (req.harness_tools, req.isolated, req.primer, req.notices) == (
+        True,
+        False,
+        True,
+        True,
+    )
+    assert {k: getattr(s.spec, k) for k in SWITCHES} == SWITCHES
+
+
+def test_the_product_switches_survive_the_spawn_record():
+    s = SpawnSpec(
+        agent="a",
+        model="m",
+        effort="high",
+        permission="full",
+        cwd=Path("/w"),
+        **SWITCHES,
+    )
+    back = SpawnSpec.from_record(s.record(), Path("/x"))
+    assert {k: getattr(back, k) for k in SWITCHES} == SWITCHES
+    plain = SpawnSpec(
+        agent="a", model="m", effort="high", permission="full", cwd=Path("/w")
+    )
+    assert not set(SWITCHES) & set(plain.record())
+
+
+async def test_a_harness_that_cannot_contain_refuses_the_start(world, monkeypatch):
+    from aegis.claude.harness import ClaudeCode
+
+    monkeypatch.setattr(ClaudeCode, "contains", frozenset({"isolated"}))
+    world.gate.rewrite = dict(SWITCHES)
+    with pytest.raises(OpError, match="cannot run with harness_tools yet"):
+        await spawn(world.app)

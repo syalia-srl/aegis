@@ -31,7 +31,7 @@ from ruamel.yaml import YAML, YAMLError
 from .claude.process import PERMISSION_MODE, REPLACED_TOOLS
 from .ops import OpError
 from .roots import CONFIG_FILE
-from .session import SpawnSpec
+from .session import SWITCHES, SpawnSpec
 
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 HARNESSES = ("claude-code", "opencode", "codex", "cursor", "pi")
@@ -79,6 +79,11 @@ class Agent:
     models: tuple[str, ...] = ()
     # Models ``models:`` listed more than once; the repeats are dropped.
     repeated: tuple[str, ...] = ()
+    # A product agent's switches (session.SWITCHES, #983).
+    harness_tools: bool = True
+    isolated: bool = False
+    primer: bool = True
+    notices: bool = True
 
     @property
     def enabled(self) -> bool:
@@ -138,6 +143,12 @@ def _agent(name: str, raw: Any) -> Agent:
         isinstance(mcp, list) and all(isinstance(n, str) and n for n in mcp)
     )
     mcp_error = None if mcp_ok else "mcp must be a list of MCP server names"
+    switches = {k: d.get(k, default) for k, default in SWITCHES.items()}
+    switch_error = next(
+        (f"{k} must be true or false" for k, v in switches.items()
+         if not isinstance(v, bool)),
+        None,
+    )  # fmt: skip
     return Agent(
         name=str(name),
         **values,
@@ -145,10 +156,20 @@ def _agent(name: str, raw: Any) -> Agent:
         keep_harness_tools=keep,
         exit=str(d.get("exit") or ""),
         mcp=tuple(mcp) if mcp_ok and mcp else (),
-        error=error or keep_error or mcp_error,
+        error=error or keep_error or mcp_error or switch_error,
         models=models or ((values["model"],) if values["model"] else ()),
         repeated=repeated,
+        harness_tools=_flag(switches, "harness_tools"),
+        isolated=_flag(switches, "isolated"),
+        primer=_flag(switches, "primer"),
+        notices=_flag(switches, "notices"),
     )
+
+
+def _flag(switches: dict, key: str) -> bool:
+    """A switch as the file has it, or its default when it is not a bool."""
+    v = switches[key]
+    return v if isinstance(v, bool) else SWITCHES[key]
 
 
 def _models(d: dict) -> tuple[tuple[str, ...], tuple[str, ...], str | None]:
@@ -268,6 +289,7 @@ def resolve(
         harness=fields["harness"],
         priming=agent.priming,
         keep_harness_tools=agent.keep_harness_tools,
+        **{k: getattr(agent, k) for k in SWITCHES},
         cascade=cascade,
         overridden=overridden,
         spawned_by=spawned_by,

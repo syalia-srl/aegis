@@ -42,6 +42,9 @@ PERMISSIONS: dict[str, dict[str, str]] = {
     "full": {"*": "allow"},
 }
 ALWAYS = {"aegis_*": "allow", "question": "deny", "doom_loop": "deny"}
+# A product agent's (#983): none of OpenCode's own tools, so only the MCP
+# servers' that ALWAYS and the servers allow after it.
+NO_TOOLS = {"*": "deny"}
 NATIVE = {"skill": "deny"}
 
 
@@ -50,11 +53,12 @@ def rules(
     read_dirs: tuple[Path, ...] = (),
     native: bool = False,
     servers: tuple[str, ...] = (),
+    harness_tools: bool = True,
 ) -> dict[str, Any]:
     """Action -> effect, or for a path rule resource -> effect. The tools of
     each server in ``servers`` run without asking, as aegis's own (#960)."""
     out: dict[str, Any] = {
-        **PERMISSIONS[permission],
+        **(PERMISSIONS[permission] if harness_tools else NO_TOOLS),
         **ALWAYS,
         **{f"{name}_*": "allow" for name in servers},
         **(NATIVE if native else {}),
@@ -74,10 +78,12 @@ def ruleset(
     read_dirs: tuple[Path, ...] = (),
     native: bool = False,
     servers: tuple[str, ...] = (),
+    harness_tools: bool = True,
 ) -> list[dict]:
     """The rules as OpenCode 2 lists them, in the order they apply."""
     out = []
-    for action, effect in rules(permission, read_dirs, native, servers).items():
+    got = rules(permission, read_dirs, native, servers, harness_tools)
+    for action, effect in got.items():
         by_resource = effect if isinstance(effect, dict) else {"*": effect}
         for resource, e in by_resource.items():
             out.append({"action": action, "resource": resource, "effect": e})
@@ -90,11 +96,16 @@ def child_config(
     read_dirs: tuple[Path, ...] = (),
     native: bool = False,
     servers: Sequence[McpServer] = (),
+    harness_tools: bool = True,
 ) -> dict[str, Any]:
     """The child's config. It travels in OPENCODE_CONFIG_CONTENT, an
-    environment variable, so the servers' values go in as they are."""
+    environment variable, so the servers' values go in as they are. Every
+    server runs outside code mode, so each call reaches the event stream by
+    its tool's name."""
     names = tuple(s.name for s in servers)
-    cfg: dict[str, Any] = {"permissions": ruleset(permission, read_dirs, native, names)}
+    cfg: dict[str, Any] = {
+        "permissions": ruleset(permission, read_dirs, native, names, harness_tools)
+    }
     entries: dict[str, dict] = {}
     if mcp is not None:
         from ..mcp import HEADER
@@ -114,16 +125,30 @@ def child_config(
                 "url": s.url,
                 "headers": dict(s.headers),
                 "oauth": False,
+                "codemode": False,
             }
         else:
             entries[s.name] = {
                 "type": "local",
                 "command": [s.command, *s.args],
                 "environment": dict(s.env),
+                "codemode": False,
             }
     if entries:
         cfg["mcp"] = {"servers": entries}
     return cfg
+
+
+def isolated_env(home: Path) -> dict[str, str]:
+    """An isolated session's environment (#983): ``home`` as the config root,
+    so OpenCode reads no global ``AGENTS.md``, config or skills of the
+    person's, and neither project config nor Claude Code's files. The login
+    lives in the data dir, which stays."""
+    return {
+        "XDG_CONFIG_HOME": str(home),
+        "OPENCODE_DISABLE_PROJECT_CONFIG": "1",
+        "OPENCODE_DISABLE_CLAUDE_CODE": "1",
+    }
 
 
 def split_model(model: str) -> dict[str, str]:
