@@ -338,7 +338,7 @@ async def test_asgi_mounts_at_the_hosts_prefix(host_srv):
         async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}") as c:
             page = await c.get("/aegis/")
             assert page.status_code == 200
-            assert 'href="/aegis/static/css/base.css"' in page.text
+            assert 'href="/aegis/static/css/client.css"' in page.text
             entry = await c.get("/aegis/aegis.js")
             assert entry.status_code == 200
             assert entry.headers["content-type"].startswith("text/javascript")

@@ -44,7 +44,7 @@ function stackIn(root) {
 }
 
 // In a session the stack sits over the transcript's column, above the message
-// box and the navigator; elsewhere it keeps its corner (base.css). Both nodes
+// box and the navigator; elsewhere it keeps its corner (client.css). Both nodes
 // are looked up under the root the stack was drawn in.
 function place(root, stack) {
   const at = (id) => {

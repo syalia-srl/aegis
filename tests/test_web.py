@@ -65,11 +65,11 @@ class Conn:
 def test_index_and_static_are_public_and_always_revalidated(project, fake_claude):
     with client_for(project, fake_claude) as c:
         assert c.get("/").status_code == 200
-        css = c.get("/static/css/base.css")
+        css = c.get("/static/css/client.css")
         assert css.status_code == 200 and css.headers["cache-control"] == "no-cache"
         assert (
             c.get(
-                "/static/css/base.css", headers={"if-none-match": css.headers["etag"]}
+                "/static/css/client.css", headers={"if-none-match": css.headers["etag"]}
             ).status_code
             == 304
         )
@@ -1292,7 +1292,7 @@ def test_a_prefixed_page_carries_the_prefix_in_its_links(project, fake_claude):
     with prefixed_client(project, fake_claude) as c:
         page = c.get("/").text
         assert 'href="/aegis/manifest.webmanifest"' in page
-        assert 'href="/aegis/static/css/base.css"' in page
+        assert 'href="/aegis/static/css/client.css"' in page
         assert 'src="/aegis/static/js/app.js"' in page
         assert "__AEGIS_PREFIX__" not in page
         # The standalone client still gets root-relative links.

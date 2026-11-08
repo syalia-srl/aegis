@@ -11,7 +11,7 @@
 // It follows the bottom while the reader is at the bottom; once they scroll
 // up, new entries light the navigator's latest button instead of moving the
 // page. Rows skip
-// layout off screen (content-visibility in base.css) and take their real
+// layout off screen (content-visibility in client.css) and take their real
 // height when they near the viewport, so while following, a change in the
 // list's height pins it to the bottom again. Only the reader moving up lets
 // go: a scroll event that reads short because the list grew after toBottom()
@@ -50,7 +50,7 @@ function swap(old, n) {
   const r = sel.rangeCount && !sel.isCollapsed ? sel.getRangeAt(0) : null;
   const body = old.querySelector(":scope > .body");
   const kept = r && body?.contains(r.startContainer) && body.contains(r.endContainer) ? offsetsIn(body, r) : null;
-  // A new row skips layout at its 40 px placeholder (base.css) until it is
+  // A new row skips layout at its 40 px placeholder (client.css) until it is
   // drawn a frame later: a reply streaming in, replaced at every delta,
   // shrank the list for that frame and the view jumped up and back (#668).
   // The new row's placeholder is the old row's height.

@@ -393,7 +393,7 @@ function place() {
 // The bar of a row no longer drawn (its pane went behind another canvas tab):
 // no scroll tells follow(), so the canvas calls this when it lays out.
 export function unbarHidden() {
-  // A tabbed canvas hides a pane with visibility, not display (base.css).
+  // A tabbed canvas hides a pane with visibility, not display (client.css).
   // The row by its id: a streaming delta redraws it as a new node.
   if (!bar_?.row) return;
   const row = bar_.row.isConnected ? bar_.row : document.querySelector(`.row[data-id="${CSS.escape(bar_.row.dataset.id)}"]`);
