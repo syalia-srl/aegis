@@ -1,7 +1,7 @@
 // English labels: the mount's own strings, the ones no part owns, and the
-// transcript's. A2 ships the mount's six, a5 the transcript's chrome and rows
-// (the part, transcript.js, entries.js, find.js and copy.js), a7 the
-// composer's, and b9 the rest.
+// transcript's and composer's. A2 ships the mount's six, a5 the transcript's
+// chrome and rows (the part, transcript.js, entries.js, find.js and copy.js),
+// a7 the composer's, its attachments' and its outbox's, and b9 the rest.
 //
 // A key is <part>.<thing>. Interpolation is {name}: a table stays
 // JSON-compatible (tests/test_labels.py parses both files) and a translator
@@ -164,5 +164,56 @@ export default {
   "copy.done": "copied",
   "copy.failedWord": "failed",
   "copy.copied": "Copied",
-  "copy.failed": "Copy failed: {error}"
+  "copy.failed": "Copy failed: {error}",
+
+  "composer.placeholder.locked": "Step {node} of the workflow {title}. You can read it; it takes no messages until the run stops.",
+  "composer.placeholder.off": "This session's server is out of reach; nothing can be sent until it is back.",
+  "composer.placeholder.asleepIdle": "Asleep after {idle} idle. Typing wakes it.",
+  "composer.placeholder.asleepIdleBare": "Asleep while idle. Typing wakes it.",
+  "composer.placeholder.asleep": "Asleep; your next message wakes it.",
+  "composer.placeholder.default": "Message the agent. Enter sends, Shift+Enter adds a line, / for commands, Esc interrupts.",
+  "composer.attach": "Attach files",
+  "composer.interrupt": "Interrupt",
+  "composer.interruptTitle": "Interrupt (Esc)",
+  "composer.send": "Send",
+  "composer.sendTitle": "Send (Enter)",
+  "composer.effort": "{effort} effort",
+  "composer.sending": "sending when the attachments finish…",
+  "composer.notConfirmed": "No answer in 5 s. Send again: it will not arrive twice.",
+  "composer.notSent": "Not sent: {error}",
+  "composer.startedOnce": "Started once: {error}",
+  "composer.untested.unknownVersion": "{label}: version unknown",
+  "composer.untested.range": "{head} · tested with {range}",
+  "composer.untested.between": "{min} to {max}",
+  "composer.untested.found": "found: {path}",
+  "composer.untested.nothing": "nothing on PATH",
+  "composer.untested.copy": "Copy",
+  "composer.untested.copied": "Copied",
+  "composer.untested.copyFailed": "Could not copy",
+  "composer.untested.cancel": "Cancel",
+  "composer.untested.always": "Always allow {version}",
+  "composer.untested.startOnce": "Start once",
+  "composer.untested.titleUnknown": "{label}'s version is unknown",
+  "composer.untested.title": "{label} {version} is untested",
+  "composer.archive.question": "Archive {title}? Its tab goes away in every browser; Reopen in the archive brings it back.",
+  "composer.archive.ok": "Archive",
+  "composer.restart.question": "Restart {handle}? It cuts the turn it is working on.",
+  "composer.restart.ok": "Restart",
+
+  "attach.size.bytes": "{n} B",
+  "attach.size.kb": "{n} KB",
+  "attach.size.mb": "{n} MB",
+  "attach.remove": "Remove",
+  "attach.removeName": "Remove {name}",
+  "attach.failedRetry": "failed · retry",
+  "attach.failed": "an attachment failed; click it to retry or remove it",
+  "attach.uploading": "attachments are still uploading",
+
+  "outbox.queued.one": "queued message",
+  "outbox.queued.other": "queued messages",
+  "outbox.sent.one": "{messages} sent",
+  "outbox.sent.other": "{messages} sent",
+  "outbox.look.one": "{messages} needs a look",
+  "outbox.look.other": "{messages} need a look",
+  "outbox.notSent": "Not sent: the connection went"
 };

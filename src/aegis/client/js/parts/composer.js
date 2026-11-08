@@ -14,8 +14,8 @@
 // the options turn them on. Until then `this.menu` and `this.dictation` stay
 // null and every code path that would use them is skipped.
 //
-// The strings here are still literal English: a7 moves them into the label
-// table, key by key, the way a5 did the transcript's.
+// Every word it draws comes from the mount's label table (a7), through `t`, so
+// a Spanish chat's box, its errors and its attachments read Spanish too.
 
 import { Attachments } from "../attach.js";
 import { choose, ask } from "../dialog.js";
@@ -32,7 +32,7 @@ export const COMPOSER_HTML = `
 <div class="atts" id="atts" hidden></div>
 <div class="box">
 <textarea id="input" rows="1"></textarea>
-<div class="acts"><button class="mic clip" id="attach" type="button" title="Attach files" aria-label="Attach files"></button><input type="file" id="attach-pick" multiple hidden><span data-slot="mic"></span><button class="int" id="interrupt" title="Interrupt (Esc)" aria-label="Interrupt" hidden></button><button class="send" id="send" title="Send (Enter)" aria-label="Send"></button></div>
+<div class="acts"><button class="mic clip" id="attach" type="button"></button><input type="file" id="attach-pick" multiple hidden><span data-slot="mic"></span><button class="int" id="interrupt" hidden></button><button class="send" id="send"></button></div>
 </div>
 <div class="chips">
 <span class="chip" id="chip-model"></span><span class="chip" id="chip-effort"></span><span class="chip" id="chip-perm"></span>
@@ -46,7 +46,6 @@ export const COMPOSER_HTML = `
 // command or files go back in the box, since only text waits on the device.
 const SEND_VERDICT_MS = 5000;
 const LATE = new Error("no answer yet");
-const NOT_CONFIRMED = "No answer in 5 s. Send again: it will not arrive twice.";
 const CANCELLED = Symbol("cancelled");
 
 const answered = (call) =>
@@ -96,6 +95,7 @@ export class ComposerPart {
     this.atts = new Attachments(this.attsTray, {
       call: (key, op, params) => this.mount.callFor(key, op, params),
       waitOnline: () => this.waitOnline(),
+      t: this.t,
     });
     this.wire();
     this.ruler = this.makeRuler();
@@ -108,11 +108,18 @@ export class ComposerPart {
     this.outbox.setSender((key, params, opts) => this.deliver(key, params, opts));
   }
 
-  // The part draws its own glyphs; the sprite is in the mount's root.
+  // The part draws its own glyphs; the sprite is in the mount's root. Its
+  // words come from the mount's table, so a Spanish chat's buttons are Spanish.
   icons() {
-    byId(this.el, "attach").append(icon("clip"));
-    byId(this.el, "send").append(icon("send"));
-    byId(this.el, "interrupt").append(icon("stop"));
+    this.attachBtn.title = this.t("composer.attach");
+    this.attachBtn.setAttribute("aria-label", this.t("composer.attach"));
+    this.interruptBtn.title = this.t("composer.interruptTitle");
+    this.interruptBtn.setAttribute("aria-label", this.t("composer.interrupt"));
+    this.sendBtn.title = this.t("composer.sendTitle");
+    this.sendBtn.setAttribute("aria-label", this.t("composer.send"));
+    this.attachBtn.append(icon("clip"));
+    this.sendBtn.append(icon("send"));
+    this.interruptBtn.append(icon("stop"));
   }
 
   wire() {
@@ -226,7 +233,7 @@ export class ComposerPart {
       n.classList.toggle("click", !!this.menu);
     };
     chip("chip-model", "h", s?.harness, s?.model || "", s?.model_id || "");
-    chip("chip-effort", "e", s?.effort, s ? `${s.effort} effort` : "");
+    chip("chip-effort", "e", s?.effort, s ? this.t("composer.effort", { effort: s.effort }) : "");
     chip("chip-perm", "p", s?.permission, s?.permission || "");
   }
 
@@ -239,18 +246,21 @@ export class ComposerPart {
     const placeholder = !s
       ? ""
       : locked(s)
-        ? `Step ${s.workflow.node} of the workflow ${workflowTitle(s.workflow.run) || s.workflow.run}. You can read it; it takes no messages until the run stops.`
+        ? this.t("composer.placeholder.locked", {
+            node: s.workflow.node,
+            title: workflowTitle(s.workflow.run) || s.workflow.run,
+          })
         : s.off
-          ? "This session's server is out of reach; nothing can be sent until it is back."
+          ? this.t("composer.placeholder.off")
           : s.state === "asleep" && s.asleep_why === "idle"
             ? idleFor(s)
-              ? `Asleep after ${idleFor(s)} idle. Typing wakes it.`
-              : "Asleep while idle. Typing wakes it."
+              ? this.t("composer.placeholder.asleepIdle", { idle: idleFor(s) })
+              : this.t("composer.placeholder.asleepIdleBare")
             : s.state === "asleep"
-              ? "Asleep; your next message wakes it."
+              ? this.t("composer.placeholder.asleep")
               : touch.matches
                 ? ""
-                : "Message the agent. Enter sends, Shift+Enter adds a line, / for commands, Esc interrupts.";
+                : this.t("composer.placeholder.default");
     if (this.input.placeholder !== placeholder) {
       this.input.placeholder = placeholder;
       this.autosize();
@@ -359,7 +369,7 @@ export class ComposerPart {
     if (this.atts.list(s.key).length) {
       // Enter during an upload sends when it finishes, never without the files.
       this.waiting.add(s.key);
-      this.error.textContent = "sending when the attachments finish…";
+      this.error.textContent = this.t("composer.sending");
       try {
         await this.atts.settled(s.key);
       } finally {
@@ -491,11 +501,11 @@ export class ComposerPart {
       }
       // A command or files: the box is the person's again, with the text, and
       // says so. An answer that comes later still settles it, unless they rewrote it.
-      if (this.key === key) this.error.textContent = NOT_CONFIRMED;
+      if (this.key === key) this.error.textContent = this.t("composer.notConfirmed");
       const still = () => (this.key === key ? this.input.value.trim() : localStorage.getItem(`aegis.draft.${key}`)?.trim()) === text;
       call.then(
         (r) => still() && sent(r),
-        (e) => still() && this.key === key && (this.error.textContent = `Not sent: ${e.message}`),
+        (e) => still() && this.key === key && (this.error.textContent = this.t("composer.notSent", { error: e.message })),
       );
     } finally {
       if (fromComposer) {
@@ -523,29 +533,32 @@ export class ComposerPart {
   untestedAsk(d) {
     const p = (cls, text) => el("p", cls, text);
     const body = el("div", "untested");
-    const range = d.min === d.max ? d.max : `${d.min} to ${d.max}`;
-    const head = d.state === "unknown" ? `${d.label}: version unknown` : `${d.label} ${d.version}`;
-    body.append(p("range", `${head} · tested with ${range}`));
+    const range = d.min === d.max ? d.max : this.t("composer.untested.between", { min: d.min, max: d.max });
+    const head = d.state === "unknown" ? this.t("composer.untested.unknownVersion", { label: d.label }) : `${d.label} ${d.version}`;
+    body.append(p("range", this.t("composer.untested.range", { head, range })));
     body.append(p("text", (d.message || "").split("\n")[0]));
-    body.append(p("found", `found: ${d.path || "nothing on PATH"}`));
+    body.append(p("found", this.t("composer.untested.found", { path: d.path || this.t("composer.untested.nothing") })));
     const cmd = el("div", "cmd");
     const code = document.createElement("code");
     code.textContent = d.install;
-    const copy = el("button", "btn copy-cmd", "Copy");
+    const copy = el("button", "btn copy-cmd", this.t("composer.untested.copy"));
     copy.type = "button";
     copy.addEventListener("click", () =>
       navigator.clipboard.writeText(d.install).then(
-        () => toast("Copied", { root: this.mount.root }),
-        () => toast("Could not copy", { kind: "error", root: this.mount.root }),
+        () => toast(this.t("composer.untested.copied"), { root: this.mount.root }),
+        () => toast(this.t("composer.untested.copyFailed"), { kind: "error", root: this.mount.root }),
       ),
     );
     cmd.append(code, copy);
     body.append(cmd);
     for (const note of d.notes || []) body.append(p("note", note));
-    const buttons = [{ label: "Cancel", value: null }];
-    if (d.may_always) buttons.push({ label: `Always allow ${d.version}`, value: "always" });
-    buttons.push({ label: "Start once", value: "once", primary: true });
-    const title = d.state === "unknown" ? `${d.label}'s version is unknown` : `${d.label} ${d.version} is untested`;
+    const buttons = [{ label: this.t("composer.untested.cancel"), value: null }];
+    if (d.may_always) buttons.push({ label: this.t("composer.untested.always", { version: d.version }), value: "always" });
+    buttons.push({ label: this.t("composer.untested.startOnce"), value: "once", primary: true });
+    const title =
+      d.state === "unknown"
+        ? this.t("composer.untested.titleUnknown", { label: d.label })
+        : this.t("composer.untested.title", { label: d.label, version: d.version });
     return choose(title, body, buttons, { root: this.mount.root });
   }
 
@@ -560,7 +573,7 @@ export class ComposerPart {
       const pick = await this.untestedAsk(e.data);
       if (!pick) return CANCELLED;
       const r = await again(pick);
-      if (r?.not_saved) toast(`Started once: ${r.not_saved}`, { kind: "error", root: this.mount.root });
+      if (r?.not_saved) toast(this.t("composer.startedOnce", { error: r.not_saved }), { kind: "error", root: this.mount.root });
       return r;
     }
   }
@@ -584,8 +597,8 @@ export class ComposerPart {
   confirmClose(s) {
     return (
       s.attention === "done" ||
-      ask(`Archive ${s.title || s.handle}? Its tab goes away in every browser; Reopen in the archive brings it back.`, {
-        ok: "Archive",
+      ask(this.t("composer.archive.question", { title: s.title || s.handle }), {
+        ok: this.t("composer.archive.ok"),
         root: this.mount.root,
       })
     );
@@ -594,7 +607,10 @@ export class ComposerPart {
   confirmRestart(s) {
     return (
       s.state !== "working" ||
-      ask(`Restart ${s.handle}? It cuts the turn it is working on.`, { ok: "Restart", root: this.mount.root })
+      ask(this.t("composer.restart.question", { handle: s.handle }), {
+        ok: this.t("composer.restart.ok"),
+        root: this.mount.root,
+      })
     );
   }
 
