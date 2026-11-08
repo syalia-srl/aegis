@@ -9,13 +9,19 @@
 //
 // The handle mount() returns is deliberately small (phase A; #962 adds the
 // rest): on(name, fn) for connection, turnEnd, entry and error; send(text),
-// which is a no-op until the composer part (a6); and destroy(), which removes
-// the root and gives the socket back. A part is added by a later slice with
-// its markup, its nodes and its live wiring.
+// which the composer part sends (a6); and destroy(), which removes the root
+// and gives the socket back. A part is added by a later slice with its markup,
+// its nodes and its live wiring.
+//
+// The outbox is per mount (a6) even when no composer draws it: drafts are one
+// device's, keyed by session, and a chat that is only a transcript still puts
+// one out when the connection comes back.
 
 import { acquire } from "./connection.js";
 import { installGlyphs } from "./glyphs.js";
 import { labelsFor } from "./labels.js";
+import { Outbox } from "./outbox.js";
+import { ComposerPart } from "./parts/composer.js";
 import { TranscriptPart } from "./parts/transcript.js";
 
 // Where this module came from: <prefix>/static/js/. Everything else is
@@ -64,13 +70,26 @@ export class Mount {
     this._working = new Set(); // keys whose turn this mount saw start
     this._costAt = new Map(); // key -> the cumulative cost_usd when it did
     this._dead = false;
+    this.outbox = null;
+    this.composer = null;
   }
 
   start() {
     this.root = makeRoot(this.el, this.opts, this.urls);
+    this.outbox = new Outbox({ root: this.root });
+    // Until a composer draws in this mount, a queued draft still goes out: the
+    // composer replaces this with the fuller path (the 5 s verdict and the
+    // untested-harness question) when it is built.
+    this.outbox.setSender((key, params) => this.callFor(key, "session.send", params));
+    this.outbox.load();
     const held = acquire(this.urls.ws.href, {
       token: this.opts.token,
-      onState: (state, server) => this.emit("connection", { state, server }),
+      onState: (state, server) => {
+        this.emit("connection", { state, server });
+        // A chat flushes only the session it shows: every draft on the device
+        // is another mount's or the full layout's to send.
+        if (state === "open") this.outbox.flushNow((key) => key === this.state.shown).catch(() => {});
+      },
     });
     this.conn = held.conn;
     this._release = held.release;
@@ -90,6 +109,7 @@ export class Mount {
     const chat = el("div", "aegis-chat");
     this.root.append(chat);
     this.transcript = this.add(new TranscriptPart(this, chat));
+    if (this.opts.composer) this.composer = this.add(new ComposerPart(this, chat));
     this.follow(this.opts.session);
   }
 
@@ -125,13 +145,17 @@ export class Mount {
   }
 
   send(text) {
-    return this.composer ? this.composer.send(text) : Promise.resolve();
+    if (this.composer) return this.composer.send(text);
+    // A transcript-only mount still lets a reply pill's send arrive.
+    if (!this.state.shown) return Promise.resolve();
+    return this.callFor(this.state.shown, "session.send", { text }).catch((error) => this.emit("error", { session: this.state.shown, error }));
   }
 
   destroy() {
     if (this._dead) return;
     this._dead = true;
     for (const p of this.parts) p.destroy?.();
+    this.outbox?.destroy();
     this._unsubSessions?.();
     this._release?.();
     this.root?.remove();
@@ -143,6 +167,7 @@ export class Mount {
   follow(key) {
     this.state.shown = key || null;
     if (this.transcript) this.transcript.show(this.state.shown);
+    if (this.composer) this.composer.show(this.state.shown);
   }
 
   call(op, params = {}, server = null) {
@@ -169,7 +194,9 @@ export class Mount {
       if (meta.state !== "working") this._forget(meta.key);
     }
     for (const key of [...this._working]) if (!seen.has(key)) this._forget(key);
-    this.transcript?.sessionChanged(this.state.shown, this.state.sessions.get(this.state.shown));
+    const meta = this.state.sessions.get(this.state.shown);
+    this.transcript?.sessionChanged(this.state.shown, meta);
+    this.composer?.sessionChanged(this.state.shown, meta);
   }
 
   _patch(ops) {
@@ -186,8 +213,10 @@ export class Mount {
         if (this.state.shown === op.remove) {
           this.state.shown = null;
           this.transcript?.show(null);
+          this.composer?.show(null);
         } else {
           this.transcript?.sessionChanged(op.remove, undefined);
+          this.composer?.sessionChanged(op.remove, undefined);
         }
       }
     }
@@ -200,6 +229,7 @@ export class Mount {
     const meta = { ...raw, key };
     this.state.sessions.set(key, meta);
     this.transcript?.sessionChanged(key, meta);
+    this.composer?.sessionChanged(key, meta);
     const was = prev?.state === "working";
     const now = meta.state === "working";
     if (now && !was && prev) {
