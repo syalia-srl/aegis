@@ -125,4 +125,6 @@ async def test_without_the_primer_the_prompt_is_the_hosts_alone(world_with):
     _, prompt = w.app.sessions.spawn_args(s)
     assert prompt == "You edit the document."
     said = await w.app.registry.call("meta", {}, Caller("agent", s.log_id))
-    assert said.startswith("You edit the document.") and "aegis, a workplace" not in said
+    assert (
+        said.startswith("You edit the document.") and "aegis, a workplace" not in said
+    )

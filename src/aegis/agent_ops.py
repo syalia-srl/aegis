@@ -1562,5 +1562,7 @@ def register_agent_ops(app: App) -> None:
         elif not s.spec.primer:
             head = s.spec.priming or "aegis"
         else:
-            head = primer(s, reg.server_name, reg.roots.config_root, browsers=available())
+            head = primer(
+                s, reg.server_name, reg.roots.config_root, browsers=available()
+            )
         return f"{head}\n\nTools: {tools}. help_search finds how to use any of these."

@@ -36,7 +36,9 @@ async def make(tmp_path: Path, fake_claude: str):
 
     async def build(notices: bool):
         (tmp_path / ".aegis.yaml").write_text(CONFIG)
-        app = App(make_roots(tmp_path, None), claude_bin=fake_claude, policy=Quiet(notices))
+        app = App(
+            make_roots(tmp_path, None), claude_bin=fake_claude, policy=Quiet(notices)
+        )
         apps.append(app)
         r = await app.registry.call("session.spawn", {"agent": "opus"})
         s = app.sessions.sessions[r["log_id"]]
@@ -62,7 +64,9 @@ async def idle(s) -> None:
 
 async def test_a_quiet_session_gets_no_notice_blocks_and_no_aegis_messages(make):
     w = await make(notices=False)
-    w.app.notices.set(w.s.log_id, "disk", [Item("full", "warn", "The disk is full.", "", False)])
+    w.app.notices.set(
+        w.s.log_id, "disk", [Item("full", "warn", "The disk is full.", "", False)]
+    )
     assert w.app.sessions.notice_blocks(w.s, "tool") == ""
     await w.s.deliver("> from aegis:cascade · now", "Switched models.")
     await w.s.deliver("> from monitor:m1 · ok", "The build finished.")
@@ -83,7 +87,9 @@ async def test_a_quiet_sessions_restart_continues_under_a_neutral_header(make):
 
 async def test_a_default_session_still_gets_them(make):
     w = await make(notices=True)
-    w.app.notices.set(w.s.log_id, "disk", [Item("full", "warn", "The disk is full.", "", False)])
+    w.app.notices.set(
+        w.s.log_id, "disk", [Item("full", "warn", "The disk is full.", "", False)]
+    )
     await w.s.deliver("> from aegis:cascade · now", "Switched models.")
     await idle(w.s)
     text = "\n".join(sends(w.s))

@@ -78,7 +78,7 @@ details.task ol>li{margin:10px 0;font-size:15px}
 </head>
 <body>
 <div class="chrome">
-  <div class="row"><span>aegis</span><span class="tab">plan · product agents, PR 1</span><span class="st"><span class="pill acc">executing inline</span><span class="pill">#983</span></span></div>
+  <div class="row"><span>aegis</span><span class="tab">plan · product agents, PR 1</span><span class="st"><span class="pill acc">done, PR open</span><span class="pill">#983</span></span></div>
   <div class="progress"><span id="pcount">0 of 0 done</span><div class="track" id="ptrack"></div></div>
 </div>
 <main>
@@ -88,7 +88,7 @@ details.task ol>li{margin:10px 0;font-size:15px}
 
 <h2>Tasks</h2>
 
-<details class="task" id="task-1" data-state="pending">
+<details class="task" id="task-1" data-state="done">
 <summary><span class="num">1</span><span><span class="ttl">The four fields from request to launch</span><span class="files">policy.py SpawnRequest · session.py SpawnSpec · app.py App.admit · harness.py Launch · session.py Session start</span></span><span class="state"></span></summary>
 <div class="body"><ol>
 <li><code>SpawnRequest</code> gains <code>harness_tools: bool = True</code>, <code>isolated: bool = False</code>, <code>primer: bool = True</code>, <code>notices: bool = True</code> (defaults last, so positional construction keeps working).</li>
@@ -101,7 +101,7 @@ details.task ol>li{margin:10px 0;font-size:15px}
 <p>A new test: a policy returning <code>req.replace(harness_tools=False, isolated=True, primer=False, notices=False)</code> leaves all four on the stored spec, and a spec round-trips through <code>record()</code>/<code>from_record</code>.</p>
 </div></details>
 
-<details class="task" id="task-2" data-state="pending">
+<details class="task" id="task-2" data-state="done">
 <summary><span class="num">2</span><span><span class="ttl">The preset keys in .aegis.yaml</span><span class="files">agents.py Agent and parse · agents.py spec from agent · config.py AgentDoc, doc_from, the writer, the known keys</span></span><span class="state"></span></summary>
 <div class="body"><ol>
 <li>Parse the four booleans on an agent, refusing a non-boolean with the agent's error, as <code>keep_harness_tools</code> does.</li>
@@ -112,7 +112,7 @@ details.task ol>li{margin:10px 0;font-size:15px}
 <script type="text/plain" data-lang="bash">uv run pytest -q tests/test_agents.py tests/test_config.py</script>
 </div></details>
 
-<details class="task" id="task-3" data-state="pending">
+<details class="task" id="task-3" data-state="done">
 <summary><span class="num">3</span><span><span class="ttl">primer: false, and meta follows the session</span><span class="files">registry.py Registry.spawn_args · agent_ops.py meta</span></span><span class="state"></span></summary>
 <div class="body"><ol>
 <li><code>spawn_args</code>: with <code>spec.primer</code> false, the prompt is the priming alone (which already holds the host's <code>system_prompt</code>, joined by <code>admit</code>).</li>
@@ -122,7 +122,7 @@ details.task ol>li{margin:10px 0;font-size:15px}
 <script type="text/plain" data-lang="bash">uv run pytest -q tests/test_meta.py tests/test_policy.py -k "primer or meta"</script>
 </div></details>
 
-<details class="task" id="task-4" data-state="pending">
+<details class="task" id="task-4" data-state="done">
 <summary><span class="num">4</span><span><span class="ttl">notices: false</span><span class="files">registry.py notice_blocks · notices.py Notices.set · nudges.py · session.py deliver and _flush_held · restarts.py header</span></span><span class="state"></span></summary>
 <div class="body"><ol>
 <li><code>Notices.set</code> stores no items for a session whose spec has notices off, so neither <code>pending</code> nor <code>_wake</code> has anything; <code>notice_blocks</code> returns "" for it (know-how menus too).</li>
@@ -133,13 +133,13 @@ details.task ol>li{margin:10px 0;font-size:15px}
 <script type="text/plain" data-lang="bash">uv run pytest -q tests/test_notices.py tests/test_nudges.py tests/test_session.py -k "notice or nudge or quiet_host"</script>
 </div></details>
 
-<details class="task" id="task-5" data-state="pending">
+<details class="task" id="task-5" data-state="done">
 <summary><span class="num">5</span><span><span class="ttl">OpenCode: codemode off on every extra server (#960 bug)</span><span class="files">opencode/config.py child_config</span></span><span class="state"></span></summary>
 <div class="body"><ol><li>Add <code>"codemode": False</code> to each extra server's entry; a test asserts it for http and stdio servers.</li></ol>
 <h4>verify</h4><script type="text/plain" data-lang="bash">uv run pytest -q tests/test_opencode_config.py</script>
 </div></details>
 
-<details class="task" id="task-6" data-state="pending">
+<details class="task" id="task-6" data-state="done">
 <summary><span class="num">6</span><span><span class="ttl">Refusal for a switch a harness cannot keep</span><span class="files">harness.py Harness · codex, pi, cursor harness modules · session.py start</span></span><span class="state"></span></summary>
 <div class="body"><ol>
 <li>Each harness class declares <code>contains: frozenset[str]</code>, the subset of <code>{"harness_tools", "isolated"}</code> it guarantees; default empty.</li>
@@ -148,7 +148,7 @@ details.task ol>li{margin:10px 0;font-size:15px}
 <h4>verify</h4><script type="text/plain" data-lang="bash">uv run pytest -q tests/test_session.py -k unsupported</script>
 </div></details>
 
-<details class="task" id="task-7" data-state="pending">
+<details class="task" id="task-7" data-state="done">
 <summary><span class="num">7</span><span><span class="ttl">Claude recipe</span><span class="files">claude/process.py build_argv · claude/harness.py · a new isolation helper shared by drivers</span></span><span class="state"></span></summary>
 <div class="body"><ol>
 <li>A helper (in <code>harness.py</code> or a new <code>isolation.py</code>) returns the isolated cwd <code>&lt;tmp&gt;/aegis-&lt;uid&gt;/&lt;log_id&gt;</code> (created empty, mode 700) and the home <code>&lt;state&gt;/harness-home/&lt;harness&gt;</code>.</li>
@@ -158,7 +158,7 @@ details.task ol>li{margin:10px 0;font-size:15px}
 <h4>verify</h4><script type="text/plain" data-lang="bash">uv run pytest -q tests/test_replaced_tools.py</script>
 </div></details>
 
-<details class="task" id="task-8" data-state="pending">
+<details class="task" id="task-8" data-state="done">
 <summary><span class="num">8</span><span><span class="ttl">OpenCode recipe</span><span class="files">opencode/config.py · opencode/process.py</span></span><span class="state"></span></summary>
 <div class="body"><ol>
 <li>Harness tools off: permission <code>{"*": "deny", "aegis_*": "allow", "&lt;server&gt;_*": "allow"}</code> for each extra server; <code>question</code> and <code>doom_loop</code> stay denied.</li>
@@ -168,7 +168,7 @@ details.task ol>li{margin:10px 0;font-size:15px}
 <h4>verify</h4><script type="text/plain" data-lang="bash">uv run pytest -q tests/test_opencode_config.py tests/test_opencode_process.py</script>
 </div></details>
 
-<details class="task" id="task-9" data-state="pending">
+<details class="task" id="task-9" data-state="done">
 <summary><span class="num">9</span><span><span class="ttl">Live test per harness</span><span class="files">tests/test_live_product_agent.py (new)</span></span><span class="state"></span></summary>
 <div class="body"><ol>
 <li>One test per harness as the spec's §08 says: all four switches on, <code>tools</code> = <code>set()</code>, the echo fixture as the only server, a cwd under a folder with a planted <code>.claude/skills</code> and <code>AGENTS.md</code> marker.</li>
@@ -180,7 +180,7 @@ details.task ol>li{margin:10px 0;font-size:15px}
 uv run pytest -q -m live tests/test_live_product_agent.py -k opencode</script>
 </div></details>
 
-<details class="task" id="task-10" data-state="pending">
+<details class="task" id="task-10" data-state="done">
 <summary><span class="num">10</span><span><span class="ttl">Help pages, changelog, PR</span><span class="files">src/aegis/help/library page · the agent preset page · changelog.d/983-product-agents.added.md</span></span><span class="state"></span></summary>
 <div class="body"><ol>
 <li>Host policy section: the four fields and an example; agent presets: the four keys; which harness supports which.</li>
@@ -191,7 +191,14 @@ uv run pytest -q -m live tests/test_live_product_agent.py -k opencode</script>
 </div></details>
 
 <h2>Where this plan departs from the spec</h2>
-<p>None yet. A deviation the code forces is recorded here with the file and line that forced it.</p>
+<ul>
+<li><b>OpenCode's isolation sets <code>XDG_CONFIG_HOME</code></b>, not <code>OPENCODE_CONFIG_DIR</code> (<code>opencode/config.py</code> <code>isolated_env</code>): it moves the whole global config root, so no global <code>AGENTS.md</code> or config of the person's is read; the login lives in the data dir and stays. Measured by the live test; <code>OPENCODE_CONFIG_DIR</code> was not tried.</li>
+<li><b>OpenCode keeps a stdio server's tools in Code Mode</b> whatever its <code>codemode</code> says (OpenCode 2.1.2, measured: with <code>execute</code> denied the model saw no tool; the same echo over HTTP was on the native list and the only tool). A product agent on OpenCode needs its servers over HTTP; the help page says so and the OpenCode live test serves the echo fixture over HTTP (<code>tests/fixtures/mcp_echo.py --http PORT</code>).</li>
+<li><b>OpenCode's ruleset is <code>{"*": "deny"}</code> plus the server allows</b>, as planned. Allowing everything and denying the documented actions without <code>execute</code> also worked, but left Code Mode, whose <code>fetch</code> reaches the network.</li>
+<li><b>A Settings control</b> for the four keys (<code>client/js/settings.js</code> <code>productFold</code>): <code>tests/test_config_coverage.py</code> requires one for every agent key.</li>
+<li><b>Claude's login link</b> comes from Claude Code's own config dir (<code>CLAUDE_CONFIG_DIR</code> or <code>~/.claude</code>), not aegis's quota setting <code>CLAUDE_CREDS</code>, which the test suite points elsewhere (<code>claude/harness.py</code> <code>isolated_env</code>).</li>
+<li><b>The notices gate is one filter</b> (<code>Session._quiet</code>) over delivered and held messages, plus <code>Notices.set</code>, <code>notice_blocks</code>, the send-time hint and the nudge check; the restart header becomes <code>&gt; continue</code> as approved.</li>
+</ul>
 </main>
 <script>
 for (const s of document.querySelectorAll('script[type="text/plain"]')) {

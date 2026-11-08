@@ -145,10 +145,15 @@ def test_every_extra_server_runs_outside_code_mode():
     cfg = child_config(
         None,
         "full",
-        servers=(McpServer.http("notes", "http://n/mcp"), McpServer.stdio("echo", "uv")),
+        servers=(
+            McpServer.http("notes", "http://n/mcp"),
+            McpServer.stdio("echo", "uv"),
+        ),
     )
     servers = cfg["mcp"]["servers"]
-    assert servers["notes"]["codemode"] is False and servers["echo"]["codemode"] is False
+    assert (
+        servers["notes"]["codemode"] is False and servers["echo"]["codemode"] is False
+    )
 
 
 def test_without_harness_tools_only_mcp_tools_are_allowed():
@@ -170,4 +175,8 @@ def test_an_isolated_session_reads_no_config_of_the_persons(tmp_path):
 
     env = isolated_env(tmp_path)
     assert env["XDG_CONFIG_HOME"] == str(tmp_path)
-    assert env["OPENCODE_DISABLE_PROJECT_CONFIG"] == env["OPENCODE_DISABLE_CLAUDE_CODE"] == "1"
+    assert (
+        env["OPENCODE_DISABLE_PROJECT_CONFIG"]
+        == env["OPENCODE_DISABLE_CLAUDE_CODE"]
+        == "1"
+    )

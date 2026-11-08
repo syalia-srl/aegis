@@ -197,3 +197,36 @@ until a restart.
 
 Memories, skills and help state are kept per key; dictation, saved workflow
 definitions and harness sign-ins are the server's.
+
+## Product agents
+
+An agent your program runs for its own users can be closed to everything but
+the MCP servers you give it. Four fields of `SpawnRequest`, set in `spawn`,
+each off by default:
+
+| Field | What it does |
+|---|---|
+| `harness_tools=False` | None of the harness's own tools: no shell, file tools, web fetch, subagents or skills. MCP tools stay. |
+| `isolated=True` | The harness reads none of the machine's config: its own config dir holding only the sign-in, and an empty working folder outside any project. |
+| `primer=False` | aegis's workplace prompt is dropped; the session's prompt is the agent's `priming` and your `system_prompt=` text. `meta` answers with it. |
+| `notices=False` | aegis sends no nudges, notices or notes of its own. A turn a restart cut still continues, under `> continue`. |
+
+```python
+class ProductPolicy(HostPolicy):
+    async def spawn(self, who, req):
+        return req.replace(system_prompt=BRIEF, harness_tools=False,
+                           isolated=True, primer=False, notices=False)
+
+    def tools(self, who, session):
+        return set()          # none of aegis's tools either
+
+    def mcp(self, who, session):
+        return [McpServer.http("sandbox", URL, {"Authorization": f"Bearer {tok}"})]
+```
+
+Claude Code and OpenCode keep `harness_tools=False` and `isolated=True`; Codex, pi and
+Cursor refuse a start that asks for either, rather than starting less closed.
+On OpenCode, give the servers over HTTP: OpenCode keeps a stdio server's
+tools behind its Code Mode `execute` tool, which `harness_tools=False` denies.
+Every call to your servers streams as a tool entry with its name, input and
+result. `tests/test_live_product_agent.py` runs each harness this way.
