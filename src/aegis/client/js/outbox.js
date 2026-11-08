@@ -17,29 +17,41 @@
 // says it arrived: a page closed mid-send leaves it "sending", and the next
 // page puts it back in queue; sent again with the same revision, it asks
 // instead of arriving twice, since the first send's own row moved past it.
+//
+// The drafts are one device's, keyed by session, and every Outbox on the page
+// reads the same map. What is per mount (a6) is the sender and the toasts: a
+// chat's outbox draws its toasts in the chat's root and sends over the chat's
+// socket, while the full layout's own instance (the singleton below) stays the
+// page's. Claiming a draft in the device store is what keeps two instances —
+// or two tabs — from sending it twice.
 
 import { outboxAll, outboxAppend, outboxClaim, outboxDelete, outboxSettle } from "./devicestore.js";
 import { toast } from "./toast.js";
 
 const drafts = new Map(); // key -> draft, this page's copy of the store
-const listeners = [];
-let sender = null; // (key, params) -> the session.send call, set by app.js
-let round = Promise.resolve();
+const instances = new Set(); // every Outbox on this page, for a change
 // Codes that mean the server was out of reach, not that it refused: the draft
 // goes back in queue and the walk stops for that round.
 const UNREACHED = new Set(["offline", "server_offline", "timeout"]);
 const SENDING_STALE_MS = 30000; // a send this old with no answer: its page died
 
-const changed = () => listeners.forEach((fn) => fn());
-
-// Called when any draft is added, changed or removed.
-export const onDrafts = (fn) => listeners.push(fn);
-
-export const draftFor = (key) => drafts.get(key) || null;
+// Every instance hears a change, because they read the same drafts: the full
+// layout's queued row and a mount's must not disagree about what is waiting.
+const changed = () => {
+  for (const box of instances) {
+    for (const fn of box.listeners) {
+      try {
+        fn();
+      } catch (e) {
+        console.error("aegis: outbox listener", e);
+      }
+    }
+  }
+};
 
 // The store's drafts into this page, at boot and after every change. A draft
 // left "sending" by a page that closed mid-send goes back in queue.
-export async function loadDrafts() {
+async function load() {
   const all = await outboxAll();
   drafts.clear();
   for (const [key, d] of all) {
@@ -52,85 +64,139 @@ export async function loadDrafts() {
   changed();
 }
 
-// `rev` is the transcript revision the page held for the session, or -1 when
-// it held none: then any content at all makes the draft ask. `nonce` is that
-// of a send of this text that got no answer: the draft goes out under it, so
-// if that send did arrive the server answers without delivering it twice.
-export async function queue(key, text, rev, nonce) {
-  await outboxAppend(key, text, rev, nonce);
-  await loadDrafts();
-}
-
-export async function discard(key) {
-  await outboxDelete(key);
-  await loadDrafts();
-}
-
-export const setSender = (fn) => (sender = fn);
-
-// One send of a claimed draft, settled by its answer. Answers the state it
-// settled in, or "unreached" when the server could not be reached.
-async function deliver(key, d, params, opts = {}) {
-  try {
-    await sender(key, params, opts);
-    await outboxSettle(key, "sent");
-    return "sent";
-  } catch (e) {
-    if (UNREACHED.has(e.code)) {
-      await outboxSettle(key, "queued");
-      return "unreached";
-    }
-    const state = e.code === "stale" ? "stale" : e.code === "archived" || e.code === "no_session" ? "gone" : "error";
-    await outboxSettle(key, state, state === "error" ? e.message : "");
-    return state;
-  }
-}
-
-// Send every queued draft whose key `only` accepts. Claiming marks it
-// "sending" in one transaction, so of two tabs flushing at once only one sends.
-export async function flush(only = () => true) {
-  const out = { sent: 0, stale: 0, gone: 0, error: 0 };
-  if (!sender) return out;
-  // A send with no answer for SENDING_STALE_MS: its page died mid-send.
-  const stuck = (d) => d.state === "sending" && Date.now() - (d.sent_at || 0) > SENDING_STALE_MS;
-  for (const [key, d] of await outboxAll()) {
-    if ((d.state !== "queued" && !stuck(d)) || !only(key)) continue;
-    const mine = await outboxClaim(key, (x) => x.state === "queued" || stuck(x));
-    if (!mine) continue; // another tab took it
-    await loadDrafts();
-    const got = await deliver(key, mine, { text: mine.text, expect_rev: mine.rev, ...(mine.nonce && { nonce: mine.nonce }) });
-    if (got === "unreached") break;
-    out[got]++;
-  }
-  await loadDrafts();
-  return out;
-}
-
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
-// One flush and one toast for it. Rounds run one after another.
-export function flushNow(only) {
-  const next = round.then(() => flush(only));
-  round = next.catch(() => {});
-  return next.then((out) => {
-    const { sent, stale, gone, error } = out;
-    const ask = stale + gone + error;
-    const look = `need${ask === 1 ? "s" : ""} a look`;
-    if (sent) toast(`${plural(sent, "queued message")} sent${ask ? ` · ${ask} ${look}` : ""}`);
-    else if (ask) toast(`${plural(ask, "queued message")} ${look}`);
+export class Outbox {
+  // `root` is the mount whose toasts this instance draws in (null: the page's
+  // own root); `sender(key, params, opts)` is the session.send it delivers
+  // through, set by its owner once the connection exists.
+  constructor({ root = null, sender = null } = {}) {
+    this.root = root;
+    this.sender = sender;
+    this.listeners = new Set();
+    this.round = Promise.resolve();
+    instances.add(this);
+  }
+
+  // Called when any draft is added, changed or removed. Returns the off.
+  on(fn) {
+    this.listeners.add(fn);
+    return () => this.listeners.delete(fn);
+  }
+
+  draftFor(key) {
+    return drafts.get(key) || null;
+  }
+
+  // The store's drafts into the page (the singleton does it at boot).
+  load() {
+    return load();
+  }
+
+  setSender(fn) {
+    this.sender = fn;
+    return this;
+  }
+
+  // `rev` is the transcript revision the page held for the session, or -1 when
+  // it held none: then any content at all makes the draft ask. `nonce` is that
+  // of a send of this text that got no answer: the draft goes out under it, so
+  // if that send did arrive the server answers without delivering it twice.
+  async queue(key, text, rev, nonce) {
+    await outboxAppend(key, text, rev, nonce);
+    await load();
+  }
+
+  async discard(key) {
+    await outboxDelete(key);
+    await load();
+  }
+
+  // One send of a claimed draft, settled by its answer. Answers the state it
+  // settled in, or "unreached" when the server could not be reached.
+  async deliver(key, d, params, opts = {}) {
+    try {
+      await this.sender(key, params, opts);
+      await outboxSettle(key, "sent");
+      return "sent";
+    } catch (e) {
+      if (UNREACHED.has(e.code)) {
+        await outboxSettle(key, "queued");
+        return "unreached";
+      }
+      const state = e.code === "stale" ? "stale" : e.code === "archived" || e.code === "no_session" ? "gone" : "error";
+      await outboxSettle(key, state, state === "error" ? e.message : "");
+      return state;
+    }
+  }
+
+  // Send every queued draft whose key `only` accepts. Claiming marks it
+  // "sending" in one transaction, so of two tabs flushing at once only one sends.
+  async flush(only = () => true) {
+    const out = { sent: 0, stale: 0, gone: 0, error: 0 };
+    if (!this.sender) return out;
+    // A send with no answer for SENDING_STALE_MS: its page died mid-send.
+    const stuck = (d) => d.state === "sending" && Date.now() - (d.sent_at || 0) > SENDING_STALE_MS;
+    for (const [key, d] of await outboxAll()) {
+      if ((d.state !== "queued" && !stuck(d)) || !only(key)) continue;
+      const mine = await outboxClaim(key, (x) => x.state === "queued" || stuck(x));
+      if (!mine) continue; // another tab took it
+      await load();
+      const got = await this.deliver(key, mine, { text: mine.text, expect_rev: mine.rev, ...(mine.nonce && { nonce: mine.nonce }) });
+      if (got === "unreached") break;
+      out[got]++;
+    }
+    await load();
     return out;
-  });
+  }
+
+  // One flush and one toast for it. Rounds run one after another.
+  flushNow(only) {
+    const next = this.round.then(() => this.flush(only));
+    this.round = next.catch(() => {});
+    return next.then((out) => {
+      const { sent, stale, gone, error } = out;
+      const ask = stale + gone + error;
+      const look = `need${ask === 1 ? "s" : ""} a look`;
+      if (sent) toast(`${plural(sent, "queued message")} sent${ask ? ` · ${ask} ${look}` : ""}`, { root: this.root });
+      else if (ask) toast(`${plural(ask, "queued message")} ${look}`, { root: this.root });
+      return out;
+    });
+  }
+
+  // A mount that goes takes its instance with it; the drafts stay on the device.
+  destroy() {
+    instances.delete(this);
+    this.listeners.clear();
+  }
+
+  // A draft sent as written, asked for: no revision to compare. Claimed first,
+  // so a second tap while the first send is out does nothing.
+  async sendAnyway(key) {
+    if (!this.sender) return;
+    const mine = await outboxClaim(key, (d) => ["stale", "error", "queued"].includes(d.state));
+    if (!mine) return;
+    await load();
+    // The person pressed it: a refusal that asks them (harness_untested) may ask.
+    const got = await this.deliver(key, mine, { text: mine.text, ...(mine.nonce && { nonce: mine.nonce }) }, { ask: true });
+    await load();
+    if (got === "unreached") toast("Not sent: the connection went", { kind: "error", root: this.root });
+  }
 }
 
-// A draft sent as written, asked for: no revision to compare. Claimed first,
-// so a second tap while the first send is out does nothing.
-export async function sendAnyway(key) {
-  if (!sender) return;
-  const mine = await outboxClaim(key, (d) => ["stale", "error", "queued"].includes(d.state));
-  if (!mine) return;
-  await loadDrafts();
-  // The person pressed it: a refusal that asks them (harness_untested) may ask.
-  const got = await deliver(key, mine, { text: mine.text, ...(mine.nonce && { nonce: mine.nonce }) }, { ask: true });
-  await loadDrafts();
-  if (got === "unreached") toast("Not sent: the connection went", { kind: "error" });
-}
+// The page's own instance: the full layout's, until b1 moves it, and what the
+// module's plain functions below act on. A mount makes its own (a6), so a
+// chat's toasts stay in the chat and its sends go over its own socket.
+export const outbox = new Outbox();
+
+// The page-level API the client had before a6, kept so app.js and the browser
+// suite call it as they did.
+export const onDrafts = (fn) => outbox.on(fn);
+export const draftFor = (key) => outbox.draftFor(key);
+export const setSender = (fn) => outbox.setSender(fn);
+export const queue = (key, text, rev, nonce) => outbox.queue(key, text, rev, nonce);
+export const discard = (key) => outbox.discard(key);
+export const flush = (only) => outbox.flush(only);
+export const flushNow = (only) => outbox.flushNow(only);
+export const sendAnyway = (key) => outbox.sendAnyway(key);
+export const loadDrafts = () => load();
