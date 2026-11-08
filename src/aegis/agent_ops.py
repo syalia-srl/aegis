@@ -181,8 +181,9 @@ class FeedStart(_Strict):
 
 class FeedName(_Strict):
     name: str
-    # A person names the session; an agent acts on its own.
-    session: SkipJsonSchema[str | None] = None
+    # A person's call names the session (its log id or handle); an agent
+    # acts on its own.
+    log_id: SkipJsonSchema[str | None] = None
 
 
 class FarAgent(_Strict):
@@ -916,9 +917,9 @@ def register_agent_ops(app: App) -> None:
         if caller.is_agent:
             s = own(caller)
         else:
-            if not p.session:
+            if not p.log_id:
                 raise OpError("bad_params", "name the session the feed belongs to")
-            s = target(p.session)
+            s = target(p.log_id)
         f = app.feeds.get(s.log_id, p.name)
         if f is None:
             raise OpError("no_feed", f"no feed {p.name!r} on {s.handle}")
@@ -993,9 +994,7 @@ def register_agent_ops(app: App) -> None:
         )
         return [feed_row(f) for f in items]
 
-    @r.op(
-        "feed.pause", FeedName, agent=True, read=True, names=(("session", "session"),)
-    )
+    @r.op("feed.pause", FeedName, agent=True, read=True, names=(("log_id", "session"),))
     async def feed_pause(p: FeedName, caller):
         """Stop a feed waking you. It keeps reading, and what came while it was
         paused goes as the next batch when you feed_resume it."""
@@ -1004,7 +1003,7 @@ def register_agent_ops(app: App) -> None:
         return feed_row(f)
 
     @r.op(
-        "feed.resume", FeedName, agent=True, read=True, names=(("session", "session"),)
+        "feed.resume", FeedName, agent=True, read=True, names=(("log_id", "session"),)
     )
     async def feed_resume(p: FeedName, caller):
         """Start a paused feed again, its error count cleared."""
@@ -1013,7 +1012,7 @@ def register_agent_ops(app: App) -> None:
         return feed_row(f)
 
     @r.op(
-        "feed.cancel", FeedName, agent=True, read=True, names=(("session", "session"),)
+        "feed.cancel", FeedName, agent=True, read=True, names=(("log_id", "session"),)
     )
     async def feed_cancel(p: FeedName, caller):
         """Remove a feed. Items still waiting are not sent."""
@@ -1021,7 +1020,7 @@ def register_agent_ops(app: App) -> None:
         app.feeds.cancel(f.owner, f.name)
         return {"cancelled": f.name, "unsent": len(f.pending)}
 
-    @r.op("feed.send", FeedName, names=(("session", "session"),))
+    @r.op("feed.send", FeedName, names=(("log_id", "session"),))
     async def feed_send(p: FeedName, caller):
         """A person's Send now: what waits goes without the debounce, or
         when the session's turn ends."""

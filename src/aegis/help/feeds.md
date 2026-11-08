@@ -121,6 +121,30 @@ the server stopped: skip what you already handled.
 Three failed reads in a row (a file that is gone, a command that exits 2)
 pause the feed and wake you with the reason. Fix the source and resume it.
 
+## The card
+
+Each feed has a row under Feeds in the session's sidebar: its name, how many
+items wait or how long ago the last one came, and a bar per 5 minutes of the
+last hour. The Fleet card of the session counts its feeds and what waits.
+
+Hover the row, or tap it on a phone, for the feed's card:
+
+- its state (live, debouncing, waits for the turn, paused, source fails) and
+  when the next batch goes;
+- items per bucket over the last hour, day or week, with a tick under each
+  bucket a batch went in;
+- the wait per item, from the read that saw it to its delivery: median, 90th
+  percentile and maximum, and how all the waiting split between the debounce,
+  a running turn, the quota gate and pauses;
+- per batch: the median items, and the length and tokens of the turn a batch
+  started on its own;
+- the latest items under their batch, the waiting ones first;
+- the source with its last read, and its error when it fails.
+
+Send now skips the debounce; while the session works, the items still wait for
+its turn to end. Pause, Resume and Cancel act as the tools do. Cancel asks
+once more before it drops what waits.
+
 ## While a feed is live
 
 A live feed will wake you again, so `turn_end` refuses done until you pause or

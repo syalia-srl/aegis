@@ -163,9 +163,10 @@ def test_the_client_draws_no_emoji_or_icon_marks():
 
 def test_the_client_writes_no_svg_outside_the_sprite():
     """The exceptions draw no icon: the favicon (ping.js) is a fixed image
-    outside the page and its theme, a monitor's sparkline (monitors.js) is a
-    chart, and a theme's background pattern is a data URL in its CSS."""
-    allowed = {"ping.js", "monitors.js"}
+    outside the page and its theme, a monitor's sparkline (monitors.js) and a
+    feed's bars (feeds.js) are charts, and a theme's background pattern is a
+    data URL in its CSS."""
+    allowed = {"ping.js", "monitors.js", "feeds.js"}
     found = [
         at
         for at, line in code_lines()
