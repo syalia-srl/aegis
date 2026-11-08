@@ -135,7 +135,9 @@ def test_every_theme_in_settings_has_a_stylesheet_the_page_links():
     names = theme_names()
     html = (JS.parent / "index.html").read_text()
     assert sorted(names) == sorted(p.stem for p in THEMES.glob("*.css"))
-    assert [n for n in names if f'href="__AEGIS_PREFIX__/static/themes/{n}.css"' not in html] == []
+    assert [
+        n for n in names if f'href="__AEGIS_PREFIX__/static/themes/{n}.css"' not in html
+    ] == []
     for n in names:
         assert f"[data-theme={n}] #a2{{" in (THEMES / f"{n}.css").read_text()
 
