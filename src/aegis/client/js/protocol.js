@@ -102,6 +102,7 @@ export class Connection {
         const s = this.subs.get(subKey(msg.channel, msg.server));
         if (!s) return;
         s.seq = msg.seq;
+        s.snapshotted = true; // seq 0 is a snapshot too
         for (const l of s.listeners) l.onSnapshot(msg.data);
         break;
       }
@@ -219,9 +220,9 @@ export class Connection {
       // A listener that joins after the snapshot arrived cannot see it. Ask
       // the channel again from the beginning, so every listener holds the
       // same state rather than one of them waiting for the next patch.
-      if (this.open && s.seq > 0) this._sendSub(key, true);
+      if (this.open && s.snapshotted) this._sendSub(key, true);
     } else {
-      s = { channel, server, seq: 0, listeners: [listener] };
+      s = { channel, server, seq: 0, snapshotted: false, listeners: [listener] };
       this.subs.set(key, s);
       if (this.open) this._sendSub(key);
     }
