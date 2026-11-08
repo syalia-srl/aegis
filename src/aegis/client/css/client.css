@@ -2,7 +2,7 @@
    .aegis, so mounting the client into a host page restyles nothing of the
    host's. The variables come from a theme (themes/*.css) or, for a host page
    with theme "host", from its own CSS. */
-*{box-sizing:border-box}
+.aegis,.aegis *{box-sizing:border-box}
 .aegis [hidden]{display:none !important}
 
 /* Scrollbars in the theme's colors: thin, a thumb in the rule color that
@@ -14,8 +14,6 @@
 .aegis ::-webkit-scrollbar-thumb{background:var(--rule);border-radius:4px;border:2px solid transparent;background-clip:padding-box}
 .aegis ::-webkit-scrollbar-thumb:hover{background:var(--faint);background-clip:padding-box}
 .aegis ::-webkit-scrollbar-corner{background:transparent}
-html,body{margin:0;height:100%}
-body{background:#000}
 .aegis{height:100dvh;display:grid;grid-template-rows:auto 1fr;grid-template-columns:minmax(0,1fr);overflow:hidden;
   background:var(--bg);color:var(--ink);font-family:var(--font-ui)}
 .aegis button,.aegis input,.aegis select,.aegis textarea{font:inherit;color:inherit}
@@ -1213,7 +1211,6 @@ body{background:#000}
 .aegis .hljs-addition{color:var(--ok)}.aegis .hljs-deletion{color:var(--err)}
 .aegis .hljs-emphasis{font-style:italic}.aegis .hljs-strong{font-weight:600}
 .aegis code,.aegis pre,.aegis .diff,.aegis .lines{font-variant-ligatures:none}
-#probes{position:fixed;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none}
 
 /* inbox rows, monitors, workers */
 .aegis .row.inbox .g{color:var(--comms)}
