@@ -17,7 +17,7 @@ import { Find } from "./find.js";
 import * as artifacts from "./artifacts.js";
 import { TabOrder } from "./tabs.js";
 import { setWho, who } from "./me.js";
-import { ago, byNeed, patchCard, renderArchive, renderBand, renderBandQuota, renderCards, tickPlan, card as fleetCard } from "./fleet.js";
+import { byNeed, card as fleetCard } from "./fleet.js";
 import { tile } from "./gauges.js";
 import { installKeys, renderKeys } from "./keys.js";
 import { Palette } from "./palette.js";
@@ -26,6 +26,7 @@ import { SidebarPart } from "./parts/sidebar.js";
 import { CommandsPart } from "./parts/commands.js";
 import { DictationPart } from "./parts/dictation.js";
 import { SpawnPart } from "./parts/spawn.js";
+import { FleetPart } from "./parts/fleet.js";
 import { factIcon, glyph, gorgoneion, icon, LABEL } from "./glyphs.js";
 import * as cmenu from "./menu.js";
 import { attachTabCard } from "./tabcard.js";
@@ -48,7 +49,7 @@ import { Speaker } from "./speak.js";
 import { closeTerm, drawCard, openTerm } from "./termview.js";
 import { browserSources, closeBrowser, drawBrowser, mountBrowser, openBrowser } from "./browserview.js";
 import { applyUpdate, checkForUpdate, setAutoApply, startWorker, takeBuild } from "./appworker.js";
-import { closeInstallDialog, startInstall } from "./install.js";
+import { closeInstallDialog } from "./install.js";
 import { checkRotation, closePushPanel, openPushPanel, setupPush } from "./pushpanel.js";
 import { clearDevice, loadFleet, loadTranscript, saveFleet, saveTranscript } from "./devicestore.js";
 import { markNeedsNet, offline } from "./net.js";
@@ -132,8 +133,23 @@ const sidebar = new SidebarPart(app, root.querySelector(".v-session"), {
   drawer: () => drawerMode.matches,
   setVersionTop: (nodes, title) => header.setVersion(nodes, title),
   archiveInvalidate: () => {
-    archiveLoaded = false;
+    fleet.invalidateArchive();
   },
+});
+
+// The Fleet is a part (b6): it builds the markup index.html used to hold and
+// owns the cards, the band, the linked servers and the archive. The page hands
+// it what only the router, the card menu and the network know.
+const fleet = new FleetPart(app, root, {
+  open: (key) => openCard(key),
+  close: (key) => closeById(key),
+  go: (hash) => go(hash),
+  read: (key) => go(`#read=${key}`),
+  reopen: (id) => reopen(id),
+  seen: () => seenText(),
+  measure: (server) => measureNet(server),
+  attachCardMenu: (box) => attachCardMenu(box),
+  attachMenu: (box, items, opts) => cmenu.attach(box, items, opts),
 });
 
 // The state the views share lives on the mount (mount.js's MountState). Quota
@@ -362,7 +378,6 @@ $("waking-g").append(icon("think"));
 $("coldnote-g").append(icon("wait"));
 $("closing-g").append(glyph("done"));
 $("boot-mark").append(gorgoneion());
-$("band-mark").append(gorgoneion());
 $("nav-up").addEventListener("click", () => transcript.message(-1));
 $("nav-down").addEventListener("click", () => transcript.message(1));
 $("nav-pos").addEventListener("click", () => transcript.firstUnread());
@@ -452,51 +467,8 @@ $("entries").addEventListener("click", (ev) => {
   ev.preventDefault();
   speaker.toggle(row);
 });
-// How the Fleet orders its cards: this browser's choice, like the tab order.
-let fleetOrder = localStorage.getItem("aegis.fleetOrder") || "attention";
-// Unfolded groups in the Fleet (#586), this browser's own and apart from the
-// bar's folds: the overview and the switcher fold for different reasons.
-const unfoldedGroups = new Set(JSON.parse(localStorage.getItem("aegis.fleet-open") || "[]"));
-const fleetStacks = {
-  get here() {
-    return app.conn.server || localStorage.getItem("aegis.server") || "";
-  },
-  open: unfoldedGroups,
-  onToggle: (key) => {
-    if (!unfoldedGroups.delete(key)) unfoldedGroups.add(key);
-    localStorage.setItem("aegis.fleet-open", JSON.stringify([...unfoldedGroups]));
-    render();
-  },
-};
-function markOrder() {
-  for (const b of document.querySelectorAll("#fleet-order button")) b.classList.toggle("on", b.dataset.order === fleetOrder);
-}
-markOrder();
-// Which kinds the Fleet and the archive show: all, agents or terminals. This
-// browser's choice, like the order.
-let fleetKind = localStorage.getItem("aegis.kind") || "all";
 // Terminals and browsers are tools, not agents: the "terminals" kind shows both.
 const isTool = (m) => m.kind === "term" || m.kind === "browser";
-const kindShown = (m) => fleetKind === "all" || (fleetKind === "terminals") === isTool(m);
-function markKind() {
-  for (const b of document.querySelectorAll(".kinds button")) b.setAttribute("aria-checked", String(b.dataset.kind === fleetKind));
-}
-markKind();
-for (const b of document.querySelectorAll(".kinds button"))
-  b.addEventListener("click", () => {
-    fleetKind = b.dataset.kind;
-    localStorage.setItem("aegis.kind", fleetKind);
-    markKind();
-    render();
-    loadArchive();
-  });
-for (const b of document.querySelectorAll("#fleet-order button"))
-  b.addEventListener("click", () => {
-    fleetOrder = b.dataset.order;
-    localStorage.setItem("aegis.fleetOrder", fleetOrder);
-    markOrder();
-    render();
-  });
 
 // -- routing: #fleet, #new[?<fill>], #settings, #journal, #usage, #knowledge[=<name>], #files[=<path>[:line]], #schedules, #help[=<page>], #s=<key>, #t=<key>, #read=<key>, #w=<n>:<key> --
 // A help ref is URI-encoded; a hand-typed malformed one is a page name nobody has.
@@ -627,7 +599,7 @@ function markOffline(state) {
   markNeedsNet();
   // The band's line says how old the device copy is while offline: opening or
   // closing the socket changes it, not only the next snapshot.
-  if (root.dataset.view === "fleet") drawBand();
+  if (root.dataset.view === "fleet") fleet.band();
 }
 
 // The token no longer works: what this device kept goes before the sign-in
@@ -786,7 +758,6 @@ const usage = new Usage(app.conn, $("usage"), {
 });
 const usageChanged = () => usage.changed();
 app.conn.subscribe("usage", usageChanged, usageChanged);
-$("band-quota-link").addEventListener("click", () => go("#usage"));
 // The Schedules view (schedules.js); its button counts them, red while one is
 // paused by errors.
 const schedules = new Schedules(app.conn, $("schedules"), {
@@ -947,8 +918,8 @@ function sessionHandlers(server) {
           // The server archives a session before it publishes the removal, so
           // this is the moment the archive gains a row, wherever it was closed.
           // A close carries the row; anything else reads the page again.
-          if (op.archived) archiveGained({ ...op.archived, server: server ?? app.conn.server });
-          else archiveLoaded = false;
+          if (op.archived) fleet.archiveGained({ ...op.archived, server: server ?? app.conn.server });
+          else fleet.invalidateArchive();
         }
       }
       // A session added or removed redraws at once: a reply that navigates
@@ -1022,8 +993,8 @@ function onLinks(list) {
   const sig = app.state.links.map((l) => `${l.name}:${l.state}`).join(",");
   if (sig !== app.state.linksSig) {
     app.state.linksSig = sig;
-    archiveLoaded = false;
-    if (booted && root.dataset.view === "fleet") loadArchive();
+    fleet.invalidateArchive();
+    if (booted && root.dataset.view === "fleet") fleet.loadArchive();
   }
   if (root.dataset.view === "fleet") watchHost("all");
   if (booted) onSessions();
@@ -1144,13 +1115,7 @@ function flushSessions() {
   for (const id of ids) if (app.state.sessions.has(id) && !header.patch(app.state.sessions.get(id), tabFocus(r))) whole = true;
   if (whole) header.render(tabbed(), tabFocus(r), r.view);
   if (r.view === "fleet") {
-    const home = [...ids].filter((id) => !app.state.sessions.get(id)?.server);
-    const regroup = home.some((id) => !patchCard($("cards"), app.state.sessions.get(id), openCard, fleetOrder, closeById));
-    if (regroup) renderCards($("cards"), local().filter(kindShown), openCard, fleetOrder, closeById, fleetStacks);
-    if (home.length < ids.size) renderRemotes();
-    fleetMark(false);
-    drawBand();
-    markNeedsNet(); // the cards' Archive buttons
+    fleet.patch(ids);
   } else if (r.view === "session" && ids.has(r.id)) renderMeta(app.state.sessions.get(r.id));
   else if (r.view === "term" && ids.has(r.id)) drawCard(termCard(r.id));
   else if (r.view === "window" && ids.has(r.id)) drawWindow(r);
@@ -1208,7 +1173,6 @@ startWorker({
   onUpdate: () =>
     toast("A new version of aegis is ready.", { ms: Infinity, action: { label: "Reload", run: applyUpdate } }),
 });
-startInstall($("install-offer"));
 setupPush((op, params) => app.conn.call(op, params));
 listenForOpen(openSession);
 setToastOpener(openSession);
@@ -1325,12 +1289,12 @@ function render() {
     return render();
   }
   // A reload into a closed terminal: its row comes from term.closed.
-  if (r.view === "term" && !app.state.sessions.has(r.id) && !closedTerms.has(r.id) && homeLive && !closedTermsLoaded) {
-    loadClosedTerms().then(render);
+  if (r.view === "term" && !app.state.sessions.has(r.id) && !fleet.closedTerm(r.id) && homeLive && !fleet.closedTermsLoaded) {
+    fleet.loadClosedTerms().then(render);
     return;
   }
-  if (r.view === "term" && !app.state.sessions.has(r.id) && closedTerms.has(r.id)) {
-    const card = { ...closedTerms.get(r.id), state: "ended", reason: "closed", archived: true };
+  if (r.view === "term" && !app.state.sessions.has(r.id) && fleet.closedTerm(r.id)) {
+    const card = { ...fleet.closedTerm(r.id), state: "ended", reason: "closed", archived: true };
     header.render(tabbed(), null, "term");
     watchHost(null);
     follow(null);
@@ -1359,14 +1323,9 @@ function render() {
   if (r.view === "fleet") {
     follow(null);
     show("fleet");
-    renderCards($("cards"), local().filter(kindShown), openCard, fleetOrder, closeById, fleetStacks);
-    renderRemotes();
-    fleetMark(false);
+    fleet.render();
     watchHost("all");
-    drawBand();
-    markNeedsNet(); // the cards' Archive buttons
     if (newView) drawQuota();
-    if (!archiveLoaded) loadArchive();
     setTitle("Fleet · aegis");
   } else if (r.view === "spawn") {
     watchHost(null);
@@ -1464,9 +1423,9 @@ function render() {
     watchHost(forKey(r.id).server || "");
     show("session");
     follow(r.id);
-    const m = archived.find((x) => x.key === r.id);
+    const m = fleet.findArchived(r.id);
     if (m) renderMeta({ ...m, state: "archived" });
-    else if (!archiveLoaded) loadArchive().then(render);
+    else if (!fleet.archiveLoaded) fleet.loadArchive().then(render);
     if (newView) drawQuota();
   }
 }
@@ -1517,29 +1476,8 @@ function watchHost(want) {
 }
 
 function drawHost() {
-  if (root.dataset.view === "fleet") drawBand();
+  if (root.dataset.view === "fleet") fleet.band();
   else if (root.dataset.view === "session") sidebar.drawHost();
-}
-
-function drawBand() {
-  if (root.dataset.view !== "fleet") return;
-  // Saved cards say how old they are while the socket is not open. Once it
-  // opens the live snapshot is on its way, and the band is no longer offline.
-  const saved = !app.conn.open && local().some((m) => m.stale);
-  renderBand($("band"), { metas: local(), host: app.state.host, server: app.conn.server || localStorage.getItem("aegis.server") || "", link: saved ? seenText() : app.state.links.length ? "this server" : "", off: saved, measure: () => measureNet(null) });
-  for (const l of app.state.links) {
-    const box = $("remotes").querySelector(`[data-server="${CSS.escape(l.name)}"]`);
-    if (!box) continue;
-    const r = app.state.remote.get(l.name);
-    renderBand(box.querySelector(".band"), {
-      metas: on(l.name),
-      host: r?.host,
-      server: l.name,
-      link: linkLine(l),
-      off: l.state !== "linked",
-      measure: () => measureNet(l.name),
-    });
-  }
 }
 
 // A speed reading now, on the server the row belongs to; the host channel
@@ -1548,66 +1486,9 @@ function measureNet(server) {
   app.conn.call("net.measure", {}, server).catch((e) => toast(e.message, { kind: "error" }));
 }
 
-// The line beside a linked server's name in its band.
-function linkLine(l) {
-  // A way back (links.py, Backlink) has no URL: that server links this one.
-  const host = l.back ? "links here" : l.url.replace(/^https?:\/\//, "");
-  if (l.state === "linked") return `${host} · linked${l.rtt_ms != null ? ` · ${l.rtt_ms} ms` : ""}`;
-  const since = new Date(l.since * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  if (l.state === "offline") return `${host} · offline since ${since} · retrying`;
-  if (l.state === "connecting") return `${host} · connecting`;
-  return `${host} · ${l.state}: ${l.error}`;
-}
-
-// A block per linked server under this server's cards: its band, then its
-// cards. The band is a copy of this server's, so a theme styles both alike.
-function renderRemotes() {
-  const host = $("remotes");
-  const names = new Set(app.state.links.map((l) => l.name));
-  for (const box of [...host.children]) if (!names.has(box.dataset.server)) box.remove();
-  for (const l of app.state.links) {
-    let box = host.querySelector(`[data-server="${CSS.escape(l.name)}"]`);
-    if (!box) {
-      box = document.createElement("div");
-      box.className = "remote";
-      box.dataset.server = l.name;
-      const band = $("band").cloneNode(true);
-      band.removeAttribute("id");
-      band.querySelector(".band-mark")?.remove();
-      for (const n of band.querySelectorAll("[id]")) n.removeAttribute("id");
-      band.classList.add("far");
-      const cards = document.createElement("section");
-      cards.className = "cards";
-      attachCardMenu(cards);
-      box.append(band, cards);
-      host.append(box);
-      const r = app.state.remote.get(l.name);
-      if (r) renderBandQuota(band, { ...farQuota(r.quota), now: nowS() });
-    }
-    host.append(box); // keep the links' order
-    const metas = on(l.name).filter(kindShown);
-    if (metas.length) renderCards(box.querySelector(".cards"), metas, openCard, fleetOrder, closeById, fleetStacks);
-    else box.querySelector(".cards").replaceChildren();
-  }
-  drawBand();
-}
-
-// A linked server's quota, less the providers this server already shows for
-// the same account (each reading names its account by a hash).
-function farQuota(q) {
-  const mine = new Set((app.state.quota.providers || []).filter((p) => p.account).map((p) => `${p.name}:${p.account}`));
-  const providers = q.providers || [];
-  const dup = (p) => p.account && mine.has(`${p.name}:${p.account}`);
-  return { quota: { providers: providers.filter((p) => !dup(p)) }, same: providers.filter(dup), home: app.conn.server };
-}
-
 function drawQuota() {
   if (root.dataset.view === "fleet") {
-    renderBandQuota($("band"), { quota: app.state.quota, now: nowS() });
-    for (const box of $("remotes").children) {
-      const r = app.state.remote.get(box.dataset.server);
-      if (r) renderBandQuota(box.querySelector(".band"), { ...farQuota(r.quota), now: nowS() });
-    }
+    fleet.quota();
   } else if (root.dataset.view === "session") {
     sidebar.drawQuota();
   }
@@ -1896,14 +1777,7 @@ setInterval(tickWorking, 60);
 
 setInterval(() => {
   tickMonitors();
-  if (root.dataset.view === "fleet" && local().some((m) => m.stale)) drawBand();
-  if (root.dataset.view === "fleet") for (const c of document.querySelectorAll(".card")) {
-    const m = app.state.sessions.get(c.dataset.id);
-    if (m && !isTool(m)) {
-      c.querySelector(".when").textContent = ago(m.last_activity);
-      tickPlan(c, m);
-    }
-  }
+  fleet.tick();
   if (root.dataset.view === "session" && app.state.shown) {
     const s = app.state.sessions.get(app.state.shown);
     sidebar.tickPlan(s);
@@ -2034,222 +1908,10 @@ $("entries").addEventListener("click", async (ev) => {
   await open();
 });
 
-// -- archive -------------------------------------------------------------------
-let archived = [];
-let archiveCursor = null; // the next page's cursor; null: nothing more
-let archiveTotal = 0; // the first page's count of everything matching
-let archiveServer = null; // the server filter: null for every server
-let archiveCounts = {}; // the first page's count per server
-let archiveOffline = []; // linked servers that were down for the first page
-let archiveWorkers = false; // queue workers shown: the chip is on
-let archiveWorkerCount = 0; // the first page's count of matching queue workers
-let archiveLoaded = false;
-let archiveTimer = null;
-
-// The first page, or with `more` the next one after what is shown. A button
-// asks for more, never scrolling: the page grows only when a person asks.
-async function loadArchive(more = false) {
-  archiveLoaded = true;
-  const q = $("arch-q").value.trim();
-  const params = q ? { query: q } : {};
-  if (archiveServer) params.server = archiveServer;
-  if (archiveWorkers) params.workers = true;
-  if (more && archiveCursor) params.cursor = archiveCursor;
-  try {
-    const r = await app.conn.call("archive.list", params);
-    // Every row names its server; this server's rows are keyed by log id alone.
-    const items = r.items.map((m) => withKey(m, m.server && m.server !== app.conn.server ? m.server : null));
-    archived = more ? [...archived, ...items] : items;
-    archiveCursor = r.cursor;
-    if (!more) {
-      archiveTotal = r.total;
-      if (!archiveServer) archiveCounts = r.counts || {};
-      archiveOffline = r.offline || [];
-      archiveWorkerCount = r.workers || 0;
-    }
-  } catch (e) {
-    // Offline, or failed: the next render reads it again.
-    if (!more) [archived, archiveCursor, archiveTotal, archiveLoaded] = [[], null, 0, false];
-  }
-  if (!more) loadClosedTerms();
-  drawArchive();
-}
-
-// An archive row's menu: its own Read and Reopen buttons (fleet.js).
-cmenu.attach(
-  $("arch-list"),
-  (t) => {
-    const read = t.querySelector?.("button.read");
-    const again = t.querySelector?.("button.reopen");
-    if (!t.dataset?.id || !read) return null;
-    return {
-      groups: [
-        [
-          { id: "read", label: "Read", icon: "book", run: () => read.click() },
-          again && { id: "reopen", label: "Reopen", icon: "again", run: () => again.click() },
-        ].filter(Boolean),
-      ],
-    };
-  },
-  { selector: "tr[data-id]" },
-);
-
-function drawArchive() {
-  renderArchive($("arch-list"), archived.filter(kindShown), {
-    onReopen: reopen,
-    onRead: (id) => go(`#read=${id}`),
-  });
-  $("arch-more").hidden = !archived.length;
-  $("arch-count").textContent = `Showing ${archived.length} of ${Math.max(archiveTotal, archived.length)}`;
-  $("arch-next").hidden = !archiveCursor;
-  drawArchiveServers();
-  drawArchiveWorkers();
-  fleetMark(false);
-}
-
-// A closed session's row, which its remove carried, joins the archive where it
-// sorts (archive.py's newest-first key), so a close does not read the first
-// page again, about 85 KB (#525). A search is the server's to match: it reads
-// the page again.
-function archiveGained(m) {
-  if (!archiveLoaded) return; // the next render reads the page, this row in it
-  if ($("arch-q").value.trim()) {
-    archiveLoaded = false;
-    return;
-  }
-  const row = withKey(m, m.server !== app.conn.server ? m.server : null);
-  if (archived.some((x) => x.key === row.key)) return;
-  if (m.worker) archiveWorkerCount += 1;
-  if (!m.worker || archiveWorkers) {
-    archiveCounts[m.server] = (archiveCounts[m.server] || 0) + 1;
-    if (!archiveServer || archiveServer === m.server) {
-      archiveTotal += 1;
-      const newer = (a, b) => a.last_activity > b.last_activity || (a.last_activity === b.last_activity && a.log_id > b.log_id);
-      const at = archived.findIndex((x) => newer(row, x));
-      // Past the pages shown, the next page brings it.
-      if (at >= 0) archived.splice(at, 0, row);
-      else if (!archiveCursor) archived.push(row);
-    }
-  }
-  drawArchive();
-}
-
-// Closed terminals on this server (term.closed), in a section of their own
-// after the archive's list. Read opens one read-only, from closedTerms.
-const closedTerms = new Map(); // id -> its row
-let closedTermsLoaded = false;
-async function loadClosedTerms() {
-  let rows = [];
-  try {
-    rows = await app.conn.call("term.closed");
-    closedTermsLoaded = true;
-  } catch {
-    // Offline, or a server without terminals: the section stays empty.
-  }
-  closedTerms.clear();
-  for (const t of rows) closedTerms.set(t.id, t);
-  const shownRows = fleetKind === "agents" ? [] : rows;
-  $("arch-terms").hidden = !shownRows.length;
-  const t = document.createElement("table");
-  t.className = "tbl";
-  for (const row of shownRows) {
-    const tr = t.insertRow();
-    tr.dataset.id = row.id;
-    for (const [cls, text] of [[null, row.name], ["m", row.title], ["m", ago(row.closed_at)], ["m", row.code == null ? "-" : `exit ${row.code}`]])
-      Object.assign(tr.insertCell(), { textContent: text ?? "" }, cls ? { className: cls } : {});
-    const read = Object.assign(document.createElement("button"), { type: "button", className: "btn", textContent: "Read" });
-    read.title = "Replay what it printed";
-    read.addEventListener("click", () => go(`#t=${row.id}`));
-    tr.insertCell().append(read);
-  }
-  document.querySelector("#arch-terms .arch-term-list").replaceChildren(t);
-}
-
-// Queue workers are left out of the archive unless this chip is on (#331): a
-// worker's result went to whoever enqueued it. The chip says how many match,
-// and goes away when none do.
-function drawArchiveWorkers() {
-  const b = $("arch-workers");
-  b.hidden = !archiveWorkerCount && !archiveWorkers;
-  b.classList.toggle("on", archiveWorkers);
-  b.setAttribute("aria-pressed", String(archiveWorkers));
-  b.querySelector("b").textContent = archiveWorkerCount;
-}
-$("arch-workers").addEventListener("click", () => {
-  archiveWorkers = !archiveWorkers;
-  loadArchive();
-});
-
-// The archive's server filter, once a server is linked: every server with its
-// count, and a down one named so its rows are not silently missing.
-function drawArchiveServers() {
-  const box = $("arch-servers");
-  box.hidden = !app.state.links.length;
-  if (!app.state.links.length) return;
-  const all = Object.values(archiveCounts).reduce((a, n) => a + n, 0);
-  const pick = (label, server, n) => {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.dataset.server = server || "";
-    b.className = archiveServer === server ? "on" : "";
-    b.append(label, Object.assign(document.createElement("b"), { textContent: n }));
-    b.addEventListener("click", () => {
-      archiveServer = server;
-      loadArchive();
-    });
-    return b;
-  };
-  const off = (name) => Object.assign(document.createElement("span"), { className: "off", textContent: `${name} offline` });
-  box.replaceChildren(
-    pick("All", null, all),
-    ...Object.entries(archiveCounts).map(([name, n]) => pick(name, name === app.conn.server ? app.conn.server : name, n)),
-    ...archiveOffline.map(off),
-  );
-}
-$("arch-next").addEventListener("click", () => loadArchive(true));
-
-// The Fleet's selection: a card or an archive row, by log id, re-marked after
-// every redraw because both are rebuilt from scratch.
-let fleetSel = null;
-
-function fleetItems() {
-  return [...document.querySelectorAll("#cards .card, #remotes .card, #arch-list tr[data-id]")];
-}
-
-function fleetMark(scroll) {
-  for (const n of document.querySelectorAll("#cards .sel, #remotes .sel, #arch-list .sel")) n.classList.remove("sel");
-  const n = fleetItems().find((x) => x.dataset.id === fleetSel);
-  if (!n) {
-    fleetSel = null;
-    return;
-  }
-  n.classList.add("sel");
-  if (scroll) n.scrollIntoView({ block: "nearest" });
-}
-
-function fleetMove(delta) {
-  const items = fleetItems();
-  const i = items.findIndex((x) => x.dataset.id === fleetSel);
-  const n = i < 0 ? items[0] : items[i + delta];
-  if (!n) return;
-  fleetSel = n.dataset.id;
-  fleetMark(true);
-}
-
-function fleetOpen() {
-  const n = fleetItems().find((x) => x.dataset.id === fleetSel);
-  if (n) go(n.classList.contains("card") ? hashOf(fleetSel) : `#read=${fleetSel}`);
-}
-
-$("arch-q").addEventListener("input", () => {
-  clearTimeout(archiveTimer);
-  archiveTimer = setTimeout(loadArchive, 200);
-});
-
 async function reopen(id) {
   try {
     await callFor(id, "session.reopen");
-    archiveLoaded = false;
+    fleet.invalidateArchive();
     go(`#s=${id}`);
   } catch (e) {
     sidebar.fail(e.message);
@@ -2363,8 +2025,7 @@ installKeys(
         $("tr").focus({ preventScroll: true });
         transcript.pick();
       } else if (v === "fleet") {
-        $("cards").focus({ preventScroll: true });
-        if (!fleetSel) fleetMove(1);
+        fleet.focus();
       }
     },
     needs: nextNeed,
@@ -2390,17 +2051,17 @@ installKeys(
     copy: onTranscript(() => transcript.selected && copyRow(transcript.selected, transcript.nodes.get(transcript.selected), copyDeps)),
     foldLevel: () => foldLevel((transcript.foldLevel + 1) % 3),
     walk() {},
-    fleetNext: () => fleetMove(1),
-    fleetPrev: () => fleetMove(-1),
-    fleetOpen,
-    filter: () => $("arch-q").focus(),
+    fleetNext: () => fleet.move(1),
+    fleetPrev: () => fleet.move(-1),
+    fleetOpen: () => fleet.openSel(),
+    filter: () => fleet.filter(),
     // The focused row's menu, else the selected transcript row's or Fleet card's.
     menuKey() {
       const at = document.activeElement?.closest?.("[data-id], .trow");
       if (cmenu.openFor(at)) return;
       const v = route().view;
       if (v === "session" || v === "read") cmenu.openFor(transcript.selected && transcript.nodes.get(transcript.selected));
-      else if (v === "fleet") cmenu.openFor(fleetItems().find((x) => x.dataset.id === fleetSel));
+      else if (v === "fleet") cmenu.openFor(fleet.selected());
     },
     spawn: () => spawn.open(),
     settings: () => go("#settings"),
@@ -3284,7 +2945,6 @@ function cardMenu(t) {
 function attachCardMenu(box, opts = {}) {
   cmenu.attach(box, cardMenu, { selector: ".card[data-id], .tab[data-id], .wait[data-id]", ...opts });
 }
-attachCardMenu($("cards"));
 // The tab card (#586) belongs to the header part (b2): a session tab's Fleet
 // card on hover, with the tab menu's items as buttons, and a long press on a
 // touch screen. The same card for a session the shown one waits on (#667), to

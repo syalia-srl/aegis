@@ -46,35 +46,6 @@ document.documentElement.dataset.theme = localStorage.getItem("aegis.theme") || 
     </div>
   </main>
 
-  <main class="view v-fleet">
-    <section class="install-offer" id="install-offer" hidden><div class="t">Install aegis as an app<span>Opens from the home screen, works without a connection, and can notify you.</span></div><button class="btn" type="button" data-act="later">Not now</button><button class="btn primary" type="button" data-act="install">Install</button></section>
-    <section class="band" id="band">
-      <div class="band-mark" id="band-mark"></div>
-      <div><h5><span class="band-server" id="band-server">server</span><span class="band-link"></span></h5><div class="counts band-counts" id="band-counts"></div></div>
-      <div><h5>Host</h5><div class="band-host" id="band-host"></div></div>
-      <div class="q band-quota-col" id="band-quota-col" hidden><h5><span class="qlink" id="band-quota-link" title="Usage: what work cost">Quota</span><span class="age band-quota-age" id="band-quota-age"></span></h5><div class="band-quota" id="band-quota"></div></div>
-    </section>
-    <div class="order"><h3>Sessions</h3>
-      <div class="seg" id="fleet-order">
-        <button data-order="attention">Needs you first</button>
-        <button data-order="tabs">Tab order</button>
-      </div>
-      <div class="seg kinds" role="radiogroup" aria-label="Show">
-        <button type="button" role="radio" data-kind="all">All</button>
-        <button type="button" role="radio" data-kind="agents">Agents</button>
-        <button type="button" role="radio" data-kind="terminals">Terminals</button>
-      </div>
-    </div>
-    <section class="cards" id="cards" tabindex="-1"></section>
-    <div id="remotes"></div>
-    <section class="archive">
-      <div class="archive-head"><h3>Archive</h3><input id="arch-q" placeholder="Filter by title, handle or directory" spellcheck="false"><div class="arch-servers" id="arch-servers" hidden></div><button class="arch-workers" id="arch-workers" type="button" aria-pressed="false" title="Queue workers: their results went to whoever enqueued them" hidden>Queue workers<b></b></button></div>
-      <div id="arch-list"></div>
-      <section id="arch-terms" class="arch-terms" hidden><h4>Closed terminals</h4><div class="arch-term-list"></div></section>
-      <div class="arch-more" id="arch-more" hidden><span id="arch-count"></span><button class="btn" id="arch-next" type="button">Show 50 more</button></div>
-    </section>
-  </main>
-
   <main class="view v-settings"><section class="settings" id="settings"></section></main>
   <main class="view v-journal"><section class="journal" id="journal"></section></main>
   <main class="view v-usage"><section class="usage" id="usage"></section></main>
