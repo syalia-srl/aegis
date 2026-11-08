@@ -116,6 +116,10 @@ SERVER = {
         "service_worker",
         "client_files",
         "index",
+        # The manifest's hashes and the entry module a host imports (#961).
+        "_file_hash",
+        "build_web.listing",
+        "build_web.entry_module",
     },
 }
 
