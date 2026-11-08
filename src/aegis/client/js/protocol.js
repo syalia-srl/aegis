@@ -3,8 +3,10 @@
 // A channel delivers a snapshot, then patches numbered from 1. A gap in the
 // numbers, or a reconnect, means resubscribe, saying which revision it holds.
 //
-// The socket signs in with the HttpOnly cookie the server set; the page never
-// holds the token.
+// The standalone socket signs in with the HttpOnly cookie the server set; the
+// page never holds the token. A host's mount has no such cookie, so it passes
+// a token (a string, or a function called on each connect so an expired one is
+// replaced without a reload) and the hello carries it.
 //
 // A call or subscription may name a linked `server`: the home server forwards
 // it down its link and stamps `server` on what comes back (links.py). A
@@ -27,8 +29,9 @@ export class OpError extends Error {
 }
 
 export class Connection {
-  constructor(url, { onState = () => {} } = {}) {
+  constructor(url, { token = "", onState = () => {} } = {}) {
     this.url = url;
+    this.token = token; // a string, or () => string | Promise, called on each connect
     this.onState = onState;
     this.ws = null;
     this.open = false;
@@ -38,17 +41,30 @@ export class Connection {
     this.watches = new Map(); // server -> the last watch message sent to it
     this.backoff = 500;
     this.stopped = false;
+    this.gen = 0; // bumped by stop(): a token awaited across a stop opens nothing
     this.retryTimer = null;
     this.retryAt = 0; // epoch ms of the next attempt, or 0
   }
 
-  connect() {
+  async connect() {
     clearTimeout(this.retryTimer);
     this.retryTimer = null;
     this.retryAt = 0;
+    const gen = ++this.gen;
     this.onState("connecting");
+    let token;
+    try {
+      token = typeof this.token === "function" ? await this.token() : this.token;
+    } catch (e) {
+      // A token this page could not fetch is a connection that did not open,
+      // and the backoff knows what to do with that.
+      if (!this.stopped && gen === this.gen) this._closed(1006);
+      return;
+    }
+    if (this.stopped || gen !== this.gen) return;
     const ws = (this.ws = new WebSocket(this.url));
-    ws.onopen = () => ws.send(JSON.stringify({ t: "hello", proto: PROTO }));
+    ws.onopen = () =>
+      ws.send(JSON.stringify({ t: "hello", proto: PROTO, ...(token ? { token } : {}) }));
     ws.onmessage = (ev) => this._receive(JSON.parse(ev.data));
     ws.onclose = (ev) => this._closed(ev.code);
   }
@@ -140,6 +156,28 @@ export class Connection {
   retryNow() {
     if (this.open || this.stopped || !this.retryTimer) return;
     this.connect();
+  }
+
+  // The last mount on the page gave the socket back. Its close is not news
+  // (nothing hears it), a token still being awaited opens nothing, and every
+  // call in flight is rejected as offline rather than left pending forever.
+  stop() {
+    if (this.stopped) return;
+    this.stopped = true;
+    this.gen += 1;
+    clearTimeout(this.retryTimer);
+    this.retryTimer = null;
+    this.retryAt = 0;
+    const ws = this.ws;
+    this.ws = null;
+    if (ws) {
+      ws.onopen = ws.onmessage = ws.onclose = null;
+      ws.close();
+    }
+    this.open = false;
+    for (const p of this.pending.values()) p.reject(new OpError("offline", "the connection stopped"));
+    this.pending.clear();
+    this.subs.clear();
   }
 
   call(op, params = {}, server = null) {
