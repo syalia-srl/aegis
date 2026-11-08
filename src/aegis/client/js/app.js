@@ -50,7 +50,7 @@ import { Attachments } from "./attach.js";
 import { setToastOpener, toast } from "./toast.js";
 import { Speaker } from "./speak.js";
 import { TermView } from "./termview.js";
-import { BrowserTab, browserSources, drawBrowser, mountBrowser } from "./browserview.js";
+import { BrowserTab, drawBrowser, mountBrowser } from "./browserview.js";
 import { applyUpdate, checkForUpdate, setAutoApply, startWorker, takeBuild } from "./appworker.js";
 import { closeInstallDialog } from "./install.js";
 import { checkRotation, closePushPanel, openPushPanel, setupPush } from "./pushpanel.js";
@@ -152,7 +152,6 @@ const views = new ViewsPart(app, root, { before: root.querySelector(".v-session"
 const terminalPart = new TerminalPart(app, root);
 const terminal = new TermView(terminalPart);
 const browserPart = new BrowserPart(app, root);
-const browserTab = new BrowserTab(browserPart.host);
 
 // The Fleet is a part (b6): it builds the markup index.html used to hold and
 // owns the cards, the band, the linked servers and the archive. The page hands
@@ -220,6 +219,14 @@ const withKey = (m, server = null) => app.withKey(m, server);
 // A docked browser's key: its pane holds the id the browser's own server
 // knows it by, and the canvas is the shown session's, on that server (#970).
 const paneKey = (id) => keyOf(forKey(app.state.shown || "").server, id);
+// Where a browser's views find its card and the sessions it can be given to.
+// The mount names these, so a second mount on the page cannot overwrite them.
+const browserCard = (id) => (app.state.sessions.has(paneKey(id)) ? termCard(paneKey(id)) : null);
+const browserSources = {
+  card: browserCard,
+  sessions: () => local().filter((m) => !isTool(m) && m.state !== "asleep"),
+};
+const browserTab = new BrowserTab(browserPart.host, browserSources);
 // The last session shown in this browser tab, where Files' quotes go; a
 // reload of the Files view keeps it.
 let lastShown = sessionStorage.getItem("aegis.lastShown");
@@ -314,9 +321,12 @@ const canvas = new Canvas($("canvas"), {
   refuse: (message) => toast(message, { kind: "error" }),
   openWindow: (n, tab) => openWindow(app.state.shown, n, tab),
   // A browser the session drives, docked: its own view of the stream.
+  browserCard,
   mountBrowser: (host, id) => {
     const key = paneKey(id);
-    return app.state.sessions.has(key) ? mountBrowser(host, id, termCard(key), { conn: app.conn, server: forKey(key).server }) : null;
+    return app.state.sessions.has(key)
+      ? mountBrowser(host, id, termCard(key), { conn: app.conn, server: forKey(key).server, sources: browserSources })
+      : null;
   },
 });
 // Dock on a card or the viewer's bar. The viewer lets go of what it docks.
@@ -1177,11 +1187,6 @@ const openSession = (id) => route().view === "window" || go(hashOf(id));
 // A tab's hash: a terminal's view, or a session's.
 const hashOf = (key) => ({ term: `#t=${key}`, browser: `#b=${key}` })[app.state.sessions.get(key)?.kind] || `#s=${key}`;
 const tabFocus = (r) => (r.view === "session" || r.view === "term" || r.view === "browser" ? r.id : null);
-// Where a browser's views find its card and the sessions it can be given to.
-browserSources({
-  card: (id) => (app.state.sessions.has(paneKey(id)) ? termCard(paneKey(id)) : null),
-  sessions: () => local().filter((m) => !isTool(m) && m.state !== "asleep"),
-});
 // The open terminal's card, with the log id and server it is reached by.
 function termCard(key) {
   const m = app.state.sessions.get(key);
