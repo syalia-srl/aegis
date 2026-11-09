@@ -334,8 +334,10 @@ export class TranscriptPart {
   // (a peek or status upsert) is never announced twice.
   report(entry, live = false) {
     this.mount.emit("entry", { session: this.key, entry });
-    if (!live || entry.kind !== "file") return;
+    if (entry.kind !== "file") return;
     const id = entry.id;
+    // A file the snapshot replayed is known, so its later upserts stay quiet.
+    if (!live) return void (id != null && this.sentFiles.add(id));
     if (id != null) {
       if (this.sentFiles.has(id)) return;
       this.sentFiles.add(id);
