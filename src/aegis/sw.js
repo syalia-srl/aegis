@@ -59,7 +59,11 @@ self.addEventListener("push", (event) => {
   }
   event.waitUntil(
     (async () => {
-      if (p.key && (await inFront(p.key))) return;
+      // A worker restarted since the page last said what it shows has no view
+      // for this session: nobody can be in front, and asking the clients would
+      // only delay the notification. Ask only a window that says it shows it.
+      const shown = p.key && [...views.values()].some((v) => v.key === p.key);
+      if (shown && (await inFront(p.key))) return;
       await self.registration.showNotification(p.title || "aegis", {
         body: p.body || "",
         tag: p.tag || p.key || "aegis",
