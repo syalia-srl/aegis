@@ -3,6 +3,13 @@
 // list of log ids. Gone ids drop out, new sessions go at the end. A group (a
 // session and those it started, groups.js) is drawn as one block headed by its
 // oldest member, which can fold it to one tab (#586).
+//
+// Reordering is a pointer gesture, not the browser's HTML5 drag: Playwright's
+// `drag_and_drop` sends one mousemove, a busy renderer can lose the dragstart,
+// and the drop and dragend then never arrive. A pressed tab remembers what it
+// would move, and the reorder happens on pointerup from the same rules a drop
+// uses. A redraw waits while a tab is pressed or dragged: replacing the node
+// under the pointer is the other way a drag dies.
 
 import { labelsFor, stateLabel } from "./labels.js";
 import { iconText, PANE_ICON } from "./glyphs.js";
@@ -55,43 +62,66 @@ const URGENT = ["needs_you", "error", "review", "working", "waiting"];
 // `actions.here` names this server; `actions.folds` is the set of folded group
 // keys, `actions.onFold(key)` toggles one and `actions.saveFolds()` keeps the
 // set. A folded group whose hidden member is the one in view unfolds.
+//
+// A tab keeps its node across draws (keptTabs): replacing one under the pointer
+// cancels a drag or a click, and a sessions patch arrives at any moment. Only
+// the block wrappers are new each time.
+const keptTabs = new WeakMap(); // list -> Map(key -> its .tab node)
+
+// Move `next`'s look onto `old` without replacing the node, listeners and all.
+function restyle(old, next) {
+  if (!old) return next;
+  if (next.outerHTML === old.outerHTML) return old;
+  old.replaceChildren(...next.childNodes);
+  for (const a of [...old.attributes]) old.removeAttribute(a.name);
+  for (const a of [...next.attributes]) old.setAttribute(a.name, a.value);
+  return old;
+}
+
 export function renderTabs(list, metas, focusId, actions) {
   const t = actions.t || labelsFor("en");
-  list.replaceChildren(
-    ...blocksOf(metas, actions.here || "").map((b) => {
-      const box = document.createElement("div");
-      box.className = "tblock";
-      box.dataset.group = b.key;
-      // Every member's key, in tab order, folded ones too: what a drag moves.
-      box.dataset.keys = JSON.stringify(metas.filter((m) => b.members.includes(m)).map((m) => m.key));
-      if (b.members.length < 2) {
-        box.append(tab(b.head, focusId, actions, "solo"));
-        return box;
-      }
-      const hidden = b.members.slice(1);
-      if (actions.folds?.has(b.key) && hidden.some((m) => m.key === focusId)) {
-        actions.folds.delete(b.key);
-        actions.saveFolds();
-      }
-      const folded = !!actions.folds?.has(b.key);
-      box.classList.add("grp");
-      box.style.setProperty("--g", `var(--group-${hueOf(b.key)})`);
-      const mark = folded ? URGENT.find((a) => b.members.some((m) => m.mark === a)) : null;
-      const head = tab(mark ? { ...b.head, mark } : b.head, focusId, actions, "head");
-      const cnt = document.createElement("span");
-      cnt.className = "cnt";
-      cnt.textContent = folded ? `+${hidden.length}` : "−";
-      cnt.title = t(folded ? "tabs.unfold" : "tabs.fold");
-      cnt.classList.toggle("alert", folded && hidden.some((m) => m.mark === "needs_you"));
-      cnt.addEventListener("click", (ev) => {
-        ev.stopPropagation();
-        actions.onFold(b.key);
-      });
-      head.append(cnt);
-      box.append(head, ...(folded ? [] : hidden.map((m) => tab(m, focusId, actions, "member"))));
+  const kept = keptTabs.get(list) || new Map();
+  const drawn = new Map();
+  const make = (m, role) => {
+    const node = restyle(kept.get(m.key), tab(m, focusId, actions, role));
+    drawn.set(m.key, node);
+    return node;
+  };
+  const boxes = blocksOf(metas, actions.here || "").map((b) => {
+    const box = document.createElement("div");
+    box.className = "tblock";
+    box.dataset.group = b.key;
+    // Every member's key, in tab order, folded ones too: what a drag moves.
+    box.dataset.keys = JSON.stringify(metas.filter((m) => b.members.includes(m)).map((m) => m.key));
+    if (b.members.length < 2) {
+      box.append(make(b.head, "solo"));
       return box;
-    }),
-  );
+    }
+    const hidden = b.members.slice(1);
+    if (actions.folds?.has(b.key) && hidden.some((m) => m.key === focusId)) {
+      actions.folds.delete(b.key);
+      actions.saveFolds();
+    }
+    const folded = !!actions.folds?.has(b.key);
+    box.classList.add("grp");
+    box.style.setProperty("--g", `var(--group-${hueOf(b.key)})`);
+    const mark = folded ? URGENT.find((a) => b.members.some((m) => m.mark === a)) : null;
+    const head = make(mark ? { ...b.head, mark } : b.head, "head");
+    const cnt = document.createElement("span");
+    cnt.className = "cnt";
+    cnt.textContent = folded ? `+${hidden.length}` : "−";
+    cnt.title = t(folded ? "tabs.unfold" : "tabs.fold");
+    cnt.classList.toggle("alert", folded && hidden.some((m) => m.mark === "needs_you"));
+    cnt.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      actions.onFold(b.key);
+    });
+    head.append(cnt);
+    box.append(head, ...(folded ? [] : hidden.map((m) => make(m, "member"))));
+    return box;
+  });
+  list.replaceChildren(...boxes);
+  keptTabs.set(list, drawn);
 }
 
 // One session's tab redrawn where it stands; the others keep their nodes. A
@@ -101,35 +131,89 @@ export function patchTab(list, m, focusId, actions) {
   const old = list.querySelector(`.tab[data-id="${CSS.escape(m.key)}"]`);
   if (!old) return true;
   if (old.closest(".tblock.grp")) return false;
-  old.replaceWith(tab(m, focusId, actions, "solo"));
+  restyle(old, tab(m, focusId, actions, "solo"));
   return true;
 }
 
 // What is being dragged: one member inside its group, or a whole block.
 let dragging = null;
-// The tab whose pointer went down and has not been released yet: a drag starts
-// a moment later, and a strip that redraws in between loses the node the
-// browser was about to drag. Redraws wait from pointerdown until dragend (or
-// pointerup, for a plain click).
-let holding = null;
+// The tab under a live pointer press, from pointerdown until it lifts. It
+// carries what a drag of that tab would move, so the reorder survives a
+// browser that never starts (or loses) a native drag.
+let pressed = null;
 
 // Whether a drag owns the strip right now. A part that draws tabs asks this
 // before rebuilding them: replacing the node under the pointer cancels the
 // drag, and a sessions patch may arrive at any moment.
-export const draggingTab = () => dragging !== null || holding !== null;
+export const draggingTab = () => dragging !== null || pressed !== null;
 
-function releaseHold() {
-  const node = holding;
-  holding = null;
-  document.removeEventListener("pointerup", releaseHold);
-  document.removeEventListener("pointercancel", releaseHold);
-  node?.dispatchEvent(new CustomEvent("aegis-tabdrag-end", { bubbles: true }));
+// Run `fn` with `dragging` describing the pressed tab, for the drop rules.
+function asDrag(p, fn) {
+  const down = dragging;
+  dragging = { group: p.group, member: p.member, keys: p.keys };
+  try {
+    return fn();
+  } finally {
+    dragging = down;
+  }
 }
 
-function holdTab(node) {
-  holding = node;
-  document.addEventListener("pointerup", releaseHold);
-  document.addEventListener("pointercancel", releaseHold);
+// The tab under the pointer, marked as a place this press may drop.
+function hover(x, y) {
+  const list = pressed?.node.closest("#tablist");
+  if (!list) return;
+  for (const t of list.querySelectorAll(".drop, .nodrop")) t.classList.remove("drop", "nodrop");
+  const t = document.elementFromPoint(x, y)?.closest?.(".tab[data-id]");
+  if (!t) return;
+  const ok = asDrag(pressed, () => dropBefore(t, x) !== undefined);
+  t.classList.toggle("drop", ok);
+  t.classList.toggle("nodrop", !ok);
+}
+
+function movePress(ev) {
+  if (!pressed || !(ev.buttons & 1)) return;
+  if (!pressed.moved) {
+    if (Math.hypot(ev.clientX - pressed.x, ev.clientY - pressed.y) < 6) return;
+    pressed.moved = true;
+    (pressed.member ? pressed.node : pressed.node.closest(".tblock"))?.classList.add("dragging");
+  }
+  hover(ev.clientX, ev.clientY);
+}
+
+function clearPress() {
+  const p = pressed;
+  pressed = null;
+  if (!p) return null;
+  document.removeEventListener("pointermove", movePress);
+  document.removeEventListener("pointerup", endPress);
+  document.removeEventListener("pointercancel", endPress);
+  const list = p.node.closest("#tablist");
+  for (const t of list?.querySelectorAll(".drop, .nodrop") || []) t.classList.remove("drop", "nodrop");
+  return p;
+}
+
+// The pointer lifted. When the browser never turned the press into a drag (its
+// renderer was busy when the mouse moved), the move is done here from the same
+// rules a drop uses, so a dragged tab is never silently left behind.
+function endPress(ev) {
+  const p = clearPress();
+  if (!p) return;
+  (p.member ? p.node : p.node.closest(".tblock"))?.classList.remove("dragging");
+  if (p.moved && ev.type === "pointerup" && p.mouse) {
+    const t = document.elementFromPoint(ev.clientX, ev.clientY)?.closest?.(".tab[data-id]");
+    if (t) {
+      const before = asDrag(p, () => dropBefore(t, ev.clientX));
+      if (before !== undefined) p.onMove?.(p.keys, before);
+    }
+  }
+  p.node.dispatchEvent(new CustomEvent("aegis-tabdrag-end", { bubbles: true }));
+}
+
+function pressTab(node, info) {
+  pressed = { ...info, node, x: info.x, y: info.y, moved: false };
+  document.addEventListener("pointermove", movePress);
+  document.addEventListener("pointerup", endPress);
+  document.addEventListener("pointercancel", endPress);
 }
 
 // Where a drop on tab `t` at `x` puts what is dragged: the key it goes before
@@ -201,38 +285,35 @@ function tab(m, focusId, { onFocus, onMove, onClose, t = labelsFor("en") }, role
   node.addEventListener("click", () => onFocus(m.key));
   closeOnMiddle(node, () => onClose(m.key));
   node.addEventListener("pointerdown", (ev) => {
-    if (ev.button === 0) holdTab(node);
+    if (ev.button !== 0) return;
+    const box = node.closest(".tblock");
+    // The node is reused across draws and may have changed role since its
+    // listeners were made, so the class decides what it is now.
+    const member = node.classList.contains("member");
+    pressTab(node, {
+      group: box.dataset.group,
+      member,
+      keys: member ? [m.key] : JSON.parse(box.dataset.keys),
+      x: ev.clientX,
+      y: ev.clientY,
+      // A touch swipe scrolls the strip; only a mouse or pen reorders here.
+      mouse: ev.pointerType !== "touch",
+      onMove,
+    });
   });
   node.addEventListener("dragstart", (ev) => {
-    ev.dataTransfer.setData("text/aegis-tab", m.key);
-    ev.dataTransfer.effectAllowed = "move";
-    const box = node.closest(".tblock");
-    const member = role === "member";
-    dragging = { group: box.dataset.group, member, keys: member ? [m.key] : JSON.parse(box.dataset.keys) };
-    (member ? node : box).classList.add("dragging");
+    // Reordering is the pointer gesture above. Never start a native drag: the
+    // one mousemove Playwright's drag_and_drop sends may not start it, and a
+    // lost dragstart leaves no drop or dragend and a wedged strip.
+    ev.preventDefault();
   });
   node.addEventListener("dragend", () => {
     node.closest(".tblock")?.classList.remove("dragging");
     node.classList.remove("dragging");
     dragging = null;
-    if (holding === node) holding = null;
-    document.removeEventListener("pointerup", releaseHold);
-    document.removeEventListener("pointercancel", releaseHold);
+    clearPress();
     // A strip that was asked to redraw during the drag waited for this.
     node.dispatchEvent(new CustomEvent("aegis-tabdrag-end", { bubbles: true }));
-  });
-  node.addEventListener("dragover", (ev) => {
-    if (!dragging || !ev.dataTransfer.types.includes("text/aegis-tab")) return;
-    if (dropBefore(node, ev.clientX) === undefined) return node.classList.add("nodrop");
-    ev.preventDefault();
-    node.classList.add("drop");
-  });
-  node.addEventListener("dragleave", () => node.classList.remove("drop", "nodrop"));
-  node.addEventListener("drop", (ev) => {
-    ev.preventDefault();
-    node.classList.remove("drop", "nodrop");
-    const before = dragging && dropBefore(node, ev.clientX);
-    if (before !== undefined && dragging) onMove(dragging.keys, before);
   });
   return node;
 }
