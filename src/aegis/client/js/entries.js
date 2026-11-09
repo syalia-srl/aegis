@@ -13,6 +13,7 @@ import { diffView } from "./diff.js";
 import { cachedColour, colour, isPlain, langName, paint, splitLines } from "./highlight.js";
 import { hostIcon, repoUrl, shortLabel, sureRepo } from "./refs.js";
 import { serverNow } from "./clock.js";
+import { SETTLE } from "./toolverb.js";
 import { labelsFor } from "./labels.js";
 
 // The table a row reads when its caller passes none: the standalone page, until
@@ -1964,7 +1965,13 @@ const RENDERERS = {
     if (more.childNodes.length) d.append(more);
     const body = el("div", "body");
     body.append(d);
-    return row(e, `tool ${e.status}`, body);
+    const r = row(e, `tool ${e.status}`, body);
+    // What the call does, for its verb while it runs or has just ended (toolverb.js).
+    if (det.activity && (e.status === "running" || serverNow() - e.ts < SETTLE)) {
+      r.dataset.activity = det.activity;
+      r.dataset.at = String(e.ts);
+    }
+    return r;
   },
 
   system(e, opts = {}) {

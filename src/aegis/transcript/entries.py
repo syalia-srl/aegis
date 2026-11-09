@@ -25,6 +25,7 @@ from typing import Any
 
 from .. import files
 from .. import layout as canvas
+from ..usage.kinds import activity
 from ..artifacts import EVENTS_KEPT
 from ..dictation import without_note
 from ..claude.stream import (
@@ -196,6 +197,9 @@ class Fold:
         # that text, while the pending entry shows what the person typed.
         self._said: dict[str, str] = {}
         self._calls: dict[str, ToolCall] = {}
+        # Whether the last shell command failed: a test or a read after it is
+        # debugging, for the running row's verb (#1012).
+        self._shell_failed = False
         self._seen_init = False
         self._interrupted = False
         self._last_cost = 0.0
@@ -1516,6 +1520,10 @@ class Fold:
                 detail["path"] = path  # what the row's "show file" copies (file.peek)
             if lang := d.tool_lang(ev.name, ev.input):
                 detail["lang"] = lang  # the views' language (client/js/highlight.js)
+            act = activity(ev.name, ev.input)
+            if self._shell_failed and act in ("reading", "testing"):
+                act = "debugging"
+            detail["activity"] = act  # the running row's verbs (#1012)
             return self._upsert(
                 _entry(
                     ev.id,
@@ -1534,6 +1542,8 @@ class Fold:
             name = call.name if call else "result"
             inp = call.input if call else {}
             pair = d.edit_pair(name, inp)
+            if name == "Bash":
+                self._shell_failed = ev.is_error
             prev = self._entries.get(ev.id)
             detail: dict[str, Any] = (
                 dict(prev["detail"]) if prev else {"args": "", "steps": 0}

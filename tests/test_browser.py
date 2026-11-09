@@ -9690,10 +9690,10 @@ def test_esc_throws_a_locked_take_away(server, mic_page):
 def test_the_working_row_types_its_verb_and_counts_the_turns_tokens(server, page):
     """#938: while a turn runs the verb types out letter by letter and the
     counters show the turn's new input and output tokens; they start at zero
-    on the next turn."""
+    on the next turn. The verb types while no tool runs (#1012)."""
     page.goto(server.url)
     spawn(page, "hello")
-    page.fill("#input", "/busy 4")
+    page.fill("#input", '/script [["sleep", 2]]')
     page.press("#input", "Enter")
     page.wait_for_selector("#working", state="visible")
     seen = set()
@@ -9701,6 +9701,10 @@ def test_the_working_row_types_its_verb_and_counts_the_turns_tokens(server, page
         seen.add(page.text_content("#working-verb"))
         time.sleep(0.04)
     assert len(seen) > 3, seen  # it types, not one word drawn at once
+    turns_done(page, 2)  # hello's, then the script's
+    page.fill("#input", "/busy 4")
+    page.press("#input", "Enter")
+    page.wait_for_selector("#working", state="visible")
     page.wait_for_function(
         "document.getElementById('working-out').textContent === '20'"
     )
@@ -9711,6 +9715,49 @@ def test_the_working_row_types_its_verb_and_counts_the_turns_tokens(server, page
         page.set_viewport_size({"width": 390, "height": 844})
         time.sleep(0.5)
         page.screenshot(path=f"{shots}/working-phone.png")
+
+
+def test_the_working_row_takes_the_running_calls_glyph_and_verb(server, page):
+    """#1012: while a call runs, the working row's title is that call's glyph,
+    a verb of what it does and the call's name, with the counters kept; a
+    call that ends at once keeps the title about two pulses, then the star
+    and the general verbs come back."""
+    page.goto(server.url)
+    spawn(page, "hello")
+    page.fill("#input", "/busy 4")
+    page.press("#input", "Enter")
+    page.wait_for_selector("#working.calling", timeout=5000)
+    assert page.text_content("#working .wcall") == "Bash: Wait"
+    assert page.is_visible("#working-s")
+    seen = set()
+    for _ in range(25):
+        seen.add(page.text_content("#working-verb"))
+        time.sleep(0.04)
+    assert len(seen) > 3, seen  # it types, not one word drawn at once
+    verbs = "Reading Studying Scanning Digesting Exploring Untangling".split()
+    assert any(v.startswith(s.rstrip("…")) for s in seen if s for v in verbs), seen
+    shots = os.environ.get("AEGIS_SHOTS")
+    if shots:
+        time.sleep(0.6)
+        page.locator("#tr").screenshot(path=f"{shots}/call-title-desktop.png")
+        page.set_viewport_size({"width": 390, "height": 844})
+        time.sleep(0.6)
+        page.screenshot(path=f"{shots}/call-title-phone.png")
+        page.set_viewport_size({"width": 1280, "height": 800})
+    turns_done(page, 2)  # hello's, then busy's
+
+    page.fill("#input", '/script [["toast", {"line": "hi"}], ["sleep", 5]]')
+    page.press("#input", "Enter")
+    page.wait_for_function(
+        "document.querySelector('#working.calling .wcall')?.textContent.includes('toast')",
+        timeout=5000,
+    )
+    t0 = time.monotonic()
+    page.wait_for_selector("#working:not(.calling)", timeout=6000)
+    held = time.monotonic() - t0
+    assert 1.5 < held < 4, held  # the quick call held the title, then let go
+    assert page.is_visible("#working")
+    assert page.errors == []
 
 
 def test_the_working_row_names_esc_only_where_there_is_a_keyboard(server, browser):
