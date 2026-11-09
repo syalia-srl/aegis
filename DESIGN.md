@@ -936,20 +936,32 @@ variables and nothing else.
 
 **A client is a set of mounts.** The page is not one client but as many mounts
 as it asks for: `mount()` (`js/mount.js`) builds one `.aegis` root inside the
-element the host named, and composes into it the parts the layout asks for — a
-chat is one session's transcript and, unless it is switched off, its composer;
-tabs are the same two under a strip of the sessions the policy lists for that
-caller, with a button that starts a new one.
+element the host named, and composes into it the parts its layout asks for.
+There are three layouts: `chat` is one session's transcript and, unless it is
+switched off, its composer; `tabs` is the same two under a strip of the sessions
+the policy lists for that caller, with a button that starts a new one; `full` is
+the standalone client's whole page. A host passes `theme`, `lang`, `labels`,
+`controls` and `composer` to any of them; `renderers` gives a host's own tool a
+card of its own, called when the call has finished and again on each update, and
+`transcribe` hands a dictation take's 16 kHz mono pieces to the host's speech
+service in place of the browser's. `sidebar: false` keeps a `full` mount's
+session panel out, for a host that wants only the transcript, and `page` — true
+only on `index.html` — lets the mount own the document's title, favicon, theme,
+URL hash, service worker and push, while false keeps all of those the host's.
 The standalone page is one mount too, adopting its empty `#a2` element
-(`adopt`): `layout: "full"` makes `js/layouts/full.js` build the netbanner, the
-boot view and the session view into that root, and `index.html` keeps only its
-head, the empty element and the module script. That mount owns the state its
-views share: every server's sessions, the links, each link's quota and host, the
-browser's tab order, the session shown and the transcripts kept for it. Its
-views are parts as well: the Fleet, the new-session form, Settings, Journal,
-Usage, Knowledge, Files, Schedules, Help, the terminal and the browser each
-build the `<main class="view">` they draw in and hand their module that node,
-so the router only chooses which one the root's `data-view` shows.
+(`adopt`). `layout: "full"` makes `js/layouts/full.js` build the netbanner, the
+boot view and the session view into that root, and loads `app.js` with a dynamic
+import that only a full mount pays for; `composeFull` composes the parts when it
+resolves, and the calls a host made while it loaded run then. `index.html` keeps
+only its head, the empty element and the module script. That mount owns the
+state its views share: every server's sessions, the links, each link's quota and
+host, the browser's tab order, the session shown and the transcripts kept for
+it. Its views are parts as well: the Fleet, the new-session form, Settings,
+Journal, Usage, Knowledge, Files, Schedules, Help, the terminal and the browser
+each build the `<main class="view">` they draw in and hand their module that
+node, so the router only chooses which one the root's `data-view` shows. The
+router and the key table stay in `app.js` until #1003 takes them out; nothing a
+chat or tabs mount needs is in it.
 A product chat may also switch off the composer's model, effort and permission
 chips (`controls: false`, #994).
 A part owns the markup it draws, looks every node up under its own element and
