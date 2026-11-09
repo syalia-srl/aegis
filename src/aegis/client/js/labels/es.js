@@ -171,6 +171,9 @@ export default {
   "copy.copied": "Copiado",
   "copy.failed": "No se pudo copiar: {error}",
 
+  "tabs.newTitle": "Sesión nueva",
+  "tabs.empty": "Aún no hay sesiones",
+
   "composer.placeholder.locked": "Paso {node} del flujo {title}. Puedes leerlo; no recibe mensajes hasta que el flujo se detenga.",
   "composer.placeholder.off": "El servidor de esta sesión no está disponible; no se puede enviar nada hasta que vuelva.",
   "composer.placeholder.asleepIdle": "Dormida tras {idle} sin actividad. Escribir la despierta.",

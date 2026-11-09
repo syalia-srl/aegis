@@ -25,6 +25,7 @@ import { labelsFor } from "./labels.js";
 import { lifecycle } from "./lifecycle.js";
 import { Outbox } from "./outbox.js";
 import { buildFull } from "./layouts/full.js";
+import { TabsLayout } from "./layouts/tabs.js";
 import { ComposerPart } from "./parts/composer.js";
 import { TranscriptPart } from "./parts/transcript.js";
 
@@ -137,12 +138,19 @@ export class Mount {
   // The standalone client's page: the full layout builds the netbanner, the
   // boot view and the session view in this root, and app.js composes the parts
   // it holds. It keeps the id the browser suite addresses (b8). A chat composes
-  // one transcript and, unless the host asked for none, its box.
+  // one transcript and, unless the host asked for none, its box; tabs compose
+  // the same two under a strip of the sessions the policy lists.
   mountLayout() {
     if (this.opts.layout === "full") {
       this.root.id = "a2";
       this.root.classList.add("app");
       buildFull(this.root, this.t);
+      return;
+    }
+    if (this.opts.layout === "tabs") {
+      this.view = this.add(new TabsLayout(this, this.root));
+      // The constructor's session is not news to the host: it passed it.
+      this.follow(this.opts.session, true);
       return;
     }
     if (this.opts.layout !== "chat") throw new Error(`aegis: no layout ${this.opts.layout}`);
@@ -350,6 +358,8 @@ export class Mount {
     const meta = this.state.sessions.get(this.state.shown);
     this.transcript?.sessionChanged(this.state.shown, meta);
     this.composer?.sessionChanged(this.state.shown, meta);
+    // The tabs layout redraws its strip from what just arrived (m3).
+    this.view?.draw?.();
   }
 
   _patch(ops) {
@@ -372,6 +382,8 @@ export class Mount {
         }
       }
     }
+    // The tabs layout redraws its strip from what just arrived (m3).
+    this.view?.draw?.();
   }
 
   _put(raw) {
