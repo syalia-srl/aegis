@@ -20,7 +20,7 @@ import { attach as attachMenu } from "../menu.js";
 import { installBell } from "../ping.js";
 import { pushSupported } from "../pushpanel.js";
 import { attachTabCard } from "../tabcard.js";
-import { draggingTab, patchTab, renderTabs, stepMove } from "../tabs.js";
+import { patchTab, renderTabs, stepMove } from "../tabs.js";
 import { Switcher } from "../switcher.js";
 
 // The markup this part owns. The ids stay as they are: they are the browser
@@ -94,12 +94,6 @@ export class HeaderPart {
     this.sideBtn = n("side-btn");
     this.helpBtn = n("help-btn");
     this.switcherBox = n("switcher");
-    this.dirty = false; // a drag asked for a redraw; it waits for dragend
-    this.list.addEventListener("aegis-tabdrag-end", () => {
-      if (!this.dirty) return;
-      this.dirty = false;
-      this.render(this.tabs(), this.current());
-    });
 
     const part = this;
     // What tabs.js calls while it draws: the bar's actions are the page's,
@@ -228,13 +222,6 @@ export class HeaderPart {
   // does; `focusId` is the session in view and `view` names the route, for the
   // header buttons' on marks.
   render(metas, focusId = null, view = undefined) {
-    // A drag owns the strip until it ends: a sessions patch that rebuilds the
-    // tabs under the pointer would cancel it. The last ask waits below.
-    if (draggingTab()) {
-      this.dirty = true;
-      return;
-    }
-    this.dirty = false;
     renderTabs(this.list, metas, focusId, this.tabActions);
     this.focus();
     if (view !== undefined) this.mark(view);
@@ -244,10 +231,6 @@ export class HeaderPart {
   // One session's tab redrawn where it stands. False when the tab is inside a
   // group, whose head and count depend on its members: then the bar redraws.
   patch(meta, focusId = null) {
-    if (draggingTab()) {
-      this.dirty = true;
-      return true; // the bar redraws at dragend, not mid-drag
-    }
     return patchTab(this.list, meta, focusId, this.tabActions);
   }
 
