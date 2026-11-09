@@ -321,10 +321,12 @@ export class Transcript {
     // taken before a delta this tab already applied would take that delta's
     // rows away: on a busy server the mount's first snapshot can land after a
     // live turn's upserts, and the reply vanishes. The first after a reconnect
-    // is authoritative; any other older one keeps the newer rows (#961).
+    // is authoritative; any other one that is not newer keeps the newer rows
+    // (#961). A live entry grows without moving its revision, so an equal
+    // revision can still be older than what this tab drew: it is not newer.
     const force = this.reset;
     this.reset = false;
-    if (!force && Number.isFinite(data.rev) && data.rev < this.rev) return;
+    if (!force && Number.isFinite(data.rev) && data.rev <= this.rev) return;
     const { sinceId, sinceText } = this;
     this.clear();
     this.sinceId = sinceId;
