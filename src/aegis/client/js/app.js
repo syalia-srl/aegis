@@ -566,6 +566,24 @@ if (page) {
   window.addEventListener("hashchange", render);
   window.addEventListener("popstate", render);
 }
+// The layout draws real anchors with hash hrefs (a terminal's Show link, a
+// continued-by link, a message's #s= link). In a host they route this mount,
+// not the page's URL: one listener for all of them, since a part that draws a
+// link does not know whether it is on the page or in an embed (m5).
+if (!page) {
+  root.addEventListener("click", (ev) => {
+    if (ev.defaultPrevented || ev.button !== 0) return;
+    if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
+    const a = ev.target.closest?.('a[href^="#"]');
+    // Only a real HTML anchor inside this mount; a <use> in the glyph sprite
+    // has a hash href but is not a link.
+    if (!a || !root.contains(a) || !(a instanceof HTMLAnchorElement)) return;
+    if (a.target && a.target !== "_self") return;
+    ev.preventDefault();
+    setHash(a.getAttribute("href"), true);
+    render();
+  });
+}
 
 function show(view, text) {
   root.dataset.view = view;
