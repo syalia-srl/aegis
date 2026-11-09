@@ -109,6 +109,8 @@ export class TranscriptPart {
     // The file entries this mount has announced for the session it shows, so
     // an upsert that changes only a peek or a status does not announce twice.
     this.sentFiles = new Set();
+    // The host's own tool cards, passed to every row this part renders.
+    this.renderers = mount.opts.renderers || {};
 
     this.pane = el("section", "tr-pane col");
     this.pane.dataset.pane = "transcript";
@@ -142,6 +144,7 @@ export class TranscriptPart {
     this.transcript = new Transcript(this.tr, this.entries, this.jump, {
       base: this.base,
       t: this.t,
+      renderers: this.renderers,
       opener: (item) => this.viewer.open(item),
       onSelect: () => this.drawNav(),
       onRead: (ids) => this.read(ids),

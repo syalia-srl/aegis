@@ -68,7 +68,7 @@ const PAGE = 100;
 const NEAR_TOP_PX = 400;
 
 export class Transcript {
-  constructor(scroller, list, jump, { loadDetail, statPaths = null, onRead = () => {}, onSelect = () => {}, onReply = () => {}, seen = () => true, base = null, opener = null, t = labelsFor("en") } = {}) {
+  constructor(scroller, list, jump, { loadDetail, statPaths = null, onRead = () => {}, onSelect = () => {}, onReply = () => {}, seen = () => true, base = null, opener = null, renderers = {}, t = labelsFor("en") } = {}) {
     this.scroller = scroller;
     // The mount's label table; the standalone page passes none and reads
     // English, as it does until b9 labels the whole client.
@@ -80,6 +80,9 @@ export class Transcript {
     // no prefix, and "/aegis[/via/<server>]" a host's. A part sets it before
     // each switch; render(entry, { base }) uses it.
     this.base = base;
+    // The host's own tool cards: tool name -> (entry, el) => boolean. Empty
+    // for the standalone page, which draws every row itself.
+    this.renderers = renderers;
     this.opener = opener; // what a sent file's or artifact's Open does
     this.entries = new Map(); // id -> entry, in transcript order
     this.nodes = new Map(); // id -> row, for the mounted suffix
@@ -242,7 +245,7 @@ export class Transcript {
   }
 
   mount(e) {
-    const n = render(this.whole(e), { base: this.base ?? undefined, open: this.opener, t: this.t });
+    const n = render(this.whole(e), { base: this.base ?? undefined, open: this.opener, renderers: this.renderers, t: this.t });
     for (const f of n.querySelectorAll(".fence")) watch(f);
     if (this.statPaths && n.querySelector(".md code.ref[data-index]")) {
       const known = this.kinds.get(e.id);
@@ -436,7 +439,7 @@ export class Transcript {
         const done = e.kind === "prose" && !e.live && (!known || prev.live);
         const old = this.nodes.get(e.id);
         if (old) {
-          if (update(e, old, prev, { base: this.base ?? undefined, open: this.opener, t: this.t }))
+          if (update(e, old, prev, { base: this.base ?? undefined, open: this.opener, renderers: this.renderers, t: this.t }))
             this.nodes.set(e.id, old);
           else {
             this.watch.unobserve(old);
