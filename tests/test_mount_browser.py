@@ -1752,3 +1752,19 @@ def test_the_tabs_new_button_spawns_and_opens_the_new_session(host, browser):  #
     assert change["previous"] == host["session"]
     assert errors == []
     page.close()
+
+
+def test_a_chat_mount_never_loads_the_full_layouts_boot(host, browser):  # noqa: F811
+    """The full layout's behaviour is app.js's, and a m4 mount imports it only
+    for a full layout: a chat host never downloads or evaluates its module
+    graph, so the page's own resource list has no app.js."""
+    page, errors = open_page(browser, 1280)
+    page.goto(host["url"])
+    mounted(page)
+    loaded = page.evaluate(
+        """() => performance.getEntriesByType("resource")
+          .map((e) => new URL(e.name).pathname)"""
+    )
+    assert [n for n in loaded if n.endswith("/js/app.js")] == []
+    assert errors == []
+    page.close()
