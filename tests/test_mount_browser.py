@@ -1422,11 +1422,12 @@ def test_renderers_draw_a_live_tool_card(host, browser, width):  # noqa: F811
     page.close()
 
 
-def test_renderers_take_both_key_forms_and_fall_back_on_false_or_throw(host, browser):  # noqa: F811
+@pytest.mark.parametrize("width", [1280, 390])
+def test_renderers_take_both_keys_and_fall_back(host, browser, width):  # noqa: F811
     """A second MCP server's tool keeps its full harness name as its key; a
     renderer that declines keeps aegis's row, and one that throws leaves the
     row too and does not fail the page (one console line names the tool)."""
-    page, errors = open_page(browser, 1280)
+    page, errors = open_page(browser, width)
     page.goto(host["url"])
     page.wait_for_function("() => window.aegisHost", timeout=30_000)
     prefix = page.evaluate("window.aegisHost.prefix")
@@ -1481,10 +1482,11 @@ def test_renderers_take_both_key_forms_and_fall_back_on_false_or_throw(host, bro
     page.close()
 
 
-def test_transcribe_replaces_the_workers(host, browser):  # noqa: F811
+@pytest.mark.parametrize("width", [1280, 390])
+def test_transcribe_replaces_the_workers(host, browser, width):  # noqa: F811
     """A transcribe hook takes each 16 kHz mono piece as a Float32Array and its
     text lands in the box; the model is never loaded and no Worker is made."""
-    page, errors = open_page(browser, 1280)
+    page, errors = open_page(browser, width)
     page.goto(host["url"])
     page.wait_for_function("() => window.aegisHost", timeout=30_000)
     prefix = page.evaluate("window.aegisHost.prefix")
