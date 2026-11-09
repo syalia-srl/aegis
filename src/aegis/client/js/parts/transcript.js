@@ -16,6 +16,7 @@ import { serverNow } from "../clock.js";
 import { installCopy } from "../copy.js";
 import { loadTranscript, saveTranscript } from "../devicestore.js";
 import { byId } from "../dom.js";
+import { entryFiles } from "../entries.js";
 import { Find } from "../find.js";
 import { icon, glyph } from "../glyphs.js";
 import { applyLabels } from "../labels.js";
@@ -294,10 +295,10 @@ export class TranscriptPart {
         if (gen !== this.gen) return;
         if (data.since !== undefined) {
           this.transcript.resume(data);
-          for (const entry of data.entries || []) this.mount.emit("entry", { session: this.key, entry });
+          for (const entry of data.entries || []) this.report(entry);
         } else {
           this.transcript.snapshot(data);
-          for (const entry of data.entries || []) this.mount.emit("entry", { session: this.key, entry });
+          for (const entry of data.entries || []) this.report(entry);
           if (!this.placed) this.transcript.setSince(this.sinceText());
           this.placed = true;
         }
@@ -308,7 +309,7 @@ export class TranscriptPart {
       (ops) => {
         if (gen !== this.gen) return;
         this.transcript.apply(ops);
-        for (const op of ops) if (op.upsert) this.mount.emit("entry", { session: this.key, entry: op.upsert });
+        for (const op of ops) if (op.upsert) this.report(op.upsert);
         this.keep();
         this.drawOfflineNotice();
         this.drawNav();
@@ -319,6 +320,14 @@ export class TranscriptPart {
       () => (this.transcript.rev >= 0 ? this.transcript.rev : null),
       server,
     );
+  }
+
+  // What the host hears for one upsert: the generic entry, and the narrow
+  // fileSent for a file card (spec 06: a host's own file board).
+  report(entry) {
+    this.mount.emit("entry", { session: this.key, entry });
+    if (entry.kind === "file")
+      this.mount.emit("fileSent", { session: this.key, entry, files: entryFiles(entry) });
   }
 
   // The divider's words: how long since this session was last read.
