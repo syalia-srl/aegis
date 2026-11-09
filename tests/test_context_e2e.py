@@ -177,7 +177,7 @@ async def test_the_archive_survives_a_restart_before_the_first_turn(world):
     await until(lambda: log_a in reg.archived, 8, "archived after restart")
 
 
-async def test_peer_read_reaches_the_archived_predecessor_for_its_successor_only(world):
+async def test_peer_read_reaches_an_archived_session_for_any_agent(world):
     a, b = await handed(world)
     reg = world.app.sessions
     await until(lambda: a.log_id in reg.archived, 8, "archived")
@@ -185,9 +185,21 @@ async def test_peer_read_reaches_the_archived_predecessor_for_its_successor_only
     got = await world.app.registry.call("peer.read", read, Caller("agent", b.log_id))
     assert "ctx 342000" in got
     c = await world.spawn()
+    got = await world.app.registry.call("peer.read", read, Caller("agent", c.log_id))
+    assert "ctx 342000" in got
+    from aegis.gc import pack
+
+    pack(world.app.sessions.store_path(a.log_id))  # what aegis gc leaves
+    got = await world.app.registry.call("peer.read", read, Caller("agent", c.log_id))
+    assert "ctx 342000" in got
+    by_id = {"target": a.log_id, "last": 5}
+    got = await world.app.registry.call("peer.read", by_id, Caller("agent", c.log_id))
+    assert "ctx 342000" in got
     with pytest.raises(OpError) as e:
-        await world.app.registry.call("peer.read", read, Caller("agent", c.log_id))
-    assert e.value.code == "archived"
+        await world.app.registry.call(
+            "peer.read", {"target": "no-such-one"}, Caller("agent", c.log_id)
+        )
+    assert e.value.code == "no_session"
 
 
 async def test_the_line_asks_outright_at_a_break_and_conditionally_on_a_question(world):

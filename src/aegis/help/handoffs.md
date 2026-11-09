@@ -27,6 +27,10 @@ session's transcript, or up to 200 with `last=200`. Tool calls are left out unle
 changes nothing and wakes nobody. `handle@server` reads a session on a linked
 server.
 
+An archived session reads the same way, by its handle or its id, including
+one whose transcript `aegis gc` packed. When an open session took the same
+handle, `peer_read` reads the open one; name the archived one by its id.
+
 ## Hand work over
 
 `peer_handoff` gives another session context or an instruction. Pass `target`
