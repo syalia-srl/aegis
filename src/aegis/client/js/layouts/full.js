@@ -14,17 +14,19 @@
 // wrapper: the root is the grid (.aegis[data-layout=full]) and this is its
 // content.
 
+import { applyLabels } from "../labels.js";
+
 export const FULL_HTML = `
-  <div class="netbanner" id="netbanner" role="status" hidden><span class="lbl">no connection</span><span id="netbanner-t"></span><button class="btn" id="netbanner-retry" type="button">Retry now</button></div>
+  <div class="netbanner" id="netbanner" role="status" hidden><span class="lbl" data-t="shell.noConnection">no connection</span><span id="netbanner-t"></span><button class="btn" id="netbanner-retry" type="button" data-t="shell.retry">Retry now</button></div>
 
   <main class="view v-boot">
     <div class="boot">
       <div class="boot-mark" id="boot-mark"></div>
-      <div class="notice" id="boot-text">Connecting…</div>
+      <div class="notice" id="boot-text" data-t="shell.connecting">Connecting…</div>
       <form class="login" id="login" hidden>
-        <label for="login-token">Paste the token <code>aegis serve</code> printed. This browser stays signed in.</label>
+        <label for="login-token"><span data-t="shell.tokenBefore">Paste the token</span> <code>aegis serve</code> <span data-t="shell.tokenAfter">printed. This browser stays signed in.</span></label>
         <input id="login-token" type="password" autocomplete="current-password" spellcheck="false" required>
-        <button class="btn primary" type="submit">Sign in</button>
+        <button class="btn primary" type="submit" data-t="shell.signIn">Sign in</button>
         <p class="err-text" id="login-error"></p>
       </form>
     </div>
@@ -32,33 +34,33 @@ export const FULL_HTML = `
 
   <main class="view v-session">
     <div class="canvas" id="canvas" data-docked="0">
-    <p class="notice wempty">This window is empty</p>
+    <p class="notice wempty" data-t="shell.emptyWindow">This window is empty</p>
     <section class="col pane" id="tr-pane" data-pane="transcript">
-      <div class="tr" id="tr" tabindex="-1"><p class="notice tr-offline" id="tr-offline" hidden>Not saved on this device. It opens when the connection is back.</p><div id="entries"></div><div class="row queued" id="queued" hidden><span class="t"></span><span class="g" id="queued-g"></span><div class="body"><span class="lbl" id="queued-lbl"></span><div class="text"></div><div class="ctl"><button class="btn primary" type="button" data-act="send">Send anyway</button><button class="btn" type="button" data-act="copy">Copy</button><button class="btn" type="button" data-act="edit">Edit</button><button class="btn" type="button" data-act="discard">Discard</button></div></div></div><div class="row replies" id="replies" hidden><span class="t"></span><span class="g" id="replies-g"></span><div class="body"><div id="replies-pills"></div><p class="cnote" id="handoff-done" hidden></p></div></div><div class="row coldnote" id="coldnote" hidden><span class="t"></span><span class="g" id="coldnote-g"></span><div class="body"><div class="cold"><span class="lbl">cache expired</span><span id="coldnote-t"></span><button class="btn needs-net" id="coldnote-go" type="button">Continue in a fresh session</button></div></div></div><div class="row closing" id="closing" hidden><span class="t"></span><span class="g" id="closing-g"></span><div class="body"><button class="btn archive needs-net" id="closing-btn" type="button" title="Close this session; it stays in the archive">Archive</button></div></div><div class="row working" id="working" hidden><span class="t"></span><span class="g" id="working-g"></span><div class="body"><span class="wverb"><span id="working-verb">Working…</span><span class="wcur"></span></span><span class="meta">(<span id="working-s">0</span>s · ↑ <span class="wtok" id="working-in">0</span> · ↓ <span class="wtok" id="working-out">0</span> tokens<span class="wesc"> · Esc to interrupt</span>)</span></div></div><div class="row working" id="waking" hidden><span class="t"></span><span class="g" id="waking-g"></span><div class="body">Waking <span class="meta">· resuming the harness</span></div></div></div>
+      <div class="tr" id="tr" tabindex="-1"><p class="notice tr-offline" id="tr-offline" hidden data-t="transcript.offline">Not saved on this device. It opens when the connection is back.</p><div id="entries"></div><div class="row queued" id="queued" hidden><span class="t"></span><span class="g" id="queued-g"></span><div class="body"><span class="lbl" id="queued-lbl"></span><div class="text"></div><div class="ctl"><button class="btn primary" type="button" data-act="send" data-t="transcript.queued.send">Send anyway</button><button class="btn" type="button" data-act="copy" data-t="transcript.queued.copy">Copy</button><button class="btn" type="button" data-act="edit" data-t="transcript.queued.edit">Edit</button><button class="btn" type="button" data-act="discard" data-t="transcript.queued.discard">Discard</button></div></div></div><div class="row replies" id="replies" hidden><span class="t"></span><span class="g" id="replies-g"></span><div class="body"><div id="replies-pills"></div><p class="cnote" id="handoff-done" hidden></p></div></div><div class="row coldnote" id="coldnote" hidden><span class="t"></span><span class="g" id="coldnote-g"></span><div class="body"><div class="cold"><span class="lbl" data-t="transcript.cold.expired">cache expired</span><span id="coldnote-t"></span><button class="btn needs-net" id="coldnote-go" type="button" data-t="transcript.cold.continue">Continue in a fresh session</button></div></div></div><div class="row closing" id="closing" hidden><span class="t"></span><span class="g" id="closing-g"></span><div class="body"><button class="btn archive needs-net" id="closing-btn" type="button" title="Close this session; it stays in the archive" data-t="transcript.closing.archive">Archive</button></div></div><div class="row working" id="working" hidden><span class="t"></span><span class="g" id="working-g"></span><div class="body"><span class="wverb"><span id="working-verb" data-t="transcript.working.verb">Working…</span><span class="wcur"></span></span><span class="meta">(<span id="working-s">0</span><span data-t="transcript.working.seconds">s</span> · ↑ <span class="wtok" id="working-in">0</span> · ↓ <span class="wtok" id="working-out">0</span> <span data-t="transcript.working.tokens">tokens</span><span class="wesc"> · <span data-t="transcript.working.escape">Esc to interrupt</span></span>)</span></div></div><div class="row working" id="waking" hidden><span class="t"></span><span class="g" id="waking-g"></span><div class="body">Waking <span class="meta" data-t="transcript.waking.meta">· resuming the harness</span></div></div></div>
       <div class="nav" id="nav" hidden>
-        <button class="spark" id="nav-recap" title="Recap where this session stands" aria-label="Recap where this session stands"></button>
-        <button class="fold" id="nav-fold" data-level="0" title="Fold tool calls and thinking (Z)" aria-label="Fold tool calls and thinking"></button>
-        <button class="needs" id="nav-needs" title="Next session that needs you (Alt+J)" aria-label="Next session that needs you"><span class="n" id="nav-needs-n"></span></button>
-        <button class="up" id="nav-up" title="Previous agent message (Alt+↑)" aria-label="Previous agent message"></button>
-        <button class="pos" id="nav-pos" title="First unread (Alt+U)"></button>
-        <button class="down" id="nav-down" title="Next agent message (Alt+↓)" aria-label="Next agent message"></button>
-        <button class="last" id="nav-last" title="Start of the last agent message" aria-label="Start of the last agent message"></button>
-        <button class="latest" id="jump" title="Latest (G)" aria-label="Latest"></button>
-        <button class="side-btn" id="nav-side" title="Session panel (Alt+B)" aria-label="Session panel"></button>
+        <button class="spark" id="nav-recap" data-t-title="transcript.nav.recapTitle" data-t-aria="transcript.nav.recap"></button>
+        <button class="fold" id="nav-fold" data-level="0" data-t-title="transcript.nav.foldTitle" data-t-aria="transcript.nav.fold"></button>
+        <button class="needs" id="nav-needs" data-t-title="transcript.nav.needsTitle" data-t-aria="transcript.nav.needs"><span class="n" id="nav-needs-n"></span></button>
+        <button class="up" id="nav-up" data-t-title="transcript.nav.upTitle" data-t-aria="transcript.nav.up"></button>
+        <button class="pos" id="nav-pos" data-t-title="transcript.nav.firstUnread"></button>
+        <button class="down" id="nav-down" data-t-title="transcript.nav.downTitle" data-t-aria="transcript.nav.down"></button>
+        <button class="last" id="nav-last" data-t-title="transcript.nav.lastTitle" data-t-aria="transcript.nav.last"></button>
+        <button class="latest" id="jump" data-t-title="transcript.nav.latestTitle" data-t-aria="transcript.nav.latest"></button>
+        <button class="side-btn" id="nav-side" data-t-title="transcript.nav.sideTitle" data-t-aria="transcript.nav.side"></button>
       </div>
       <div class="find" id="find" hidden>
-        <input id="find-q" spellcheck="false" autocomplete="off" placeholder="Find in transcript" aria-label="Find in this transcript">
+        <input id="find-q" spellcheck="false" autocomplete="off" data-t-placeholder="find.placeholder" data-t-aria="find.aria">
         <span class="count" id="find-n" aria-live="polite"></span>
-        <button class="prev" id="find-prev" title="Previous match (Shift+Enter)" aria-label="Previous match"></button>
-        <button class="next" id="find-next" title="Next match (Enter)" aria-label="Next match"></button>
-        <button class="close" id="find-close" title="Close (Esc)" aria-label="Close"></button>
+        <button class="prev" id="find-prev" data-t-title="find.prevTitle" data-t-aria="find.prev"></button>
+        <button class="next" id="find-next" data-t-title="find.nextTitle" data-t-aria="find.next"></button>
+        <button class="close" id="find-close" data-t-title="find.closeTitle" data-t-aria="find.close"></button>
       </div>
       <div class="composer" id="composer">
         <div data-slot="menu"></div>
         <div class="atts" id="atts" hidden></div>
         <div class="box">
-          <textarea id="input" rows="1" placeholder="Message the agent. Enter sends, Shift+Enter adds a line, / for commands, Esc interrupts."></textarea>
-          <div class="acts"><button class="mic clip needs-net" id="attach" type="button" title="Attach files" aria-label="Attach files"></button><input type="file" id="attach-pick" multiple hidden><span data-slot="mic"></span><button class="mic speak-follow" id="speak-follow" type="button" aria-pressed="false" title="Read new replies aloud" aria-label="Read new replies aloud"></button><button class="int" id="interrupt" title="Interrupt (Esc)" aria-label="Interrupt" hidden></button><button class="send" id="send" title="Send (Enter)" aria-label="Send"></button></div>
+          <textarea id="input" rows="1" data-t-placeholder="composer.placeholder.default"></textarea>
+          <div class="acts"><button class="mic clip needs-net" id="attach" type="button" data-t-title="composer.attach" data-t-aria="composer.attach"></button><input type="file" id="attach-pick" multiple hidden><span data-slot="mic"></span><button class="mic speak-follow" id="speak-follow" type="button" aria-pressed="false" data-t-title="composer.speakFollow" data-t-aria="composer.speakFollow"></button><button class="int" id="interrupt" data-t-title="composer.interruptTitle" data-t-aria="composer.interrupt" hidden></button><button class="send" id="send" data-t-title="composer.sendTitle" data-t-aria="composer.send"></button></div>
         </div>
         <div class="chips">
           <span class="chip" id="chip-model"></span><span class="chip" id="chip-effort"></span><span class="chip" id="chip-perm"></span>
@@ -74,8 +76,9 @@ export const FULL_HTML = `
 
 // Build the full layout into `root`. The mount calls it before any part is
 // composed, so a part may find its nodes under the root at once.
-export function buildFull(root) {
+export function buildFull(root, t) {
   const holder = document.createElement("template");
   holder.innerHTML = FULL_HTML;
   root.append(holder.content);
+  if (t) applyLabels(root, t);
 }

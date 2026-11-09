@@ -4,7 +4,8 @@
 // session and those it started, groups.js) is drawn as one block headed by its
 // oldest member, which can fold it to one tab (#586).
 
-import { iconText, LABEL, PANE_ICON } from "./glyphs.js";
+import { stateLabel } from "./labels.js";
+import { iconText, PANE_ICON } from "./glyphs.js";
 import { closeOnMiddle, markNode } from "./fleet.js";
 import { blocksOf, hueOf } from "./groups.js";
 import { shownOwner } from "./me.js";
@@ -79,7 +80,7 @@ export function renderTabs(list, metas, focusId, actions) {
       const cnt = document.createElement("span");
       cnt.className = "cnt";
       cnt.textContent = folded ? `+${hidden.length}` : "−";
-      cnt.title = folded ? "Unfold the group" : "Fold the group";
+      cnt.title = t(folded ? "tabs.unfold" : "tabs.fold");
       cnt.classList.toggle("alert", folded && hidden.some((m) => m.mark === "needs_you"));
       cnt.addEventListener("click", (ev) => {
         ev.stopPropagation();
@@ -142,13 +143,13 @@ export function stepMove(list, key, d) {
   return box.nextElementSibling ? [keys, firstKey(box.nextElementSibling.nextElementSibling)] : null;
 }
 
-function tab(m, focusId, { onFocus, onMove, onClose }, role) {
+function tab(m, focusId, { onFocus, onMove, onClose, t }, role) {
   const t = document.createElement("div");
   t.className = `tab ${role}${m.key === focusId ? " on" : ""}${m.state === "asleep" ? " asleep" : ""}${m.off ? " off" : ""}`;
   t.classList.toggle("blink", !!m.blink);
   t.draggable = true;
   t.dataset.id = m.key;
-  const said = `${m.handle}: ${m.title || "untitled"} (${LABEL[m.attention] || m.state})`;
+  const said = t("tabs.said", { handle: m.handle, title: m.title || t("sidebar.untitled"), state: stateLabel(t, m.attention) || m.state });
   const mark = markNode(m);
   const term = m.kind === "term" || m.kind === "browser";
   if (term) {

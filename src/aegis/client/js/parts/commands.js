@@ -14,6 +14,7 @@
 
 import { CommandMenu } from "../commands.js";
 import { byId } from "../dom.js";
+import { applyLabels } from "../labels.js";
 import { forKey } from "../mount.js";
 import { toast } from "../toast.js";
 
@@ -50,6 +51,7 @@ export class CommandsPart {
     const slot = host.querySelector('[data-slot="menu"]');
     if (!slot) throw new Error("aegis: the composer has no menu slot");
     slot.innerHTML = MENU_HTML;
+    applyLabels(slot, this.t);
     // The menu box is the slot's child; the slot stays in the composer's flow
     // as an empty, zero-height div while the box is absolutely placed.
     this.el = slot.firstElementChild;
@@ -62,6 +64,7 @@ export class CommandsPart {
       getLine: () => opts.getLine(),
       setLine: (v) => opts.setLine(v),
       meta: () => opts.meta(),
+      t: this.t,
     });
   }
 

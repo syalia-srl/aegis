@@ -68,9 +68,14 @@ const phoneHeader = matchMedia("(max-width:760px)"); // the one-row header (clie
 // the page's shared socket and owns the state every view below reads. The theme
 // is the one index.html applied to <html> before the first paint, so the first
 // render draws what the last one did.
+// A page mounted with ?lang=es, or one that chose a language before, reads
+// its whole layout in that table: the full client is mountable too (b9).
+const langOf = () =>
+  new URLSearchParams(location.search).get("lang") || localStorage.getItem("aegis.lang") || "en";
 const app = new Mount(root, {
   adopt: true,
   layout: "full",
+  lang: langOf(),
   theme: localStorage.getItem("aegis.theme") || document.documentElement.dataset.theme || "ink",
   // The page's outbox is outbox.js's singleton (the queued row and the browser
   // suite call it by that name), handed to the mount that owns its flush.

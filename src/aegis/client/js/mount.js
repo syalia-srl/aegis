@@ -131,7 +131,7 @@ export class Mount {
     if (this.opts.layout === "full") {
       this.root.id = "a2";
       this.root.classList.add("app");
-      buildFull(this.root);
+      buildFull(this.root, this.t);
       return;
     }
     if (this.opts.layout !== "chat") throw new Error(`aegis: no layout ${this.opts.layout}`);

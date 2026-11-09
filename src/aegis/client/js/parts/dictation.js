@@ -23,19 +23,15 @@ import { icon } from "../glyphs.js";
 import { q } from "../dom.js";
 import { toast } from "../toast.js";
 
-// The words the button carries. b9 moves them to the label table with the rest
-// of the command menu's and dictation's strings.
-const TITLE = "Dictate (Alt+M)";
-const LABEL = "Dictate";
-
-function micButton() {
+// The words the button carries come from the mount's table.
+function micButton(t) {
   const b = document.createElement("button");
   b.id = "mic"; // the id the browser suite and client.css address
   b.className = "mic needs-net";
   b.type = "button";
   b.dataset.state = "idle";
-  b.title = TITLE;
-  b.setAttribute("aria-label", LABEL);
+  b.title = t("dictation.title");
+  b.setAttribute("aria-label", t("dictation.label"));
   b.append(icon("mic"));
   return b;
 }
@@ -47,6 +43,7 @@ export class DictationPart {
   // onState/onLevel: the page's own listeners (an artifact frame's dictation).
   constructor(mount, host, opts = {}) {
     this.mount = mount;
+    this.t = mount.t;
     this.opts = opts;
     this.boxes = new Map(); // textarea -> {input, draft, heard, ctx, onTake}
     this.buttons = new Map(); // button -> the same box
@@ -65,8 +62,10 @@ export class DictationPart {
         opts.onLevel?.(x);
       },
       onError: refuse,
+      t: this.t,
     });
     this.recorder = new HoldToRecord({
+      t: this.t,
       busy: () => this.busy(),
       onError: refuse,
       onDone: (file, ms, ctx) => ctx.box.onTake?.(file, ms, ctx.box.ctx?.()),
@@ -104,7 +103,7 @@ export class DictationPart {
     if (!button) {
       const slot = q(host, '[data-slot="mic"]');
       if (!slot) throw new Error("aegis: the composer has no mic slot");
-      button = micButton();
+      button = micButton(this.t);
       slot.append(button);
     }
     const box = {
@@ -118,8 +117,8 @@ export class DictationPart {
     this.buttons.set(button, box);
     if (!navigator.mediaDevices) {
       button.disabled = true;
-      button.title = "Dictation needs https or localhost";
-    } else button.title += " · hold to record audio";
+      button.title = this.t("dictation.needsHttps");
+    } else button.title += this.t("dictation.hold");
     this.recorder.attach(button, () => ({ box }));
     button.addEventListener("click", () => {
       if (!this.allowed()) return;

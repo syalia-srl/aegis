@@ -18,6 +18,7 @@
 import { Attachments } from "../attach.js";
 import { CommandMenu } from "../commands.js";
 import { byId, q } from "../dom.js";
+import { applyLabels } from "../labels.js";
 import { gorgoneion, icon } from "../glyphs.js";
 import { modelMeta } from "../models.js";
 import { offline } from "../net.js";
@@ -29,40 +30,40 @@ import { toast } from "../toast.js";
 const SPAWN_HTML = `
 <form class="spawn" id="spawn">
   <div class="mark" id="sp-mark"><span>ægis</span></div>
-  <h3 class="sp-head">Agents</h3>
-  <div class="cwdline"><pick-chip class="srvpick" id="sp-server" name="server" aria-label="Server" title="The server the session starts on" hidden></pick-chip><span class="srvsep" id="sp-sep" hidden>:</span><input class="cwd" id="sp-cwd" spellcheck="false" aria-label="Working directory" title="Working directory: click to change"></div>
+  <h3 class="sp-head" data-t="spawn.agents">Agents</h3>
+  <div class="cwdline"><pick-chip class="srvpick" id="sp-server" name="server" data-t-aria="spawn.server" data-t-title="spawn.serverTitle" hidden></pick-chip><span class="srvsep" id="sp-sep" hidden>:</span><input class="cwd" id="sp-cwd" spellcheck="false" data-t-aria="spawn.cwd" data-t-title="spawn.cwdTitle"></div>
   <div class="atts" id="sp-atts" hidden></div>
   <div class="box">
-    <textarea id="sp-text" rows="3" aria-label="First message"
-      placeholder="What should the agent do? Enter starts the session and sends this; Shift+Enter adds a line."></textarea>
+    <textarea id="sp-text" rows="3" data-t-aria="spawn.firstMessage"
+      data-t-placeholder="spawn.placeholder"></textarea>
     <div class="acts">
-      <button class="mic clip needs-net" id="sp-attach" type="button" title="Attach files" aria-label="Attach files"><svg class="ic i-clip" aria-hidden="true"><use href="#g-clip"/></svg></button><input type="file" id="sp-attach-pick" multiple hidden>
-      <button class="mic needs-net" id="sp-mic" type="button" data-state="idle" title="Dictate (Alt+M)" aria-label="Dictate"><svg class="ic i-mic" aria-hidden="true"><use href="#g-mic"/></svg></button>
-      <button class="send needs-net" type="submit" id="sp-go" title="Start the session" aria-label="Start the session"></button>
+      <button class="mic clip needs-net" id="sp-attach" type="button" data-t-title="composer.attach" data-t-aria="composer.attach"><svg class="ic i-clip" aria-hidden="true"><use href="#g-clip"/></svg></button><input type="file" id="sp-attach-pick" multiple hidden>
+      <button class="mic needs-net" id="sp-mic" type="button" data-state="idle" data-t-title="spawn.dictateTitle" data-t-aria="spawn.dictate"><svg class="ic i-mic" aria-hidden="true"><use href="#g-mic"/></svg></button>
+      <button class="send needs-net" type="submit" id="sp-go" data-t-title="spawn.startTitle" data-t-aria="spawn.start"></button>
     </div>
   </div>
-  <div class="cmd-menu" id="sp-cmd-menu" hidden><input id="sp-cmd-filter" hidden spellcheck="false" placeholder="/command"><div id="sp-cmd-rows"></div></div>
+  <div class="cmd-menu" id="sp-cmd-menu" hidden><input id="sp-cmd-filter" hidden spellcheck="false" data-t-placeholder="spawn.command"><div id="sp-cmd-rows"></div></div>
   <div class="chips">
-    <pick-chip class="pick agent" id="sp-agent" name="agent" aria-label="Agent"></pick-chip>
-    <pick-chip class="pick" id="sp-harness" name="harness" aria-label="Harness"></pick-chip>
-    <pick-chip class="pick" id="sp-model" name="model" aria-label="Model" free></pick-chip>
-    <pick-chip class="pick" id="sp-effort" name="effort" aria-label="Effort"></pick-chip>
-    <pick-chip class="pick" id="sp-permission" name="permission" aria-label="Permission"></pick-chip>
-    <button type="button" class="reset" id="sp-reset" hidden>reset</button>
+    <pick-chip class="pick agent" id="sp-agent" name="agent" data-t-aria="spawn.agent"></pick-chip>
+    <pick-chip class="pick" id="sp-harness" name="harness" data-t-aria="spawn.harness"></pick-chip>
+    <pick-chip class="pick" id="sp-model" name="model" data-t-aria="spawn.model" free></pick-chip>
+    <pick-chip class="pick" id="sp-effort" name="effort" data-t-aria="spawn.effortChip"></pick-chip>
+    <pick-chip class="pick" id="sp-permission" name="permission" data-t-aria="spawn.permissionChip"></pick-chip>
+    <button type="button" class="reset" id="sp-reset" hidden data-t="spawn.reset">reset</button>
   </div>
   <div class="hints" id="sp-hints">
     <div class="doc" id="hint-doctor" hidden>
-      <div class="row"><span class="dot"></span><span class="sum" id="hint-doctor-sum"></span><button class="run" id="hint-doctor-go" type="button">/doctor</button><button class="more" id="hint-doctor-more" type="button" aria-expanded="false" title="What the doctor found" aria-label="What the doctor found"></button></div>
+      <div class="row"><span class="dot"></span><span class="sum" id="hint-doctor-sum"></span><button class="run" id="hint-doctor-go" type="button">/doctor</button><button class="more" id="hint-doctor-more" type="button" aria-expanded="false" data-t-title="spawn.doctorTitle" data-t-aria="spawn.doctor"></button></div>
       <ul id="hint-doctor-list" hidden></ul>
     </div>
-    <div class="hint" id="hint-tutorial" hidden><button class="go" id="hint-tutorial-go" type="button">Run <code>/tutorial</code> for a quick guide.</button><button class="x" id="hint-tutorial-x" type="button" title="Dismiss" aria-label="Dismiss"></button></div>
-    <div class="hint" id="hint-whats-new" hidden><button class="go" id="hint-whats-new-go" type="button">Run <code>/whats-new</code> to learn what's new in <span id="hint-whats-new-v"></span>.</button><button class="x" id="hint-whats-new-x" type="button" title="Dismiss" aria-label="Dismiss"></button></div>
-    <div class="hint" id="hint-feedback" hidden><button class="go" id="hint-feedback-go" type="button">Run <code>/feedback</code> to report a bug or ask for a feature.</button></div>
+    <div class="hint" id="hint-tutorial" hidden><button class="go" id="hint-tutorial-go" type="button"><span data-t="spawn.hintRun">Run</span> <code>/tutorial</code> <span data-t="spawn.hintTutorial">for a quick guide.</span></button><button class="x" id="hint-tutorial-x" type="button" data-t-title="spawn.dismiss" data-t-aria="spawn.dismiss"></button></div>
+    <div class="hint" id="hint-whats-new" hidden><button class="go" id="hint-whats-new-go" type="button"><span data-t="spawn.hintRun">Run</span> <code>/whats-new</code> <span data-t="spawn.hintWhatsNew">to learn what's new in</span> <span id="hint-whats-new-v"></span>.</button><button class="x" id="hint-whats-new-x" type="button" data-t-title="spawn.dismiss" data-t-aria="spawn.dismiss"></button></div>
+    <div class="hint" id="hint-feedback" hidden><button class="go" id="hint-feedback-go" type="button"><span data-t="spawn.hintRun">Run</span> <code>/feedback</code> <span data-t="spawn.hintFeedback">to report a bug or ask for a feature.</span></button></div>
     <div class="hint tip" id="hint-tip" hidden><span class="lab"></span><button class="go" id="hint-tip-go" type="button"></button></div>
   </div>
   <p class="err-text" id="sp-error"></p>
-  <section id="sp-terms" class="sp-terms" aria-label="Terminals">
-    <h3>Terminals</h3>
+  <section id="sp-terms" class="sp-terms" data-t-aria="spawn.terminals">
+    <h3 data-t="spawn.terminals">Terminals</h3>
     <div class="sp-term-list"></div>
   </section>
 </form>`;
@@ -79,6 +80,7 @@ export class SpawnPart {
   // its take before a send.
   constructor(mount, host, actions = {}) {
     this.mount = mount;
+    this.t = mount.t;
     this.act = actions;
     this.roster = { agents: [], harnesses: [], models: {}, default: null, cwd: "" };
     // What each harness can run, by server: the catalog config.detect reads
@@ -110,6 +112,7 @@ export class SpawnPart {
     this.el = document.createElement("main");
     this.el.className = "view v-spawn";
     this.el.innerHTML = SPAWN_HTML;
+    applyLabels(this.el, this.t);
     host.insertBefore(this.el, host.querySelector(".v-settings") || null);
 
     const n = (id) => byId(this.el, id);
@@ -180,7 +183,7 @@ export class SpawnPart {
 
     this.wire();
     this.drawServerPick();
-    if (this.touch.matches) this.text.placeholder = "What should the agent do?";
+    if (this.touch.matches) this.text.placeholder = this.t("spawn.placeholderTouch");
 
     // The first message grows with its text until the form fills the view, and
     // only then scrolls (#384). The room left changes with the window and with
@@ -216,7 +219,7 @@ export class SpawnPart {
     if (server && server !== this.mount.conn.server) {
       await this.mount.state.linksReady;
       if (this.mount.linkOf(server)?.state !== "linked")
-        return toast(`${server} is not a linked server: the session would start on this one`, {
+        return toast(this.t("spawn.notLinked", { server }), {
           kind: "error",
           root: this.mount.root,
         });
@@ -300,10 +303,10 @@ export class SpawnPart {
       return;
     }
     pick.options = [
-      { value: "", label: this.mount.conn.server || "this server" },
+      { value: "", label: this.mount.conn.server || this.t("sidebar.thisServer") },
       ...this.mount.state.links.map((l) => ({
         value: l.name,
-        label: l.state === "linked" ? l.name : `${l.name} (${l.state})`,
+        label: l.state === "linked" ? l.name : this.t("spawn.linkState", { name: l.name, state: l.state }),
         disabled: l.state !== "linked",
       })),
     ];
@@ -333,11 +336,11 @@ export class SpawnPart {
         b.type = "button";
         b.dataset.profile = p.name;
         b.disabled = Boolean(p.error);
-        b.title = p.error || p.cmd || "your login shell";
+        b.title = p.error || p.cmd || this.t("spawn.yourLoginShell");
         const name = document.createElement("b");
         name.textContent = p.name;
         const what = document.createElement("span");
-        what.textContent = p.error || p.cmd || "login shell";
+        what.textContent = p.error || p.cmd || this.t("spawn.loginShell");
         b.append(name, " ", what);
         b.addEventListener("click", () =>
           this.mount.call("term.spawn", { profile: p.name }, server).then(
@@ -578,16 +581,16 @@ export class SpawnPart {
   // each named after what it is about rather than the doctor's dotted key.
   findingLabel(where) {
     const [head, name] = where.split(".");
-    if (head === "agents" && name) return `Agent ${name}`;
-    if (head === "queues" && name) return `Queue ${name}`;
+    if (head === "agents" && name) return this.t("spawn.findingAgent", { name });
+    if (head === "queues" && name) return this.t("spawn.findingQueue", { name });
     if (head === "harness" && name) return HARNESS_LABEL[name] || name;
     if (head === "service" && name) {
       // service.<unit>.<Directive>, and a unit's name has its own dot.
       const rest = where.slice(8);
       const cut = rest.search(/\.[A-Z][A-Za-z]*$/);
-      return cut < 0 ? `Service ${rest}` : `Service ${rest.slice(0, cut)} · ${rest.slice(cut + 1)}`;
+      return cut < 0 ? this.t("spawn.findingService", { unit: rest }) : this.t("spawn.findingServiceDirective", { unit: rest.slice(0, cut), directive: rest.slice(cut + 1) });
     }
-    return { file: ".aegis.yaml", default_agent: "The default agent", state: "The state directory" }[where] || where;
+    return { file: ".aegis.yaml", default_agent: this.t("spawn.findingDefaultAgent"), state: this.t("spawn.findingState") }[where] || where;
   }
 
   drawDoctor(d) {
@@ -596,9 +599,9 @@ export class SpawnPart {
     if (!d) return;
     row.classList.toggle("err", d.errors > 0);
     row.classList.toggle("warn", d.errors === 0);
-    const parts = [d.errors && counted(d.errors, "error"), d.warns && counted(d.warns, "warning")].filter(Boolean);
-    this.doctorSum.replaceChildren("This server's setup has ", Object.assign(document.createElement("b"), { textContent: parts.join(" and ") }),
-      `. Fix ${d.findings.length === 1 ? "it" : "them"} with`);
+    const parts = [d.errors && this.counted(d.errors, "spawn.error"), d.warns && this.counted(d.warns, "spawn.warning")].filter(Boolean);
+    this.doctorSum.replaceChildren(this.t("spawn.doctorSum"), " ", Object.assign(document.createElement("b"), { textContent: parts.join(this.t("spawn.and")) }),
+      this.t(d.findings.length === 1 ? "spawn.doctorFix.one" : "spawn.doctorFix.other"));
     const items = d.findings.map((f) => {
       const li = document.createElement("li");
       li.className = f.level;
@@ -607,7 +610,7 @@ export class SpawnPart {
     });
     const tail = Object.assign(document.createElement("li"), { className: "tail" });
     const a = Object.assign(document.createElement("a"), { href: "#settings", textContent: "Settings" });
-    tail.append("Each one is also marked on its row in ", a, ".");
+    tail.append(this.t("spawn.doctorTail"), " ", a, ".");
     this.doctorList.replaceChildren(...items, tail);
   }
 
@@ -757,8 +760,8 @@ export class SpawnPart {
 
   wire() {
     this.serverPick.addEventListener("change", () => this.setSpServer(this.serverPick.value || null));
-    this.effort.options = ["low", "medium", "high", "xhigh", "max"].map((e) => ({ value: e, label: `effort ${e}` }));
-    this.permission.options = ["read", "write", "auto", "full"].map((p) => ({ value: p, label: `perm ${p}` }));
+    this.effort.options = ["low", "medium", "high", "xhigh", "max"].map((e) => ({ value: e, label: this.t("spawn.effortLabel", { effort: e }) }));
+    this.permission.options = ["read", "write", "auto", "full"].map((p) => ({ value: p, label: this.t("spawn.permLabel", { perm: p }) }));
     this.agentPick.addEventListener("change", () => this.pickAgent(this.agentPick.value));
     this.harness.addEventListener("change", () => {
       this.fillModels(this.harness.value);
@@ -851,6 +854,11 @@ export class SpawnPart {
     document.addEventListener("drop", this.onDrop);
   }
 
+  // A count and the noun its plural comes from (spawn.error.one/.other).
+  counted(n, key) {
+    return this.t(n === 1 ? `${key}.one` : `${key}.other`, { n });
+  }
+
   destroy() {
     clearInterval(this.tipTimer);
     this.room?.disconnect();
@@ -864,4 +872,4 @@ export class SpawnPart {
 
 const TIP_MS = 8000;
 const HARNESS_LABEL = { "claude-code": "Claude Code", opencode: "OpenCode", codex: "Codex", cursor: "Cursor Agent" };
-const counted = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+

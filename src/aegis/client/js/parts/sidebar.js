@@ -34,109 +34,110 @@ import {
   quotaTile,
   tile,
 } from "../gauges.js";
-import { entryIcon, factIcon, glyph, icon, iconText, LABEL } from "../glyphs.js";
+import { entryIcon, factIcon, glyph, icon, iconText } from "../glyphs.js";
 import { entry as journalEntry, opens } from "../journal.js";
 import { renderMonitors } from "../monitors.js";
 import { dur, planTimes } from "../plantime.js";
+import { applyLabels, stateLabel } from "../labels.js";
 import { Side } from "../side.js";
 
 // The markup this part owns. The ids stay as they are: they are the browser
 // suite's hooks, and two mounts' copies are harmless because every lookup is
 // scoped to the part's own element.
 const SIDEBAR_HTML = `
-<div class="sec"><h4>Session</h4>
+<div class="sec"><h4 data-t="sidebar.session">Session</h4>
   <div class="prow" id="p-session" tabindex="0">
-    <div class="title editable" id="s-title" title="Click to rename"></div>
-    <div class="sline"><span class="handle editable" id="s-handle" title="Click to rename"></span><span class="at" id="s-at" title="The server this session runs on"></span><span class="badge" id="s-worker" hidden></span><span class="st" id="s-status"></span></div>
+    <div class="title editable" id="s-title" data-t-title="sidebar.renameTitle"></div>
+    <div class="sline"><span class="handle editable" id="s-handle" data-t-title="sidebar.renameTitle"></span><span class="at" id="s-at" data-t-title="sidebar.serverTitle"></span><span class="badge" id="s-worker" hidden></span><span class="st" id="s-status"></span></div>
     <div class="pcard">
       <div class="chd"><div class="t" id="c-title"></div><div class="sub" id="c-sub"></div></div>
       <div class="csec">
-        <div class="kv"><span>harness</span><span id="s-harness"></span></div>
-        <div class="kv"><span>model</span><span id="s-model"></span></div>
-        <div class="kv"><span>effort</span><span id="s-effort"></span></div>
-        <div class="kv"><span>permission</span><span id="s-perm"></span></div>
-        <div class="kv"><span>directory</span><span class="path" id="s-cwd"></span></div>
-        <div class="kv"><span>server</span><span id="s-server"></span></div>
-        <div class="kv" id="s-exit-row" hidden><span>exits via</span><span id="s-exit"></span></div>
-        <p class="cnote">Click the title or the handle to rename.</p>
+        <div class="kv"><span data-t="sidebar.kv.harness">harness</span><span id="s-harness"></span></div>
+        <div class="kv"><span data-t="sidebar.kv.model">model</span><span id="s-model"></span></div>
+        <div class="kv"><span data-t="sidebar.kv.effort">effort</span><span id="s-effort"></span></div>
+        <div class="kv"><span data-t="sidebar.kv.permission">permission</span><span id="s-perm"></span></div>
+        <div class="kv"><span data-t="sidebar.kv.directory">directory</span><span class="path" id="s-cwd"></span></div>
+        <div class="kv"><span data-t="sidebar.kv.server">server</span><span id="s-server"></span></div>
+        <div class="kv" id="s-exit-row" hidden><span data-t="sidebar.exitsVia">exits via</span><span id="s-exit"></span></div>
+        <p class="cnote" data-t="sidebar.renameNote">Click the title or the handle to rename.</p>
       </div>
     </div>
   </div>
   <div class="askbox" id="s-ask" hidden></div>
 </div>
-<div class="sec" id="s-plan-sec" hidden><h4 id="s-plan-h">Plan</h4>
+<div class="sec" id="s-plan-sec" hidden><h4 id="s-plan-h" data-t="sidebar.plan">Plan</h4>
   <div class="plan" id="s-plan"></div>
   <div class="prow more" id="p-plan" tabindex="0" hidden><span id="s-plan-more"></span>
-    <div class="pcard"><div class="csec"><h5 id="s-plan-card-h">Plan</h5><div class="plan" id="s-plan-all"></div></div></div>
+    <div class="pcard"><div class="csec"><h5 id="s-plan-card-h" data-t="sidebar.plan">Plan</h5><div class="plan" id="s-plan-all"></div></div></div>
   </div>
 </div>
-<div class="sec" id="s-skills-sec" hidden><h4>Skills loaded</h4><div class="plan" id="s-skills"></div></div>
-<div class="sec" id="s-repos-sec" hidden><h4><span>Repos</span><span class="aside" id="s-repos-n"></span></h4>
+<div class="sec" id="s-skills-sec" hidden><h4 data-t="sidebar.skills">Skills loaded</h4><div class="plan" id="s-skills"></div></div>
+<div class="sec" id="s-repos-sec" hidden><h4><span data-t="sidebar.repos">Repos</span><span class="aside" id="s-repos-n"></span></h4>
   <div class="prow" id="p-repos" tabindex="0">
     <div id="s-repos"></div>
     <div class="pcard">
-      <div class="chd"><div class="t">Repos this session wrote to</div><div class="sub" id="s-repos-sum"></div></div>
+      <div class="chd"><div class="t" data-t="sidebar.reposTitle">Repos this session wrote to</div><div class="sub" id="s-repos-sum"></div></div>
       <div id="s-repos-all"></div>
     </div>
   </div>
 </div>
-<div class="sec" id="s-journal-sec"><h4><span>Journal</span><span class="aside">today</span></h4>
+<div class="sec" id="s-journal-sec"><h4><span data-t="sidebar.journal">Journal</span><span class="aside" data-t="sidebar.today">today</span></h4>
   <div class="prow" id="p-journal" tabindex="0">
     <div class="jpeek" id="s-journal-peek" hidden></div>
-    <div class="foot"><span id="s-journal">nothing yet today</span><span id="s-journal-at"></span></div>
+    <div class="foot"><span id="s-journal" data-t="sidebar.nothingYet">nothing yet today</span><span id="s-journal-at"></span></div>
     <div class="pcard">
-      <div class="chd"><div class="t">This session today</div><div class="sub">newest first · each opens its transcript</div></div>
+      <div class="chd"><div class="t" data-t="sidebar.journalTitle">This session today</div><div class="sub" data-t="sidebar.journalSub">newest first · each opens its transcript</div></div>
       <div class="csec" id="s-journal-all"></div>
     </div>
   </div>
 </div>
-<div class="sec" id="s-wait-sec" hidden><h4>Waiting on</h4><div id="s-waiting"></div></div>
-<div class="sec" id="s-mon-sec" hidden><h4>Monitors</h4><div id="s-monitors"></div></div>
-<div class="sec"><h4>Usage</h4>
+<div class="sec" id="s-wait-sec" hidden><h4 data-t="sidebar.waiting">Waiting on</h4><div id="s-waiting"></div></div>
+<div class="sec" id="s-mon-sec" hidden><h4 data-t="sidebar.monitors">Monitors</h4><div id="s-monitors"></div></div>
+<div class="sec"><h4 data-t="sidebar.usage">Usage</h4>
   <div class="prow" id="p-usage" tabindex="0">
     <div class="tiles" id="s-tiles"></div>
     <div class="foot" id="s-foot"><span id="s-foot-l"></span><span id="s-foot-r"></span></div>
-    <div class="foot" id="s-load" hidden title="CPU over the last minute and RAM, of this session and everything it started"><span>load</span><span id="s-load-v"></span></div>
+    <div class="foot" id="s-load" hidden data-t-title="sidebar.loadTitle"><span data-t="sidebar.load">load</span><span id="s-load-v"></span></div>
     <div class="pcard">
-      <div class="csec"><h5><span>Context</span><span>this session</span></h5>
-        <div class="big"><span class="p" id="s-tokens">no turn yet</span><span class="of" id="s-of"></span><span class="c" id="s-cost">$0.00</span></div>
+      <div class="csec"><h5><span data-t="sidebar.context">Context</span><span data-t="sidebar.thisSession">this session</span></h5>
+        <div class="big"><span class="p" id="s-tokens" data-t="sidebar.noTurn">no turn yet</span><span class="of" id="s-of"></span><span class="c" id="s-cost">$0.00</span></div>
         <div class="bar" id="s-ctxbar"><i id="s-bar" style="width:0%"></i></div>
         <p class="cnote" id="s-ctxnote"></p>
         <p class="cnote" id="s-counters" hidden></p>
       </div>
-      <div class="csec" id="s-quota-sec"><h5><span class="qlink" id="s-quota-head" title="Usage: what work cost">Quota</span><span id="s-quota-age"></span></h5><div id="s-quota"></div></div>
+      <div class="csec" id="s-quota-sec"><h5><span class="qlink" id="s-quota-head" data-t-title="sidebar.quotaTitle"><span data-t="sidebar.quota">Quota</span></span><span id="s-quota-age"></span></h5><div id="s-quota"></div></div>
     </div>
   </div>
 </div>
-<div class="sec" id="s-host-sec" hidden><h4><span>Host</span><span class="aside" id="s-host-name"></span></h4>
+<div class="sec" id="s-host-sec" hidden><h4><span data-t="sidebar.host">Host</span><span class="aside" id="s-host-name"></span></h4>
   <div class="prow" id="p-host" tabindex="0">
     <div class="tiles" id="s-host-tiles"></div>
     <div class="pcard">
-      <div class="csec"><h5><span id="s-host-head">Host</span><span>every 5 s</span></h5><div id="s-host-rows"></div></div>
+      <div class="csec"><h5><span id="s-host-head" data-t="sidebar.host">Host</span><span data-t="sidebar.everyFive">every 5 s</span></h5><div id="s-host-rows"></div></div>
       <div class="csec">
-        <div class="kv"><span>live sessions</span><span id="s-host-live"></span></div>
-        <div class="kv"><span>average context</span><span id="s-host-ctx"></span></div>
+        <div class="kv"><span data-t="sidebar.liveSessions">live sessions</span><span id="s-host-live"></span></div>
+        <div class="kv"><span data-t="sidebar.avgContext">average context</span><span id="s-host-ctx"></span></div>
       </div>
     </div>
   </div>
 </div>
 <div class="side-acts live-only">
-  <button class="act stop needs-net" id="stop-session" title="Sleep: end the process and keep the conversation; the next message wakes it"><span>Sleep</span></button>
-  <button class="act" id="quiet-session" title="Quiet: hide the tab until the turn ends; its card stays in the Fleet"><span>Quiet</span></button>
-  <button class="act needs-net" id="autoclose-session" aria-pressed="false" title="Autoclose: once on, the agent must end done with close, so the session closes when it finishes"><span>Autoclose</span></button>
-  <button class="act needs-net" id="continue" title="Continue: send “Continue” to the agent"><span>Continue</span></button>
-  <button class="act needs-net" id="restart" title="Restart: a fresh process on the same conversation; nothing is sent"><span>Restart</span></button>
-  <button class="act needs-net" id="close" title="Archive: the tab goes away in every browser; Reopen brings it back"><span>Archive</span></button>
+  <button class="act stop needs-net" id="stop-session" data-t-title="sidebar.sleepTitle"><span data-t="sidebar.sleep">Sleep</span></button>
+  <button class="act" id="quiet-session" data-t-title="sidebar.quietTitle"><span data-t="sidebar.quiet">Quiet</span></button>
+  <button class="act needs-net" id="autoclose-session" aria-pressed="false" data-t-title="sidebar.autocloseTitle"><span data-t="sidebar.autoclose">Autoclose</span></button>
+  <button class="act needs-net" id="continue" data-t-title="sidebar.continueTitle"><span data-t="sidebar.continue">Continue</span></button>
+  <button class="act needs-net" id="restart" data-t-title="sidebar.restartTitle"><span data-t="sidebar.restart">Restart</span></button>
+  <button class="act needs-net" id="close" data-t-title="sidebar.archiveTitle"><span data-t="sidebar.archive">Archive</span></button>
 </div>
-<div class="side-acts read-only"><button class="act reopen" id="reopen" title="Reopen: continue the conversation in a live tab"><span>Reopen</span></button></div>
+<div class="side-acts read-only"><button class="act reopen" id="reopen" data-t-title="sidebar.reopenTitle"><span data-t="sidebar.reopen">Reopen</span></button></div>
 <p class="sub err-text" id="side-error"></p>
 <div class="ver" id="ver-sec" hidden>
   <div class="prow" id="p-ver" tabindex="0"><span id="ver-line"></span>
     <div class="pcard"><div class="csec"><h5 id="ver-head">aegis</h5>
-      <div class="kv"><span>running</span><span id="ver-run"></span></div>
-      <div class="kv dim" id="ver-ref-row" hidden><span>ref</span><span class="path" id="ver-ref"></span></div>
-      <div class="kv dim" id="ver-base-row" hidden><span>base</span><span class="v" id="ver-base"></span></div>
-      <div class="kv"><span>latest</span><span id="ver-latest"></span></div>
+      <div class="kv"><span data-t="sidebar.running">running</span><span id="ver-run"></span></div>
+      <div class="kv dim" id="ver-ref-row" hidden><span data-t="sidebar.ref">ref</span><span class="path" id="ver-ref"></span></div>
+      <div class="kv dim" id="ver-base-row" hidden><span data-t="sidebar.base">base</span><span class="v" id="ver-base"></span></div>
+      <div class="kv"><span data-t="sidebar.latest">latest</span><span id="ver-latest"></span></div>
     </div><div class="csec ver-upd" id="ver-upd" hidden></div></div>
   </div>
 </div>`;
@@ -163,6 +164,7 @@ function span(cls, text, name) {
 export class SidebarPart {
   constructor(mount, host, actions = {}) {
     this.mount = mount;
+    this.t = mount.t;
     this.act = actions;
     this.root = mount.root || host;
     this.editing = new Set();
@@ -171,11 +173,12 @@ export class SidebarPart {
     const grip = document.createElement("div");
     grip.className = "grip";
     grip.id = "side-grip";
-    grip.title = "Drag to resize; double-click for the default width";
+    grip.title = this.t("sidebar.gripTitle");
     this.el = document.createElement("aside");
     this.el.className = "side";
     this.el.id = "side";
     this.el.innerHTML = SIDEBAR_HTML;
+    applyLabels(this.el, this.t);
     host.append(grip, this.el);
     this.grip = grip;
 
@@ -386,33 +389,33 @@ export class SidebarPart {
   // -- what the page draws through the part ---------------------------------
   render(s) {
     if (!s) return;
-    if (!this.editing.has("title")) this.title.textContent = s.title || "untitled";
+    if (!this.editing.has("title")) this.title.textContent = s.title || this.t("sidebar.untitled");
     if (!this.editing.has("handle")) this.handle.textContent = s.handle;
     this.session = s;
-    this.cardTitle.textContent = s.title || "untitled";
-    const born = s.created_at ? ` · started ${new Date(s.created_at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "";
+    this.cardTitle.textContent = s.title || this.t("sidebar.untitled");
+    const born = s.created_at ? this.t("sidebar.started", { time: new Date(s.created_at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) }) : "";
     this.cardSub.textContent = `${s.handle}${born}`;
     // A launch on a version outside the tested range shows it in the warning
     // colour (harness_versions.py, #456).
     const u = s.untested_version;
     this.harness.replaceChildren(factIcon("h", s.harness), `${s.harness_label || s.harness || ""}${u ? ` ${u.version || "?"}` : ""}`);
     this.harness.classList.toggle("warn", !!u);
-    this.harness.title = u ? `${u.state === "unknown" ? "version unknown" : `${u.state} than tested`} · tested with ${u.range}` : "";
+    this.harness.title = u ? this.t("sidebar.untestedTitle", { state: this.t(`sidebar.untested.${u.state in { newer: 1, older: 1 } ? u.state : "unknown"}`), range: u.range }) : "";
     this.model.textContent = s.model_id && s.model_id !== s.model ? `${modelLine(s)} → ${s.model_id}` : modelLine(s);
     this.effort.replaceChildren(factIcon("e", s.effort), s.effort || "");
     this.perm.replaceChildren(factIcon("p", s.permission), s.permission || "");
-    this.server.textContent = s.server || this.mount.conn.server || "this server";
+    this.server.textContent = s.server || this.mount.conn.server || this.t("sidebar.thisServer");
     // The handle as peers address it, handle@server, and the badge a Fleet card
     // gives a queue worker.
     this.at.textContent = s.server || this.mount.conn.server ? `@${s.server || this.mount.conn.server}` : "";
     this.worker.hidden = !s.worker;
-    this.worker.textContent = s.worker ? `worker · ${s.worker.queue}` : "";
+    this.worker.textContent = s.worker ? this.t("sidebar.worker", { queue: s.worker.queue }) : "";
     if (s.attention === undefined) {
       // The archived read view: a stored meta has no attention, so the state alone.
       this.status.textContent = s.state;
       this.status.className = "st";
     } else {
-      this.status.replaceChildren(glyph(s.attention), document.createTextNode(` ${LABEL[s.attention] || s.state}`));
+      this.status.replaceChildren(glyph(s.attention), document.createTextNode(` ${stateLabel(this.t, s.attention) || s.state}`));
       this.status.className = `st at-${s.attention}`;
     }
     this.ask.hidden = !s.attention_line;
@@ -459,19 +462,19 @@ export class SidebarPart {
     const h = s && this.hostOf(server);
     this.hostSec.hidden = !h;
     if (!h) return;
-    const name = server || this.mount.conn.server || "this server";
+    const name = server || this.mount.conn.server || this.t("sidebar.thisServer");
     this.hostName.textContent = name;
-    this.hostHead.textContent = `Host · ${name}`;
+    this.hostHead.textContent = this.t("sidebar.hostCard", { name });
     const meter = (label, pct) => tile(label, `${pct}%`, { pct, kind: "h", severity: hostSeverity(pct) });
-    const tiles = [meter("CPU", h.cpu), meter("RAM", h.ram.pct)];
-    const rows = [hostRow("CPU", h.cpu, ""), hostRow("RAM", h.ram.pct, `${h.ram.used_gb} / ${h.ram.total_gb} GB`)];
-    if (h.disk) tiles.push(meter("disk", h.disk.pct)); // the fullest
+    const tiles = [meter(this.t("gauges.cpu"), h.cpu), meter(this.t("gauges.ram"), h.ram.pct)];
+    const rows = [hostRow(this.t("gauges.cpu"), h.cpu, ""), hostRow(this.t("gauges.ram"), h.ram.pct, `${h.ram.used_gb} / ${h.ram.total_gb} GB`)];
+    if (h.disk) tiles.push(meter(this.t("gauges.disk"), h.disk.pct)); // the fullest
     rows.push(...diskRows(h));
     const net = h.net;
     if (net) {
       const sp = net.speed;
-      tiles.push(tile("net", net.ok ? `${net.rtt_ms} ms` : "down", { severity: net.ok ? "normal" : "critical" }));
-      if (sp?.complete) tiles.push(tile("speed", mbps(sp.bps), { small: " Mbps" }));
+      tiles.push(tile(this.t("gauges.net"), net.ok ? `${net.rtt_ms} ms` : this.t("gauges.down"), { severity: net.ok ? "normal" : "critical" }));
+      if (sp?.complete) tiles.push(tile(this.t("gauges.speed"), mbps(sp.bps), { small: this.t("gauges.mbps") }));
     }
     rows.push(...netRows(net, serverNow(), () => this.act.measureNet?.(server || null)));
     this.hostTiles.replaceChildren(...tiles);
@@ -529,7 +532,7 @@ export class SidebarPart {
       ...skills.map((n) => {
         const d = document.createElement("div");
         const r = runs[n] || 0;
-        d.append(span("", ""), span("", n), span("t", r ? `${r} run${r > 1 ? "s" : ""}` : ""));
+        d.append(span("", ""), span("", n), span("t", r ? this.t(r > 1 ? "sidebar.run.other" : "sidebar.run.one", { n: r }) : ""));
         return d;
       }),
     );
@@ -551,7 +554,7 @@ export class SidebarPart {
     const from = Math.max(0, (open < 0 ? plan.length : open) - 2);
     this.plan.replaceChildren(...plan.slice(from).map((i, k) => row(i, from + k)));
     this.planMore.hidden = !from;
-    this.planMoreText.textContent = `+ ${from} done above`;
+    this.planMoreText.textContent = this.t("sidebar.moreDone", { n: from });
     this.planAll.replaceChildren(...(from ? plan.map(row) : []));
   }
 
@@ -561,9 +564,9 @@ export class SidebarPart {
     const plan = s.plan || [];
     const t = planTimes(s);
     const done = plan.filter((i) => i.state === "done").length;
-    let head = `Plan ${done}/${plan.length}`;
-    if (t) head += ` · ${dur(t.work)} work · ${dur(t.idle)} idle`;
-    if (t && t.left != null) head += ` · ~${dur(t.left)} left`;
+    let head = this.t("sidebar.planHead", { done, total: plan.length });
+    if (t) head += this.t("sidebar.planWork", { work: dur(t.work), idle: dur(t.idle) });
+    if (t && t.left != null) head += this.t("sidebar.planLeft", { left: dur(t.left) });
     this.planH.textContent = head;
     this.planH.title = head; // one line in the panel; whole here and in the card
     this.planCardH.textContent = head;
@@ -584,11 +587,11 @@ export class SidebarPart {
   // its count; the card lists its five newest as the Journal view draws them.
   // Fetched when the shown session changes or the journal changes.
   noJournal() {
-    this.journal.textContent = "nothing yet today";
+    this.journal.textContent = this.t("sidebar.nothingYet");
     this.journalAt.textContent = "";
     this.journalPeek.hidden = true;
     this.journalPeek.replaceChildren();
-    this.journalAll.replaceChildren(span("cnote", "Nothing journaled today."));
+    this.journalAll.replaceChildren(span("cnote", this.t("sidebar.nothingJournaled")));
   }
 
   async drawJournal(key, force = false) {
@@ -625,8 +628,9 @@ export class SidebarPart {
     const c = res.counts || {};
     const total = Object.values(c).reduce((a, b) => a + b, 0);
     this.journal.textContent =
-      `${total} ${total === 1 ? "entry" : "entries"}` + (c.commit ? ` · ${c.commit} commit${c.commit === 1 ? "" : "s"}` : "");
-    this.journalAt.textContent = `last ${res.rows[0].time}`;
+      this.t(total === 1 ? "sidebar.entry.one" : "sidebar.entry.other", { n: total }) +
+      (c.commit ? this.t(c.commit === 1 ? "sidebar.commit.one" : "sidebar.commit.other", { n: c.commit }) : "");
+    this.journalAt.textContent = this.t("sidebar.last", { time: res.rows[0].time });
     this.journalPeek.replaceChildren(...res.rows.slice(0, 2).map((r) => {
       const line = document.createElement("div");
       line.className = `k-${r.kind}`;
@@ -678,18 +682,18 @@ export class SidebarPart {
     if (!repos.length) return;
     const groups = repoGroups(repos);
     this.reposN.textContent = String(groups.length);
-    const lines = groups.slice(0, 5).map(repoLine);
-    if (groups.length > 5) lines.push(span("rp-more", `+${groups.length - 5} more`));
+    const lines = groups.slice(0, 5).map((g) => repoLine(g, this.t));
+    if (groups.length > 5) lines.push(span("rp-more", this.t("sidebar.more", { n: groups.length - 5 })));
     this.repos.replaceChildren(...lines);
     const sum = (k) => repos.reduce((a, r) => a + r[k], 0);
     const open = new Set(repos.flatMap((r) => r.prs.filter((p) => p.state === "open").map((p) => `${r.main}#${p.n}`))).size;
     this.reposSum.textContent = [
-      rpPlural(groups.length, "repo"),
-      `${rpPlural(sum("dirty_n"), "file")} uncommitted`,
-      `${rpPlural(sum("unpushed_n"), "commit")} unpushed`,
-      `${rpPlural(open, "PR")} open`,
+      rpPlural(this.t, groups.length, "sidebar.repo"),
+      this.t("sidebar.dirty", { files: rpPlural(this.t, sum("dirty_n"), "sidebar.file") }),
+      this.t("sidebar.unpushed", { commits: rpPlural(this.t, sum("unpushed_n"), "sidebar.commitN") }),
+      this.t("sidebar.prsOpen", { n: open }),
     ].join(" · ");
-    this.reposAll.replaceChildren(...groups.map((g) => repoSection(g, d.gh)));
+    this.reposAll.replaceChildren(...groups.map((g) => repoSection(g, d.gh, this.t)));
   }
 
   // -- waiting ---------------------------------------------------------------
@@ -705,8 +709,8 @@ export class SidebarPart {
         const key = w.key && this.act.keyOf?.(s.server, w.key);
         const row = document.createElement("div");
         row.className = `kv wait${key ? " go" : ""}`;
-        const where = w.kind === "task" ? `queue ${w.queue} · ${w.status}` : w.status;
-        row.append(span("", w.handle || "no worker yet"), span("r", where));
+        const where = w.kind === "task" ? this.t("sidebar.queueTask", { queue: w.queue, status: w.status }) : w.status;
+        row.append(span("", w.handle || this.t("sidebar.noWorker")), span("r", where));
         if (key) {
           row.dataset.id = key;
           row.tabIndex = 0;
@@ -752,7 +756,7 @@ export class SidebarPart {
   // only when what they show changed.
   // A session's load (load.py): cores over the last minute and RAM.
   loadText(l) {
-    return `${l.cpu.toFixed(1)} cores · ${l.rss_gb.toFixed(1)} GB`;
+    return this.t("sidebar.loadText", { cores: l.cpu.toFixed(1), ram: l.rss_gb.toFixed(1) });
   }
 
   drawUsage(s) {
@@ -765,22 +769,22 @@ export class SidebarPart {
     this.load.hidden = !s.load;
     if (s.load) this.loadV.textContent = this.loadText(s.load);
 
-    this.tokens.textContent = tokens ?? "no turn yet";
-    this.of.textContent = tokens == null ? "" : s.context_window ? `of ${this.fmtTokens(s.context_window)} · ${pct}%` : "tokens";
+    this.tokens.textContent = tokens ?? this.t("sidebar.noTurn");
+    this.of.textContent = tokens == null ? "" : s.context_window ? this.t("sidebar.ofContext", { window: this.fmtTokens(s.context_window), pct }) : this.t("sidebar.tokens");
     this.bar.style.width = `${pct || 0}%`;
     this.ctxbar.hidden = !s.context_window;
     this.ctxnote.textContent =
-      tokens != null && !s.context_window ? `${s.harness_label} does not report the model's window, so there is no share of it.` : "";
+      tokens != null && !s.context_window ? this.t("sidebar.noWindow", { harness: s.harness_label }) : "";
     this.cost.textContent = cost;
     // What the cache did (cache.py): red when the warm calls miss.
     const cn = this.counters;
     cn.hidden = s.cache_hit == null;
     if (s.cache_hit != null) {
       const hit = document.createElement("span");
-      hit.textContent = `cache ${s.cache_hit}%`;
+      hit.textContent = this.t("sidebar.cache", { pct: s.cache_hit });
       hit.classList.toggle("bad", !!s.cache_alarm);
-      hit.title = s.cache_alarm ? "Below 80% while warm: something broke the cache" : "";
-      cn.replaceChildren(`tools ${s.tool_calls ?? 0} · `, hit, ` · compactions ${s.compactions ?? 0}`);
+      hit.title = s.cache_alarm ? this.t("sidebar.cacheAlarm") : "";
+      cn.replaceChildren(this.t("sidebar.tools", { n: s.tool_calls ?? 0 }), hit, this.t("sidebar.compactions", { n: s.compactions ?? 0 }));
     }
 
     // With a share of the window, context leads and the quota follows; without
@@ -802,11 +806,11 @@ export class SidebarPart {
     if (sig === this.tilesSig) return;
     this.tilesSig = sig;
     const tiles = [];
-    if (lead) tiles.push(tile("context", pct != null ? `${pct}%` : tokens ?? "–", { pct }));
+    if (lead) tiles.push(tile(this.t("gauges.context"), pct != null ? `${pct}%` : tokens ?? "–", { pct }));
     for (const w of shown) tiles.push(quotaTile(p, w, now));
     if (!windows.length) {
-      tiles.push(tile("cost", cost));
-      tiles.push(tile("quota", p ? "error" : "none", { severity: p ? "stale" : "normal", title: p ? p.note : "" }));
+      tiles.push(tile(this.t("gauges.cost"), cost));
+      tiles.push(tile(this.t("gauges.quota"), p ? this.t("gauges.error") : this.t("gauges.none"), { severity: p ? "stale" : "normal", title: p ? p.note : "" }));
     }
     this.tiles.replaceChildren(...tiles);
     this.footL.textContent = left;
@@ -820,22 +824,22 @@ export class SidebarPart {
     const p = this.provider(s);
     this.quotaKey = `${s.server || ""}:${p ? p.name : ""}`;
     const now = serverNow();
-    this.quotaHead.textContent = p ? `Quota · ${p.label}` : "Quota";
+    this.quotaHead.textContent = p ? this.t("sidebar.quotaWith", { provider: p.label }) : this.t("sidebar.quota");
     if (!p) {
       this.quotaAge.textContent = "";
-      const what = s.harness === "opencode" ? (s.model || "").split("/")[0] || "this model" : s.harness_label;
+      const what = s.harness === "opencode" ? (s.model || "").split("/")[0] || this.t("sidebar.thisModel") : s.harness_label;
       const n = document.createElement("p");
       n.className = "cnote";
-      n.textContent = `aegis reads no quota for ${what}.`;
+      n.textContent = this.t("sidebar.noQuota", { what });
       this.quota.replaceChildren(n);
       return;
     }
-    this.quotaAge.textContent = p.read_at != null ? `read ${ago(p.read_at)}` : ""; // "read just now", "read 2m ago"
+    this.quotaAge.textContent = p.read_at != null ? this.t("sidebar.read", { ago: ago(p.read_at) }) : ""; // "read just now", "read 2m ago"
     const rows = p.state === "failed" ? [] : p.windows.map((w) => quotaSideRow(p, w, now));
     if (p.state !== "ok") {
       const n = document.createElement("p");
       n.className = "cnote gnote";
-      n.textContent = p.state === "stale" ? `${p.note}; this reading is ${age(now - p.read_at)} old.` : p.note;
+      n.textContent = p.state === "stale" ? this.t("sidebar.stale", { note: p.note, age: age(now - p.read_at) }) : p.note;
       rows.push(n);
     }
     this.quota.replaceChildren(...rows);
@@ -852,10 +856,10 @@ export class SidebarPart {
     const run = v.running;
     const dev = run.dev;
     const short = run.commit ? run.commit.slice(0, 7) : null;
-    const shown = dev && short ? short : run.version || "unknown";
+    const shown = dev && short ? short : run.version || this.t("sidebar.versionUnknown");
     const behind = v.status === "behind";
 
-    this.verHead.textContent = `aegis on ${this.mount.conn.server}`;
+    this.verHead.textContent = this.t("sidebar.aegisOn", { server: this.mount.conn.server });
     this.verRun.replaceChildren(span("v", shown), ...(dev ? [span("tag", "dev")] : []));
     // aegis-dev builds from the resolved commit, so the ref is often the commit again.
     const ref = run.ref && !(run.commit || "").startsWith(run.ref) ? run.ref : null;
@@ -863,12 +867,12 @@ export class SidebarPart {
     this.verRef.textContent = ref || "";
     this.verBaseRow.hidden = !dev || !run.version;
     this.verBase.textContent = run.version || "";
-    const mark = v.status === "current" ? [span("ok", " current", "read")] : behind ? [span("upd", " update", "arrow-up")] : [];
-    this.verLatest.replaceChildren(span("v", v.latest || "unknown"), ...mark);
+    const mark = v.status === "current" ? [span("ok", this.t("sidebar.current"), "read")] : behind ? [span("upd", this.t("sidebar.update"), "arrow-up")] : [];
+    this.verLatest.replaceChildren(span("v", v.latest || this.t("sidebar.versionUnknown")), ...mark);
     this.verLine.replaceChildren(
       span("", "aegis"),
       span("v", shown),
-      ...(dev ? [span("tag", "dev")] : behind ? [span("upd", " update", "arrow-up")] : v.status === "current" ? [span("ok", "", "read")] : []),
+      ...(dev ? [span("tag", "dev")] : behind ? [span("upd", this.t("sidebar.update"), "arrow-up")] : v.status === "current" ? [span("ok", "", "read")] : []),
     );
     this.verSec.hidden = false;
 
@@ -889,21 +893,21 @@ export class SidebarPart {
     const behind = v.status === "behind";
     const nodes = [span("", shown), ...(dev ? [span("tag", "dev")] : behind ? [span("upd", "", "arrow-up")] : [])];
     if (behind && this.mayUpdate() && (this.upd.phase === "idle" || this.upd.phase === "failed")) {
-      nodes.push(this.updButton("Update"));
+      nodes.push(this.updButton(this.t("sidebar.update")));
     }
     if (UPD_STEPS.includes(this.upd.phase)) {
       const line = document.createElement("div");
       line.className = "upd-run";
-      line.textContent = this.upd.phase === "restarting" ? "restarting" : "updating";
+      line.textContent = this.upd.phase === "restarting" ? this.t("sidebar.restarting") : this.t("sidebar.updating");
       nodes.push(line);
     }
     const how = v.install?.command;
     const ref = run.ref && !(run.commit || "").startsWith(run.ref) ? run.ref : null;
     const title = behind
-      ? `aegis ${run.version}; ${v.latest} is out${how ? `: ${how}` : ""}`
+      ? this.t(how ? "sidebar.versionBehindHow" : "sidebar.versionBehind", { version: run.version, latest: v.latest, how })
       : dev
-        ? `aegis built from ${run.commit || "a source tree"}${ref ? ` (${ref})` : ""}, based on ${run.version}; latest release ${v.latest || "unknown"}`
-        : `aegis ${run.version}; latest release ${v.latest || "unknown"}`;
+        ? this.t("sidebar.versionDev", { commit: run.commit || this.t("sidebar.sourceTree"), ref: ref ? ` (${ref})` : "", version: run.version, latest: v.latest || this.t("sidebar.versionUnknown") })
+        : this.t("sidebar.versionCurrent", { version: run.version, latest: v.latest || this.t("sidebar.versionUnknown") });
     this.act.setVersionTop?.(nodes, title);
   }
 
@@ -928,8 +932,8 @@ export class SidebarPart {
 
   async startUpdate() {
     const n = [...this.mount.state.sessions.values()].filter((m) => m.server === null && m.state === "working").length;
-    const busy = n ? ` ${n} session${n > 1 ? "s are" : " is"} working: their turns stop for the restart and continue on the new version.` : "";
-    if (!(await ask(`Update aegis to ${this.verInfo.latest} and restart the server?${busy}`, { ok: "Update and restart", root: this.root }))) return;
+    const busy = n ? this.t(n > 1 ? "sidebar.updateBusy.other" : "sidebar.updateBusy.one", { n }) : "";
+    if (!(await ask(this.t("sidebar.updateQuestion", { latest: this.verInfo.latest, busy }), { ok: this.t("sidebar.updateOk"), root: this.root }))) return;
     try {
       await this.mount.conn.call("server.update");
     } catch (e) {
@@ -958,17 +962,17 @@ export class SidebarPart {
       d.textContent = text;
       return d;
     };
-    if (inst) rows.push(kv("installed by", inst.by));
+    if (inst) rows.push(kv(this.t("sidebar.installedBy"), inst.by));
     if (this.upd.phase === "idle") {
       if (this.mayUpdate()) {
         rows.push(line("how", inst.command));
         const acts = line("acts", "");
-        acts.append(this.updButton("Update"));
+        acts.append(this.updButton(this.t("sidebar.update")));
         rows.push(acts);
       } else if (inst?.can) {
-        rows.push(line("how", "An admin can update this server."), line("how", inst.command));
+        rows.push(line("how", this.t("sidebar.updateAdmin")), line("how", inst.command));
       } else {
-        rows.push(line("how", inst?.command ? `Update in a shell: ${inst.command}` : "Pull and reinstall in a shell."));
+        rows.push(line("how", inst?.command ? this.t("sidebar.updateShell", { command: inst.command }) : this.t("sidebar.pullReinstall")));
       }
     } else {
       const ul = document.createElement("ul");
@@ -977,7 +981,7 @@ export class SidebarPart {
       const failedAt = UPD_STEPS.indexOf(this.upd.failed_at);
       UPD_STEPS.forEach((step, i) => {
         const li = document.createElement("li");
-        li.textContent = step;
+        li.textContent = this.t(`sidebar.step.${step}`);
         if (at >= 0) li.className = i < at ? "done" : i === at ? "doing" : "";
         else li.className = i < failedAt ? "done" : i === failedAt ? "bad" : "";
         ul.append(li);
@@ -990,10 +994,10 @@ export class SidebarPart {
         rows.push(pre);
       }
       if (this.upd.phase === "failed") {
-        rows.push(line("err-text", `${this.upd.error}. aegis ${this.verInfo?.running.version || ""} is still running.`));
+        rows.push(line("err-text", this.t("sidebar.updateFailed", { error: this.upd.error, version: this.verInfo?.running.version || "" })));
         if (this.mayUpdate()) {
           const acts = line("acts", "");
-          acts.append(this.updButton("Try again"));
+          acts.append(this.updButton(this.t("sidebar.tryAgain")));
           rows.push(acts);
         }
       }
@@ -1010,7 +1014,7 @@ export class SidebarPart {
       const old = node.textContent;
       const box = document.createElement("input");
       box.className = "rename";
-      box.value = field === "title" && old === "untitled" ? "" : old;
+      box.value = field === "title" && old === this.t("sidebar.untitled") ? "" : old;
       node.replaceChildren(box);
       box.focus();
       box.select();
@@ -1052,7 +1056,7 @@ export class SidebarPart {
 }
 
 // -- the repos card's rows ----------------------------------------------------
-const rpPlural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+const rpPlural = (t, n, one) => t(n === 1 ? `${one}.one` : `${one}.other`, { n });
 const rpBase = (p) => p.split("/").filter(Boolean).pop() || p;
 
 function prLink(pr) {
@@ -1088,20 +1092,20 @@ function repoGroups(repos) {
   });
 }
 
-function repoLine(g) {
+function repoLine(g, t) {
   const line = document.createElement("div");
   line.className = "rp-line";
   if (g.peers.size) {
     const dot = span("rp-dot", "");
-    dot.title = [...g.peers.keys()].map((h) => `${h} is also here`).join("\n");
+    dot.title = [...g.peers.keys()].map((h) => t("sidebar.alsoHere", { handle: h })).join("\n");
     line.append(dot);
   }
   const [r] = g.lines;
-  const where = g.lines.length > 1 ? `${g.lines.length} checkouts` : r.worktree ? rpBase(r.top) : r.branch || "detached";
+  const where = g.lines.length > 1 ? t("sidebar.checkouts", { n: g.lines.length }) : r.worktree ? rpBase(r.top) : r.branch || t("sidebar.detached");
   line.append(span("n", g.name), span("rp-br", where, g.lines.length === 1 && r.worktree ? RP_ICON.worktree : ""));
   const right = span("rp-r", "");
   const sum = (k) => g.lines.reduce((a, l) => a + l[k], 0);
-  if (g.lines.every((l) => l.removed)) right.append(span("rp-gone", "removed"));
+  if (g.lines.every((l) => l.removed)) right.append(span("rp-gone", t("sidebar.removedShort")));
   for (const op of new Set(g.lines.map((l) => l.op).filter(Boolean))) right.append(span("rp-op", op));
   if (sum("dirty_n")) right.append(span("rp-dirty", `~${sum("dirty_n")}`));
   if (sum("unpushed_n")) right.append(span("rp-ahead", `↑${sum("unpushed_n")}`));
@@ -1125,7 +1129,7 @@ function rpKv(k, v, cls = "") {
   return d;
 }
 
-function rpList(items, shown, total) {
+function rpList(items, shown, total, t) {
   const ul = document.createElement("ul");
   ul.className = "rp-files";
   for (const [text, x] of items.slice(0, shown)) {
@@ -1137,48 +1141,48 @@ function rpList(items, shown, total) {
   if (total > shown) {
     const li = document.createElement("li");
     li.className = "more";
-    li.textContent = `+${total - shown} more`;
+    li.textContent = t("sidebar.more", { n: total - shown });
     ul.append(li);
   }
   return ul;
 }
 
 // One checkout inside its repo's section: what this session left there.
-function checkoutBlock(r, ghOk) {
+function checkoutBlock(r, ghOk, t) {
   const sec = document.createElement("div");
   sec.className = "rp-co";
   const h = document.createElement("h6");
-  h.append(span("", r.worktree ? `worktree ${rpBase(r.top)}` : "main checkout"));
+  h.append(span("", r.worktree ? t("sidebar.worktree", { name: rpBase(r.top) }) : t("sidebar.mainCheckout")));
   if (r.worktree) h.append(span("p", r.path));
   sec.append(h);
-  if (r.removed) sec.append(rpKv("state", "removed: the directory is gone"));
-  else if (r.branch || r.upstream) sec.append(rpKv("branch", r.upstream ? `${r.branch} → ${r.upstream}` : `${r.branch || "detached"}, no upstream`));
-  if (r.stale) sec.append(rpKv("state", "git did not answer; last known state"));
-  if (r.op) sec.append(rpKv("in progress", r.op, "rp-op"));
+  if (r.removed) sec.append(rpKv(t("sidebar.state"), t("sidebar.removed")));
+  else if (r.branch || r.upstream) sec.append(rpKv(t("sidebar.branch"), r.upstream ? `${r.branch} → ${r.upstream}` : t("sidebar.noUpstream", { branch: r.branch || t("sidebar.detached") })));
+  if (r.stale) sec.append(rpKv(t("sidebar.state"), t("sidebar.notAnswered")));
+  if (r.op) sec.append(rpKv(t("sidebar.inProgress"), r.op, "rp-op"));
   if (r.dirty_n) {
-    sec.append(rpKv("uncommitted", rpPlural(r.dirty_n, "file"), "rp-dirty"));
-    sec.append(rpList(r.dirty.map((f) => [f.path, f.stat]), 10, r.dirty_n));
+    sec.append(rpKv(t("sidebar.uncommittedLabel"), rpPlural(t, r.dirty_n, "sidebar.file"), "rp-dirty"));
+    sec.append(rpList(r.dirty.map((f) => [f.path, f.stat]), 10, r.dirty_n, t));
   }
   if (r.unpushed_n) {
-    sec.append(rpKv("unpushed", rpPlural(r.unpushed_n, "commit"), "rp-ahead"));
-    sec.append(rpList(r.unpushed.map((s) => [s]), 5, r.unpushed_n));
+    sec.append(rpKv(t("sidebar.unpushedLabel"), rpPlural(t, r.unpushed_n, "sidebar.commitN"), "rp-ahead"));
+    sec.append(rpList(r.unpushed.map((s) => [s]), 5, r.unpushed_n, t));
   }
-  if (r.clean) sec.append(rpKv("state", "clean, pushed", "rp-clean"));
+  if (r.clean) sec.append(rpKv(t("sidebar.state"), t("sidebar.cleanPushed"), "rp-clean"));
   if (r.left_n) {
-    sec.append(rpKv("left here", rpPlural(r.left_n, "commit")));
-    sec.append(rpList(r.left.map((c) => [`${c.hash} ${c.subject}`]), 5, r.left_n));
+    sec.append(rpKv(t("sidebar.leftHere"), rpPlural(t, r.left_n, "sidebar.commitN")));
+    sec.append(rpList(r.left.map((c) => [`${c.hash} ${c.subject}`]), 5, r.left_n, t));
   }
   for (const pr of r.prs) {
     const v = span("", "");
     v.append(prLink(pr), document.createTextNode(` ${[pr.title, pr.state, pr.ci].filter(Boolean).join(" · ")}`));
-    sec.append(rpKv("PR", v));
+    sec.append(rpKv(t("sidebar.pr"), v));
   }
-  if (r.prs.length && !ghOk) sec.append(rpKv("", "PR state unknown: gh unavailable"));
-  if (r.others_n) sec.append(rpKv("others' dirt", `${rpPlural(r.others_n, "file")} this session never wrote`));
+  if (r.prs.length && !ghOk) sec.append(rpKv("", t("sidebar.prUnknown")));
+  if (r.others_n) sec.append(rpKv(t("sidebar.othersDirt"), t("sidebar.othersDirtNote", { files: rpPlural(t, r.others_n, "sidebar.file") })));
   return sec;
 }
 
-function repoSection(g, ghOk) {
+function repoSection(g, ghOk, t) {
   const sec = document.createElement("div");
   sec.className = "csec";
   const h = document.createElement("h5");
@@ -1186,12 +1190,12 @@ function repoSection(g, ghOk) {
   h.append(span("", g.name));
   const main = g.lines.find((l) => !l.worktree);
   h.append(span("p", main ? main.path : g.main));
-  sec.append(h, ...g.lines.map((r) => checkoutBlock(r, ghOk)));
+  sec.append(h, ...g.lines.map((r) => checkoutBlock(r, ghOk, t)));
   for (const [handle, wheres] of g.peers) {
     const d = document.createElement("div");
     d.className = "rp-peer";
-    d.append(...iconText("dot", `${handle} is also here`));
-    sec.append(d, rpList(wheres.map((w) => [w]), wheres.length, wheres.length));
+    d.append(...iconText("dot", t("sidebar.alsoHere", { handle })));
+    sec.append(d, rpList(wheres.map((w) => [w]), wheres.length, wheres.length, t));
   }
   return sec;
 }

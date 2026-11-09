@@ -14,6 +14,7 @@
 // header button is on) follow the route the page reports.
 
 import { byId } from "../dom.js";
+import { applyLabels } from "../labels.js";
 import { icon } from "../glyphs.js";
 import { attach as attachMenu } from "../menu.js";
 import { installBell } from "../ping.js";
@@ -26,25 +27,25 @@ import { Switcher } from "../switcher.js";
 // suite's hooks, and two mounts' copies are harmless because every lookup is
 // scoped to the part's own element.
 const HEADER_HTML = `
-<button class="hdr-burger" id="hdr-burger" title="Menu" aria-label="Menu" aria-expanded="false" aria-controls="hdr-menu"></button>
-<div class="tab home" id="tab-fleet" title="Fleet (Alt+0)">Fleet</div>
+<button class="hdr-burger" id="hdr-burger" data-t-title="header.menu" data-t-aria="header.menu" aria-expanded="false" aria-controls="hdr-menu"></button>
+<div class="tab home" id="tab-fleet" data-t-title="header.fleetTitle" data-t="header.fleet">Fleet</div>
 <div class="tablist" id="tablist"></div>
-<button class="tab-more" id="tab-more" title="Every open session (Alt+P)" aria-label="Every open session" aria-haspopup="menu" hidden></button>
-<button class="new-session needs-net" id="tab-add" type="button" title="New session (Alt+N)" aria-label="New session"><span class="plus">+</span><span class="lbl">New session</span></button>
+<button class="tab-more" id="tab-more" data-t-title="header.moreTitle" data-t-aria="header.more" aria-haspopup="menu" hidden></button>
+<button class="new-session needs-net" id="tab-add" type="button" data-t-title="header.newTitle" data-t-aria="header.new"><span class="plus">+</span><span class="lbl" data-t="header.new">New session</span></button>
 <div class="gap"></div>
 <div class="hdr-scrim" id="hdr-scrim"></div>
 <div class="hdr-menu" id="hdr-menu">
-<div class="servers"><span class="dot ghost" id="conn-dot"></span><span id="conn-text">connecting</span><span class="ver-top" id="ver-top" hidden></span></div>
-<button class="menu-fleet" id="menu-fleet" title="Fleet (Alt+0)" aria-label="Fleet"></button>
-<button class="keys-btn set-btn sch-btn" id="schedules-btn" title="Schedules (Alt+K)" aria-label="Schedules"><span class="lbl">Schedules</span><span class="n" id="schedules-n"></span></button>
-<button class="keys-btn set-btn" id="settings-btn" title="Settings (Alt+S)" aria-label="Settings"><span class="lbl">Settings</span></button>
-<button class="jr-btn" id="files-btn" title="Files (Alt+O)" aria-label="Files"></button>
-<button class="jr-btn" id="journal-btn" title="Journal (Alt+L)" aria-label="Journal"></button>
-<button class="jr-btn" id="knowledge-btn" title="Knowledge: skills and memories (Alt+I)" aria-label="Knowledge"></button>
-<button class="jr-btn" id="usage-btn" title="Usage: what the work cost" aria-label="Usage"></button>
-<button class="keys-btn bell" id="bell" title="Turn on desktop notifications" aria-label="Notifications"></button>
-<button class="side-btn" id="side-btn" title="Session panel (Alt+B)" aria-label="Session panel"></button>
-<button class="keys-btn help-btn" id="help-btn" title="Help: how to use aegis" aria-label="Help"><span class="q">?</span></button>
+<div class="servers"><span class="dot ghost" id="conn-dot"></span><span id="conn-text" data-t="header.connecting">connecting</span><span class="ver-top" id="ver-top" hidden></span></div>
+<button class="menu-fleet" id="menu-fleet" data-t-title="header.fleetTitle" data-t-aria="header.fleet"></button>
+<button class="keys-btn set-btn sch-btn" id="schedules-btn" data-t-title="header.schedulesTitle" data-t-aria="header.schedules"><span class="lbl" data-t="header.schedules">Schedules</span><span class="n" id="schedules-n"></span></button>
+<button class="keys-btn set-btn" id="settings-btn" data-t-title="header.settingsTitle" data-t-aria="header.settings"><span class="lbl" data-t="header.settings">Settings</span></button>
+<button class="jr-btn" id="files-btn" data-t-title="header.filesTitle" data-t-aria="header.files"></button>
+<button class="jr-btn" id="journal-btn" data-t-title="header.journalTitle" data-t-aria="header.journal"></button>
+<button class="jr-btn" id="knowledge-btn" data-t-title="header.knowledgeTitle" data-t-aria="header.knowledge"></button>
+<button class="jr-btn" id="usage-btn" data-t-title="header.usageTitle" data-t-aria="header.usage"></button>
+<button class="keys-btn bell" id="bell" data-t-title="header.bellTitle" data-t-aria="header.notifications"></button>
+<button class="side-btn" id="side-btn" data-t-title="header.sideTitle" data-t-aria="header.side"></button>
+<button class="keys-btn help-btn" id="help-btn" data-t-title="header.helpTitle" data-t-aria="header.help"><span class="q">?</span></button>
 </div>
 <div class="palette switcher" id="switcher" hidden></div>`;
 
@@ -57,6 +58,7 @@ const HEADER_HTML = `
 export class HeaderPart {
   constructor(mount, host, actions = {}) {
     this.mount = mount;
+    this.t = mount.t;
     this.act = actions;
     this.root = mount.root || host;
     this.quietSeen = new Map(); // key -> whether it was quiet when last drawn
@@ -67,6 +69,7 @@ export class HeaderPart {
     this.el = document.createElement("header");
     this.el.className = "tabs";
     this.el.innerHTML = HEADER_HTML;
+    applyLabels(this.el, this.t);
     host.append(this.el);
 
     const n = (id) => byId(this.el, id);
@@ -96,6 +99,7 @@ export class HeaderPart {
     // What tabs.js calls while it draws: the bar's actions are the page's,
     // except the folds, which belong to this browser and this part.
     this.tabActions = {
+      t: this.t,
       onFocus: (key) => part.act.open?.(key),
       onClose: (key) => part.act.close?.(key),
       onMove: (keys, before) => part.act.move?.(keys, before),
@@ -115,8 +119,9 @@ export class HeaderPart {
     // every open session (quiet ones last) and opens one through openCard so a
     // quiet session gets its tab back.
     this.switcher = new Switcher(this.switcherBox, {
+      t: this.t,
       metas: () => this.mount.state.ordered,
-      here: () => this.act.here?.() || "this server",
+      here: () => this.act.here?.() || this.t("sidebar.thisServer"),
       links: () => this.mount.state.links,
       current: () => this.current(),
       open: (key) => (this.act.openCard || this.act.open)?.(key),
@@ -260,7 +265,7 @@ export class HeaderPart {
   setConn(state, server) {
     this.connDot.className = `dot ${state === "open" ? "ready" : state === "connecting" ? "ghost" : "err"}`;
     this.connText.textContent =
-      state === "open" ? server : state === "connecting" ? "connecting" : state === "closed" ? "disconnected, retrying" : state;
+      state === "open" ? server : state === "connecting" ? this.t("header.connecting") : state === "closed" ? this.t("header.disconnected") : state;
     this.markMenu();
   }
 
