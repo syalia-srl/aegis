@@ -955,11 +955,12 @@ def test_the_whole_chat_in_a_page_that_already_had_the_ids(
 # payloads unchanged.
 
 
-def test_open_and_focus_are_the_hosts_calls(host, browser):  # noqa: F811
+@pytest.mark.parametrize("width", [1280, 390])
+def test_open_and_focus_are_the_hosts_calls(host, browser, width):  # noqa: F811
     """open(session) moves the transcript and box and reports the change once;
     focus() puts the caret in this mount's own box, or in its transcript when it
     has no box."""
-    page, errors = open_page(browser, 1280)
+    page, errors = open_page(browser, width)
     page.goto(host["url"])
     mounted(page)
     page.evaluate("""() => {
@@ -1014,11 +1015,12 @@ def test_open_and_focus_are_the_hosts_calls(host, browser):  # noqa: F811
     page.close()
 
 
-def test_a_mount_with_an_agent_spawns_on_its_first_send(host, browser):  # noqa: F811
+@pytest.mark.parametrize("width", [1280, 390])
+def test_a_mount_with_an_agent_spawns_on_its_first_send(host, browser, width):  # noqa: F811
     """No session and an agent: the first send starts a session, opens it (one
     sessionChanged with previous null), and the turn reports turnStart then
     turnEnd with its own cost."""
-    page, errors = open_page(browser, 1280)
+    page, errors = open_page(browser, width)
     page.goto(host["url"])
     mounted(page)
     prefix = page.evaluate("window.aegisHost.prefix")
@@ -1075,10 +1077,11 @@ def test_a_mount_with_an_agent_spawns_on_its_first_send(host, browser):  # noqa:
     page.close()
 
 
-def test_session_changed_is_silent_for_the_constructor_session(host, browser):  # noqa: F811
+@pytest.mark.parametrize("width", [1280, 390])
+def test_session_changed_is_silent_for_the_constructor_session(host, browser, width):  # noqa: F811
     """A Mount built directly can register its listener before start(): the
     constructor's session is followed silently, and a later open() reports it."""
-    page, errors = open_page(browser, 1280)
+    page, errors = open_page(browser, width)
     page.goto(host["url"])
     mounted(page)
     prefix = page.evaluate("window.aegisHost.prefix")
@@ -1113,12 +1116,13 @@ def test_session_changed_is_silent_for_the_constructor_session(host, browser):  
     page.close()
 
 
-def test_file_sent_event_reports_its_entry_and_files(host, browser):  # noqa: F811
+@pytest.mark.parametrize("width", [1280, 390])
+def test_file_sent_event_reports_its_entry_and_files(host, browser, width):  # noqa: F811
     """A file card's upsert fires fileSent beside entry, with the card's files
     and the same entry the generic event carried."""
     note = Path(host["root"]) / "event-note.txt"
     note.write_text("a file the host hears about\n")
-    page, errors = open_page(browser, 1280)
+    page, errors = open_page(browser, width)
     page.goto(host["url"])
     mounted(page)
     page.evaluate("""() => {
@@ -1149,10 +1153,11 @@ def test_file_sent_event_reports_its_entry_and_files(host, browser):  # noqa: F8
     page.close()
 
 
-def test_oikos_options_still_get_their_events(host, browser):  # noqa: F811
+@pytest.mark.parametrize("width", [1280, 390])
+def test_oikos_options_still_get_their_events(host, browser, width):  # noqa: F811
     """Oikos's exact options (a token function, chat, host theme, Spanish, no
     controls) still get connection, error and turnEnd with their old payloads."""
-    page, errors = open_page(browser, 390)
+    page, errors = open_page(browser, width)
     page.goto(host["url"])
     mounted(page)
     prefix = page.evaluate("window.aegisHost.prefix")
