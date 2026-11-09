@@ -786,7 +786,15 @@ make changelog-check</script>
 <p>One branch, <code>962-mount-api</code>, one worktree, one PR. Slices run one at a time and never in parallel; each is one agent that reads this page, the spec and <code>AGENTS.md</code>, commits one logical change per task with named paths, and pushes. A worker runs only the tests its slice names, plus <code>make gates</code>; the whole browser suite belongs to CI and the nightly, not to the worker. The main agent reviews every diff against this plan and the spec, and after the last slice merges <code>main</code>, opens the PR, copies CI's bench table into its body, and asks before merging. The plan's “Where this plan departs from the spec” section is filled from the workers' reports before the PR opens. This page is the plan; each worker marks its slice's <code>data-state</code> as it starts and finishes, one edit each.</p>
 
 <h2>Where this plan departs from the spec</h2>
-<ul></ul>
+<ul>
+  <li>m1: <code>ensureSession()</code> shares one pending spawn, and an empty box spawns nothing; <code>fileSent</code> fires only for live file entries, once per id, never for a snapshot's history.</li>
+  <li>m3: the tab strip reuses its buttons and listens once on the strip, because replacing a button between mousedown and mouseup dropped clicks. When the shown session goes away a tabs mount reports two changes (to none, then to the next tab), and turns are reported only for the shown session.</li>
+  <li>m4: <code>Mount.on("connection")</code> replays the last state to a listener that joins later, in a microtask, because <code>app.js</code> now registers after the socket may have opened. <code>index.html</code> keeps its root's attributes for the first paint.</li>
+  <li>m5: <code>entries.js</code> skips <code>.wfcard</code>s outside an <code>.aegis</code> root; <code>checkPush</code> is page-only too; hash links inside an embedded full mount route the mount, not the host's URL.</li>
+  <li>m6: <code>built()</code> opens the constructor's session through the full layout's own <code>hooks.open</code>; <code>keys.js</code> returns a disposer; the teardown also removes the measuring textarea on <code>document.body</code>.</li>
+  <li>m7: the header scrolls only its tab strip, never the host's page. The other <code>scrollIntoView</code> calls, all on a user's action, are #1011.</li>
+  <li>m8: <code>library.md</code> keeps its heading, so the #961 fragments' anchor still resolves; <code>data-page</code> is not part of the public contract.</li>
+</ul>
 </main>
 <script>
 // Tables read as cards on a phone: each cell says which column it was.
