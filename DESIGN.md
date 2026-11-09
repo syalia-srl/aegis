@@ -937,7 +937,9 @@ variables and nothing else.
 **A client is a set of mounts.** The page is not one client but as many mounts
 as it asks for: `mount()` (`js/mount.js`) builds one `.aegis` root inside the
 element the host named, and composes into it the parts the layout asks for — a
-chat is one session's transcript and, unless it is switched off, its composer.
+chat is one session's transcript and, unless it is switched off, its composer;
+tabs are the same two under a strip of the sessions the policy lists for that
+caller, with a button that starts a new one.
 The standalone page is one mount too, adopting its empty `#a2` element
 (`adopt`): `layout: "full"` makes `js/layouts/full.js` build the netbanner, the
 boot view and the session view into that root, and `index.html` keeps only its
@@ -959,8 +961,9 @@ token rides in the hello (`protocol.js`), and the mount derives every address
 from its own module URL, so a host that serves the app under its prefix
 (`web.py`, `Server(prefix=...)`) configures nothing; `theme: "host"` loads no
 theme and leaves the variables to the host's own CSS. The handle is the whole
-contract a host sees: `on` for `connection`, `entry`, `turnEnd` and `error`,
-`send`, `destroy`.
+contract a host sees: `on` for `connection`, `sessionChanged`, `turnStart`,
+`turnEnd`, `entry`, `fileSent` and `error`; `open`, `spawn`, `focus`, `send`,
+`destroy` and `el`.
 
 **A part's strings are keys in a table.** `js/labels/en.js` and
 `js/labels/es.js` hold the same keys, and a mount picks one with `lang` while
