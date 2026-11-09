@@ -94,6 +94,7 @@ export class Transcript {
     this.onReply = onReply; // an agent reply that arrived whole, or stopped streaming (speak.js)
     this.loadDetail = loadDetail; // ids -> Promise of whole entries
     this.rev = -1; // the highest revision seen: what a resubscribe asks since
+    this.reset = false; // a snapshot is due after the socket came back
     this.full = new Map(); // id -> the whole entry, fetched when its row opened
     this.fetching = new Set();
     this.foldLevel = 0; // 0 everything shown; 1 the work folded; 2 all but the messages
@@ -302,10 +303,25 @@ export class Transcript {
       });
   }
 
+  // The socket's state, from the page or the part that owns this transcript.
+  // After a close, the next whole transcript is the server's, even when its
+  // store is shorter than what this tab held (a restart cuts the tail).
+  connection(state) {
+    if (state !== "open") this.reset = true;
+  }
+
   // A whole snapshot of the session already shown (a reconnect the server
   // answers in full, a gap in the patches) keeps the divider where it was;
   // switching sessions clears it (stash, clear).
   snapshot(data) {
+    // A snapshot is the whole transcript at the revision it was taken. One
+    // taken before a delta this tab already applied would take that delta's
+    // rows away: on a busy server the mount's first snapshot can land after a
+    // live turn's upserts, and the reply vanishes. The first after a reconnect
+    // is authoritative; any other older one keeps the newer rows (#961).
+    const force = this.reset;
+    this.reset = false;
+    if (!force && Number.isFinite(data.rev) && data.rev < this.rev) return;
     const { sinceId, sinceText } = this;
     this.clear();
     this.sinceId = sinceId;
@@ -324,6 +340,7 @@ export class Transcript {
 
   // A delta: what changed since the revision this tab held, removals first.
   resume(data) {
+    this.reset = false;
     this.apply([...data.removed.map((id) => ({ remove: id })), ...data.entries.map((e) => ({ upsert: e }))], { live: false });
     this.rev = Math.max(this.rev, data.rev);
   }

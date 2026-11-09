@@ -944,8 +944,18 @@ variables and nothing else.
 **A client is a set of mounts.** The page is not one client but as many mounts
 as it asks for: `mount()` (`js/mount.js`) builds one `.aegis` root inside the
 element the host named, and composes into it the parts the layout asks for — a
-chat is one session's transcript and, unless it is switched off, its composer;
-a product chat may also switch off the composer's model, effort and permission
+chat is one session's transcript and, unless it is switched off, its composer.
+The standalone page is one mount too, adopting its empty `#a2` element
+(`adopt`): `layout: "full"` makes `js/layouts/full.js` build the netbanner, the
+boot view and the session view into that root, and `index.html` keeps only its
+head, the empty element and the module script. That mount owns the state its
+views share: every server's sessions, the links, each link's quota and host, the
+browser's tab order, the session shown and the transcripts kept for it. Its
+views are parts as well: the Fleet, the new-session form, Settings, Journal,
+Usage, Knowledge, Files, Schedules, Help, the terminal and the browser each
+build the `<main class="view">` they draw in and hand their module that node,
+so the router only chooses which one the root's `data-view` shows.
+A product chat may also switch off the composer's model, effort and permission
 chips (`controls: false`, #994).
 A part owns the markup it draws, looks every node up under its own element and
 never asks the page for an id, and every stylesheet a mount loads is scoped to
@@ -957,7 +967,20 @@ from its own module URL, so a host that serves the app under its prefix
 (`web.py`, `Server(prefix=...)`) configures nothing; `theme: "host"` loads no
 theme and leaves the variables to the host's own CSS. The handle is the whole
 contract a host sees: `on` for `connection`, `entry`, `turnEnd` and `error`,
-`send`, `destroy`. A turn's cost is the mount's — the cumulative figure the
+`send`, `destroy`.
+
+**A part's strings are keys in a table.** `js/labels/en.js` and
+`js/labels/es.js` hold the same keys, and a mount picks one with `lang` while
+`labels` replaces single entries. A key one table lacks falls back to English
+and is logged by name once, so a translation lag makes noise instead of an
+empty button. A part's markup stays in English and names its key beside it
+(`data-t`, and `data-t-title`, `data-t-aria` and `data-t-placeholder` for the
+attributes `applyLabels` fills); code that builds a string calls `t("part.thing",
+{ name })`. Counts, plurals and dates stay in code and only their nouns come
+from the table, so a translator moves the word, not the arithmetic. The
+standalone page is a mount like any other and takes `?lang=es` (or the
+`aegis.lang` it remembers), which is what makes the full layout's own chrome,
+Settings and the help pages read in Spanish too. A turn's cost is the mount's — the cumulative figure the
 patch that entered working carried, subtracted from the one it left with, null
 when the mount joined mid-turn — so no host re-derives it.
 

@@ -282,7 +282,7 @@ export function refreshApprovals() {
   for (const c of document.querySelectorAll(".apcard")) fillApproval(c);
 }
 
-function fillApproval(card) {
+function fillApproval(card, t = card._t || en) {
   // Set when the agent made it on another server, across a link.
   const where = card.dataset.server;
   const s = approvals.schedule(card.dataset.name, where);
@@ -290,24 +290,24 @@ function fillApproval(card) {
   bar.append(entryIcon(card.dataset.glyph), el("span", "fn", card.dataset.name));
   if (!s) {
     card.dataset.state = "gone";
-    bar.append(el("span", "fs", where ? `on ${where}: see its Schedules view` : "deleted"));
+    bar.append(el("span", "fs", where ? t("entries.approval.onServer", { server: where }) : t("entries.approval.deleted")));
     card.replaceChildren(bar);
     return;
   }
   const waiting = s.paused?.by === "approval";
   card.dataset.state = waiting ? "waiting" : s.paused ? "paused" : "running";
-  bar.append(el("span", "fs", waiting ? "waits for your go" : s.paused ? "paused" : s.next ? `next ${s.next.slice(11, 16)}` : "finished"));
+  bar.append(el("span", "fs", waiting ? t("entries.approval.waits") : s.paused ? t("entries.approval.paused") : s.next ? t("entries.approval.next", { time: s.next.slice(11, 16) }) : t("entries.approval.finished")));
   const kv = el("dl", "apkv");
   const clock = Object.entries(s.clock).map(([k, v]) => `${k} ${v}`).join(" ");
-  const fire = s.fire.target === "existing" ? `into ${s.fire.session}` : `a new ${s.fire.agent || "default"} session in ${s.fire.cwd || "."}`;
-  for (const [k, v] of [["clock", clock], ["overlap", s.overlap], ["check", s.check?.bash || "none"], ["fires", fire], ["prompt", s.prompt]]) {
-    kv.append(el("dt", null, k), el("dd", k === "prompt" || k === "check" ? "pre" : null, v));
+  const fire = s.fire.target === "existing" ? t("entries.approval.fireExisting", { session: s.fire.session }) : t("entries.approval.fireNew", { agent: s.fire.agent || t("entries.approval.defaultAgent"), cwd: s.fire.cwd || "." });
+  for (const [k, v] of [[t("entries.approval.clock"), clock], [t("entries.approval.overlap"), s.overlap], [t("entries.approval.check"), s.check?.bash || t("entries.approval.none")], [t("entries.approval.fires"), fire], [t("entries.approval.prompt"), s.prompt]]) {
+    kv.append(el("dt", null, k), el("dd", k === t("entries.approval.prompt") || k === t("entries.approval.check") ? "pre" : null, v));
   }
   const kids = [bar, kv];
   const wf = s.workflow;
-  if (wf) kids.push(...scheduleWorkflow(wf));
+  if (wf) kids.push(...scheduleWorkflow(wf, t));
   if (waiting) {
-    const go = el("button", "btn primary", "Unpause");
+    const go = el("button", "btn primary", t("entries.approval.unpause"));
     go.type = "button";
     go.onclick = async () => {
       go.disabled = true;
@@ -337,12 +337,12 @@ export function setSecrets(call) {
 const revealed = new Map(); // secret id -> text
 const fromB64 = (s) => Uint8Array.from(atob(s || ""), (c) => c.charCodeAt(0));
 const SECRET_GONE = {
-  revealed: "Already viewed. It cannot be shown again.",
-  expired: "Expired before it was revealed. Ask the agent to send it again.",
-  restarted: "No longer available: aegis restarted before it was revealed. Ask the agent to send it again.",
+  revealed: "entries.secret.goneRevealed",
+  expired: "entries.secret.goneExpired",
+  restarted: "entries.secret.goneRestarted",
 };
 const lapsed = (e) => Date.parse(e.detail?.expires_at || "") / 1000 < serverNow();
-const until = (iso) => `expires ${new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+const until = (iso, t = en) => t("entries.secret.expires", { time: new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) });
 
 function secretBar(e, title, meta) {
   const bar = el("div", "fbar");
@@ -351,35 +351,35 @@ function secretBar(e, title, meta) {
   return { bar, acts };
 }
 
-function fillSecret(card, e) {
-  const size = `${e.detail?.bytes ?? "?"} B`;
+function fillSecret(card, e, t = card._t || en) {
+  const size = t("entries.secret.size", { bytes: e.detail?.bytes ?? "?" });
   const value = revealed.get(e.id);
   const why = e.status === "pending" && lapsed(e) ? "expired" : e.status;
   card.classList.toggle("gone", value === undefined && why !== "pending");
   if (value !== undefined) {
-    const { bar, acts } = secretBar(e, e.title || "secret", `${size} · revealed`);
-    const copy = el("button", "btn primary", "Copy");
+    const { bar, acts } = secretBar(e, e.title || t("entries.secret.title"), t("entries.secret.revealed", { size }));
+    const copy = el("button", "btn primary", t("entries.secret.copy"));
     copy.type = "button";
-    copy.onclick = () => navigator.clipboard.writeText(value).then(() => (copy.textContent = "Copied"), () => (copy.textContent = "Copy failed"));
-    const hide = el("button", "btn", "Hide");
+    copy.onclick = () => navigator.clipboard.writeText(value).then(() => (copy.textContent = t("entries.secret.copied")), () => (copy.textContent = t("entries.secret.copyFailed")));
+    const hide = el("button", "btn", t("entries.secret.hide"));
     hide.type = "button";
     hide.onclick = () => {
       revealed.delete(e.id);
-      fillSecret(card, { ...e, status: "revealed" });
+      fillSecret(card, { ...e, status: "revealed" }, t);
     };
     acts.append(copy, hide);
     const shown = el("div", "sbody val", value);
-    shown.append(el("span", "hint", "Shown in this tab only. Reloading or hiding it ends it."));
+    shown.append(el("span", "hint", t("entries.secret.hint")));
     card.replaceChildren(bar, shown);
     return;
   }
   if (why !== "pending") {
-    const { bar } = secretBar(e, e.title || "secret", `${size} · ${why === "revealed" ? "viewed" : why}`);
-    card.replaceChildren(bar, el("div", "sbody dim", SECRET_GONE[why] || SECRET_GONE.restarted));
+    const { bar } = secretBar(e, e.title || t("entries.secret.title"), t("entries.secret.state", { size, state: why === "revealed" ? t("entries.secret.viewed") : why }));
+    card.replaceChildren(bar, el("div", "sbody dim", t(SECRET_GONE[why] || SECRET_GONE.restarted)));
     return;
   }
-  const { bar, acts } = secretBar(e, e.title || "secret", `${size} · ${until(e.detail.expires_at)}`);
-  const go = el("button", "btn primary", "Reveal");
+  const { bar, acts } = secretBar(e, e.title || t("entries.secret.title"), t("entries.secret.until", { size, when: until(e.detail.expires_at, t) }));
+  const go = el("button", "btn primary", t("entries.secret.reveal"));
   go.type = "button";
   go.onclick = async () => {
     go.disabled = true;
@@ -393,40 +393,40 @@ function fillSecret(card, e) {
       // The reveal's patch can redraw the row before this reply lands: fill
       // the card that is on the page now, not only the one clicked.
       const now = [...document.querySelectorAll(`.row[data-id="${CSS.escape(e.id)}"] .scard`)];
-      for (const c of now.length ? now : [card]) fillSecret(c, r?.pad ? e : { ...e, status: r?.gone || "restarted" });
+      for (const c of now.length ? now : [card]) fillSecret(c, r?.pad ? e : { ...e, status: r?.gone || "restarted" }, t);
     } catch (err) {
       go.disabled = false;
       go.title = String(err?.message || err);
     }
   };
   acts.append(go);
-  card.replaceChildren(bar, el("div", "sbody dim", "Only you can reveal this, once. The agent never saw it."));
+  card.replaceChildren(bar, el("div", "sbody dim", t("entries.secret.onlyYou")));
 }
 
-function fillRequest(card, e) {
+function fillRequest(card, e, t = card._t || en) {
   const d = e.detail || {};
   const why = e.status === "waiting" && lapsed(e) ? "expired" : e.status;
   card.classList.toggle("gone", why !== "waiting");
   if (why === "provided") {
-    const { bar } = secretBar(e, "secret requested", "provided");
-    card.replaceChildren(bar, el("div", "sbody dim", `Provided: ${d.bytes} B written to ${d.path}. The agent was woken.`));
+    const { bar } = secretBar(e, t("entries.request.title"), t("entries.request.provided"));
+    card.replaceChildren(bar, el("div", "sbody dim", t("entries.request.providedLine", { bytes: d.bytes, path: d.path })));
     return;
   }
   if (why !== "waiting") {
-    const { bar } = secretBar(e, "secret requested", why);
-    card.replaceChildren(bar, el("div", "sbody dim", "Expired before it was provided. Nothing was written."));
+    const { bar } = secretBar(e, t("entries.request.title"), why);
+    card.replaceChildren(bar, el("div", "sbody dim", t("entries.request.expired")));
     return;
   }
-  const { bar } = secretBar(e, "secret requested", until(d.expires_at));
+  const { bar } = secretBar(e, t("entries.request.title"), until(d.expires_at, t));
   const body = el("div", "sbody");
   const form = el("form", "sform");
   const input = el("input");
-  Object.assign(input, { type: "password", autocomplete: "off", placeholder: "paste the secret", required: true });
-  input.setAttribute("aria-label", "secret");
+  Object.assign(input, { type: "password", autocomplete: "off", placeholder: t("entries.request.placeholder"), required: true });
+  input.setAttribute("aria-label", t("entries.request.aria"));
   input.dataset.lpignore = "true";
-  const go = el("button", "btn primary", "Provide");
+  const go = el("button", "btn primary", t("entries.request.provide"));
   go.type = "submit";
-  const hint = el("span", "hint", `Written to ${d.path} on the server, mode 0600. It does not enter the transcript.`);
+  const hint = el("span", "hint", t("entries.request.hint", { path: d.path }));
   form.onsubmit = async (ev) => {
     ev.preventDefault();
     if (!input.value) return;
@@ -447,24 +447,24 @@ function fillRequest(card, e) {
 
 // The Claude sign-in card (claude/login.py): how to get a setup-token, and a
 // field the server checks it in. The token never enters the transcript.
-function fillLogin(card, e) {
+function fillLogin(card, e, t = card._t || en) {
   const d = e.detail || {};
   const who = (d.handles || []).join(", ");
   card.classList.toggle("gone", e.status !== "waiting");
   if (e.status !== "waiting") {
-    const { bar } = secretBar(e, "Claude sign-in renewed", "renewed");
-    const done = (d.restarted || []).length ? `Restarted ${d.restarted.join(", ")}.` : "No session was waiting.";
-    card.replaceChildren(bar, el("div", "sbody dim", `The new token is in ${d.path}. ${done}`));
+    const { bar } = secretBar(e, t("entries.login.renewed"), t("entries.login.renewedMeta"));
+    const done = (d.restarted || []).length ? t("entries.login.restarted", { handles: d.restarted.join(", ") }) : t("entries.login.noneWaiting");
+    card.replaceChildren(bar, el("div", "sbody dim", t("entries.login.tokenIn", { path: d.path, done })));
     return;
   }
   const n = (d.handles || []).length;
-  const { bar } = secretBar(e, "Claude sign-in failed", `${n} ${n === 1 ? "session" : "sessions"} waiting`);
+  const { bar } = secretBar(e, t("entries.login.failed"), t(n === 1 ? "entries.login.waiting.one" : "entries.login.waiting.other", { n }));
   const body = el("div", "sbody");
   const steps = el("ol", "steps");
   for (const [before, code, after] of [
-    ["On any machine with a browser, run ", "claude setup-token", "."],
-    ["Approve access in the browser. If the browser shows a code, paste it back into that terminal.", "", ""],
-    ["The terminal prints a line starting with ", "sk-ant-oat01-", ". Paste that line here."],
+    [t("entries.login.step1Before"), "claude setup-token", "."],
+    [t("entries.login.step2"), "", ""],
+    [t("entries.login.step3Before"), "sk-ant-oat01-", t("entries.login.step3After")],
   ]) {
     const li = el("li", null, before);
     if (code) li.append(el("code", null, code), after);
@@ -473,17 +473,17 @@ function fillLogin(card, e) {
   const form = el("form", "sform");
   const input = el("input");
   Object.assign(input, { type: "password", autocomplete: "off", placeholder: "sk-ant-oat01-…", required: true });
-  input.setAttribute("aria-label", "Claude token");
+  input.setAttribute("aria-label", t("entries.login.aria"));
   input.dataset.lpignore = "true";
-  const go = el("button", "btn primary", "Save and check");
+  const go = el("button", "btn primary", t("entries.login.save"));
   go.type = "submit";
-  const hint = el("span", "hint", `Waiting: ${who}. The token lasts a year and is kept in ${d.path}, mode 0600.`);
+  const hint = el("span", "hint", t("entries.login.waitingHint", { who, path: d.path }));
   form.onsubmit = async (ev) => {
     ev.preventDefault();
     if (!input.value) return;
     go.disabled = true;
     hint.classList.remove("err");
-    hint.textContent = "Checking with one request on haiku…";
+    hint.textContent = t("entries.login.checkingHai");
     try {
       await secretCall("claude.token", { id: e.id, secret: input.value });
       input.value = "";
@@ -503,16 +503,16 @@ function fillLogin(card, e) {
 // goes to that login only; it is sent and cleared, never kept here.
 const SIGN_IN_OPEN = new Set(["starting", "open_url", "paste", "device_code", "choose", "checking"]);
 
-function fillSignIn(card, e) {
+function fillSignIn(card, e, t = card._t || en) {
   const d = e.detail || {};
-  const label = d.label || d.harness || "harness";
+  const label = d.label || d.harness || t("entries.signin.harness");
   const step = d.step || e.status;
   const n = (d.handles || []).length;
   const live = SIGN_IN_OPEN.has(step);
   card.classList.toggle("gone", !live);
-  const waiting = n ? `${n} ${n === 1 ? "session" : "sessions"} waiting` : "no session waiting";
-  const head = live && d.expires ? `${waiting} · ${until(d.expires * 1000)}` : step === "done" ? "signed in" : live ? waiting : "failed";
-  const { bar, acts } = secretBar(e, `${label} sign-in`, head);
+  const waiting = n ? t(n === 1 ? "entries.signin.waiting.one" : "entries.signin.waiting.other", { n }) : t("entries.signin.noWaiting");
+  const head = live && d.expires ? `${waiting} · ${until(d.expires * 1000, t)}` : step === "done" ? t("entries.signin.signedIn") : live ? waiting : t("entries.signin.failed");
+  const { bar, acts } = secretBar(e, t("entries.signin.title", { label }), head);
   const body = el("div", "sbody");
   const hint = el("span", "hint");
   const fail = (err) => {
@@ -534,35 +534,35 @@ function fillSignIn(card, e) {
     return b;
   };
   if (live && d.term_id) {
-    const show = el("a", "btn", "Show terminal");
+    const show = el("a", "btn", t("entries.signin.showTerminal"));
     show.href = `#t=${d.term_id}`;
     acts.append(show);
   }
-  if (live) acts.append(act("Cancel", "signin.cancel", {}));
-  if (step === "starting") body.append(el("div", "prompt", `Starting the ${label} login…`));
+  if (live) acts.append(act(t("entries.signin.cancel"), "signin.cancel", {}));
+  if (step === "starting") body.append(el("div", "prompt", t("entries.signin.starting", { label })));
   if (step === "paste" || step === "open_url" || step === "device_code") {
     const steps = el("ol", "steps");
     if (d.url) {
-      const open = el("a", "btn primary", "Open sign-in page");
+      const open = el("a", "btn primary", t("entries.signin.openPage"));
       Object.assign(open, { href: d.url, target: "_blank", rel: "noopener noreferrer" });
       const li = el("li", null, "");
       li.append(open);
       steps.append(li);
     }
     if (step === "device_code" && d.code) {
-      const c = el("li", null, "Enter this code there: ");
+      const c = el("li", null, t("entries.signin.enterCode"));
       c.append(el("code", null, d.code));
       steps.append(c);
     }
     body.append(steps);
     if (step === "paste") {
-      steps.append(el("li", null, d.prompt || "Approve, then paste the code the page shows."));
+      steps.append(el("li", null, d.prompt || t("entries.signin.approvePrompt")));
       const form = el("form", "sform");
       const input = el("input");
-      Object.assign(input, { type: "password", autocomplete: "off", placeholder: d.url ? "code from the page" : "paste here", required: true });
-      input.setAttribute("aria-label", "sign-in code");
+      Object.assign(input, { type: "password", autocomplete: "off", placeholder: d.url ? t("entries.signin.codePlaceholder") : t("entries.signin.pastePlaceholder"), required: true });
+      input.setAttribute("aria-label", t("entries.signin.codeAria"));
       input.dataset.lpignore = "true";
-      const go = el("button", "btn primary", "Sign in");
+      const go = el("button", "btn primary", t("entries.signin.signIn"));
       go.type = "submit";
       form.onsubmit = async (ev) => {
         ev.preventDefault();
@@ -582,21 +582,21 @@ function fillSignIn(card, e) {
     }
   }
   if (step === "choose") {
-    body.append(el("div", "prompt", d.prompt || "Pick one:"));
+    body.append(el("div", "prompt", d.prompt || t("entries.signin.pick")));
     const row = el("div", "sform");
     for (const o of d.options || []) row.append(act(o, "signin.choose", { option: o }));
     body.append(row);
   }
-  if (step === "checking") body.append(el("div", "prompt", "Checking the sign-in…"));
+  if (step === "checking") body.append(el("div", "prompt", t("entries.signin.checking")));
   if (step === "done") {
     const r = d.restarted || [];
-    body.append(el("div", "dim", `Signed in. ${r.length ? `Restarted ${r.join(", ")}.` : "No session was waiting."}`));
+    body.append(el("div", "dim", t("entries.signin.done", { restarted: r.length ? t("entries.login.restarted", { handles: r.join(", ") }) : t("entries.login.noneWaiting") })));
   }
   if (step === "failed") {
-    body.append(el("div", "prompt", d.error || "The sign-in failed."));
+    body.append(el("div", "prompt", d.error || t("entries.signin.failPrompt")));
     if (d.tail) body.append(el("pre", "tail", d.tail));
-    if (n) body.append(el("div", "dim", `Still waiting: ${d.handles.join(", ")}.`));
-    const again = el("button", "btn primary", "Start again");
+    if (n) body.append(el("div", "dim", t("entries.signin.stillWaiting", { handles: d.handles.join(", ") })));
+    const again = el("button", "btn primary", t("entries.signin.startAgain"));
     again.type = "button";
     again.onclick = async () => {
       again.disabled = true;
@@ -611,23 +611,23 @@ function fillSignIn(card, e) {
     againRow.append(again);
     body.append(againRow);
   }
-  if (live && d.harness === "claude-code") body.append(pasteToken(e));
+  if (live && d.harness === "claude-code") body.append(pasteToken(e, t));
   body.append(hint);
   card.replaceChildren(bar, body);
 }
 
 // Claude's other way in: a setup-token made elsewhere, pasted whole.
-function pasteToken(e) {
+function pasteToken(e, t = en) {
   const more = el("details", "more");
-  more.append(el("summary", null, "Paste a token instead"));
+  more.append(el("summary", null, t("entries.login.pasteInstead")));
   const form = el("form", "sform");
   const input = el("input");
   Object.assign(input, { type: "password", autocomplete: "off", placeholder: "sk-ant-oat01-…", required: true });
-  input.setAttribute("aria-label", "Claude token");
+  input.setAttribute("aria-label", t("entries.login.aria"));
   input.dataset.lpignore = "true";
-  const go = el("button", "btn", "Save and check");
+  const go = el("button", "btn", t("entries.login.save"));
   go.type = "submit";
-  const hint = el("span", "hint", "From claude setup-token run on any machine. It lasts a year.");
+  const hint = el("span", "hint", t("entries.login.pasteHint"));
   form.onsubmit = async (ev) => {
     ev.preventDefault();
     if (!input.value) return;
@@ -635,7 +635,7 @@ function pasteToken(e) {
     const value = input.value;
     input.value = "";
     hint.classList.remove("err");
-    hint.textContent = "Checking with one request on haiku…";
+    hint.textContent = t("entries.login.checkingHai");
     try {
       await secretCall("claude.token", { id: e.id, secret: value });
     } catch (err) {
@@ -652,17 +652,17 @@ function pasteToken(e) {
 // A config change an agent suggested (config_suggest.py): the diff, and for
 // an admin Apply and Not now. The outcome comes back as the folded entry.
 const CONFIG_DONE = {
-  applied: "Applied. .aegis.yaml now holds this text; the agent was told.",
-  declined: "Declined. Nothing was written; the agent was told.",
-  stale: ".aegis.yaml changed since this was suggested. Nothing was written; the agent was told.",
+  applied: "entries.config.applied",
+  declined: "entries.config.declined",
+  stale: "entries.config.stale",
 };
 
-function fillConfig(card, e) {
+function fillConfig(card, e, t = card._t || en) {
   const d = e.detail || {};
   card.classList.toggle("gone", e.status !== "pending");
   const bar = el("div", "fbar");
   const acts = el("span", "acts");
-  bar.append(entryIcon(e.glyph), el("span", "fn", ".aegis.yaml"), el("span", "fs", e.status === "pending" ? "suggested" : e.status), acts);
+  bar.append(entryIcon(e.glyph), el("span", "fn", ".aegis.yaml"), el("span", "fs", e.status === "pending" ? t("entries.config.suggested") : e.status), acts);
   const diff = el("pre", "cdiff");
   for (const line of String(d.diff || "").split("\n")) {
     const cls = line.startsWith("+++") || line.startsWith("---") ? "h" : line.startsWith("@@") ? "at" : line[0] === "+" ? "add" : line[0] === "-" ? "del" : null;
@@ -670,7 +670,7 @@ function fillConfig(card, e) {
   }
   const kids = [bar, el("div", "sbody why", d.why || ""), diff];
   if (e.status !== "pending") {
-    kids.push(el("div", "sbody dim", CONFIG_DONE[e.status] || e.status));
+    kids.push(el("div", "sbody dim", e.status in CONFIG_DONE ? t(CONFIG_DONE[e.status]) : e.status));
   } else {
     const hint = el("span", "hint");
     const press = (op, label) => {
@@ -688,7 +688,7 @@ function fillConfig(card, e) {
       };
       return b;
     };
-    acts.append(press("config.suggestion.apply", "Apply"), press("config.suggestion.decline", "Not now"));
+    acts.append(press("config.suggestion.apply", t("entries.config.apply")), press("config.suggestion.decline", t("entries.config.notNow")));
     kids.push(hint);
   }
   card.replaceChildren(...kids);
@@ -699,14 +699,14 @@ function fillConfig(card, e) {
 // saved approved because the person asked. The card
 // is a transcript record, so its buttons work after a restart; the outcome
 // comes back as the folded entry.
-const KNOWLEDGE_VERB = { new: "proposed", changed: "changed", deleted: "deleted", saved: "saved as you asked" };
+const KNOWLEDGE_VERB = { new: "entries.knowledge.verb.new", changed: "entries.knowledge.verb.changed", deleted: "entries.knowledge.verb.deleted", saved: "entries.knowledge.verb.saved" };
 const KNOWLEDGE_DONE = {
-  approved: "Approved. It is hinted from now on; the agent was told.",
-  discarded: "Discarded. It was deleted; the agent was told.",
-  undone: "Undone. The change was reverted; the agent was told.",
-  stale: "It changed since this card was drawn. Nothing was done; the agent was told.",
-  gone: "It no longer exists. Nothing was done; the agent was told.",
-  conflict: "It changed again since, so this change cannot be undone by itself. Nothing was done; the agent was told.",
+  approved: "entries.knowledge.done.approved",
+  discarded: "entries.knowledge.done.discarded",
+  undone: "entries.knowledge.done.undone",
+  stale: "entries.knowledge.done.stale",
+  gone: "entries.knowledge.done.gone",
+  conflict: "entries.knowledge.done.conflict",
 };
 
 function fileSize(n) {
@@ -717,23 +717,23 @@ function fileSize(n) {
 
 // What /setup moved into aegis (knowledge.import): a row per item, each with
 // its own Undo, which reverts that item's import commit.
-const IMPORT_DONE = { undone: "undone: no longer in aegis", conflict: "changed since, not undone" };
+const IMPORT_DONE = { undone: "entries.knowledge.importUndone", conflict: "entries.knowledge.importConflict" };
 
-function fillImported(card, e) {
+function fillImported(card, e, t = card._t || en) {
   const d = e.detail || {};
   const items = d.items || [];
   const bar = el("div", "fbar");
-  bar.append(entryIcon(e.glyph), el("span", "fn", `imported ${items.length === 1 ? "1 item" : `${items.length} items`}`), el("span", "fs", "approved"));
+  bar.append(entryIcon(e.glyph), el("span", "fn", t(items.length === 1 ? "entries.knowledge.imported.one" : "entries.knowledge.imported.other", { n: items.length })), el("span", "fs", t("entries.knowledge.approved")));
   const hint = el("span", "hint");
   const rows = items.map((x) => {
     const r = el("div", "krow");
     r.dataset.name = x.name;
     const what = el("span", "kwhat");
-    what.append(el("b", null, x.name), el("span", "dim", ` ${x.kind} · from ${x.source}`));
+    what.append(el("b", null, x.name), el("span", "dim", t("entries.knowledge.from", { kind: x.kind, source: x.source })));
     r.append(what);
-    if (x.outcome) r.append(el("span", "dim", IMPORT_DONE[x.outcome] || x.outcome));
+    if (x.outcome) r.append(el("span", "dim", x.outcome in IMPORT_DONE ? t(IMPORT_DONE[x.outcome]) : x.outcome));
     else {
-      const b = el("button", "btn", "Undo");
+      const b = el("button", "btn", t("entries.knowledge.undo"));
       b.type = "button";
       b.onclick = async () => {
         b.disabled = true;
@@ -749,26 +749,26 @@ function fillImported(card, e) {
     }
     return r;
   });
-  const about = el("div", "sbody dim", "Moved in from /setup, as you ticked. Undo takes one out of aegis; it does not put back an original that was removed.");
+  const about = el("div", "sbody dim", t("entries.knowledge.importAbout"));
   card.replaceChildren(bar, about, ...rows, hint);
 }
 
-function fillKnowledge(card, e) {
+function fillKnowledge(card, e, t = card._t || en) {
   const d = e.detail || {};
-  if (d.op === "imported") return fillImported(card, e);
+  if (d.op === "imported") return fillImported(card, e, t);
   const pending = e.status === "pending";
   card.classList.toggle("gone", !pending);
   const bar = el("div", "fbar");
   const acts = el("span", "acts");
-  bar.append(entryIcon(e.glyph), el("span", "fn", d.name || ""), el("span", "fs", pending ? KNOWLEDGE_VERB[d.op] || d.op : e.status), acts);
-  const about = [d.op === "saved" ? `${d.item_kind} saved by the agent, as you asked` : `${d.item_kind} ${KNOWLEDGE_VERB[d.op] || d.op} by the agent`, d.type, d.lifetime === "temporary" && d.expires ? `until ${d.expires}` : d.lifetime];
+  bar.append(entryIcon(e.glyph), el("span", "fn", d.name || ""), el("span", "fs", pending ? (d.op in KNOWLEDGE_VERB ? t(KNOWLEDGE_VERB[d.op]) : d.op) : e.status), acts);
+  const about = [d.op === "saved" ? t("entries.knowledge.aboutSaved", { kind: d.item_kind }) : t("entries.knowledge.about", { kind: d.item_kind, verb: d.op in KNOWLEDGE_VERB ? t(KNOWLEDGE_VERB[d.op]) : d.op }), d.type, d.lifetime === "temporary" && d.expires ? t("entries.knowledge.until", { when: d.expires }) : d.lifetime];
   const kids = [bar, el("div", "sbody dim", about.filter(Boolean).join(" · ")), el("div", "sbody why", d.description || "")];
   if (d.body) kids.push(el("pre", "cdiff kbody", d.body));
-  if (d.partial) kids.push(el("div", "sbody dim", "Shown in part: the first 4,000 characters of the text."));
+  if (d.partial) kids.push(el("div", "sbody dim", t("entries.knowledge.partial")));
   // A skill's every file, so a script that changed is not hidden behind its text.
-  if (d.files?.length) kids.push(el("div", "sbody dim", "files: " + d.files.map((f) => `${f.name} (${fileSize(f.size)})`).join(" · ")));
+  if (d.files?.length) kids.push(el("div", "sbody dim", t("entries.knowledge.files") + d.files.map((f) => `${f.name} (${fileSize(f.size)})`).join(" · ")));
   if (!pending) {
-    kids.push(el("div", "sbody dim", KNOWLEDGE_DONE[e.status] || e.status));
+    kids.push(el("div", "sbody dim", e.status in KNOWLEDGE_DONE ? t(KNOWLEDGE_DONE[e.status]) : e.status));
   } else {
     const hint = el("span", "hint");
     const press = (op, label, primary) => {
@@ -787,9 +787,9 @@ function fillKnowledge(card, e) {
       return b;
     };
     // Edit opens the item in the Knowledge view, where a saved edit approves it.
-    const edit = Object.assign(el("a", "btn", "Edit"), { href: `#knowledge=${encodeURIComponent(d.name || "")}` });
-    if (d.op === "new") acts.append(press("knowledge.card.approve", "Approve", true), edit, press("knowledge.card.discard", "Discard"));
-    else acts.append(press("knowledge.card.undo", "Undo", true));
+    const edit = Object.assign(el("a", "btn", t("entries.knowledge.edit")), { href: `#knowledge=${encodeURIComponent(d.name || "")}` });
+    if (d.op === "new") acts.append(press("knowledge.card.approve", t("entries.knowledge.approve"), true), edit, press("knowledge.card.discard", t("entries.knowledge.discard")));
+    else acts.append(press("knowledge.card.undo", t("entries.knowledge.undo"), true));
     kids.push(hint);
   }
   card.replaceChildren(...kids);
@@ -799,17 +799,17 @@ function fillKnowledge(card, e) {
 // what changed since the version a person approved (schedules.py). The
 // approval card and the Schedules view draw the same, so a Resume in either
 // sends only a version the person was shown.
-export function scheduleWorkflow(wf) {
+export function scheduleWorkflow(wf, t = en) {
   const kids = [];
-  const who = wf.saved_by ? `saved by ${wf.saved_by.by.handle || wf.saved_by.by.principal || "?"} ${hhmm(wf.saved_by.t)}` : null;
+  const who = wf.saved_by ? t("entries.approval.savedBy", { handle: wf.saved_by.by.handle || wf.saved_by.by.principal || "?", time: hhmm(wf.saved_by.t) }) : null;
   const runs = el("div", "aprun");
-  runs.append("runs ", el("b", null, wf.id));
-  const parts = wf.sha ? [wf.title, `v${wf.sha.slice(0, 8)}`, who] : ["deleted"];
+  runs.append(t("entries.approval.runs"), " ", el("b", null, wf.id));
+  const parts = wf.sha ? [wf.title, `v${wf.sha.slice(0, 8)}`, who] : [t("entries.approval.deleted")];
   runs.append(...parts.filter(Boolean).map((p) => ` · ${p}`));
-  if (wf.changed) runs.append(" · ", el("span", "apchanged", wf.sha ? "changed since you approved it" : "nothing to approve until the prompt names another"));
+  if (wf.changed) runs.append(" · ", el("span", "apchanged", wf.sha ? t("entries.approval.changed") : t("entries.approval.nothingToApprove")));
   kids.push(runs);
   if (wf.say) kids.push(el("div", "wflede", wf.say));
-  if (wf.changed && wf.diff?.length) kids.push(diffPanel({}, wf.diff, null));
+  if (wf.changed && wf.diff?.length) kids.push(diffPanel({}, wf.diff, null, t));
   else if (wf.steps?.length) {
     const list = el("ul", "apsteps");
     for (const say of wf.steps) list.append(el("li", null, say));
@@ -817,7 +817,7 @@ export function scheduleWorkflow(wf) {
   }
   // Every command it runs without asking, as the arm card lists them.
   if (wf.cmds?.length) {
-    const line = runsLine({ commands: wf.commands, cwd: wf.cwd });
+    const line = runsLine({ commands: wf.commands, cwd: wf.cwd }, t);
     if (line) kids.push(line);
     kids.push(el("pre", "apcmds", wf.cmds.join("\n")));
   }
@@ -875,27 +875,27 @@ function fmtSecs(s) {
 }
 
 // A probe as the card names it: how often an sh runs, or what judges.
-function probeTag(p) {
+function probeTag(p, t = en) {
   if (!p) return "";
-  if (p.sh) return `sh · every ${fmtSecs(p.every)}`;
+  if (p.sh) return t("entries.workflow.probeSh", { every: fmtSecs(p.every) });
   if (p.expr) return "expr";
-  return `judge · ${p.judge.agent}`;
+  return t("entries.workflow.probeJudge", { agent: p.judge.agent });
 }
 
 // A row's kind as the card names it: who runs an agent, how a par or a map
 // spreads, what a check, an if or a loop asks. A map's do, drawn once before
 // its items are known, says so.
-function kindTag(r) {
-  const cap = r.cap ? ` · ${r.cap} at a time` : "";
-  if (r.kind === "agent" && r.session) return `agent · in ${r.session}'s session`;
-  if (r.kind === "agent") return r.main ? "agent · main agent" : `agent · ${r.agent}`;
-  if (r.kind === "gate") return r.by === "person" ? "gate · you decide" : "gate · the main agent decides";
-  if (r.kind === "map") return `for each ${r.as}${cap}`;
-  if (r.kind === "par") return `at once${cap}`;
-  if (r.kind === "check") return `check · ${probeTag(r.probe)}`;
-  if (r.kind === "if") return `if · ${probeTag(r.probe).split(" ·")[0]}`;
-  if (r.kind === "loop") return `repeat · up to ${r.max}`;
-  if (r.kind === "wait") return `wait ${r.wait}`;
+function kindTag(r, t = en) {
+  const cap = r.cap ? t("entries.workflow.cap", { cap: r.cap }) : "";
+  if (r.kind === "agent" && r.session) return t("entries.workflow.kindAgentSession", { session: r.session });
+  if (r.kind === "agent") return r.main ? t("entries.workflow.kindAgentMain") : t("entries.workflow.kindAgent", { agent: r.agent });
+  if (r.kind === "gate") return r.by === "person" ? t("entries.workflow.kindGateYou") : t("entries.workflow.kindGateMain");
+  if (r.kind === "map") return t("entries.workflow.kindMap", { as: r.as, cap });
+  if (r.kind === "par") return t("entries.workflow.kindPar", { cap });
+  if (r.kind === "check") return t("entries.workflow.kindCheck", { probe: probeTag(r.probe, t) });
+  if (r.kind === "if") return t("entries.workflow.kindIf", { probe: probeTag(r.probe, t).split(" ·")[0] });
+  if (r.kind === "loop") return t("entries.workflow.kindLoop", { max: r.max });
+  if (r.kind === "wait") return t("entries.workflow.kindWait", { wait: r.wait });
   return r.kind;
 }
 
@@ -919,26 +919,28 @@ function commandOf(r) {
 
 // The commands a person approves, counted for the line above Approve, with
 // how often each group runs: once, for each item of a map, each round.
-function runsLine(w) {
+function runsLine(w, t = en) {
   const { sh = 0, probes = 0, groups } = w.commands || {};
   if (!sh && !probes) return null;
-  const n = (k, one, many) => `${k} ${k === 1 ? one : many}`;
+  const n = (k, one, many) => t(k === 1 ? `${one}.one` : `${one}.other`, { n: k });
   const counts = (g) =>
-    [g.sh && n(g.sh, "shell command", "shell commands"), g.probes && n(g.probes, "probe", "probes")].filter(Boolean);
+    [g.sh && n(g.sh, "entries.workflow.shellCommand"), g.probes && n(g.probes, "entries.workflow.probe")].filter(Boolean);
+  const and = t("entries.workflow.and");
   const all = groups || [{ sh, probes, per: "" }];
   if (all.length === 1) {
     const g = all[0];
-    return el("span", "runs", `Runs ${counts(g).join(" and ")}${g.per ? ` ${g.per}` : ""} in ${w.cwd}, without asking.`);
+    const list = counts(g).join(and);
+    return el("span", "runs", t("entries.workflow.runs", { list, per: g.per ? ` ${g.per}` : "", cwd: w.cwd }));
   }
-  const parts = all.map((g) => counts(g).join(" and ") + (g.per ? ` ${g.per}` : ""));
-  const list = parts.length === 2 ? parts.join(" and ") : `${parts.slice(0, -1).join(", ")}, and ${parts.at(-1)}`;
-  return el("span", "runs", `Runs ${list}, in ${w.cwd}, without asking.`);
+  const parts = all.map((g) => counts(g).join(and) + (g.per ? ` ${g.per}` : ""));
+  const list = parts.length === 2 ? parts.join(and) : t("entries.workflow.listAnd", { before: parts.slice(0, -1).join(", "), last: parts.at(-1) });
+  return el("span", "runs", t("entries.workflow.runsMany", { list, cwd: w.cwd }));
 }
 
 const COUNT_ORDER = ["done", "running", "queued", "pending", "failed", "stopped"];
-function countLine(count) {
+function countLine(count, t = en) {
   return COUNT_ORDER.filter((k) => count[k])
-    .map((k) => `${count[k]} ${k === "pending" ? "waiting" : k}`)
+    .map((k) => t("entries.workflow.counted", { n: count[k], what: t(`entries.node.${k}`) }))
     .join(" · ");
 }
 
@@ -948,20 +950,20 @@ function since(a, b) {
   return s >= 3600 ? `${Math.floor(s / 3600)}h${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}` : `${Math.floor(s / 60)}m${String(s % 60).padStart(2, "0")}`;
 }
 
-const WF_WORDS = { armed: "waits for your go", done: "done", failed: "failed", stopped: "stopped", rejected: "rejected", replaced: "replaced" };
+const WF_WORDS = { armed: "entries.wfState.armed", done: "entries.wfState.done", failed: "entries.wfState.failed", stopped: "entries.wfState.stopped", rejected: "entries.wfState.rejected", replaced: "entries.wfState.replaced" };
 const STORY_ICON = { ok: "read", bad: "close", ask: "comment", note: "pip" };
 
 // What a run waits on, in one line under its lede: the person first.
-function openLine(w) {
+function openLine(w, t = en) {
   const open = w.open || [];
   const mine = open.filter((o) => o.kind === "gate" && o.by === "person");
-  if (mine.length) return el("div", "wfopen you", `waits on you: ${mine.map((o) => w.tree.find((r) => r.id === o.node)?.say || o.node).join(", ")}`);
-  const n = (k, one, many) => {
+  if (mine.length) return el("div", "wfopen you", t("entries.workflow.waitsOnYou", { nodes: mine.map((o) => w.tree.find((r) => r.id === o.node)?.say || o.node).join(", ") }));
+  const n = (k, one) => {
     const c = open.filter((o) => o.kind === k).length;
-    return c ? `${c} ${c === 1 ? one : many}` : null;
+    return c ? t(c === 1 ? `${one}.one` : `${one}.other`, { n: c }) : null;
   };
-  const parts = [n("failed", "failed step", "failed steps"), n("gate", "gate", "gates"), n("ask", "question", "questions")].filter(Boolean);
-  return parts.length ? el("div", "wfopen", `waits on the main agent: ${parts.join(", ")}`) : null;
+  const parts = [n("failed", "entries.workflow.failedStep"), n("gate", "entries.workflow.gate"), n("ask", "entries.workflow.question")].filter(Boolean);
+  return parts.length ? el("div", "wfopen", t("entries.workflow.waitsOnMain", { parts: parts.join(", ") })) : null;
 }
 
 // Done, failed and open questions over every leaf the run will run: a map
@@ -981,32 +983,32 @@ function tally(w) {
 
 // The header under the card's bar: counts over a progress bar; before
 // approval, how many steps the plan has.
-function headLine(w) {
-  const t = tally(w);
+function headLine(w, t = en) {
+  const c = tally(w);
   const box = el("div", "wfhead");
   if (w.status === "armed") {
-    box.append(el("span", null, `${t.total} step${t.total === 1 ? "" : "s"}`));
+    box.append(el("span", null, t(c.total === 1 ? "entries.workflow.steps.one" : "entries.workflow.steps.other", { n: c.total })));
     return box;
   }
-  const n = (k, one, many) => (k ? `${k} ${k === 1 ? one : many}` : null);
-  const parts = [`${t.done} of ${t.total} done`, n(t.failed, "failed", "failed"), n(t.asks, "question", "questions")];
+  const n = (k, one) => (k ? t(k === 1 ? `${one}.one` : `${one}.other`, { n: k }) : null);
+  const parts = [t("entries.workflow.doneOf", { done: c.done, total: c.total }), n(c.failed, "entries.workflow.failedStep"), n(c.asks, "entries.workflow.question")];
   box.append(el("span", null, parts.filter(Boolean).join(" · ")));
   const bar = el("div", "bar");
   const fill = el("i");
-  fill.style.width = `${t.total ? Math.round((100 * t.done) / t.total) : 0}%`;
+  fill.style.width = `${c.total ? Math.round((100 * c.done) / c.total) : 0}%`;
   bar.append(fill);
   box.append(bar);
-  const eta = etaLine(w);
+  const eta = etaLine(w, t);
   if (eta) box.append(el("span", "eta", eta));
   return box;
 }
 
 // A step's see: the server resolves the path from the run and the step, and
 // the viewer opens it at its #fragment (an HTML page's frame) or its :line.
-function seeChip(w, r) {
-  const chip = el("button", "see", `see ${r.see}`);
+function seeChip(w, r, t = en) {
+  const chip = el("button", "see", t("entries.workflow.see", { name: r.see }));
   chip.type = "button";
-  chip.title = "Open it";
+  chip.title = t("entries.workflow.openIt");
   chip.onclick = async () => {
     try {
       const got = await workflows.call("workflow.see", { run: w.run, node: r.id });
@@ -1025,17 +1027,17 @@ function seeChip(w, r) {
 
 // A step's session, as a link: its transcript while open (read-only while the
 // run holds it, with no tab added), the archive's copy once closed.
-function stepLink(r) {
+function stepLink(r, t = en) {
   if (!r.log_id) return el("span", "w", "");
-  const a = el("a", "who", r.handle || "transcript");
+  const a = el("a", "who", r.handle || t("entries.workflow.transcript"));
   a.href = r.handle ? `#s=${r.log_id}` : `#read=${r.log_id}`;
-  a.title = "Open its transcript";
+  a.title = t("entries.workflow.openTranscript");
   return a;
 }
 
 // Now: each working leaf with what it runs in and for how long, then up to
 // three steps that come next, queued ones first. Only while running.
-function nowSection(w) {
+function nowSection(w, t = en) {
   if (w.status !== "running") return null;
   const leaves = w.tree.filter((r) => !r.each && LEAF_KINDS.has(r.kind));
   const working = leaves.filter((r) => r.state === "running");
@@ -1044,11 +1046,11 @@ function nowSection(w) {
   const next = [...queued, ...pending].slice(0, 3);
   if (!working.length && !next.length) return null;
   const box = el("div", "wfnow");
-  box.append(el("h5", null, "now"));
+  box.append(el("h5", null, t("entries.workflow.now")));
   for (const r of working) {
     const line = el("div", "nowline");
     line.dataset.node = r.id;
-    const what = r.kind === "agent" ? stepLink(r) : el("span", "w", commandOf(r) || r.reading || kindTag(r));
+    const what = r.kind === "agent" ? stepLink(r, t) : el("span", "w", commandOf(r) || r.reading || kindTag(r, t));
     line.append(el("span", "dot running"), el("span", "say", r.say), what);
     if (r.percent != null) line.append(el("span", "pct", `${r.percent}%`));
     line.append(el("span", "dur", since(r.started, r.ended)));
@@ -1058,7 +1060,7 @@ function nowSection(w) {
   for (const r of next) {
     const line = el("div", "nowline next");
     line.dataset.node = r.id;
-    line.append(el("span", `dot ${r.state}`), el("span", "say", r.say), el("span", "w", r.state === "queued" ? "waits for room" : "next"));
+    line.append(el("span", `dot ${r.state}`), el("span", "say", r.say), el("span", "w", r.state === "queued" ? t("entries.workflow.waitsRoom") : t("entries.workflow.next")));
     box.append(line);
   }
   return box;
@@ -1088,11 +1090,11 @@ function folds(w) {
 const hidden = (fs, r) => !needsSomeone(r) && fs.some((f) => r.id.startsWith(f.under) && !(f.keep && r.id.startsWith(f.keep)));
 
 // A folded map's or loop's toggle, beside its count line.
-function foldButton(w, r) {
+function foldButton(w, r, t = en) {
   const key = `${w.run}/${r.id}`;
   const open = openMaps.has(key);
   const n = r.kind === "map" ? itemCount(r) : r.rounds.round - 1;
-  const label = open ? "fold" : r.kind === "map" ? `show all ${n}` : `${n} earlier round${n === 1 ? "" : "s"}`;
+  const label = open ? t("entries.workflow.fold") : r.kind === "map" ? t("entries.workflow.showAll", { n }) : t(n === 1 ? "entries.workflow.earlierRound.one" : "entries.workflow.earlierRound.other", { n });
   const b = el("button", "fold", label);
   b.type = "button";
   b.onclick = () => {
@@ -1105,7 +1107,7 @@ function foldButton(w, r) {
 // A folded map's or loop's story folds with it: the lines of the steps it
 // hides become one line, where the last of them was, with the same toggle as
 // the tree. A failure, a question and a note never fold.
-function storyLines(w, fs) {
+function storyLines(w, fs, t = en) {
   const hider = (s) => s.mark === "ok" && s.node && fs.find((f) => s.node.startsWith(f.under) && !(f.keep && s.node.startsWith(f.keep)));
   const count = new Map();
   const last = new Map();
@@ -1118,9 +1120,9 @@ function storyLines(w, fs) {
     const f = hider(s);
     if (!f) out.push(storyLine(s.t, s.mark, icon(STORY_ICON[s.mark] || "comment"), s.text));
     else if (last.get(f) === i) {
-      const line = storyLine(s.t, "ok", "…", `${count.get(f)} lines folded · ${f.row.say}`);
+      const line = storyLine(s.t, "ok", "…", t("entries.workflow.linesFolded", { n: count.get(f), say: f.row.say }));
       line.classList.add("folded");
-      line.append(foldButton(w, f.row));
+      line.append(foldButton(w, f.row, t));
       out.push(line);
     }
   });
@@ -1143,8 +1145,8 @@ function docked(id) {
 }
 
 // A workflow's status line, for the card's bar and a pane's.
-export function workflowStatus(w) {
-  return w.status === "running" ? `running ${since(w.started)}` : WF_WORDS[w.status] || w.status;
+export function workflowStatus(w, t = en) {
+  return w.status === "running" ? t("entries.wfState.running", { since: since(w.started) }) : w.status in WF_WORDS ? t(WF_WORDS[w.status]) : w.status;
 }
 
 // Where a card is drawn: a canvas pane, the viewer, or the transcript (null).
@@ -1158,7 +1160,7 @@ function hostOf(card, id) {
 // breaks. A person's choice is kept per run and input.
 const openArgs = new Set(); // "run/name" a person unfolded
 const ARG_INLINE = 60;
-function argRow(run, k, v) {
+function argRow(run, k, v, t = en) {
   let data = v !== null && typeof v === "object" ? v : null;
   if (typeof v === "string" && /^\s*[[{]/.test(v)) {
     try {
@@ -1174,7 +1176,7 @@ function argRow(run, k, v) {
     return row;
   }
   const preview = Array.isArray(data)
-    ? `${data.length} item${data.length === 1 ? "" : "s"}`
+    ? t(data.length === 1 ? "entries.workflow.item.one" : "entries.workflow.item.other", { n: data.length })
     : data
       ? `{ ${Object.keys(data).join(", ")} }`
       : text.replace(/\s+/g, " ").trim();
@@ -1206,41 +1208,41 @@ function argRow(run, k, v) {
 // while running an estimate of what is left from the pace so far (finished
 // steps over wall time, so parallel steps count), and what its steps' sessions
 // have cost, with an estimated total from the cost of each finished step.
-function etaLine(w) {
+function etaLine(w, t = en) {
   if (!w.started) return "";
-  const t = tally(w);
+  const c = tally(w);
   const end = w.ended || serverNow();
   const took = end - w.started;
-  const parts = [`${since(w.started, end)} elapsed`];
-  const live = w.status === "running" && t.done > 0 && t.done < t.total;
-  if (live) parts.push(`~${fmtSecs(Math.round(((took / t.done) * (t.total - t.done)) / 60) * 60 || 60)} left`);
+  const parts = [t("entries.workflow.elapsed", { since: since(w.started, end) })];
+  const live = w.status === "running" && c.done > 0 && c.done < c.total;
+  if (live) parts.push(t("entries.workflow.left", { time: fmtSecs(Math.round(((took / c.done) * (c.total - c.done)) / 60) * 60 || 60) }));
   const rows = w.tree.filter((r) => !r.each && LEAF_KINDS.has(r.kind));
   const spent = rows.reduce((a, r) => a + (r.cost || 0), 0);
   if (rows.some((r) => r.cost != null)) {
-    parts.push(`${money(spent)} spent`);
+    parts.push(t("entries.workflow.spent", { money: money(spent) }));
     const doneCost = rows.filter((r) => r.state === "done").reduce((a, r) => a + (r.cost || 0), 0);
-    if (live) parts.push(`~${money(Math.max(spent, (doneCost / t.done) * t.total))} total`);
+    if (live) parts.push(t("entries.workflow.total", { money: money(Math.max(spent, (doneCost / c.done) * c.total)) }));
   }
   return parts.join(" · ");
 }
 
-export function fillWorkflow(card) {
+export function fillWorkflow(card, t = card._t || en) {
   const w = workflows.get(card.dataset.run);
   const id = `wf-${card.dataset.run}`;
   const host = hostOf(card, id);
   if (!w) {
-    card.replaceChildren(el("div", "fbar", "workflow not found"));
+    card.replaceChildren(el("div", "fbar", t("entries.workflow.notFound")));
     return;
   }
   card.dataset.status = w.status;
   card.dataset.held = docked(id);
-  const title = [entryIcon("pip"), el("span", "fn", w.title), el("span", "fs", workflowStatus(w))];
+  const title = [entryIcon("pip"), el("span", "fn", w.title), el("span", "fs", workflowStatus(w, t))];
   if (w.status === "replaced" && !host) {
     // Armed again before approval: the newer card under a later call is the one.
     const v = workflows.summary(w.replaced_by)?.version || w.version + 1;
     const head = el("div", "fbar");
     head.append(...title);
-    card.replaceChildren(head, el("div", "wflede", `replaced by v${v}`));
+    card.replaceChildren(head, el("div", "wflede", t("entries.workflow.replacedBy", { version: v })));
     return;
   }
   const kids = [];
@@ -1252,13 +1254,13 @@ export function fillWorkflow(card) {
     bar?.replaceChildren(...title, ...[...(bar?.querySelectorAll(".acts") || [])]);
   } else {
     const head = el("div", "fbar");
-    const view = iconButton(el("button", "btn primary view"), "expand", "Open");
+    const view = iconButton(el("button", "btn primary view"), "expand", t("entries.workflow.open"));
     view.type = "button";
     view.addEventListener("click", () => opener({ workflow: card.dataset.run }));
     head.append(...title, view, dockButton(id));
     const at = docker.docked(id);
     if (at) {
-      card.replaceChildren(head, heldLine(id, at === true ? DOCKED : inWindow(at)));
+      card.replaceChildren(head, heldLine(id, at === true ? DOCKED : inWindow(at), t));
       return;
     }
     kids.push(head);
@@ -1267,24 +1269,24 @@ export function fillWorkflow(card) {
   // run is running when it is first drawn, so this is what the person reads
   // instead of an Approve.
   if (w.launch) {
-    const how = w.launch.by === "schedule" ? `Started by schedule ${w.launch.name}, run ${w.launch.run}` : `Started by your ${(w.launch.line || "/workflow").split(" ")[0]} line`;
+    const how = w.launch.by === "schedule" ? t("entries.workflow.startedBySchedule", { name: w.launch.name, run: w.launch.run }) : t("entries.workflow.startedByYou", { line: (w.launch.line || "/workflow").split(" ")[0] });
     kids.push(el("div", "wfwho", w.launch.by !== "schedule" && w.launch.typed ? `${how}: ${w.launch.typed}` : how));
   }
   const args = Object.entries(w.args || {});
   if (args.length) {
     const box = el("div", "wfargs");
-    for (const [k, v] of args) box.append(argRow(w.run, k, v));
+    for (const [k, v] of args) box.append(argRow(w.run, k, v, t));
     kids.push(box);
   }
-  kids.push(headLine(w), el("div", "wflede", w.say));
-  const waits = w.status === "running" ? openLine(w) : null;
+  kids.push(headLine(w, t), el("div", "wflede", w.say));
+  const waits = w.status === "running" ? openLine(w, t) : null;
   if (waits) kids.push(waits);
-  const now = nowSection(w);
+  const now = nowSection(w, t);
   if (now) kids.push(now);
   const fs = folds(w);
   if (w.story.length) {
     const story = el("div", "story");
-    story.append(...storyLines(w, fs));
+    story.append(...storyLines(w, fs, t));
     kids.push(story);
   }
   const tree = el("div", "wftree");
@@ -1298,18 +1300,18 @@ export function fillWorkflow(card) {
     const main = el("div", "wfb");
     main.append(el("div", "say", r.say));
     const tags = el("div", "tags");
-    tags.append(el("span", "kind", kindTag(r)));
+    tags.append(el("span", "kind", kindTag(r, t)));
     if (r.branch) tags.append(el("span", "branch", r.branch));
-    if (r.log_id) tags.append(stepLink(r));
-    for (const a of r.after || []) tags.append(el("span", `after${a.met ? " met" : ""}`, `after ${a.name}`));
+    if (r.log_id) tags.append(stepLink(r, t));
+    for (const a of r.after || []) tags.append(el("span", `after${a.met ? " met" : ""}`, t(a.met ? "entries.workflow.afterMet" : "entries.workflow.after", { name: a.name })));
     if (r.deadline) {
       const d = el("span", "deadline");
       d.append(...iconText("clock", fmtSecs(r.deadline)));
       tags.append(d);
     }
-    if (r.retries) tags.append(el("span", "retries", `retries ${r.retries}`));
-    if (r.attempts) tags.append(el("span", "attempt", `attempt ${r.attempts + 1} of ${(r.retries || 0) + 1}`));
-    if (r.held) tags.append(el("span", "held", "waits for the change"));
+    if (r.retries) tags.append(el("span", "retries", t("entries.workflow.retries", { n: r.retries })));
+    if (r.attempts) tags.append(el("span", "attempt", t("entries.workflow.attempt", { n: r.attempts + 1, total: (r.retries || 0) + 1 })));
+    if (r.held) tags.append(el("span", "held", t("entries.workflow.waitsChange")));
     const key = `${w.run}/${r.id}`;
     const prompt = r.prompt || r.probe?.judge?.prompt;
     if (prompt) {
@@ -1322,7 +1324,7 @@ export function fillWorkflow(card) {
       };
       tags.append(tog);
     }
-    if (r.see) tags.append(seeChip(w, r));
+    if (r.see) tags.append(seeChip(w, r, t));
     main.append(tags);
     const cmd = commandOf(r);
     if (cmd) main.append(el("pre", "cmd", cmd));
@@ -1333,19 +1335,19 @@ export function fillWorkflow(card) {
       if (r.percent != null) out.append(progressBar(r));
       main.append(out);
     }
-    const counted = r.rounds ? el("div", "out", `round ${r.rounds.round} of ${r.rounds.max}`) : r.count ? el("div", "out", countLine(r.count)) : null;
+    const counted = r.rounds ? el("div", "out", t("entries.workflow.round", { round: r.rounds.round, max: r.rounds.max })) : r.count ? el("div", "out", countLine(r.count, t)) : null;
     if (counted) {
-      if (foldable(r)) counted.append(" · ", foldButton(w, r));
+      if (foldable(r)) counted.append(" · ", foldButton(w, r, t));
       main.append(counted);
     }
-    if (r.kind === "gate" && !r.each && r.state !== "pending") main.append(gatePanel(w, r));
+    if (r.kind === "gate" && !r.each && r.state !== "pending") main.append(gatePanel(w, r, t));
     else if (r.summary || r.error) main.append(el("div", `out ${r.error ? "bad" : ""}`, r.error || r.summary));
     const waiting = r.state === "pending" || r.state === "queued" || r.state === "skipped";
     row.append(el("span", `dot ${r.state}`), main, el("span", "dur", waiting ? "" : since(r.started, r.ended)));
     tree.append(row);
   }
   kids.push(tree);
-  if (w.proposal && w.edits?.length) kids.push(editPanel(w, w.edits.at(-1)));
+  if (w.proposal && w.edits?.length) kids.push(editPanel(w, w.edits.at(-1), t));
   const foot = el("div", "apbar");
   const act = (label, op, cls = "") => {
     const b = el("button", `btn ${cls}`.trim(), label);
@@ -1365,12 +1367,12 @@ export function fillWorkflow(card) {
     // Armed again with a new definition: this card approves too, so it shows
     // the diff the again card shows, never an approval past what changed.
     const again = w.story.findLast((s) => s.text.startsWith("Armed again"));
-    if (again?.diff?.length) kids.push(diffPanel(w, again.diff, again.commands));
-    const runs = runsLine(w);
+    if (again?.diff?.length) kids.push(diffPanel(w, again.diff, again.commands, t));
+    const runs = runsLine(w, t);
     if (runs) foot.append(runs);
-    act("Approve and run", "workflow.approve", "primary");
-    act("Reject", "workflow.reject");
-  } else if (w.status === "running") act("Stop", "workflow.stop", "danger");
+    act(t("entries.workflow.approve"), "workflow.approve", "primary");
+    act(t("entries.workflow.reject"), "workflow.reject");
+  } else if (w.status === "running") act(t("entries.workflow.stop"), "workflow.stop", "danger");
   if (foot.children.length) kids.push(foot);
   const refocus = keepDraft(card);
   card.replaceChildren(...kids);
@@ -1397,22 +1399,22 @@ function keepDraft(card) {
 // and workflow.gate.delegate, operations no agent reaches). Auto hands this
 // gate, and every later opening of the same step, to the main agent.
 // Answered, one line says who and what.
-function gatePanel(w, r) {
+function gatePanel(w, r, t = en) {
   const box = el("div", "gate");
   box.append(el("div", "q", r.ask || r.say));
   for (const [k, v] of Object.entries(r.shown || {})) box.append(el("pre", null, `${k}: ${JSON.stringify(v)}`));
   if (r.state !== "running" || r.by !== "person" || w.status !== "running") {
-    if (r.summary) box.append(el("div", "out", r.summary.replace("by the person", "by you")));
+    if (r.summary) box.append(el("div", "out", r.summary.replace("by the person", t("entries.workflow.byYou"))));
     else if (r.error) box.append(el("div", "out bad", r.error));
-    else if (r.state === "stopped") box.append(el("div", "out bad", "Stopped there."));
-    else if (r.by === "main" && r.state === "running") box.append(el("div", "out", r.delegated ? "Handed to the main agent: it answers this one and each later one." : "Waiting for the main agent."));
-    else if (r.delegated) box.append(el("div", "out", "Handed to the main agent."));
+    else if (r.state === "stopped") box.append(el("div", "out bad", t("entries.workflow.stoppedThere")));
+    else if (r.by === "main" && r.state === "running") box.append(el("div", "out", r.delegated ? t("entries.workflow.handedEach") : t("entries.workflow.waitingMain")));
+    else if (r.delegated) box.append(el("div", "out", t("entries.workflow.handed")));
     return box;
   }
   const key = `${w.run}/${r.id}`;
   const answer = el("textarea");
   answer.rows = 2;
-  answer.placeholder = "answer (optional): later steps read it";
+  answer.placeholder = t("entries.workflow.answerPlaceholder");
   answer.value = gateDrafts.get(key) || "";
   answer.oninput = () => gateDrafts.set(key, answer.value);
   answer.dataset.draft = key;
@@ -1427,13 +1429,13 @@ function gatePanel(w, r) {
     }
   };
   const btns = el("div", "btns");
-  const ok = el("button", "btn primary", "Continue");
-  const no = el("button", "btn danger", "Stop");
-  const auto = el("button", "btn", "Auto");
+  const ok = el("button", "btn primary", t("entries.workflow.continue"));
+  const no = el("button", "btn danger", t("entries.workflow.stop"));
+  const auto = el("button", "btn", t("entries.workflow.auto"));
   ok.type = no.type = auto.type = "button";
   ok.onclick = go(true, ok);
   no.onclick = go(false, no);
-  auto.title = "Hand this gate to the main agent, now and each later time this step asks";
+  auto.title = t("entries.workflow.autoTitle");
   auto.onclick = async () => {
     auto.disabled = true;
     try {
@@ -1451,34 +1453,37 @@ function gatePanel(w, r) {
 // A change in the steps' sentences and the commands it adds: an edit's,
 // or a new definition given when arming again.
 const DIFF_OP = { add: "+", remove: "−", change: "~", move: "→" };
-function diffPanel(w, diff, commands) {
+function diffPanel(w, diff, commands, t = en) {
   const box = el("div", "edit");
   for (const d of diff) {
     const line = el("div", `d ${d.op}`);
-    const what = d.key === "$" ? `The workflow's ${d.fields.join(", ").replaceAll("its ", "")}` : d.say;
+    const what = d.key === "$" ? t("entries.workflow.diffWorkflow", { fields: d.fields.join(", ").replaceAll("its ", "") }) : d.say;
     const text = el("span", "w", what);
-    if (d.was) text.title = `was: ${d.was}`;
+    if (d.was) text.title = t("entries.workflow.was", { was: d.was });
     line.append(el("span", "op", DIFF_OP[d.op]), text);
     if (d.fields?.length && d.key !== "$") line.append(el("span", "f", d.fields.join(", ")));
     if (d.cmd) line.append(el("pre", "cmd", `$ ${d.cmd}`));
     box.append(line);
   }
   const c = commands || {};
-  const n = (k, one) => (k ? `${k} ${one}${k > 1 ? "s" : ""}` : null);
-  if (c.sh || c.probes) box.append(el("div", "runs", `Adds ${[n(c.sh, "shell command"), n(c.probes, "probe")].filter(Boolean).join(" and ")}, run in ${w.cwd} without asking. Steps that ran keep their results.`));
+  const n = (k, one) => (k ? t(k === 1 ? `${one}.one` : `${one}.other`, { n: k }) : null);
+  if (c.sh || c.probes) {
+    const list = [n(c.sh, "entries.workflow.shellCommand"), n(c.probes, "entries.workflow.probe")].filter(Boolean).join(t("entries.workflow.and"));
+    box.append(el("div", "runs", t("entries.workflow.adds", { list, cwd: w.cwd })));
+  }
   return box;
 }
 
 // An edit's panel: its diff, and Apply change and Keep the plan while it
 // is the open proposal.
-function editPanel(w, e) {
-  const box = diffPanel(w, e.diff, e.commands || w.proposal?.commands);
+function editPanel(w, e, t = en) {
+  const box = diffPanel(w, e.diff, e.commands || w.proposal?.commands, t);
   if (e.status !== "proposed" || w.status !== "running") {
-    box.append(el("div", "out", e.status === "replaced" ? "replaced by a later change" : e.status === "proposed" ? `not applied: the run is ${WF_WORDS[w.status] || w.status}` : e.status));
+    box.append(el("div", "out", e.status === "replaced" ? t("entries.workflow.replacedLater") : e.status === "proposed" ? t("entries.workflow.notApplied", { state: w.status in WF_WORDS ? t(WF_WORDS[w.status]) : w.status }) : e.status));
     return box;
   }
   const btns = el("div", "btns");
-  for (const [label, op, cls] of [["Apply change", "workflow.edit.apply", "primary"], ["Keep the plan", "workflow.edit.reject", ""]]) {
+  for (const [label, op, cls] of [[t("entries.workflow.applyChange"), "workflow.edit.apply", "primary"], [t("entries.workflow.keepPlan"), "workflow.edit.reject", ""]]) {
     const b = el("button", `btn ${cls}`.trim(), label);
     b.type = "button";
     b.onclick = async () => {
@@ -1502,45 +1507,51 @@ const LEAF_KINDS = new Set(["agent", "sh", "wait", "check", "gate"]);
 // a gate, an edit, or arming again. Filled from the workflows channel, as
 // the run's own card is; the answer box keeps its text across redraws.
 function fillDecision(card) {
+  const t = card._t || en;
+  const said = (key) => (typeof key === "string" && key.startsWith("entries.") ? t(key) : key);
   const w = workflows.get(card.dataset.run);
   if (!w) {
-    card.replaceChildren(el("div", "fbar", "workflow not found"));
+    card.replaceChildren(el("div", "fbar", t("entries.workflow.notFound")));
     return;
   }
   const { what, key } = card.dataset;
   const refocus = keepDraft(card);
   let panel = null;
   let state = "";
+  let waiting = false;
   if (what === "gate") {
     // key is <instance>@<attempt>: a card of an earlier attempt is history.
     const [id, at] = key.split("@");
     const r = w.tree.find((x) => x.id === id);
     if (r && Number(at || 0) !== (r.attempts || 0)) {
       panel = el("div", "gate");
-      panel.append(el("div", "q", r.ask || r.say), el("div", "out", "Asked again below."));
-      state = "asked again";
+      panel.append(el("div", "q", r.ask || r.say), el("div", "out", t("entries.decision.askedAgain")));
+      state = "entries.decision.askedAgain";
     } else {
-      if (r) panel = gatePanel(w, r);
+      if (r) panel = gatePanel(w, r, t);
       const open = r && r.state === "running" && r.by === "person" && w.status === "running";
-      state = open ? "waits for you" : r?.state === "done" ? "continued" : r?.state === "stopped" ? "stopped" : r?.delegated && r.state === "running" ? "handed to the main agent" : WF_WORDS[w.status] || w.status;
+      waiting = !!open;
+      state = open ? "entries.decision.waitsForYou" : r?.state === "done" ? "entries.decision.continued" : r?.state === "stopped" ? "entries.wfState.stopped" : r?.delegated && r.state === "running" ? "entries.decision.handedMain" : w.status in WF_WORDS ? WF_WORDS[w.status] : w.status;
     }
   } else if (what === "edit") {
     const e = (w.edits || []).find((x) => String(x.v) === key);
-    if (e) panel = editPanel(w, e);
-    state = e?.status === "proposed" && w.status === "running" ? "waits for you" : e?.status || "";
+    if (e) panel = editPanel(w, e, t);
+    waiting = e?.status === "proposed" && w.status === "running";
+    state = waiting ? "entries.decision.waitsForYou" : e?.status || "";
   } else if (what === "again") {
     const agains = w.story.map((s, i) => [s, i]).filter(([s]) => s.text.startsWith("Armed again"));
     const current = agains.at(-1)?.[1] === Number(key);
     const leaves = w.tree.filter((r) => LEAF_KINDS.has(r.kind) && !r.each);
     const kept = leaves.filter((r) => r.state === "done" || r.state === "skipped").length;
     panel = el("div", "again");
-    panel.append(el("div", "q", `Run again: ${kept} done step${kept === 1 ? "" : "s"} kept, ${leaves.length - kept} to run`));
+    panel.append(el("div", "q", t(kept === 1 ? "entries.decision.runAgain.one" : "entries.decision.runAgain.other", { kept, toRun: leaves.length - kept })));
     const line = w.story[Number(key)];
-    if (line?.diff?.length) panel.append(diffPanel(w, line.diff, line.commands));
+    if (line?.diff?.length) panel.append(diffPanel(w, line.diff, line.commands, t));
     if (current && w.status === "armed") {
-      state = "waits for you";
+      waiting = true;
+      state = "entries.decision.waitsForYou";
       const btns = el("div", "btns");
-      for (const [label, op, cls] of [["Approve and run", "workflow.approve", "primary"], ["Reject", "workflow.reject", ""]]) {
+      for (const [label, op, cls] of [[t("entries.workflow.approve"), "workflow.approve", "primary"], [t("entries.workflow.reject"), "workflow.reject", ""]]) {
         const b = el("button", `btn ${cls}`.trim(), label);
         b.type = "button";
         b.onclick = async () => {
@@ -1556,13 +1567,13 @@ function fillDecision(card) {
       }
       panel.append(btns);
     } else {
-      state = current ? (w.status === "rejected" ? "rejected" : "approved") : "armed again later";
-      panel.append(el("div", "out", state));
+      state = current ? (w.status === "rejected" ? "entries.wfState.rejected" : "entries.decision.approved") : "entries.decision.armedLater";
+      panel.append(el("div", "out", said(state)));
     }
   }
-  card.dataset.state = state === "waits for you" ? "waiting" : "answered";
+  card.dataset.state = waiting ? "waiting" : "answered";
   const head = el("div", "fbar");
-  head.append(entryIcon("pip"), el("span", "fn", w.title), el("span", "fs", state));
+  head.append(entryIcon("pip"), el("span", "fn", w.title), el("span", "fs", said(state)));
   card.replaceChildren(head, ...(panel ? [panel] : []));
   refocus();
 }
@@ -2008,95 +2019,113 @@ const RENDERERS = {
     return row(e, "file", body);
   },
 
-  approval(e) {
+  approval(e, opts = {}) {
     // An agent's schedule waiting for a person: the schedule in full and the
     // one button that approves it (fillApproval). Never folded.
+    const t = opts.t || en;
     const body = el("div", "body");
     const card = el("div", "fcard apcard");
+    card._t = t;
     card.dataset.object = e.detail?.object || "";
     card.dataset.name = e.detail?.name || "";
     card.dataset.server = e.detail?.server || "";
     card.dataset.glyph = e.glyph || "";
-    fillApproval(card);
+    fillApproval(card, t);
     body.append(card);
     return row(e, "approval", body);
   },
 
-  secret(e) {
+  secret(e, opts = {}) {
     // A secret for the person to reveal once (fillSecret). Never folded.
+    const t = opts.t || en;
     const body = el("div", "body");
     const card = el("div", "fcard scard");
-    fillSecret(card, e);
+    card._t = t;
+    fillSecret(card, e, t);
     body.append(card);
     return row(e, "secret", body);
   },
 
-  config(e) {
+  config(e, opts = {}) {
     // A config change waiting for a person (fillConfig). Never folded.
+    const t = opts.t || en;
     const body = el("div", "body");
     const card = el("div", "fcard scard ccard");
-    fillConfig(card, e);
+    card._t = t;
+    fillConfig(card, e, t);
     body.append(card);
     return row(e, "config", body);
   },
 
-  sign_in(e) {
+  sign_in(e, opts = {}) {
     // A harness sign-in driven by aegis (fillSignIn).
+    const t = opts.t || en;
     const body = el("div", "body");
     const card = el("div", "fcard scard lcard");
-    fillSignIn(card, e);
+    card._t = t;
+    fillSignIn(card, e, t);
     body.append(card);
     return row(e, "sign_in", body);
   },
 
-  claude_login(e) {
+  claude_login(e, opts = {}) {
     // A failed Claude sign-in: steps and a token field (fillLogin).
+    const t = opts.t || en;
     const body = el("div", "body");
     const card = el("div", "fcard scard lcard");
-    fillLogin(card, e);
+    card._t = t;
+    fillLogin(card, e, t);
     body.append(card);
     return row(e, "claude_login", body);
   },
 
-  knowledge(e) {
+  knowledge(e, opts = {}) {
     // A memory or skill an agent saved, waiting for a person (fillKnowledge).
     // Never folded.
+    const t = opts.t || en;
     const body = el("div", "body");
     const card = el("div", "fcard scard ccard kcard");
-    fillKnowledge(card, e);
+    card._t = t;
+    fillKnowledge(card, e, t);
     body.append(card);
     return row(e, "knowledge", body);
   },
 
-  secret_request(e) {
+  secret_request(e, opts = {}) {
     // A secret asked of the person: a password field (fillRequest).
+    const t = opts.t || en;
     const body = el("div", "body");
     const card = el("div", "fcard scard");
-    fillRequest(card, e);
+    card._t = t;
+    fillRequest(card, e, t);
     body.append(card);
     return row(e, "secret_request", body);
   },
 
-  workflow(e) {
+  workflow(e, opts = {}) {
     // A workflow this session armed (fillWorkflow). Never folded.
+    const t = opts.t || en;
     const body = el("div", "body");
     const card = el("div", "fcard wfcard");
+    card._t = t;
     card.dataset.run = e.detail?.run || "";
     // Redrawn by syncDock only when its docking changed, as a file card is:
     // syncDock runs on every update of the shown session's card.
     card._sync = () => {
       if (docked(`wf-${card.dataset.run}`) !== card.dataset.held) fillWorkflow(card);
     };
-    fillWorkflow(card);
+    fillWorkflow(card, t);
     body.append(card);
     return row(e, "workflow", body);
   },
 
-  workflow_decision(e) {
+  workflow_decision(e, opts = {}) {
     // What a run waits on a person for (workflows.py): a gate, an edit, or
     // arming again. Never folded; filled from the workflows channel.
+    const t = opts.t || en;
     const body = el("div", "body");
     const card = el("div", "fcard wfdcard");
+    card._t = t;
     Object.assign(card.dataset, { run: e.detail?.run || "", what: e.detail?.what || "", key: e.detail?.key || "" });
     fillDecision(card);
     body.append(card);

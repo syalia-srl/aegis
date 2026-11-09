@@ -733,17 +733,17 @@ export class Schedules {
     const nameOk = NAME.test(E.name);
     const clockOk = !!E.preview && !E.preview.error;
     const fireOk = E.target === "new" || !!E.session;
-    const hint = document.getElementById("sch-name-hint");
+    const hint = this.root.querySelector("#sch-name-hint");
     if (hint) {
       hint.textContent = E.name && !nameOk ? "two or three lowercase words joined by hyphens" : "";
       hint.classList.toggle("bad", !!E.name && !nameOk);
     }
-    const ch = document.getElementById("sch-clock-hint");
+    const ch = this.root.querySelector("#sch-clock-hint");
     if (ch) {
       ch.textContent = !E.preview ? "…" : E.preview.error || `next ticks: ${E.preview.next.map(short).join(", ")}`;
       ch.classList.toggle("bad", !!E.preview?.error);
     }
-    const save = document.getElementById("sch-save");
+    const save = this.root.querySelector("#sch-save");
     const quotaOk = E.noLimit || Object.values(E.quota).every((ws) => Object.values(ws).every((v) => v === "pace" || PERCENT.test(String(v))));
     if (save) save.disabled = !(nameOk && clockOk && fireOk && quotaOk && E.prompt.trim());
   }

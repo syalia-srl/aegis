@@ -878,7 +878,7 @@ uv run pytest -q -m browser tests/test_mount_browser.py</script>
 <h2>Phase B — the rest of #961</h2>
 <p>Nine slices, in this order, on a second branch, <code>961-mountable-client-b</code>, branched from <code>main</code> after phase A merges, with one PR for the phase. They run one at a time in one worktree, each by one agent that commits and pushes; workers do not open PRs, and after each slice the nightly suite runs on CI on the branch against the phase's baseline while the main agent reviews the diff. They keep the full client working after each one: the parts are adopted by <code>app.js</code> slice by slice, and <code>index.html</code> loses its markup in the same slice that moves it.</p>
 
-<details class="task" id="b1-full-mount-state" data-state="pending">
+<details class="task" id="b1-full-mount-state" data-state="done">
 <summary><span class="num">B1</span><span><span class="ttl">The full layout's mount and its state</span><span class="files">js/mount.js · js/app.js · js/protocol.js · tests/test_browser.py</span></span><span class="state"></span></summary>
 <div class="body">
 <p>Before any part moves, <code>app.js</code> becomes a client of a mount. The mount adopts the existing <code>#a2</code> element (<code>adopt: true</code>: no new root, the element gains <code>.aegis</code> and <code>data-theme</code>), acquires the socket, and owns the state the page shares. This is the slice that pays the indirection once.</p>
@@ -894,7 +894,7 @@ uv run pytest -q -m browser tests/test_mount_browser.py</script>
 <p>No module-level session, link, quota or host state remains in <code>app.js</code>; <code>test_browser.py</code> passes unchanged; <code>make gates</code>; the phase's PR benchmark table shows no regression (this slice adds no work per frame).</p>
 </div></details>
 
-<details class="task" id="b2-tab-strip" data-state="pending">
+<details class="task" id="b2-tab-strip" data-state="done">
 <summary><span class="num">B2</span><span><span class="ttl">The tab strip and header part</span><span class="files">js/parts/header.js (new) · js/tabs.js · js/tabcard.js · js/switcher.js · js/keys.js · js/app.js · index.html · css/client.css · tests/test_tabbar_browser.py · tests/test_tabcard_browser.py</span></span><span class="state"></span></summary>
 <div class="body">
 <p>The whole <code>&lt;header class="tabs"&gt;</code>: the burger and phone menu, Fleet, the tab list with folds and groups, the overflow button and switcher, New session, the connection dot, the header's view buttons and the bell. <code>renderTabs</code>/<code>patchTab</code> already take the list; the part supplies it and the actions.</p>
@@ -911,7 +911,7 @@ uv run pytest -q -m browser tests/test_mount_browser.py</script>
 <p>A header mounts into a given element and finds <code>#tablist</code> under it, never by id over the page; both files pass unchanged; <code>make gates</code>; shots of the strip with groups and on a phone.</p>
 </div></details>
 
-<details class="task" id="b3-sidebar" data-state="pending">
+<details class="task" id="b3-sidebar" data-state="done">
 <summary><span class="num">B3</span><span><span class="ttl">The sidebar part</span><span class="files">js/parts/sidebar.js (new) · js/side.js · js/monitors.js · js/usage.js · js/gauges.js · js/app.js · index.html · css/client.css · tests/test_pages_browser.py · tests/test_usage_browser.py</span></span><span class="state"></span></summary>
 <div class="body">
 <p>The session panel: title and handle rename, the session card, plan, skills, repos, journal, waiting, monitors, usage, quota, host, the session actions, the version/update card and the phone drawer. This is the biggest move (127 lookups, 111 strings); it is mostly a move of <code>renderMeta</code> and the <code>draw*</code> functions, not new code.</p>
@@ -927,7 +927,7 @@ uv run pytest -q -m browser tests/test_mount_browser.py</script>
 <p>Every <code>s-*</code> node is found under the sidebar's root; the two files pass unchanged; <code>make gates</code>; shots of the panel open on desktop and as the phone drawer.</p>
 </div></details>
 
-<details class="task" id="b4-command-menu-and-dictation" data-state="pending">
+<details class="task" id="b4-command-menu-and-dictation" data-state="done">
 <summary><span class="num">B4</span><span><span class="ttl">The command menu and dictation parts</span><span class="files">js/parts/commands.js (new) · js/parts/dictation.js (new) · js/commands.js · js/dictation.js · js/record.js · js/app.js · js/mount.js · index.html · tests/test_menu_browser.py · tests/test_browser.py</span></span><span class="state"></span></summary>
 <div class="body">
 <p>The two optional parts of the composer, on by default in the full layout and off in a host's chat unless asked for. Each builds into its slot and finds its nodes under it.</p>
@@ -943,7 +943,7 @@ uv run pytest -q -m browser tests/test_browser.py -k "dictate or mic or command"
 <p>The menu and the mic work in the composer part, and both can be absent; the files pass unchanged; <code>make gates</code>; a shot of the menu and one of a recording.</p>
 </div></details>
 
-<details class="task" id="b5-spawn-view" data-state="pending">
+<details class="task" id="b5-spawn-view" data-state="done">
 <summary><span class="num">B5</span><span><span class="ttl">The New session view part</span><span class="files">js/parts/spawn.js (new) · js/app.js · index.html · js/commands.js · js/install.js · tests/test_hints_browser.py · tests/test_browser.py</span></span><span class="state"></span></summary>
 <div class="body">
 <p>The whole <code>#new</code> view: the form, the picks, the first-message box (with attachments and its own command menu), the hints, the doctor row, the profile and browser entries, share fills, and <code>spawnFromComposer</code>.</p>
@@ -959,7 +959,7 @@ uv run pytest -q -m browser tests/test_browser.py -k spawn</script>
 <p>The form mounts into a root and all its ids are scoped there; the files pass unchanged; <code>make gates</code>; shots of the form, the hints and a phone.</p>
 </div></details>
 
-<details class="task" id="b6-fleet-view" data-state="pending">
+<details class="task" id="b6-fleet-view" data-state="done">
 <summary><span class="num">B6</span><span><span class="ttl">The Fleet view part</span><span class="files">js/parts/fleet.js (new) · js/fleet.js · js/journal.js · js/app.js · index.html · tests/test_fleet_stacks_browser.py · tests/test_pages_browser.py</span></span><span class="state"></span></summary>
 <div class="body">
 <p>The <code>#fleet</code> view: the install offer, the band and its quota, the order/kind segments, the cards, the linked servers' bands and cards, the archive with its search, server filter, worker chip and closed terminals.</p>
@@ -974,7 +974,7 @@ uv run pytest -q -m browser tests/test_browser.py -k spawn</script>
 <p>The Fleet mounts into a root; the files pass unchanged; <code>make gates</code>; shots of the Fleet with linked servers and the archive at 1280/390.</p>
 </div></details>
 
-<details class="task" id="b7-remaining-views" data-state="pending">
+<details class="task" id="b7-remaining-views" data-state="done">
 <summary><span class="num">B7</span><span><span class="ttl">The remaining views and the terminal and browser views</span><span class="files">js/parts/views.js (new) · js/parts/terminal.js (new) · js/parts/browser.js (new) · js/settings.js · js/journal.js · js/usage.js · js/knowledge.js · js/files.js · js/schedules.js · js/help.js · js/palette.js · js/switcher.js · js/termview.js · js/browserview.js · js/app.js · index.html · tests/test_settings_coverage_browser.py · tests/test_help_browser.py</span></span><span class="state"></span></summary>
 <div class="body">
 <p>Settings, Journal, Usage, Knowledge, Files, Schedules, Help, the palette, the switcher, the keymap, the terminal and the server browser. Each module already builds its own DOM inside a root; this slice gives it a container that is part of the mount and a lifecycle (<code>open</code>, <code>close</code>, <code>show(id)</code>) that does not reach into the page.</p>
@@ -990,7 +990,7 @@ uv run pytest -q -m browser tests/test_browser.py -k spawn</script>
 <p>Every view mounts into its own root; the two files pass unchanged; <code>make gates</code>; a shot of Settings and of Files at both widths.</p>
 </div></details>
 
-<details class="task" id="b8-full-layout-index" data-state="pending">
+<details class="task" id="b8-full-layout-index" data-state="done">
 <summary><span class="num">B8</span><span><span class="ttl"><code>index.html</code> as a page that mounts the full layout</span><span class="files">index.html · js/app.js · js/mount.js · js/layouts/full.js (new) · js/keys.js · tests/test_browser.py · tests/test_pages_browser.py</span></span><span class="state"></span></summary>
 <div class="body">
 <p>The last structural slice: the page keeps its head and an empty body, and <code>mount(document.body, {layout: "full"})</code> builds the whole client in the same DOM order as the old markup. Every id now comes from a part; the root keeps <code>id="a2"</code> for the suite.</p>
@@ -1007,7 +1007,7 @@ uv run pytest -q -m browser tests/test_browser.py -k spawn</script>
 <p><code>index.html</code> has no UI markup and the full suite passes unchanged, which is the proof the DOM is the same; <code>make gates</code>; the phase's PR benchmark table is no worse than the base; shots of Fleet, a session, New session and Settings at 1280/390.</p>
 </div></details>
 
-<details class="task" id="b9-labels-remaining-and-docs" data-state="pending">
+<details class="task" id="b9-labels-remaining-and-docs" data-state="done">
 <summary><span class="num">B9</span><span><span class="ttl">Every remaining string, and what the phase ships</span><span class="files">js/labels/en.js · js/labels/es.js · js/parts/*.js · js/settings.js · js/schedules.js · js/files.js · js/knowledge.js · js/entries.js · DESIGN.md · changelog.d/961-mountable-client.changed.md (new)</span></span><span class="state"></span></summary>
 <div class="body">
 <p>The rest of the table: sidebar, tab strip, spawn, Fleet, the command menu and dictation, the other views, and the workflow/secret/sign-in/config/knowledge cards in <code>entries.js</code>. The parity test already exists; this slice makes it cover every module.</p>
@@ -1029,6 +1029,8 @@ make lint-docs</script>
 <li>Phase A keeps two copies of the transcript's markup: the part's <code>TRANSCRIPT_HTML</code> and the slice in <code>index.html</code> the full layout still uses. The a4 tests prove the mount side and <code>test_stream_browser.py</code> the page side; b1/b8 delete the <code>index.html</code> copy when the full layout mounts the parts, and until then a change to a transcript id must be made in both.</li>
 <li>A mount threads a per-mount <code>opener</code> besides its file <code>base</code>, so two mounts on one page cannot steal each other's viewer. <code>app.js</code> keeps the page's global opener (a4).</li>
 <li>A host that hands its page a token also signs the browser in for HTTP: <code>Server.sign_in(response, token, request)</code> sets the same session cookie the standalone sign-in sets, because a sent file's fetch cannot carry the websocket hello's token (a4). A minted token expires, so a host refreshes the cookie when it mints a new one.</li>
+<li>B9 labels the mount kernel, every part, the full layout's chrome, the Settings chrome and the five transcript cards a chat draws (workflow, secret and secret_request, sign-in/claude_login, config, knowledge, and the approval and workflow_decision cards). The rest of the full client's view strings — <code>app.js</code>'s toasts and menus, <code>keys.js</code>'s keymap, Schedules, Files, Monitors, Knowledge, Usage, Help, Journal, Install, Settings' long paragraphs and the small leftovers — moved to a follow-up issue rather than widening this slice: #1006.</li>
+<li>B8 keeps <code>index.html</code>'s empty <code>#a2</code> as the mount target, and the router and key table stay in <code>app.js</code> (about 3,200 lines, not 400): the full layout's session view still carries its own markup in <code>layouts/full.js</code> instead of composing TranscriptPart and ComposerPart, because the page's canvas, probes, dock and pop-out, read-aloud, peek, selection and btw controllers are wired to it. Follow-up: #1003.</li>
 </ul>
 
 <h2>How this runs</h2>

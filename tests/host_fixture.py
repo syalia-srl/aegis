@@ -143,6 +143,8 @@ const chat = mount(document.getElementById("chat"), {
   session: window.aegisHost.session,
   layout: "chat",
   theme: "host",
+  // ?lang=es mounts the chat in Spanish (slice b9); English otherwise.
+  lang: new URLSearchParams(location.search).get("lang") || "en",
 });
 window.__chat = chat;
 </script>

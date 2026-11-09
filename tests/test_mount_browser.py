@@ -670,6 +670,60 @@ def test_the_interrupt_button_stops_a_working_turn(host, browser):  # noqa: F811
     page.close()
 
 
+# -- the command menu and dictation (b4) --------------------------------------
+# Both are optional parts of the composer: a chat that did not ask for them has
+# empty slots, and one that did builds them under its own element.
+
+
+def test_the_menu_and_mic_are_opt_in_and_built_under_their_slots(host, browser):  # noqa: F811
+    page, errors = open_page(browser, 1280)
+    page.goto(host["url"])
+    mounted(page)
+    # The default chat asked for neither: the slots stay empty.
+    assert page.locator("#chat .aegis [data-slot=menu] #cmd-menu").count() == 0
+    assert page.locator("#chat .aegis [data-slot=mic] button").count() == 0
+    prefix = page.evaluate("window.aegisHost.prefix")
+    page.evaluate(
+        """async (prefix) => {
+          const { mount } = await import(`${prefix}/aegis.js`);
+          window.__chat2 = mount(document.getElementById("chat2"), {
+            token: window.aegisHost.token,
+            session: window.aegisHost.session,
+            layout: "chat",
+            theme: "host",
+            commands: true,
+            dictation: true,
+          });
+        }""",
+        prefix,
+    )
+    # Wait for the mount's session meta: the menu asks for its catalog by key.
+    page.wait_for_function(
+        """() => {
+          const chip = document.querySelector("#chat2 .aegis #chip-model");
+          return chip && chip.textContent.includes("opus");
+        }""",
+        timeout=30_000,
+    )
+    # Typing "/" opens the list under the composer's own slot.
+    box = page.locator("#chat2 .aegis #input")
+    box.click()
+    box.fill("/")
+    page.wait_for_selector(
+        "#chat2 .aegis [data-slot=menu] #cmd-menu .cmd-row", timeout=30_000
+    )
+    # Escape closes it and leaves the line as typed.
+    box.press("Escape")
+    page.wait_for_selector("#chat2 .aegis #cmd-menu", state="hidden", timeout=10_000)
+    # The mic is the slot's button, idle, and knows it can record a take.
+    mic = page.locator("#chat2 .aegis [data-slot=mic] button.mic")
+    assert mic.count() == 1
+    assert mic.get_attribute("data-state") == "idle"
+    assert "hold to record" in (mic.get_attribute("title") or "")
+    assert errors == []
+    page.close()
+
+
 OFFLINE = """async (prefix) => {
   // The same socket the mount holds (the registry is keyed by URL and token),
   // dropped as a stalled one is; every reconnect from here meets an inert
