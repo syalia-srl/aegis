@@ -946,3 +946,258 @@ def test_the_whole_chat_in_a_page_that_already_had_the_ids(
 
     assert errors == []
     page.close()
+
+
+# -- the host's calls and the missing events (m1, #962) -----------------------
+# A chat host can change the session it shows, start one, put the caret in the
+# box, and hear a turn start and a file arrive. These are additive: every case
+# above them is the regression, and Oikos's exact options get their old
+# payloads unchanged.
+
+
+def test_open_and_focus_are_the_hosts_calls(host, browser):  # noqa: F811
+    """open(session) moves the transcript and box and reports the change once;
+    focus() puts the caret in this mount's own box, or in its transcript when it
+    has no box."""
+    page, errors = open_page(browser, 1280)
+    page.goto(host["url"])
+    mounted(page)
+    page.evaluate("""() => {
+      window.__changes = [];
+      window.__chat.on("sessionChanged", (e) => window.__changes.push(e));
+    }""")
+    assert page.evaluate("window.__chat.focus()") is None
+    assert page.evaluate(
+        "document.activeElement === document.querySelector('#chat .aegis #input')"
+    )
+    # A chat that started on one session reports the next one it shows, with
+    # the one it left, and open() stays chainable.
+    assert page.evaluate(
+        "window.__chat.open(window.aegisHost.session2) === window.__chat"
+    )
+    page.wait_for_function("() => window.__changes.length === 1", timeout=10_000)
+    change = page.evaluate("window.__changes[0]")
+    assert change["session"] == host["session2"]
+    assert change["previous"] == host["session"]
+    assert change["meta"]["key"] == host["session2"]
+    # The transcript is the new session's: a message typed now draws there.
+    composer_send(page, "a message for the second session")
+    page.wait_for_function(
+        """() => [...document.querySelectorAll("#chat .aegis #entries .row.user .body")]
+          .some((b) => b.textContent.includes("a message for the second session"))""",
+        timeout=60_000,
+    )
+
+    # A transcript-only mount focuses its .tr, which has tabindex="-1".
+    prefix = page.evaluate("window.aegisHost.prefix")
+    page.evaluate(
+        """async (prefix) => {
+          const { mount } = await import(`${prefix}/aegis.js`);
+          window.__bare = mount(document.getElementById("chat2"), {
+            token: window.aegisHost.token,
+            session: window.aegisHost.session,
+            layout: "chat",
+            theme: "host",
+            composer: false,
+          });
+        }""",
+        prefix,
+    )
+    page.wait_for_function(
+        "() => document.querySelector('#chat2 .aegis .tr')", timeout=30_000
+    )
+    assert page.evaluate("window.__bare.focus()") is None
+    assert page.evaluate(
+        "document.activeElement === document.querySelector('#chat2 .aegis .tr')"
+    )
+    assert errors == []
+    page.close()
+
+
+def test_a_mount_with_an_agent_spawns_on_its_first_send(host, browser):  # noqa: F811
+    """No session and an agent: the first send starts a session, opens it (one
+    sessionChanged with previous null), and the turn reports turnStart then
+    turnEnd with its own cost."""
+    page, errors = open_page(browser, 1280)
+    page.goto(host["url"])
+    mounted(page)
+    prefix = page.evaluate("window.aegisHost.prefix")
+    page.add_style_tag(content="#chat2 { height: 700px; }")
+    page.evaluate(
+        """async (prefix) => {
+          const { mount } = await import(`${prefix}/aegis.js`);
+          window.__fresh = {changed: [], starts: [], ends: [], entries: []};
+          window.__agent = mount(document.getElementById("chat2"), {
+            token: window.aegisHost.token,
+            agent: "opus",
+            layout: "chat",
+            theme: "host",
+          });
+          window.__agent.on("sessionChanged", (e) => window.__fresh.changed.push(e));
+          window.__agent.on("turnStart", (e) => window.__fresh.starts.push(e));
+          window.__agent.on("turnEnd", (e) => window.__fresh.ends.push(e));
+          window.__agent.on("entry", (e) => window.__fresh.entries.push(e));
+        }""",
+        prefix,
+    )
+    page.wait_for_function(
+        "() => document.querySelector('#chat2 .aegis #input')", timeout=30_000
+    )
+    # Nothing was invented before the first message.
+    assert page.evaluate("window.__fresh.changed.length") == 0
+    assert page.evaluate("window.__fresh.starts.length") == 0
+
+    page.evaluate("() => window.__agent.send('hello from a fresh chat')")
+    page.wait_for_function("() => window.__fresh.changed.length === 1", timeout=60_000)
+    change = page.evaluate("window.__fresh.changed[0]")
+    assert change["previous"] is None
+    assert change["session"]
+    assert change["meta"]["key"] == change["session"]
+
+    page.wait_for_function("() => window.__fresh.starts.length === 1", timeout=60_000)
+    start = page.evaluate("window.__fresh.starts[0]")
+    assert start["session"] == change["session"]
+    assert start["meta"]["state"] == "working"
+
+    page.wait_for_function("() => window.__fresh.ends.length === 1", timeout=60_000)
+    end = page.evaluate("window.__fresh.ends[0]")
+    assert end["session"] == change["session"]
+    assert isinstance(end["cost_usd"], (int, float))
+    assert end["cost_usd"] > 0
+    assert end["line"] is None
+
+    page.wait_for_function(
+        """() => [...document.querySelectorAll("#chat2 .aegis #entries .row.user .body")]
+          .some((b) => b.textContent.includes("hello from a fresh chat"))""",
+        timeout=60_000,
+    )
+    assert errors == []
+    page.close()
+
+
+def test_session_changed_is_silent_for_the_constructor_session(host, browser):  # noqa: F811
+    """A Mount built directly can register its listener before start(): the
+    constructor's session is followed silently, and a later open() reports it."""
+    page, errors = open_page(browser, 1280)
+    page.goto(host["url"])
+    mounted(page)
+    prefix = page.evaluate("window.aegisHost.prefix")
+    page.add_style_tag(content="#chat2 { height: 700px; }")
+    page.evaluate(
+        """async (prefix) => {
+          const { Mount } = await import(`${prefix}/static/js/mount.js`);
+          window.__ev = [];
+          const m = new Mount(document.getElementById("chat2"), {
+            token: window.aegisHost.token,
+            session: window.aegisHost.session,
+            layout: "chat",
+            theme: "host",
+          });
+          m.on("sessionChanged", (e) => window.__ev.push(e));
+          window.__direct = m;
+          m.start();
+        }""",
+        prefix,
+    )
+    page.wait_for_function(
+        "() => document.querySelector('#chat2 .aegis #input')", timeout=30_000
+    )
+    page.wait_for_timeout(500)  # a first follow that reported lands here
+    assert page.evaluate("window.__ev.length") == 0
+    page.evaluate("s => window.__direct.open(s)", host["session2"])
+    page.wait_for_function("() => window.__ev.length === 1", timeout=10_000)
+    ev = page.evaluate("window.__ev[0]")
+    assert ev["session"] == host["session2"]
+    assert ev["previous"] == host["session"]
+    assert errors == []
+    page.close()
+
+
+def test_file_sent_event_reports_its_entry_and_files(host, browser):  # noqa: F811
+    """A file card's upsert fires fileSent beside entry, with the card's files
+    and the same entry the generic event carried."""
+    note = Path(host["root"]) / "event-note.txt"
+    note.write_text("a file the host hears about\n")
+    page, errors = open_page(browser, 1280)
+    page.goto(host["url"])
+    mounted(page)
+    page.evaluate("""() => {
+      window.__files = [];
+      window.__entries = [];
+      window.__chat.on("fileSent", (e) => window.__files.push(e));
+      window.__chat.on("entry", (e) => window.__entries.push(e));
+    }""")
+    send(
+        page,
+        host["session"],
+        "/mcp file_send "
+        + json.dumps({"paths": [str(note)], "caption": "a file the host hears"}),
+    )
+    page.wait_for_function("() => window.__files.length > 0", timeout=60_000)
+    file_event = page.evaluate("window.__files[0]")
+    assert file_event["session"] == host["session"]
+    assert file_event["entry"]["kind"] == "file"
+    assert len(file_event["files"]) == 1
+    entries = page.evaluate("window.__entries")
+    same = [
+        e
+        for e in entries
+        if e["entry"] == file_event["entry"] and e["session"] == host["session"]
+    ]
+    assert len(same) == 1  # the entry event carried the same object
+    assert errors == []
+    page.close()
+
+
+def test_oikos_options_still_get_their_events(host, browser):  # noqa: F811
+    """Oikos's exact options (a token function, chat, host theme, Spanish, no
+    controls) still get connection, error and turnEnd with their old payloads."""
+    page, errors = open_page(browser, 390)
+    page.goto(host["url"])
+    mounted(page)
+    prefix = page.evaluate("window.aegisHost.prefix")
+    page.add_style_tag(content="#chat2 { height: 700px; }")
+    page.evaluate(
+        """async (prefix) => {
+          const { mount } = await import(`${prefix}/aegis.js`);
+          window.__oikos = {conn: [], errs: [], turns: []};
+          window.__o = mount(document.getElementById("chat2"), {
+            token: () => window.aegisHost.token,
+            session: window.aegisHost.session,
+            layout: "chat",
+            theme: "host",
+            lang: "es",
+            controls: false,
+          });
+          window.__o.on("connection", (e) => window.__oikos.conn.push(e));
+          window.__o.on("error", (e) => window.__oikos.errs.push(e));
+          window.__o.on("turnEnd", (e) => window.__oikos.turns.push(e));
+        }""",
+        prefix,
+    )
+    page.wait_for_function("() => window.__oikos.conn.length > 0", timeout=30_000)
+    conn = page.evaluate("window.__oikos.conn[0]")
+    assert set(conn) == {"state", "server"}
+    assert conn["state"] in {"connecting", "open"}
+
+    # A refused call reaches the host as its code and message, and the error.
+    page.evaluate("() => { window.__o.spawn('no-such-agent').catch(() => {}); }")
+    page.wait_for_function("() => window.__oikos.errs.length > 0", timeout=30_000)
+    err = page.evaluate("window.__oikos.errs[0]")
+    assert set(err) == {"session", "code", "message", "error"}
+    assert err["session"] is None
+    assert isinstance(err["code"], str) and err["code"]
+    assert isinstance(err["message"], str)
+
+    box = page.locator("#chat2 .aegis #input")
+    box.click()
+    box.fill("hola desde oikos")
+    box.press("Enter")
+    page.wait_for_function("() => window.__oikos.turns.length > 0", timeout=60_000)
+    turn = page.evaluate("window.__oikos.turns[0]")
+    assert set(turn) == {"session", "cost_usd", "line", "meta"}
+    assert turn["session"] == host["session"]
+    assert isinstance(turn["cost_usd"], (int, float))
+    assert turn["cost_usd"] > 0
+    assert errors == []
+    page.close()
