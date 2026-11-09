@@ -108,6 +108,11 @@ export function patchTab(list, m, focusId, actions) {
 // What is being dragged: one member inside its group, or a whole block.
 let dragging = null;
 
+// Whether a drag owns the strip right now. A part that draws tabs asks this
+// before rebuilding them: replacing the node under the pointer cancels the
+// drag, and a sessions patch may arrive at any moment.
+export const draggingTab = () => dragging !== null;
+
 // Where a drop on tab `t` at `x` puts what is dragged: the key it goes before
 // (null: the end), or undefined when it may not go there.
 function dropBefore(t, x) {
@@ -185,9 +190,11 @@ function tab(m, focusId, { onFocus, onMove, onClose, t = labelsFor("en") }, role
     (member ? node : box).classList.add("dragging");
   });
   node.addEventListener("dragend", () => {
-    dragging = null;
     node.closest(".tblock")?.classList.remove("dragging");
     node.classList.remove("dragging");
+    dragging = null;
+    // A strip that was asked to redraw during the drag waited for this.
+    node.dispatchEvent(new CustomEvent("aegis-tabdrag-end", { bubbles: true }));
   });
   node.addEventListener("dragover", (ev) => {
     if (!dragging || !ev.dataTransfer.types.includes("text/aegis-tab")) return;
