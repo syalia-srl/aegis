@@ -14,6 +14,7 @@
 
 import { serverNow } from "../clock.js";
 import { byId } from "../dom.js";
+import { applyLabels } from "../labels.js";
 import {
   ago,
   patchCard,
@@ -31,31 +32,31 @@ import { markNeedsNet } from "../net.js";
 // suite's hooks, and two mounts' copies are harmless because every lookup is
 // scoped to the part's own element.
 const FLEET_HTML = `
-<section class="install-offer" id="install-offer" hidden><div class="t">Install aegis as an app<span>Opens from the home screen, works without a connection, and can notify you.</span></div><button class="btn" type="button" data-act="later">Not now</button><button class="btn primary" type="button" data-act="install">Install</button></section>
+<section class="install-offer" id="install-offer" hidden><div class="t"><span data-t="fleet.installOffer">Install aegis as an app</span><span data-t="fleet.installWhy">Opens from the home screen, works without a connection, and can notify you.</span></div><button class="btn" type="button" data-act="later" data-t="fleet.notNow">Not now</button><button class="btn primary" type="button" data-act="install" data-t="fleet.install">Install</button></section>
 <section class="band" id="band">
   <div class="band-mark" id="band-mark"></div>
-  <div><h5><span class="band-server" id="band-server">server</span><span class="band-link"></span></h5><div class="counts band-counts" id="band-counts"></div></div>
-  <div><h5>Host</h5><div class="band-host" id="band-host"></div></div>
-  <div class="q band-quota-col" id="band-quota-col" hidden><h5><span class="qlink" id="band-quota-link" title="Usage: what work cost">Quota</span><span class="age band-quota-age" id="band-quota-age"></span></h5><div class="band-quota" id="band-quota"></div></div>
+  <div><h5><span class="band-server" id="band-server" data-t="fleet.server">server</span><span class="band-link"></span></h5><div class="counts band-counts" id="band-counts"></div></div>
+  <div><h5 data-t="sidebar.host">Host</h5><div class="band-host" id="band-host"></div></div>
+  <div class="q band-quota-col" id="band-quota-col" hidden><h5><span class="qlink" id="band-quota-link" data-t-title="sidebar.quotaTitle"><span data-t="sidebar.quota">Quota</span></span><span class="age band-quota-age" id="band-quota-age"></span></h5><div class="band-quota" id="band-quota"></div></div>
 </section>
-<div class="order"><h3>Sessions</h3>
+<div class="order"><h3 data-t="fleet.sessions">Sessions</h3>
   <div class="seg" id="fleet-order">
-    <button data-order="attention">Needs you first</button>
-    <button data-order="tabs">Tab order</button>
+    <button data-order="attention" data-t="fleet.needsFirst">Needs you first</button>
+    <button data-order="tabs" data-t="fleet.tabOrder">Tab order</button>
   </div>
-  <div class="seg kinds" role="radiogroup" aria-label="Show">
-    <button type="button" role="radio" data-kind="all">All</button>
-    <button type="button" role="radio" data-kind="agents">Agents</button>
-    <button type="button" role="radio" data-kind="terminals">Terminals</button>
+  <div class="seg kinds" role="radiogroup" data-t-aria="fleet.show">
+    <button type="button" role="radio" data-kind="all" data-t="fleet.all">All</button>
+    <button type="button" role="radio" data-kind="agents" data-t="fleet.agents">Agents</button>
+    <button type="button" role="radio" data-kind="terminals" data-t="fleet.terminals">Terminals</button>
   </div>
 </div>
 <section class="cards" id="cards" tabindex="-1"></section>
 <div id="remotes"></div>
 <section class="archive">
-  <div class="archive-head"><h3>Archive</h3><input id="arch-q" placeholder="Filter by title, handle or directory" spellcheck="false"><div class="arch-servers" id="arch-servers" hidden></div><button class="arch-workers" id="arch-workers" type="button" aria-pressed="false" title="Queue workers: their results went to whoever enqueued them" hidden>Queue workers<b></b></button></div>
+  <div class="archive-head"><h3 data-t="fleet.archive">Archive</h3><input id="arch-q" data-t-placeholder="fleet.filter" spellcheck="false"><div class="arch-servers" id="arch-servers" hidden></div><button class="arch-workers" id="arch-workers" type="button" aria-pressed="false" data-t-title="fleet.workersTitle" hidden><span data-t="fleet.workers">Queue workers</span><b></b></button></div>
   <div id="arch-list"></div>
-  <section id="arch-terms" class="arch-terms" hidden><h4>Closed terminals</h4><div class="arch-term-list"></div></section>
-  <div class="arch-more" id="arch-more" hidden><span id="arch-count"></span><button class="btn" id="arch-next" type="button">Show 50 more</button></div>
+  <section id="arch-terms" class="arch-terms" hidden><h4 data-t="fleet.closedTerminals">Closed terminals</h4><div class="arch-term-list"></div></section>
+  <div class="arch-more" id="arch-more" hidden><span id="arch-count"></span><button class="btn" id="arch-next" type="button" data-t="fleet.showMore">Show 50 more</button></div>
 </section>`;
 
 // Terminals and browsers are tools, not agents: the "terminals" kind shows both.
@@ -67,6 +68,7 @@ const cell = (text) => Object.assign(document.createElement("td"), { textContent
 export class FleetPart {
   constructor(mount, host, actions = {}) {
     this.mount = mount;
+    this.t = mount.t;
     this.act = actions;
     this.root = mount.root || host;
 
@@ -107,6 +109,7 @@ export class FleetPart {
     this.el = document.createElement("main");
     this.el.className = "view v-fleet";
     this.el.innerHTML = FLEET_HTML;
+    applyLabels(this.el, this.t);
     host.insertBefore(this.el, host.querySelector(".v-settings") || null);
 
     const n = (id) => byId(this.el, id);
@@ -142,8 +145,8 @@ export class FleetPart {
         return {
           groups: [
             [
-              { id: "read", label: "Read", icon: "book", run: () => read.click() },
-              again && { id: "reopen", label: "Reopen", icon: "again", run: () => again.click() },
+              { id: "read", label: this.t("fleet.read"), icon: "book", run: () => read.click() },
+              again && { id: "reopen", label: this.t("fleet.reopen"), icon: "again", run: () => again.click() },
             ].filter(Boolean),
           ],
         };
@@ -204,7 +207,7 @@ export class FleetPart {
   // -- what the router draws through the part --------------------------------
   // The whole view, as the router shows it.
   render() {
-    renderCards(this.cards, this.local().filter((m) => this.kindShown(m)), this.act.open, this.order, this.act.close, this.stacks);
+    renderCards(this.cards, this.local().filter((m) => this.kindShown(m)), this.act.open, this.order, this.act.close, this.stacks, this.t);
     this.renderRemotes();
     this.mark(false);
     this.band();
@@ -217,9 +220,9 @@ export class FleetPart {
   patch(ids) {
     const home = [...ids].filter((id) => !this.mount.state.sessions.get(id)?.server);
     const regroup = home.some(
-      (id) => !patchCard(this.cards, this.mount.state.sessions.get(id), this.act.open, this.order, this.act.close),
+      (id) => !patchCard(this.cards, this.mount.state.sessions.get(id), this.act.open, this.order, this.act.close, this.t),
     );
-    if (regroup) renderCards(this.cards, this.local().filter((m) => this.kindShown(m)), this.act.open, this.order, this.act.close, this.stacks);
+    if (regroup) renderCards(this.cards, this.local().filter((m) => this.kindShown(m)), this.act.open, this.order, this.act.close, this.stacks, this.t);
     if (home.length < ids.size) this.renderRemotes();
     this.mark(false);
     this.band();
@@ -241,6 +244,7 @@ export class FleetPart {
       link: saved ? this.act.seen?.() || "" : this.mount.state.links.length ? "this server" : "",
       off: saved,
       measure: () => this.act.measure?.(null),
+      t: this.t,
     });
     for (const l of this.mount.state.links) {
       const box = this.remotes.querySelector(`[data-server="${CSS.escape(l.name)}"]`);
@@ -253,6 +257,7 @@ export class FleetPart {
         link: this.linkLine(l),
         off: l.state !== "linked",
         measure: () => this.act.measure?.(l.name),
+        t: this.t,
       });
     }
   }
@@ -262,22 +267,22 @@ export class FleetPart {
   // rebuilt row loses the hover tooltip that spells its reading out.
   quota() {
     if (this.root.dataset.view !== "fleet") return;
-    renderBandQuota(this.bandBox, { quota: this.mount.state.quota, now: serverNow() });
+    renderBandQuota(this.bandBox, { quota: this.mount.state.quota, now: serverNow(), t: this.t });
     for (const box of this.remotes.children) {
       const r = this.mount.state.remote.get(box.dataset.server);
-      if (r) renderBandQuota(box.querySelector(".band"), { ...this.farQuota(r.quota), now: serverNow() });
+      if (r) renderBandQuota(box.querySelector(".band"), { ...this.farQuota(r.quota), now: serverNow(), t: this.t });
     }
   }
 
   // The line beside a linked server's name in its band.
   linkLine(l) {
     // A way back (links.py, Backlink) has no URL: that server links this one.
-    const host = l.back ? "links here" : l.url.replace(/^https?:\/\//, "");
-    if (l.state === "linked") return `${host} · linked${l.rtt_ms != null ? ` · ${l.rtt_ms} ms` : ""}`;
+    const host = l.back ? this.t("fleet.linksHere") : l.url.replace(/^https?:\/\//, "");
+    if (l.state === "linked") return this.t("fleet.linked", { host, rtt: l.rtt_ms != null ? ` · ${l.rtt_ms} ms` : "" });
     const since = new Date(l.since * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    if (l.state === "offline") return `${host} · offline since ${since} · retrying`;
-    if (l.state === "connecting") return `${host} · connecting`;
-    return `${host} · ${l.state}: ${l.error}`;
+    if (l.state === "offline") return this.t("fleet.linkOffline", { host, since });
+    if (l.state === "connecting") return this.t("fleet.linkConnecting", { host });
+    return this.t("fleet.linkFailed", { host, state: l.state, error: l.error });
   }
 
   // A linked server's quota, less the providers this server already shows for
@@ -311,11 +316,11 @@ export class FleetPart {
         box.append(band, cards);
         this.remotes.append(box);
         const r = this.mount.state.remote.get(l.name);
-        if (r) renderBandQuota(band, { ...this.farQuota(r.quota), now: serverNow() });
+        if (r) renderBandQuota(band, { ...this.farQuota(r.quota), now: serverNow(), t: this.t });
       }
       this.remotes.append(box); // keep the links' order
       const metas = this.on(l.name).filter((m) => this.kindShown(m));
-      if (metas.length) renderCards(box.querySelector(".cards"), metas, this.act.open, this.order, this.act.close, this.stacks);
+      if (metas.length) renderCards(box.querySelector(".cards"), metas, this.act.open, this.order, this.act.close, this.stacks, this.t);
       else box.querySelector(".cards").replaceChildren();
     }
     this.band();
@@ -328,7 +333,7 @@ export class FleetPart {
     for (const c of this.el.querySelectorAll(".card")) {
       const m = this.mount.state.sessions.get(c.dataset.id);
       if (m && !isTool(m)) {
-        c.querySelector(".when").textContent = ago(m.last_activity);
+        c.querySelector(".when").textContent = ago(m.last_activity, this.t);
         tickPlan(c, m);
       }
     }
@@ -368,9 +373,10 @@ export class FleetPart {
     renderArchive(this.archList, this.archived.filter((m) => this.kindShown(m)), {
       onReopen: (id) => this.act.reopen?.(id),
       onRead: (id) => this.act.read?.(id),
+      t: this.t,
     });
     this.archMore.hidden = !this.archived.length;
-    this.archCount.textContent = `Showing ${this.archived.length} of ${Math.max(this.total, this.archived.length)}`;
+    this.archCount.textContent = this.t("fleet.showing", { shown: this.archived.length, total: Math.max(this.total, this.archived.length) });
     this.archNext.hidden = !this.cursor;
     this.drawArchiveServers();
     this.drawArchiveWorkers();
@@ -440,15 +446,15 @@ export class FleetPart {
       for (const [cls, text] of [
         [null, row.name],
         ["m", row.title],
-        ["m", ago(row.closed_at)],
-        ["m", row.code == null ? "-" : `exit ${row.code}`],
+        ["m", ago(row.closed_at, this.t)],
+        ["m", row.code == null ? "-" : this.t("fleet.exit", { code: row.code })],
       ]) {
         const td = cell(text ?? "");
         if (cls) td.className = cls;
         tr.append(td);
       }
-      const read = Object.assign(document.createElement("button"), { type: "button", className: "btn", textContent: "Read" });
-      read.title = "Replay what it printed";
+      const read = Object.assign(document.createElement("button"), { type: "button", className: "btn", textContent: this.t("fleet.read") });
+      read.title = this.t("fleet.replay");
       read.addEventListener("click", () => this.act.go?.(`#t=${row.id}`));
       tr.insertCell().append(read);
     }
@@ -493,9 +499,9 @@ export class FleetPart {
       });
       return b;
     };
-    const off = (name) => Object.assign(document.createElement("span"), { className: "off", textContent: `${name} offline` });
+    const off = (name) => Object.assign(document.createElement("span"), { className: "off", textContent: this.t("fleet.offline", { name }) });
     box.replaceChildren(
-      pick("All", null, all),
+      pick(this.t("fleet.all"), null, all),
       ...Object.entries(this.counts).map(([name, n]) => pick(name, name === this.mount.conn.server ? this.mount.conn.server : name, n)),
       ...this.away.map(off),
     );

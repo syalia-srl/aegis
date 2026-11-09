@@ -8,12 +8,13 @@
 // part's element.
 
 import { byId } from "../dom.js";
+import { applyLabels } from "../labels.js";
 
 const TERMINAL_HTML = `
 <section class="term-pane">
   <header class="term-hd">
     <span class="term-name"></span><span class="term-state"></span>
-    <span class="term-mode">line mode</span>
+    <span class="term-mode" data-t="terminal.lineMode">line mode</span>
   </header>
   <div id="term-host" class="term-host"></div>
   <div id="term-keys" class="term-keys" hidden>
@@ -23,29 +24,31 @@ const TERMINAL_HTML = `
     <button type="button" data-key="ctrl-c">Ctrl-C</button>
     <button type="button" data-key="up">↑</button>
     <button type="button" data-key="down">↓</button>
-    <button type="button" data-key="done">done</button>
+    <button type="button" data-key="done" data-t="terminal.done">done</button>
   </div>
   <form id="term-box" class="box term-box">
-    <textarea id="term-input" rows="1" placeholder="a line to the terminal" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea>
+    <textarea id="term-input" rows="1" data-t-placeholder="terminal.placeholder" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea>
   </form>
 </section>
 <aside id="term-side" class="term-side">
   <dl class="term-proc"></dl>
   <div class="term-act">
-    <button class="btn" type="button" id="term-restart" hidden>Restart</button>
-    <button class="btn" type="button" id="term-close">Close</button>
+    <button class="btn" type="button" id="term-restart" hidden data-t="sidebar.restart">Restart</button>
+    <button class="btn" type="button" id="term-close" data-t="terminal.close">Close</button>
   </div>
 </aside>`;
 
 export class TerminalPart {
   constructor(mount, container) {
     this.mount = mount;
+    this.t = mount.t;
     this.root = mount.root || container;
     this.el = document.createElement("main");
     this.el.className = "view v-term";
     this.el.id = "v-term";
-    this.el.setAttribute("aria-label", "terminal");
+    this.el.setAttribute("aria-label", mount.t("terminal.aria"));
     this.el.innerHTML = TERMINAL_HTML;
+    applyLabels(this.el, mount.t);
     container.append(this.el);
 
     const n = (id) => byId(this.el, id);

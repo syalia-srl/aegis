@@ -106,7 +106,7 @@ const header = new HeaderPart(app, root, {
   side: () => toggleSide(),
   push: (bell, anchor) => openPushPanel(phoneHeader.matches ? anchor : bell),
   menu: (key) => sessionMenu(key),
-  card: (m) => fleetCard(m, openCard, (k) => app.state.sessions.get(k) && closeSession(app.state.sessions.get(k))),
+  card: (m) => fleetCard(m, openCard, (k) => app.state.sessions.get(k) && closeSession(app.state.sessions.get(k)), app.t),
 });
 // The header is the grid's first row, under the connection banner and above
 // the views (the layout owns the order in b8).
@@ -2978,7 +2978,7 @@ function attachCardMenu(box, opts = {}) {
 // is the sidebar part's; the card is the page's until b8.
 const waitCard = attachTabCard(sidebar.waiting, {
   meta: (key) => app.state.sessions.get(key),
-  card: (m) => fleetCard(m, openCard, (k) => app.state.sessions.get(k) && closeSession(app.state.sessions.get(k))),
+  card: (m) => fleetCard(m, openCard, (k) => app.state.sessions.get(k) && closeSession(app.state.sessions.get(k)), app.t),
   items: sessionMenu,
   item: ".wait",
   place: (box, r) => {
