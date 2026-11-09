@@ -944,7 +944,7 @@ theme and leaves the variables to the host's own CSS. The handle is the whole
 contract a host sees: `on` for `connection`, `entry`, `turnEnd` and `error`,
 `send`, `destroy`.
 
-**Every string the client shows is a key in a table.** `js/labels/en.js` and
+**A part's strings are keys in a table.** `js/labels/en.js` and
 `js/labels/es.js` hold the same keys, and a mount picks one with `lang` while
 `labels` replaces single entries. A key one table lacks falls back to English
 and is logged by name once, so a translation lag makes noise instead of an
