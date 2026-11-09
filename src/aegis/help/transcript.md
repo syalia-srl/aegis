@@ -25,6 +25,18 @@ Both counts start at zero with each turn and flash when a call adds to them.
 Esc interrupts the turn. With reduced motion set in your system, the row keeps
 one verb and stops moving.
 
+While a tool call runs, the working row shows that call instead of its
+asterisk: the call's icon pulses, the verb says what kind of work it is, and
+the call's name follows it, so you see it even when its run of rows is folded.
+The verbs come from the call itself, with no model involved: reading for
+reads, searches and shell commands that change nothing; editing; testing for
+test runners, linters and CI checks; debugging for a test or a read while the
+last shell command failed; server work such as ssh, docker or systemctl;
+committing; the web; other agents; showing you a page or a file; and
+bookkeeping such as the plan. A call that ends at once keeps the row for
+about three seconds after it started, so you can see it go by; then the
+asterisk and the general verbs come back.
+
 ## Tool rows
 
 A tool row starts folded. Click its line, or select it and press Enter, to

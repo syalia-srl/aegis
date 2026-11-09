@@ -520,6 +520,12 @@
 .a2 .row.tool.running .tr2{color:var(--accent)}
 .a2 .row.tool.running .tr2:after{content:"running";animation:a2pulse 1.4s ease-in-out infinite}
 @keyframes a2pulse{50%{opacity:.35}}
+/* The working row while a call runs (#1012): the call's glyph pulses instead
+   of the star turning, and its name follows the verb (toolverb.js). */
+.a2 #working.calling #working-g svg{animation:a2gpulse 1.4s ease-in-out infinite}
+@keyframes a2gpulse{50%{opacity:.35;transform:scale(.85)}}
+.a2 #working .wcall{display:none;color:var(--muted);margin-left:1ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60ch;vertical-align:bottom}
+.a2 #working.calling .wcall{display:inline-block}
 .a2 .more{margin:6px 0 2px;display:grid;gap:6px}
 .a2 .more pre,.a2 pre.out{margin:0;padding:7px 10px;font-size:11.5px;white-space:pre-wrap;overflow-wrap:anywhere;font-family:var(--font-mono);background:var(--surface);border-left:2px solid var(--rule);color:var(--muted);max-height:420px;overflow:auto}
 .a2 .row.tool.err pre.out,.a2 .row.error pre.out{background:var(--err-bg);color:var(--err);border-left-color:var(--err)}
@@ -573,7 +579,7 @@
 @media (pointer:coarse){.a2 #working .wesc{display:none}}
 .a2 .wtok{transition:color .4s,text-shadow .4s}
 .a2 .wtok.flash{color:var(--ink);text-shadow:0 0 6px var(--accent)}
-@media (prefers-reduced-motion:reduce){.a2 #working-g svg,.a2 #working-verb span,.a2 .wcur{animation:none}.a2 .wtok{transition:none}}
+@media (prefers-reduced-motion:reduce){.a2 #working.calling #working-g svg,.a2 #working-g svg,.a2 #working-verb span,.a2 .wcur{animation:none}.a2 .wtok{transition:none}}
 .a2 .meta{color:var(--faint);margin-left:10px}
 .a2 .steps{color:var(--faint);margin-left:8px}
 /* the divider and the navigator */

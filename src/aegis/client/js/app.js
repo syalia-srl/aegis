@@ -36,6 +36,7 @@ import { attachTabCard } from "./tabcard.js";
 import { blocksOf } from "./groups.js";
 import { clampToRow, insertIntoComposer, quoted, rangeText } from "./quote.js";
 import { closeMonitorCard, tickMonitors } from "./monitors.js";
+import { CallTitle } from "./toolverb.js";
 import { closeFeedCard, tickFeeds } from "./feeds.js";
 import { Settings } from "./settings.js";
 import { Journal } from "./journal.js";
@@ -1774,6 +1775,7 @@ function drawVerb(text) {
 function tokenCount(n) {
   return n < 1000 ? String(Math.round(n)) : `${(n / 1000).toFixed(1)}k`;
 }
+const callTitle = new CallTitle();
 function tickWorking() {
   if (workingSince == null) return;
   $("working-s").textContent = Math.round((Date.now() - workingSince) / 1000);
@@ -1786,6 +1788,7 @@ function tickWorking() {
     workingShown[k] = Math.abs(gap) < 1 ? workingTokens[k] : workingShown[k] + gap * 0.15;
     $(id).textContent = tokenCount(workingShown[k]);
   });
+  if (callTitle.draw($("entries"), $("working"), app.t, stillMotion.matches)) return;
   const word = `${VERBS[typer.verb]}…`;
   if (stillMotion.matches) {
     if ($("working-verb").textContent !== "Working…") drawVerb("Working…");
