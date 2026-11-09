@@ -274,6 +274,12 @@ FIRST = [
     ("first time using aegis", "getting-started"),
     ("learn aegis from my first session to a queue of workers", "getting-started"),
     ("update a help page after changing a tool", "writing-help-pages"),
+    ("embed aegis in my web page", "embedding"),
+    (
+        "mount aegis under my own URL prefix",
+        "embedding#serving-under-a-prefix",
+    ),
+    ("draw my own card for a tool call", "embedding#renderers"),
     ("repeat a prompt every few minutes", "workflows#repeat-a-prompt-with-loop"),
     ("run a saved workflow", "workflows#run-a-saved-workflow"),
     ("make a schedule run a workflow", "schedules#fire-a-workflow"),
