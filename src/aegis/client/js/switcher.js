@@ -5,7 +5,7 @@
 // (openCard), so a quiet session gets its tab back. It reads only the metas the
 // client holds: opening it never waits on the network.
 
-import { stateLabel } from "./labels.js";
+import { labelsFor, stateLabel } from "./labels.js";
 import { fuzzy } from "./commands.js";
 import { ago, markNode } from "./fleet.js";
 import { icon } from "./glyphs.js";
@@ -46,7 +46,7 @@ function match(q, m) {
 
 // [{name, server, off, quiet, total, needs, rows: [{m, score, positions}]}].
 // `here` names this server; `links` is the links channel's list, in its order.
-export function switcherRows(metas, here, links, query = "") {
+export function switcherRows(metas, here, links, query = "", t = labelsFor("en")) {
   const q = query.trim();
   const take = (ms) => {
     const rows = ms.flatMap((m) => {
@@ -70,7 +70,7 @@ export function switcherRows(metas, here, links, query = "") {
   }
   const quiet = metas.filter((m) => m.quiet);
   const rows = take(quiet.slice().sort((a, b) => at(a) - at(b) || (b.last_activity || 0) - (a.last_activity || 0)));
-  if (rows.length) groups.push({ name: this.t("header.quiet"), server: null, off: false, quiet: true, total: quiet.length, needs: 0, rows });
+  if (rows.length) groups.push({ name: t("header.quiet"), server: null, off: false, quiet: true, total: quiet.length, needs: 0, rows });
   return groups;
 }
 
@@ -87,7 +87,7 @@ const el = (tag, cls, text) => {
 export class Switcher {
   constructor(box, src) {
     Object.assign(this, { box, src });
-    this.t = src.t;
+    this.t = src.t || labelsFor("en");
     this.flat = []; // [{key, node}] in drawn order, headers left out
     this.at = 0;
     this.back = null;
@@ -160,7 +160,7 @@ export class Switcher {
     if (!this.isOpen) return;
     const keep = this.flat[this.at]?.key;
     const query = this.q.value.trim();
-    const groups = switcherRows(this.src.metas(), this.src.here(), this.src.links(), query);
+    const groups = switcherRows(this.src.metas(), this.src.here(), this.src.links(), query, this.t);
     const out = [];
     this.flat = [];
     let best = 0;

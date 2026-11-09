@@ -14,7 +14,7 @@
 // header button is on) follow the route the page reports.
 
 import { byId } from "../dom.js";
-import { applyLabels } from "../labels.js";
+import { applyLabels, labelsFor } from "../labels.js";
 import { icon } from "../glyphs.js";
 import { attach as attachMenu } from "../menu.js";
 import { installBell } from "../ping.js";
@@ -58,7 +58,7 @@ const HEADER_HTML = `
 export class HeaderPart {
   constructor(mount, host, actions = {}) {
     this.mount = mount;
-    this.t = mount.t;
+    this.t = mount.t || labelsFor("en");
     this.act = actions;
     this.root = mount.root || host;
     this.quietSeen = new Map(); // key -> whether it was quiet when last drawn

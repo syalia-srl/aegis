@@ -8,7 +8,7 @@
 // part's element.
 
 import { byId } from "../dom.js";
-import { applyLabels } from "../labels.js";
+import { applyLabels, labelsFor } from "../labels.js";
 
 const TERMINAL_HTML = `
 <section class="term-pane">
@@ -41,14 +41,14 @@ const TERMINAL_HTML = `
 export class TerminalPart {
   constructor(mount, container) {
     this.mount = mount;
-    this.t = mount.t;
+    this.t = mount.t || labelsFor("en");
     this.root = mount.root || container;
     this.el = document.createElement("main");
     this.el.className = "view v-term";
     this.el.id = "v-term";
-    this.el.setAttribute("aria-label", mount.t("terminal.aria"));
+    this.el.setAttribute("aria-label", this.t("terminal.aria"));
     this.el.innerHTML = TERMINAL_HTML;
-    applyLabels(this.el, mount.t);
+    applyLabels(this.el, this.t);
     container.append(this.el);
 
     const n = (id) => byId(this.el, id);

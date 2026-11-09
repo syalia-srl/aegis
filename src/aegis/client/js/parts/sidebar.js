@@ -38,7 +38,7 @@ import { entryIcon, factIcon, glyph, icon, iconText } from "../glyphs.js";
 import { entry as journalEntry, opens } from "../journal.js";
 import { renderMonitors } from "../monitors.js";
 import { dur, planTimes } from "../plantime.js";
-import { applyLabels, stateLabel } from "../labels.js";
+import { applyLabels, labelsFor, stateLabel } from "../labels.js";
 import { Side } from "../side.js";
 
 // The markup this part owns. The ids stay as they are: they are the browser
@@ -164,7 +164,7 @@ function span(cls, text, name) {
 export class SidebarPart {
   constructor(mount, host, actions = {}) {
     this.mount = mount;
-    this.t = mount.t;
+    this.t = mount.t || labelsFor("en");
     this.act = actions;
     this.root = mount.root || host;
     this.editing = new Set();

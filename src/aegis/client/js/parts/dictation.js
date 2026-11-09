@@ -21,6 +21,7 @@ import { Dictation } from "../dictation.js";
 import { HoldToRecord } from "../record.js";
 import { icon } from "../glyphs.js";
 import { q } from "../dom.js";
+import { labelsFor } from "../labels.js";
 import { toast } from "../toast.js";
 
 // The words the button carries come from the mount's table.
@@ -43,7 +44,7 @@ export class DictationPart {
   // onState/onLevel: the page's own listeners (an artifact frame's dictation).
   constructor(mount, host, opts = {}) {
     this.mount = mount;
-    this.t = mount.t;
+    this.t = mount.t || labelsFor("en");
     this.opts = opts;
     this.boxes = new Map(); // textarea -> {input, draft, heard, ctx, onTake}
     this.buttons = new Map(); // button -> the same box

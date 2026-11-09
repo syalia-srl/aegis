@@ -18,7 +18,7 @@
 import { Attachments } from "../attach.js";
 import { CommandMenu } from "../commands.js";
 import { byId, q } from "../dom.js";
-import { applyLabels } from "../labels.js";
+import { applyLabels, labelsFor } from "../labels.js";
 import { gorgoneion, icon } from "../glyphs.js";
 import { modelMeta } from "../models.js";
 import { offline } from "../net.js";
@@ -80,7 +80,7 @@ export class SpawnPart {
   // its take before a send.
   constructor(mount, host, actions = {}) {
     this.mount = mount;
-    this.t = mount.t;
+    this.t = mount.t || labelsFor("en");
     this.act = actions;
     this.roster = { agents: [], harnesses: [], models: {}, default: null, cwd: "" };
     // What each harness can run, by server: the catalog config.detect reads

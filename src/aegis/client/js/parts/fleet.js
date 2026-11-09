@@ -14,7 +14,7 @@
 
 import { serverNow } from "../clock.js";
 import { byId } from "../dom.js";
-import { applyLabels } from "../labels.js";
+import { applyLabels, labelsFor } from "../labels.js";
 import {
   ago,
   patchCard,
@@ -68,7 +68,7 @@ const cell = (text) => Object.assign(document.createElement("td"), { textContent
 export class FleetPart {
   constructor(mount, host, actions = {}) {
     this.mount = mount;
-    this.t = mount.t;
+    this.t = mount.t || labelsFor("en");
     this.act = actions;
     this.root = mount.root || host;
 

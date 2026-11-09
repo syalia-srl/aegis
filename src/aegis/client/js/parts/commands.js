@@ -14,7 +14,7 @@
 
 import { CommandMenu } from "../commands.js";
 import { byId } from "../dom.js";
-import { applyLabels } from "../labels.js";
+import { applyLabels, labelsFor } from "../labels.js";
 import { forKey } from "../mount.js";
 import { toast } from "../toast.js";
 
@@ -45,7 +45,7 @@ export class CommandsPart {
   // overlay typed; getLine/setLine: the composer's box; meta(): its session.
   constructor(mount, host, opts = {}) {
     this.mount = mount;
-    this.t = mount.t;
+    this.t = mount.t || labelsFor("en");
     this.opts = opts;
     this.catalogs = new Map(); // key -> the catalog promise, so typing waits on one call
     const slot = host.querySelector('[data-slot="menu"]');

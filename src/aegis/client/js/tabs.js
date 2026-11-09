@@ -4,7 +4,7 @@
 // session and those it started, groups.js) is drawn as one block headed by its
 // oldest member, which can fold it to one tab (#586).
 
-import { stateLabel } from "./labels.js";
+import { labelsFor, stateLabel } from "./labels.js";
 import { iconText, PANE_ICON } from "./glyphs.js";
 import { closeOnMiddle, markNode } from "./fleet.js";
 import { blocksOf, hueOf } from "./groups.js";
@@ -56,6 +56,7 @@ const URGENT = ["needs_you", "error", "review", "working", "waiting"];
 // keys, `actions.onFold(key)` toggles one and `actions.saveFolds()` keeps the
 // set. A folded group whose hidden member is the one in view unfolds.
 export function renderTabs(list, metas, focusId, actions) {
+  const t = actions.t || labelsFor("en");
   list.replaceChildren(
     ...blocksOf(metas, actions.here || "").map((b) => {
       const box = document.createElement("div");
@@ -111,7 +112,7 @@ let dragging = null;
 // (null: the end), or undefined when it may not go there.
 function dropBefore(t, x) {
   const after = x > t.getBoundingClientRect().left + t.getBoundingClientRect().width / 2;
-  const box = node.closest(".tblock");
+  const box = t.closest(".tblock");
   if (dragging.member) {
     if (box.dataset.group !== dragging.group || !t.classList.contains("member")) return undefined;
     if (dragging.keys.includes(t.dataset.id)) return undefined;
@@ -131,7 +132,7 @@ const firstKey = (box) => (box ? JSON.parse(box.dataset.keys)[0] : null);
 export function stepMove(list, key, d) {
   const t = list.querySelector(`.tab[data-id="${CSS.escape(key)}"]`);
   if (!t) return null;
-  const box = node.closest(".tblock");
+  const box = t.closest(".tblock");
   if (t.classList.contains("member")) {
     const side = d < 0 ? t.previousElementSibling : t.nextElementSibling;
     if (!side?.classList.contains("member")) return null;
@@ -143,7 +144,7 @@ export function stepMove(list, key, d) {
   return box.nextElementSibling ? [keys, firstKey(box.nextElementSibling.nextElementSibling)] : null;
 }
 
-function tab(m, focusId, { onFocus, onMove, onClose, t }, role) {
+function tab(m, focusId, { onFocus, onMove, onClose, t = labelsFor("en") }, role) {
   const node = document.createElement("div");
   node.className = `tab ${role}${m.key === focusId ? " on" : ""}${m.state === "asleep" ? " asleep" : ""}${m.off ? " off" : ""}`;
   node.classList.toggle("blink", !!m.blink);

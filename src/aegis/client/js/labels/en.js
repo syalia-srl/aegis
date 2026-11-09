@@ -236,7 +236,7 @@ export default {
 
   "gauges.cpu": "CPU",
   "gauges.ram": "RAM",
-  "gauges.disk": "disk",
+  "gauges.disk": "Disk",
   "gauges.net": "net",
   "gauges.speed": "speed",
   "gauges.down": "down",
