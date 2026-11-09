@@ -7,6 +7,8 @@
   CSS is scoped to `.aegis`, so it does not touch the host's styles; the
   mount's own nodes keep ids (`#composer`, `#input`), so a host styles its own
   boxes by class. One socket serves every mount on the page.
+  The chat's command menu and dictation are opt-in: `commands: true` builds
+  the `/` menu under the box and `dictation: true` its mic and hold-to-record.
   `/aegis/manifest.json` lists the client's files with a hash each for the
   host's own service worker.
 help: library#the-chat-in-your-page

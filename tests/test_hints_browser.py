@@ -95,3 +95,82 @@ def test_the_doctor_row_shows_a_broken_setup_and_doctor_fixes_it(
 
     eventually(gone, timeout=30)
     assert page.errors == []
+
+
+def test_the_new_session_form_mounts_into_a_given_element_and_finds_its_own_nodes(
+    served,
+    page,  # noqa: F811
+):
+    """b5: the spawn part builds its markup and looks every node up under it.
+
+    The page already holds a New session form with the same ids, so this proves
+    the part never asks the document: its own #sp-text is a different node, and
+    every reference it carries resolves inside the element it was given.
+    """
+    page.goto(served.url)
+    page.wait_for_selector("#a2[data-view=fleet]")
+    got = page.evaluate(
+        """async () => {
+          const { SpawnPart } = await import('/static/js/parts/spawn.js');
+          const { byId } = await import('/static/js/dom.js');
+          const host = document.createElement('div');
+          document.body.append(host);
+          const root = document.createElement('div');
+          root.className = 'aegis';
+          root.dataset.view = 'spawn';
+          host.append(root);
+          const mount = {
+            root,
+            conn: { server: 'home', open: false },
+            state: { links: [] },
+            call: async () => ({}),
+            callFor: async () => ({}),
+            keyOf: (server, id) => id,
+            linkOf: () => null,
+          };
+          const part = new SpawnPart(mount, root, {
+            go: () => {},
+            untestedRetry: async (call) => call(),
+            cancelled: Symbol('cancelled'),
+            sendFirst: async () => {},
+            sendLine: async () => {},
+            stackActs: () => {},
+            pasted: () => null,
+            agents: async () => [],
+          });
+          const text = byId(part.el, 'sp-text');
+          const form = byId(part.el, 'spawn');
+          const refs = [...part.el.querySelectorAll('[aria-controls],[aria-labelledby],[for]')]
+            .map((n) => n.getAttribute('aria-controls')
+              || n.getAttribute('aria-labelledby') || n.getAttribute('for'))
+            .filter(Boolean)
+            .filter((id) => byId(part.el, id) === null);
+          const out = {
+            view: part.el.tagName === 'MAIN'
+              && part.el.classList.contains('v-spawn')
+              && part.el.parentElement === root,
+            form: form === part.el.querySelector('#spawn'),
+            text: text === part.el.querySelector('#sp-text'),
+            own: document.getElementById('sp-text') !== text,
+            hidden: part.el.querySelector('#sp-server').hidden,
+            refs,
+          };
+          part.focus();
+          out.focused = document.activeElement === text;
+          part.destroy();
+          out.gone = !part.el.isConnected;
+          host.remove();
+          return out;
+        }"""
+    )
+    assert got == {
+        "view": True,
+        "form": True,
+        "text": True,
+        "own": True,
+        "hidden": True,
+        "refs": [],
+        "focused": True,
+        "gone": True,
+    }
+    assert page.errors == []

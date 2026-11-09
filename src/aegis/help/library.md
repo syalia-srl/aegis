@@ -207,6 +207,13 @@ was: nothing a mount draws reaches an id or a selector outside the element you
 gave it, so your page keeps its own `#tabs`, its own `#composer`, and its own
 layout — and `document.getElementById("composer")` is still yours.
 
+**Every string is labelled.** The client shows no words of its own: each is a
+key in `js/labels/en.js` and `js/labels/es.js`, and `lang` picks the table while
+`labels` replaces single keys (`labels: { "composer.send": "Mandar" }`). A key
+the chosen table lacks falls back to English and is logged once by name. The
+standalone page reads the same tables, so `/?lang=es` gives the full client —
+Fleet, session panel, Settings and all — in Spanish.
+
 **Mount the app at your prefix.** `Server(..., prefix="/aegis")` gives a web app
 (`srv.asgi`) whose routes are relative: mount it at the prefix your page uses,
 and every URL aegis writes — the client's files, the websocket, the manifest —
@@ -264,11 +271,13 @@ parts: `on`, `send`, `destroy` and `el`.
 |---|---|
 | `token` | A string, or a function called on each connect, so an expired token is replaced without a reload. |
 | `session` | The log id of the session the chat follows. |
-| `layout` | `"chat"`: one session, no tab strip, a transcript and (with `composer`) a box. The full layout arrives in a later release. |
+| `layout` | `"chat"`: one session, no tab strip, a transcript and (with `composer`) a box. `"full"`: the standalone client's own page, which `index.html` mounts; a host page wants `"chat"`. |
 | `composer` | `true` (the default) draws the message box; `false` gives a transcript only, as for an answer pane. |
+| `commands` | `true` builds the `/` command menu under the box; `false` (the default) leaves it out. |
+| `dictation` | `true` builds the dictation mic (and hold-to-record) beside the box; `false` (the default) leaves it out. |
 | `controls` | `true` (the default) draws the model, effort and permission chips under the box; `false` hides them, so a product chat's end users see no operator details. The full layout keeps them. |
 | `theme` | `"host"`, or a built-in theme's name (`"ink"`, `"riso"`), which aegis loads itself. |
-| `lang`, `labels` | `"en"` or `"es"`, and single keys to override. A key a table lacks falls back to English and is logged once. |
+| `lang`, `labels` | `"en"` or `"es"`, and single keys to override. A key a table lacks falls back to English and is logged once. The standalone client takes the same choice in its URL, `/?lang=es`. |
 
 The handle's `send(text)` is the box's own send, through this mount's socket,
 and resolves when the send has an answer; `destroy()` unsubscribes, gives the

@@ -304,3 +304,68 @@ def test_on_a_phone_the_more_button_always_shows_and_opens_the_switcher(
     pg.tap(f"#switcher .sw-row[data-id='{a}']")
     pg.wait_for_function(f"location.hash === '#s={a}'")
     pg.close()
+
+
+def test_a_header_mounts_into_a_given_element_and_finds_its_own_nodes(server, page):  # noqa: F811
+    """b2: the header part builds its markup and looks every node up under it.
+
+    The page already holds a header with the same ids, so this proves the part
+    never asks the document: its own #tablist is a different node, and every
+    reference it carries resolves inside the element it was given.
+    """
+    page.goto(server.url)
+    page.wait_for_selector("#a2[data-view=fleet]")
+    got = page.evaluate(
+        """async () => {
+          const { HeaderPart } = await import('/static/js/parts/header.js');
+          const { byId } = await import('/static/js/dom.js');
+          const host = document.createElement('div');
+          const root = document.createElement('div');
+          root.className = 'aegis';
+          root.dataset.theme = 'ink';
+          host.append(root);
+          document.body.append(host);
+          const meta = { key: 'one', log_id: 'one', handle: 'one', title: 'One',
+                         attention: 'idle', state: 'idle', mark: 'idle', created_at: 1 };
+          const mount = { root, conn: { server: 'home' },
+                          state: { ordered: [meta], sessions: new Map([['one', meta]]), links: [] } };
+          const part = new HeaderPart(mount, root, {
+            here: () => 'home', focusId: () => 'one', go: () => {}, open: () => {},
+            openCard: () => {}, close: () => {}, move: () => {}, spawn: () => {},
+            files: () => {}, side: () => {}, push: () => {}, menu: () => null,
+            card: () => document.createElement('div'),
+          });
+          part.render(mount.state.ordered, 'one', 'session');
+          const burger = byId(part.el, 'hdr-burger');
+          const menu = byId(part.el, 'hdr-menu');
+          const controls = burger.getAttribute('aria-controls');
+          const refs = [...part.el.querySelectorAll('[aria-controls],[aria-labelledby],[for]')]
+            .map((n) => n.getAttribute('aria-controls') || n.getAttribute('aria-labelledby') || n.getAttribute('for'))
+            .filter(Boolean)
+            .filter((id) => byId(part.el, id) === null);
+          const out = {
+            header: part.el.tagName === 'HEADER' && part.el.parentElement === root,
+            list: byId(part.el, 'tablist') === part.el.querySelector('#tablist'),
+            own: document.getElementById('tablist') !== byId(part.el, 'tablist'),
+            menu: byId(part.el, 'hdr-menu') === menu,
+            controls,
+            names: byId(part.el, controls) === menu,
+            dangling: refs,
+            tabs: part.el.querySelectorAll('#tablist .tab').length,
+          };
+          part.destroy();
+          host.remove();
+          return out;
+        }"""
+    )
+    assert got == {
+        "header": True,
+        "list": True,
+        "own": True,
+        "menu": True,
+        "controls": "hdr-menu",
+        "names": True,
+        "dangling": [],
+        "tabs": 1,
+    }
+    assert page.errors == []

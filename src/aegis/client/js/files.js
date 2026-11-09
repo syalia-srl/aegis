@@ -32,6 +32,7 @@ import * as menu from "./menu.js";
 import { ago } from "./fleet.js";
 import { langName, paint } from "./highlight.js";
 import { docLocator, headingOf, offsetsIn, rangeAtPoint, rangeText, textLocator } from "./quote.js";
+import { rootOf } from "./root.js";
 
 // A tree row's caret: open or shut for a folder, empty for a file.
 function twisty(dir, open) {
@@ -820,7 +821,7 @@ export class Files {
 
   // Ask whether the open file moved on disk; see the module's comment.
   async poll() {
-    const shown = document.getElementById("a2")?.dataset.view === "files";
+    const shown = rootOf(this.box)?.dataset.view === "files";
     // A buffer keeps polling after its file was deleted (stat is null then),
     // so a file written again moves the banner to "changed".
     const idle = !this.path || (!this.ed && !this.stat);

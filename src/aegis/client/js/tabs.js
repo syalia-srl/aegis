@@ -4,7 +4,8 @@
 // session and those it started, groups.js) is drawn as one block headed by its
 // oldest member, which can fold it to one tab (#586).
 
-import { iconText, LABEL, PANE_ICON } from "./glyphs.js";
+import { labelsFor, stateLabel } from "./labels.js";
+import { iconText, PANE_ICON } from "./glyphs.js";
 import { closeOnMiddle, markNode } from "./fleet.js";
 import { blocksOf, hueOf } from "./groups.js";
 import { shownOwner } from "./me.js";
@@ -27,12 +28,16 @@ export class TabOrder {
     localStorage.setItem(this.key, JSON.stringify(ids));
   }
 
-  arrange(openIds) {
+  // `save: false` while the page draws the device's copy of the Fleet: a
+  // session it did not keep yet is not one the person closed, and dropping it
+  // from the order here would move every tab after a reload that beat the
+  // Fleet's next save.
+  arrange(openIds, save = true) {
     const open = new Set(openIds);
     const kept = this.load().filter((id) => open.has(id));
     const known = new Set(kept);
     const ids = [...kept, ...openIds.filter((id) => !known.has(id))];
-    this.save(ids);
+    if (save) this.save(ids);
     return ids;
   }
 
@@ -51,6 +56,7 @@ const URGENT = ["needs_you", "error", "review", "working", "waiting"];
 // keys, `actions.onFold(key)` toggles one and `actions.saveFolds()` keeps the
 // set. A folded group whose hidden member is the one in view unfolds.
 export function renderTabs(list, metas, focusId, actions) {
+  const t = actions.t || labelsFor("en");
   list.replaceChildren(
     ...blocksOf(metas, actions.here || "").map((b) => {
       const box = document.createElement("div");
@@ -75,7 +81,7 @@ export function renderTabs(list, metas, focusId, actions) {
       const cnt = document.createElement("span");
       cnt.className = "cnt";
       cnt.textContent = folded ? `+${hidden.length}` : "−";
-      cnt.title = folded ? "Unfold the group" : "Fold the group";
+      cnt.title = t(folded ? "tabs.unfold" : "tabs.fold");
       cnt.classList.toggle("alert", folded && hidden.some((m) => m.mark === "needs_you"));
       cnt.addEventListener("click", (ev) => {
         ev.stopPropagation();
@@ -138,63 +144,63 @@ export function stepMove(list, key, d) {
   return box.nextElementSibling ? [keys, firstKey(box.nextElementSibling.nextElementSibling)] : null;
 }
 
-function tab(m, focusId, { onFocus, onMove, onClose }, role) {
-  const t = document.createElement("div");
-  t.className = `tab ${role}${m.key === focusId ? " on" : ""}${m.state === "asleep" ? " asleep" : ""}${m.off ? " off" : ""}`;
-  t.classList.toggle("blink", !!m.blink);
-  t.draggable = true;
-  t.dataset.id = m.key;
-  const said = `${m.handle}: ${m.title || "untitled"} (${LABEL[m.attention] || m.state})`;
+function tab(m, focusId, { onFocus, onMove, onClose, t = labelsFor("en") }, role) {
+  const node = document.createElement("div");
+  node.className = `tab ${role}${m.key === focusId ? " on" : ""}${m.state === "asleep" ? " asleep" : ""}${m.off ? " off" : ""}`;
+  node.classList.toggle("blink", !!m.blink);
+  node.draggable = true;
+  node.dataset.id = m.key;
+  const said = t("tabs.said", { handle: m.handle, title: m.title || t("sidebar.untitled"), state: stateLabel(t, m.attention) || m.state });
   const mark = markNode(m);
   const term = m.kind === "term" || m.kind === "browser";
   if (term) {
     // A terminal is named by its name; its command is in the title.
-    t.title = said;
+    node.title = said;
     const name = Object.assign(document.createElement("span"), { className: "tname" });
     name.replaceChildren(...iconText(PANE_ICON[m.kind === "term" ? "term" : "browser"], m.name));
-    t.append(mark, name);
+    node.append(mark, name);
   } else {
     // The whole handle, and the title under it cut to the handle's width (#586).
-    t.setAttribute("aria-label", said);
+    node.setAttribute("aria-label", said);
     const lines = Object.assign(document.createElement("span"), { className: "l2" });
     lines.append(
       Object.assign(document.createElement("span"), { className: "hn", textContent: m.handle }),
       Object.assign(document.createElement("span"), { className: "tt", textContent: m.title || "" }),
     );
-    t.append(mark, lines);
+    node.append(mark, lines);
   }
   // Whose it is, when it is not this browser's (tokens.py).
   const owner = shownOwner(m);
-  if (owner) t.append(Object.assign(document.createElement("span"), { className: "who", textContent: owner }));
+  if (owner) node.append(Object.assign(document.createElement("span"), { className: "who", textContent: owner }));
   // A session on a linked server carries that server's name (links.py).
-  if (m.server) t.append(Object.assign(document.createElement("span"), { className: "where", textContent: m.server }));
-  t.addEventListener("click", () => onFocus(m.key));
-  closeOnMiddle(t, () => onClose(m.key));
-  t.addEventListener("dragstart", (ev) => {
+  if (m.server) node.append(Object.assign(document.createElement("span"), { className: "where", textContent: m.server }));
+  node.addEventListener("click", () => onFocus(m.key));
+  closeOnMiddle(node, () => onClose(m.key));
+  node.addEventListener("dragstart", (ev) => {
     ev.dataTransfer.setData("text/aegis-tab", m.key);
     ev.dataTransfer.effectAllowed = "move";
-    const box = t.closest(".tblock");
+    const box = node.closest(".tblock");
     const member = role === "member";
     dragging = { group: box.dataset.group, member, keys: member ? [m.key] : JSON.parse(box.dataset.keys) };
-    (member ? t : box).classList.add("dragging");
+    (member ? node : box).classList.add("dragging");
   });
-  t.addEventListener("dragend", () => {
+  node.addEventListener("dragend", () => {
     dragging = null;
-    t.closest(".tblock")?.classList.remove("dragging");
-    t.classList.remove("dragging");
+    node.closest(".tblock")?.classList.remove("dragging");
+    node.classList.remove("dragging");
   });
-  t.addEventListener("dragover", (ev) => {
+  node.addEventListener("dragover", (ev) => {
     if (!dragging || !ev.dataTransfer.types.includes("text/aegis-tab")) return;
-    if (dropBefore(t, ev.clientX) === undefined) return t.classList.add("nodrop");
+    if (dropBefore(node, ev.clientX) === undefined) return node.classList.add("nodrop");
     ev.preventDefault();
-    t.classList.add("drop");
+    node.classList.add("drop");
   });
-  t.addEventListener("dragleave", () => t.classList.remove("drop", "nodrop"));
-  t.addEventListener("drop", (ev) => {
+  node.addEventListener("dragleave", () => node.classList.remove("drop", "nodrop"));
+  node.addEventListener("drop", (ev) => {
     ev.preventDefault();
-    t.classList.remove("drop", "nodrop");
-    const before = dragging && dropBefore(t, ev.clientX);
+    node.classList.remove("drop", "nodrop");
+    const before = dragging && dropBefore(node, ev.clientX);
     if (before !== undefined && dragging) onMove(dragging.keys, before);
   });
-  return t;
+  return node;
 }

@@ -13,6 +13,7 @@
 // the person chose to send it (DESIGN.md, "Audio never leaves the browser").
 
 import { icon } from "./glyphs.js";
+import { labelsFor } from "./labels.js";
 
 export const HOLD_MS = 400;
 export const LOCK_PX = 60;
@@ -31,12 +32,15 @@ function clock(ms) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
+const esc = (x) => String(x).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
 export class HoldToRecord {
   // `busy()`: whether a long press must stay a tap (dictation running);
   // `onDone(file, ms, ctx)`: a finished take, with what `begin` was given;
   // `onError(message)`.
-  constructor({ busy, onDone, onError }) {
+  constructor({ busy, onDone, onError, t = labelsFor("en") }) {
     this.busy = busy;
+    this.t = t;
     this.onDone = onDone;
     this.onError = onError;
     this.rec = null; // the take in progress, or the one starting
@@ -118,7 +122,7 @@ export class HoldToRecord {
       });
     } catch (e) {
       this.end(r);
-      this.onError(`Cannot record: ${e.message || e.name}`);
+      this.onError(this.t("dictation.cannotRecord", { error: e.message || e.name }));
       return;
     }
     if (r.stopped) {
@@ -137,7 +141,7 @@ export class HoldToRecord {
       this.end(r);
       if (!r.send) return;
       if (ms < MIN_MS) {
-        this.onError("Too short to send: hold the microphone while you speak");
+        this.onError(this.t("dictation.tooShort"));
         return;
       }
       const type = (mr.mimeType || mime || "audio/webm").split(";")[0];
@@ -188,10 +192,10 @@ export class HoldToRecord {
     bar.hidden = true;
     bar.innerHTML =
       '<span class="rec-dot" aria-hidden="true"></span><span class="rec-time">0:00</span>' +
-      '<span class="rec-hint held">Release to send · slide up to lock</span>' +
-      '<span class="rec-hint locked">Recording · stop sends it</span>' +
-      '<button type="button" class="rec-cancel" title="Discard (Esc)" aria-label="Discard the recording"></button>' +
-      '<button type="button" class="rec-stop" title="Stop and send" aria-label="Stop and send the recording"></button>';
+      `<span class="rec-hint held">${esc(this.t("dictation.held"))}</span>` +
+      `<span class="rec-hint locked">${esc(this.t("dictation.locked"))}</span>` +
+      `<button type="button" class="rec-cancel" title="${esc(this.t("dictation.discardTitle"))}" aria-label="${esc(this.t("dictation.discardAria"))}"></button>` +
+      `<button type="button" class="rec-stop" title="${esc(this.t("dictation.stopTitle"))}" aria-label="${esc(this.t("dictation.stopAria"))}"></button>`;
     bar.querySelector(".rec-cancel").append(icon("trash"));
     bar.querySelector(".rec-stop").append(icon("stop"));
     bar.querySelector(".rec-hint.held").prepend(icon("lock"), " ");

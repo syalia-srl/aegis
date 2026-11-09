@@ -1,7 +1,7 @@
 // The Fleet view: a card per open session, then the archive.
 // Every field comes from the session's meta; nothing here computes activity.
 
-import { factIcon, glyph, icon, iconText, LABEL, PANE_ICON } from "./glyphs.js";
+import { factIcon, glyph, icon, iconText, PANE_ICON } from "./glyphs.js";
 import { idleFor } from "./lifecycle.js";
 import { diskRows, hostRow, netRows, noteRow, providerLine, quotaHeading, quotaRow } from "./gauges.js";
 import { shownOwner } from "./me.js";
@@ -9,6 +9,9 @@ import { dur, planTimes } from "./plantime.js";
 import { workflowLocked, workflowTitle } from "./entries.js";
 import { blocksOf, hueOf } from "./groups.js";
 import { serverNow } from "./clock.js";
+import { labelsFor, stateLabel } from "./labels.js";
+
+const en = labelsFor("en");
 
 function el(tag, cls, text) {
   const n = document.createElement(tag);
@@ -17,16 +20,16 @@ function el(tag, cls, text) {
   return n;
 }
 
-export function ago(ts) {
+export function ago(ts, t = en) {
   if (!ts) return "";
   const s = Math.max(0, Math.round(serverNow() - ts));
-  if (s < 10) return "just now";
-  if (s < 60) return `${s}s ago`;
+  if (s < 10) return t("time.justNow");
+  if (s < 60) return t("time.seconds", { n: s });
   const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ago`;
+  if (m < 60) return t("time.minutes", { n: m });
   const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ${m % 60}m ago`;
-  return `${Math.floor(h / 24)}d ago`;
+  if (h < 24) return t("time.hours", { h, m: m % 60 });
+  return t("time.days", { n: Math.floor(h / 24) });
 }
 
 function cwdTail(cwd) {
@@ -36,10 +39,10 @@ function cwdTail(cwd) {
 // transcript/describe.py's money(): a sub-cent session (cheap OpenCode models)
 // would otherwise read $0.00.
 // A session's model and, on a cascade, its place in it (session.py meta).
-export function modelLine(m) {
+export function modelLine(m, t = en) {
   const c = m.cascade;
   if (!c || c.at === null || c.at === undefined) return m.model;
-  return c.exhausted ? `${m.model} · cascade exhausted` : `${m.model} · ${c.at + 1} of ${c.models.length}`;
+  return c.exhausted ? t("fleet.cascadeExhausted", { model: m.model }) : t("fleet.cascadeAt", { model: m.model, at: c.at + 1, total: c.models.length });
 }
 
 export function money(usd) {
@@ -81,9 +84,9 @@ export function byNeed(metas) {
 // stack of cards, or unfolded across the grid when its key is in `open` (#586).
 // A unit is a lone session or a group; the attention order ranks a group by
 // its most urgent member.
-export function renderCards(box, metas, onOpen, order = "attention", onClose = () => {}, stacks = null) {
+export function renderCards(box, metas, onOpen, order = "attention", onClose = () => {}, stacks = null, t = en) {
   if (!metas.length) {
-    box.replaceChildren(el("div", "empty", "No open sessions. Start one with +."));
+    box.replaceChildren(el("div", "empty", t("fleet.empty")));
     return;
   }
   // A quiet session has no tab and belongs to no group (#386, #586), and a
@@ -94,7 +97,7 @@ export function renderCards(box, metas, onOpen, order = "attention", onClose = (
   const units = stacks
     ? [...blocksOf(metas.filter((m) => !apart(m)), stacks.here), ...metas.filter(apart).map(lone)]
     : metas.map(lone);
-  const draw = (u) => unit(u, metas, onOpen, onClose, stacks);
+  const draw = (u) => unit(u, metas, onOpen, onClose, stacks, t);
   if (order !== "attention") {
     box.replaceChildren(...units.map(draw));
     return;
@@ -106,17 +109,17 @@ export function renderCards(box, metas, onOpen, order = "attention", onClose = (
   // Finished workers sink below the live cards; the sort is stable.
   const done = (u) => u.members.every(finished);
   const rest = units.filter((u) => kind(u) === "rest").sort((a, b) => done(a) - done(b));
-  if (needs.length) out.push(el("div", "grp-h", "Needs you"), ...needs.map(draw));
+  if (needs.length) out.push(el("div", "grp-h", t("fleet.needsYou")), ...needs.map(draw));
   // With nobody needing you, the order bar's "Sessions" heading names the list.
   const quiet = units.filter((u) => kind(u) === "quiet");
-  if (rest.length && (needs.length || quiet.length)) out.push(el("div", "grp-h", "Everything else"));
+  if (rest.length && (needs.length || quiet.length)) out.push(el("div", "grp-h", t("fleet.everythingElse")));
   out.push(...rest.map(draw));
-  if (quiet.length) out.push(el("div", "grp-h", "Quiet"), ...quiet.map(draw));
+  if (quiet.length) out.push(el("div", "grp-h", t("header.quiet")), ...quiet.map(draw));
   box.replaceChildren(...out);
 }
 
-function unit(u, metas, onOpen, onClose, stacks) {
-  if (u.members.length < 2) return card(u.head, onOpen, onClose);
+function unit(u, metas, onOpen, onClose, stacks, t) {
+  if (u.members.length < 2) return card(u.head, onOpen, onClose, t);
   const rest = u.members.slice(1);
   const hue = `var(--group-${hueOf(u.key)})`;
   if (stacks.open.has(u.key)) {
@@ -125,15 +128,15 @@ function unit(u, metas, onOpen, onClose, stacks) {
     g.style.setProperty("--g", hue);
     const gh = el("div", "gh");
     const working = u.members.filter((m) => m.attention === "working").length;
-    const fold = el("button", null, "Stack");
+    const fold = el("button", null, t("fleet.stack"));
     fold.type = "button";
     fold.addEventListener("click", () => stacks.onToggle(u.key));
-    gh.append(markNode(u.head), el("b", null, u.head.handle), el("span", "n", `${u.members.length} sessions · ${working} working`), fold);
+    gh.append(markNode(u.head), el("b", null, u.head.handle), el("span", "n", t("fleet.stackCount", { n: u.members.length, working })), fold);
     const handles = new Map(metas.map((m) => [m.log_id, m.handle]));
     const cards = u.members.map((m) => {
-      const c = card(m, onOpen, onClose);
+      const c = card(m, onOpen, onClose, t);
       const by = handles.get(m.spawned_by);
-      if (by) c.append(el("div", "by", `started by ${by}`));
+      if (by) c.append(el("div", "by", t("fleet.startedBy", { handle: by })));
       return c;
     });
     g.append(gh, el("div", "gcards"));
@@ -145,9 +148,9 @@ function unit(u, metas, onOpen, onClose, stacks) {
   s.dataset.group = u.key;
   s.dataset.members = u.members.map((m) => m.key).join(" ");
   s.style.setProperty("--g", hue);
-  const c = card(u.head, onOpen, onClose);
+  const c = card(u.head, onOpen, onClose, t);
   const row = el("div", "mrow");
-  row.append(...rest.map(markNode), el("span", null, `+${rest.length}`), ...needy.map((m) => el("span", "alert", `${m.handle} needs you`)));
+  row.append(...rest.map(markNode), el("span", null, `+${rest.length}`), ...needy.map((m) => el("span", "alert", t("fleet.needsHandle", { handle: m.handle }))));
   c.append(row);
   s.append(el("div", "ghost g2"), el("div", "ghost g1"), el("span", "badge", String(u.members.length)), c);
   // A click on the stack unfolds it; the card's own buttons still act.
@@ -165,13 +168,13 @@ function unit(u, metas, onOpen, onClose, stacks) {
 
 // One session's card redrawn where it stands. False when its group, or its place
 // in the needs-you group, changed and the caller must regroup with renderCards.
-export function patchCard(box, m, onOpen, order = "attention", onClose = () => {}) {
+export function patchCard(box, m, onOpen, order = "attention", onClose = () => {}, t = en) {
   const old = box.querySelector(`.card[data-id="${CSS.escape(m.key)}"]`);
   // A member hidden in a stack changes the stack.
   if (!old) return !box.querySelector(`.stack[data-members~="${CSS.escape(m.key)}"]`);
   if (old.closest(".stack, .gopen")) return false; // a group redraws whole
   if (order === "attention" && (old.dataset.group !== group(m) || old.dataset.rank !== rank(m) || old.classList.contains("finished") !== finished(m))) return false;
-  old.replaceWith(card(m, onOpen, onClose));
+  old.replaceWith(card(m, onOpen, onClose, t));
   return true;
 }
 
@@ -189,7 +192,7 @@ export function markNode(m) {
 }
 
 // A terminal's card: its command, its state and the last line it printed.
-function termCard(m, onOpen, onClose) {
+function termCard(m, onOpen, onClose, t) {
   const c = el("div", `card term${m.off ? " off" : ""}`);
   c.dataset.id = m.key;
   c.dataset.group = group(m);
@@ -202,8 +205,8 @@ function termCard(m, onOpen, onClose) {
   const owner = shownOwner(m);
   if (owner) hd.append(el("span", "who", owner));
   const state = browser
-    ? m.state === "running" ? (m.holder === "person" ? (m.ask ? `the agent asks: ${m.ask}` : "you hold it") : "the agent holds it") : `stopped: ${m.reason || ""}`
-    : m.state === "exited" ? `exited (${m.code})` : m.state === "ended" ? `ended: ${m.reason}` : "running";
+    ? m.state === "running" ? (m.holder === "person" ? (m.ask ? t("fleet.termAsks", { ask: m.ask }) : t("fleet.termYouHold")) : t("fleet.termAgentHolds")) : t("fleet.termStopped", { reason: m.reason || "" })
+    : m.state === "exited" ? t("fleet.termExited", { code: m.code }) : m.state === "ended" ? t("fleet.termEnded", { reason: m.reason }) : t("fleet.termRunning");
   c.append(hd, el("div", "ttl", m.title), el("div", "ask", state), el("div", "ln", browser ? m.url || "" : m.last_line || ""));
   c.addEventListener("click", (ev) => {
     if (!ev.target.closest("button")) onOpen(m.key);
@@ -212,8 +215,8 @@ function termCard(m, onOpen, onClose) {
   return c;
 }
 
-export function card(m, onOpen, onClose) {
-  if (m.kind === "term" || m.kind === "browser") return termCard(m, onOpen, onClose);
+export function card(m, onOpen, onClose, t = en) {
+  if (m.kind === "term" || m.kind === "browser") return termCard(m, onOpen, onClose, t);
   const c = el("div", `card ${m.state} at-${m.attention}${m.off ? " off" : ""}${finished(m) ? " finished" : ""}${m.quiet ? " quiet" : ""}`);
   c.dataset.id = m.key;
   c.dataset.group = group(m);
@@ -222,33 +225,33 @@ export function card(m, onOpen, onClose) {
   hd.append(markNode(m), el("span", "h", m.handle));
   const owner = shownOwner(m);
   if (owner) hd.append(el("span", "who", owner));
-  if (m.worker) hd.append(el("span", "badge", `worker · ${m.worker.queue}`));
+  if (m.worker) hd.append(el("span", "badge", t("sidebar.worker", { queue: m.worker.queue })));
   if (m.workflow) {
     // A run's title can be a sentence: it gives way, the node that tells
     // steps apart stays, and the tooltip has it whole (#670).
     const title = workflowTitle(m.workflow.run) || m.workflow.run;
     const b = el("span", "badge wf");
-    b.title = `workflow · ${title} · ${m.workflow.node}`;
-    b.append("workflow · ", el("span", "t", title), ` · ${m.workflow.node}`);
+    b.title = t("fleet.workflow", { title, node: m.workflow.node });
+    b.append(t("fleet.workflowBadge"), el("span", "t", title), ` · ${m.workflow.node}`);
     hd.append(b);
   }
   // Two axes, two marks: quiet hides the tab, asleep has no process (#479).
   if (m.quiet) {
     const q = el("span", "quiet");
-    q.append(icon("quiet"), "quiet");
+    q.append(icon("quiet"), t("fleet.quietMark"));
     hd.append(q);
   }
   if (m.state === "asleep") {
     const idle = m.asleep_why === "idle" && idleFor(m);
-    hd.append(el("span", "zz pk", idle ? `zz idle ${idle}` : m.asleep_why ? `zz ${m.asleep_why}` : "zz"));
+    hd.append(el("span", "zz pk", idle ? t("fleet.asleepIdle", { idle }) : m.asleep_why ? t("fleet.asleepWhy", { why: m.asleep_why }) : t("fleet.asleep")));
   }
-  const label = m.attention === "waiting" && m.waiting_on ? `waiting · ${m.waiting_on}` : LABEL[m.attention] || m.state;
+  const label = m.attention === "waiting" && m.waiting_on ? t("header.waitingOn", { on: m.waiting_on }) : stateLabel(t, m.attention) || m.state;
   hd.append(el("span", `s at-${m.attention}`, label));
-  if (m.attention === "done") hd.append(archiveButton(m, onClose));
-  const parts = [hd, el("div", "ttl", m.title || "untitled")];
+  if (m.attention === "done") hd.append(archiveButton(m, onClose, t));
+  const parts = [hd, el("div", "ttl", m.title || t("sidebar.untitled"))];
   if (m.attention_line) parts.push(el("div", `ask at-${m.attention}`, m.attention_line));
   const sub = el("div", "ln");
-  sub.append(factIcon("h", m.harness), el("b", null, `${m.agent}${(m.overridden || []).length ? "*" : ""}`), document.createTextNode(`${modelLine(m)} · ${cwdTail(m.cwd)}`));
+  sub.append(factIcon("h", m.harness), el("b", null, `${m.agent}${(m.overridden || []).length ? "*" : ""}`), document.createTextNode(`${modelLine(m, t)} · ${cwdTail(m.cwd)}`));
   parts.push(sub);
   const skills = m.skills || [];
   if (m.plan_now || m.plan_did || skills.length) {
@@ -258,7 +261,7 @@ export function card(m, onOpen, onClose) {
     // The skills it loaded, in order: which worker follows which procedure,
     // and how many times it ran each one's scripts.
     const runs = m.skill_runs || {};
-    const named = skills.map((n) => (runs[n] ? `${n} (${runs[n]} run${runs[n] > 1 ? "s" : ""})` : n));
+    const named = skills.map((n) => (runs[n] ? t(runs[n] > 1 ? "fleet.skillRuns.other" : "fleet.skillRuns.one", { name: n, n: runs[n] }) : n));
     if (skills.length) pl.append(planRow("skills", named.join(" · "), "skills"));
     parts.push(pl);
   }
@@ -269,22 +272,22 @@ export function card(m, onOpen, onClose) {
   fill.style.width = `${pct}%`;
   bar.append(fill);
   const ft = el("div", "ft");
-  ft.append(el("span", "when", ago(m.last_activity)), el("span", null, money(m.cost_usd)));
+  ft.append(el("span", "when", ago(m.last_activity, t)), el("span", null, money(m.cost_usd)));
   // Its load (load.py), only when there is some: a core or a GB.
   const ld = m.load;
   if (ld && (ld.cpu >= 1 || ld.rss_gb >= 1)) {
-    const sp = el("span", "load", `${ld.cpu.toFixed(1)} cores · ${ld.rss_gb.toFixed(1)} GB`);
-    sp.title = "CPU over the last minute and RAM, of this session and everything it started";
+    const sp = el("span", "load", t("sidebar.loadText", { cores: ld.cpu.toFixed(1), ram: ld.rss_gb.toFixed(1) }));
+    sp.title = t("sidebar.loadTitle");
     ft.append(sp);
   }
-  if (m.unread) ft.append(el("span", "unr", `${m.unread} unread`));
+  if (m.unread) ft.append(el("span", "unr", t("fleet.unread", { n: m.unread })));
   const mons = (m.monitors || []).length;
-  if (mons) ft.append(el("span", "mons", `${mons} monitor${mons > 1 ? "s" : ""}`));
+  if (mons) ft.append(el("span", "mons", t(mons > 1 ? "fleet.monitors.other" : "fleet.monitors.one", { n: mons })));
   const fds = m.feeds || [];
   if (fds.length) {
     const waiting = fds.reduce((n, f) => n + (f.pending || 0), 0);
-    const txt = `${fds.length} feed${fds.length > 1 ? "s" : ""}${waiting ? ` · ${waiting} waiting` : ""}`;
-    ft.append(el("span", "mons", txt));
+    const txt = t(fds.length > 1 ? "fleet.feeds.other" : "fleet.feeds.one", { n: fds.length });
+    ft.append(el("span", "mons", waiting ? `${txt} · ${t("fleet.feeds.waiting", { n: waiting })}` : txt));
   }
   if (m.plan_total) ft.append(planProg(m));
   ft.append(el("span", "ctx", `${pct}%`));
@@ -314,14 +317,14 @@ export function closeOnMiddle(node, close) {
 
 // Close for a finished session, from the Fleet. A real button, so Tab reaches
 // it and Enter or Space presses it like the archive rows' Read and Reopen.
-function archiveButton(m, onClose) {
-  const b = el("button", "btn archive needs-net", "Archive");
+function archiveButton(m, onClose, t) {
+  const b = el("button", "btn archive needs-net", t("sidebar.archive"));
   b.type = "button";
-  b.title = "Close this session; it stays in the archive";
+  b.title = t("transcript.closing.title");
   if (workflowLocked(m)) {
     // A live workflow's step closes with its run; the server refuses it too.
     b.disabled = true;
-    b.title = "A step of a running workflow: it closes when the run ends";
+    b.title = t("fleet.workflowLocked");
   }
   b.addEventListener("click", () => onClose(m.key));
   return b;
@@ -347,15 +350,15 @@ function planProg(m) {
 // The parts of a card that move with the clock: the count and ETA, and the
 // current item's time. Called when the card is drawn and every second after.
 export function tickPlan(c, m) {
-  const t = planTimes(m);
+  const left = planTimes(m);
   const pt = c.querySelector(".ft .prog .pt");
-  if (pt) pt.textContent = `${m.plan_done}/${m.plan_total}${t && t.left != null ? ` · ~${dur(t.left)}` : ""}`;
+  if (pt) pt.textContent = `${m.plan_done}/${m.plan_total}${left && left.left != null ? ` · ~${dur(left.left)}` : ""}`;
   const now = c.querySelector(".pl .now .t");
   const doing = (m.plan || []).findIndex((i) => i.state === "doing");
-  if (now) now.textContent = t && doing >= 0 ? ` · ${dur(t.items[doing])}` : "";
+  if (now) now.textContent = left && doing >= 0 ? ` · ${dur(left.items[doing])}` : "";
 }
 
-export function renderArchive(box, items, { onReopen, onRead }) {
+export function renderArchive(box, items, { onReopen, onRead, t = en }) {
   // A link's state change reads the archive again (#774), and several replies
   // may land while a person is aiming at a row. Replacing identical rows is
   // what makes a tap miss: it was resolved on the old node and goes nowhere.
@@ -367,20 +370,20 @@ export function renderArchive(box, items, { onReopen, onRead }) {
       m.handle,
       m.server,
       cwdTail(m.cwd),
-      ago(m.last_activity),
+      ago(m.last_activity, t),
       money(m.cost_usd),
     ]),
   );
   if (box.dataset.rendered === sig) return;
   box.dataset.rendered = sig;
   if (!items.length) {
-    box.replaceChildren(el("div", "empty", "Nothing archived matches."));
+    box.replaceChildren(el("div", "empty", t("fleet.archiveEmpty")));
     return;
   }
-  const t = el("table", "tbl");
+  const tbl = el("table", "tbl");
   const head = el("tr");
-  for (const h of ["Title", "Handle", "Where", "Last active", "Cost", ""]) head.append(el("th", null, h));
-  t.append(head);
+  for (const h of [t("fleet.thTitle"), t("fleet.thHandle"), t("fleet.thWhere"), t("fleet.thActive"), t("fleet.thCost"), ""]) head.append(el("th", null, h));
+  tbl.append(head);
   for (const m of items) {
     const tr = el("tr");
     tr.dataset.id = m.key;
@@ -391,20 +394,20 @@ export function renderArchive(box, items, { onReopen, onRead }) {
     });
     const actions = el("td", "acts");
     actions.append(
-      rowButton("read", "book", "Read", "Read it without reopening it", () => onRead(m.key)),
-      rowButton("reopen", "again", "Reopen", "Reopen it to continue the conversation", () => onReopen(m.key)),
+      rowButton("read", "book", t("fleet.read"), t("fleet.readTitle"), () => onRead(m.key)),
+      rowButton("reopen", "again", t("fleet.reopen"), t("fleet.reopenTitle"), () => onReopen(m.key)),
     );
     tr.append(
-      el("td", null, m.title || "untitled"),
+      el("td", null, m.title || t("sidebar.untitled")),
       handleCell(m),
       el("td", "m", cwdTail(m.cwd)),
-      el("td", "m", ago(m.last_activity)),
+      el("td", "m", ago(m.last_activity, t)),
       el("td", "m", money(m.cost_usd)),
       actions,
     );
-    t.append(tr);
+    tbl.append(tr);
   }
-  box.replaceChildren(t);
+  box.replaceChildren(tbl);
 }
 
 // An archive row's action: an icon, named by aria-label and on hover.
@@ -432,37 +435,37 @@ const ATTENTION_ORDER = ["needs_you", "error", "review", "working", "waiting", "
 // holds; the host meters from the host channel.
 // `link` is the line beside a linked server's name: its host, its state.
 // `measure` takes a speed reading on this band's server.
-export function renderBand(band, { metas, host, server, link = "", off = false, measure = null }) {
-  band.querySelector(".band-server").textContent = server || "server";
+export function renderBand(band, { metas, host, server, link = "", off = false, measure = null, t = en }) {
+  band.querySelector(".band-server").textContent = server || t("fleet.server");
   band.querySelector(".band-link").textContent = link;
   band.classList.toggle("off", off);
   const counts = new Map();
   for (const m of metas) counts.set(m.attention, (counts.get(m.attention) || 0) + 1);
   const rows = ATTENTION_ORDER.filter((a) => counts.get(a)).map((a) => {
     const d = el("div");
-    d.append(glyph(a), el("b", null, String(counts.get(a))), document.createTextNode(a === "needs_you" ? "need you" : LABEL[a]));
+    d.append(glyph(a), el("b", null, String(counts.get(a))), document.createTextNode(a === "needs_you" ? t("fleet.needYou") : stateLabel(t, a)));
     return d;
   });
-  band.querySelector(".band-counts").replaceChildren(...(rows.length ? rows : [el("div", "empty", "no sessions")]));
+  band.querySelector(".band-counts").replaceChildren(...(rows.length ? rows : [el("div", "empty", t("fleet.noSessions"))]));
 
   const meters = [];
   if (host) {
-    meters.push(hostRow("CPU", host.cpu, ""));
-    meters.push(hostRow("RAM", host.ram.pct, `${host.ram.used_gb} / ${host.ram.total_gb} GB`));
-    meters.push(...diskRows(host));
+    meters.push(hostRow(t("gauges.cpu"), host.cpu, ""));
+    meters.push(hostRow(t("gauges.ram"), host.ram.pct, `${host.ram.used_gb} / ${host.ram.total_gb} GB`));
+    meters.push(...diskRows(host, t));
     meters.push(...netRows(host.net, serverNow(), off ? null : measure));
   }
   const live = metas.filter((m) => m.state !== "asleep" && m.context_window && m.context_tokens);
   if (live.length) {
     const avg = Math.round(live.reduce((a, m) => a + Math.min(100, (100 * m.context_tokens) / m.context_window), 0) / live.length);
-    meters.push(hostRow("Context", avg, `avg of ${live.length} live`));
+    meters.push(hostRow(t("gauges.context"), avg, t("fleet.avgLive", { n: live.length })));
   }
   // How many have no process, and what parking freed: the harnesses' own
   // memory when each was parked (park.py).
   const asleep = metas.filter((m) => m.state === "asleep");
   if (asleep.length) {
     const gb = asleep.reduce((n, m) => n + (m.parked_rss || 0), 0) / 2 ** 30;
-    meters.push(el("span", "parked-count", `${asleep.length} asleep · ~${gb.toFixed(1)} GB idle`));
+    meters.push(el("span", "parked-count", t("fleet.asleepCount", { n: asleep.length, gb: gb.toFixed(1) })));
   }
   band.querySelector(".band-host").replaceChildren(...meters);
 }
@@ -472,7 +475,7 @@ export function renderBand(band, { metas, host, server, link = "", off = false, 
 // rebuilt row loses the hover tooltip that spells its reading out.
 // `same`: providers a band above already shows for the same account, drawn as
 // one line naming that server instead of their gauges again.
-export function renderBandQuota(band, { quota, now, same = [], home = "" }) {
+export function renderBandQuota(band, { quota, now, same = [], home = "", t = en }) {
   const providers = (quota && quota.providers) || [];
   band.querySelector(".band-quota-col").hidden = !providers.length && !same.length;
   band.querySelector(".band-quota-age").textContent = quotaHeading(providers, now);
@@ -482,6 +485,6 @@ export function renderBandQuota(band, { quota, now, same = [], home = "" }) {
     if (p.state === "failed") out.push(noteRow(p.note));
     else for (const w of p.windows) out.push(quotaRow(p, w, now));
   }
-  for (const p of same) out.push(el("div", "prov same", `${p.label} · same account as ${home}`));
+  for (const p of same) out.push(el("div", "prov same", t("fleet.sameAccount", { label: p.label, home })));
   band.querySelector(".band-quota").replaceChildren(...out);
 }
