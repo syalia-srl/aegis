@@ -96,7 +96,7 @@ table{margin:0}
 </head>
 <body>
 <div class="chrome">
-  <div class="row"><span>aegis</span><span class="tab">plan · mount(): the rest of the API, tabs and full, embedding (#962)</span><span class="st"><span class="pill acc">7 slices</span><span class="pill">#962 · #957</span></span></div>
+  <div class="row"><span>aegis</span><span class="tab">plan · mount(): the rest of the API, tabs and full, embedding (#962)</span><span class="st"><span class="pill acc">8 slices</span><span class="pill">#962 · #957</span></span></div>
   <div class="progress"><span id="pcount">0 of 0 done</span><div class="track" id="ptrack"></div></div>
 </div>
 <main>
@@ -122,35 +122,35 @@ table{margin:0}
 <tr><td><code>aegis.js</code> exports <code>mount(el, options)</code></td><td><b>done</b> — <code>src/aegis/aegis.js:3</code> re-exports <code>mount</code> from <code>client/js/mount.js:37</code>.</td><td>—</td></tr>
 <tr><td>Layout <code>chat</code></td><td><b>done</b> — <code>mount.js:138-144</code> builds one transcript and, unless <code>composer: false</code>, its box.</td><td>—</td></tr>
 <tr><td>Layout <code>tabs</code></td><td><b>missing</b> — no <code>layouts/tabs.js</code>; <code>mount.js:138</code> throws <code>aegis: no layout tabs</code>.</td><td>m3</td></tr>
-<tr><td>Layout <code>full</code></td><td><b>partial</b> — <code>mount.js:132-137</code> builds the markup (<code>layouts/full.js:79-84</code>), but the controllers, router and page effects live in <code>app.js:76-85</code> and run only when <code>index.html</code> loads that module. A host that calls <code>mount(..., {layout:"full"})</code> today gets an inert page, and a page that did load <code>app.js</code> would touch the host's title, service worker and URL hash.</td><td>m4, m5</td></tr>
+<tr><td>Layout <code>full</code></td><td><b>partial</b> — <code>mount.js:132-137</code> builds the markup (<code>layouts/full.js:79-84</code>), but the controllers, router and page effects live in <code>app.js:76-85</code> and run only when <code>index.html</code> loads that module. A host that calls <code>mount(..., {layout:"full"})</code> today gets an inert page, and a page that did load <code>app.js</code> would touch the host's title, service worker and URL hash.</td><td>m4, m5, m6</td></tr>
 <tr><td>Switch <code>composer</code></td><td><b>done</b> — <code>mount.js:51</code>, read at <code>mount.js:142</code>.</td><td>—</td></tr>
 <tr><td>Switch <code>controls</code></td><td><b>done</b> — <code>parts/composer.js:95</code> hides the model, effort and permission chips (#994).</td><td>—</td></tr>
 <tr><td>Switch <code>commands</code></td><td><b>done</b> — built only when true (<code>parts/composer.js:117</code>).</td><td>—</td></tr>
 <tr><td>Switch <code>dictation</code></td><td><b>done</b> — built only when true (<code>parts/composer.js:118</code>).</td><td>—</td></tr>
 <tr><td>Switch <code>attachments</code></td><td><b>partial</b> — declared at <code>mount.js:55</code> and never read: the clip, drag and drop are always built.</td><td>m2</td></tr>
-<tr><td>Switch <code>sidebar</code></td><td><b>missing</b> — no option; the full layout always builds the session panel (<code>app.js:121-141</code>).</td><td>m5</td></tr>
+<tr><td>Switch <code>sidebar</code></td><td><b>missing</b> — no option; the full layout always builds the session panel (<code>app.js:121-141</code>).</td><td>m6</td></tr>
 <tr><td><code>theme</code>, including <code>"host"</code></td><td><b>done</b> — <code>mount.js:382</code> sets <code>data-theme</code>; <code>mount.js:394-409</code> loads no theme for <code>"host"</code>, and the zero-specificity fallback is in <code>client.css</code>.</td><td>—</td></tr>
 <tr><td><code>lang</code> and <code>labels</code></td><td><b>done</b> — <code>labels.js:46-57</code> with the English fallback and one warning per key; <code>mount.js:75</code>.</td><td>—</td></tr>
 <tr><td><code>token</code> as a string or a function</td><td><b>done</b> — <code>mount.js:57</code>; <code>protocol.js:45-49</code> calls it on every connect and writes it in the hello.</td><td>—</td></tr>
 <tr><td><code>renderers</code></td><td><b>missing</b> — no option and no seam in <code>entries.js</code>'s tool renderer (<code>entries.js:1924</code>).</td><td>m2</td></tr>
 <tr><td><code>transcribe</code></td><td><b>missing</b> — dictation always runs the two Whistle workers (<code>dictation.js:453</code>).</td><td>m2</td></tr>
 <tr><td>Event <code>connection</code></td><td><b>done</b> — <code>mount.js:103</code>.</td><td>—</td></tr>
-<tr><td>Event <code>entry</code></td><td><b>done</b> for chat — <code>parts/transcript.js:297,300,311</code> (not for <code>full</code>; m5).</td><td>m5</td></tr>
-<tr><td>Event <code>turnEnd</code></td><td><b>done</b> for chat — <code>mount.js:311-323</code> (not for <code>full</code>; m5).</td><td>m5</td></tr>
+<tr><td>Event <code>entry</code></td><td><b>done</b> for chat — <code>parts/transcript.js:297,300,311</code> (not for <code>full</code>; m6).</td><td>m6</td></tr>
+<tr><td>Event <code>turnEnd</code></td><td><b>done</b> for chat — <code>mount.js:311-323</code> (not for <code>full</code>; m6).</td><td>m6</td></tr>
 <tr><td>Event <code>error</code></td><td><b>done</b> — <code>mount.js:180-186</code>.</td><td>—</td></tr>
-<tr><td>Event <code>sessionChanged</code></td><td><b>missing</b> — <code>follow()</code> (<code>mount.js:208-212</code>) changes the session silently.</td><td>m1, m5</td></tr>
-<tr><td>Event <code>turnStart</code></td><td><b>missing</b> — the working transition is tracked for cost only (<code>mount.js:299-310</code>).</td><td>m1, m5</td></tr>
-<tr><td>Event <code>fileSent</code></td><td><b>missing</b> — a <code>file</code> entry fires only the generic <code>entry</code>.</td><td>m1, m5</td></tr>
+<tr><td>Event <code>sessionChanged</code></td><td><b>missing</b> — <code>follow()</code> (<code>mount.js:208-212</code>) changes the session silently.</td><td>m1, m6</td></tr>
+<tr><td>Event <code>turnStart</code></td><td><b>missing</b> — the working transition is tracked for cost only (<code>mount.js:299-310</code>).</td><td>m1, m6</td></tr>
+<tr><td>Event <code>fileSent</code></td><td><b>missing</b> — a <code>file</code> entry fires only the generic <code>entry</code>.</td><td>m1, m6</td></tr>
 <tr><td>Call <code>send(text)</code></td><td><b>done</b> — <code>mount.js:188-193</code>.</td><td>—</td></tr>
-<tr><td>Call <code>destroy()</code></td><td><b>done</b> — <code>mount.js:195-205</code>; <code>full</code> has no teardown yet (m5).</td><td>m5</td></tr>
-<tr><td>Call <code>open(session)</code></td><td><b>missing</b> — only the constructor's <code>session</code> option follows one.</td><td>m1, m5</td></tr>
-<tr><td>Call <code>spawn(agent, prompt)</code></td><td><b>missing</b> — the spawn form is a part of the standalone page only.</td><td>m1, m5</td></tr>
-<tr><td>Call <code>focus()</code></td><td><b>missing</b>.</td><td>m1, m5</td></tr>
+<tr><td>Call <code>destroy()</code></td><td><b>done</b> — <code>mount.js:195-205</code>; <code>full</code> has no teardown yet (m6).</td><td>m6</td></tr>
+<tr><td>Call <code>open(session)</code></td><td><b>missing</b> — only the constructor's <code>session</code> option follows one.</td><td>m1, m6</td></tr>
+<tr><td>Call <code>spawn(agent, prompt)</code></td><td><b>missing</b> — the spawn form is a part of the standalone page only.</td><td>m1, m6</td></tr>
+<tr><td>Call <code>focus()</code></td><td><b>missing</b>.</td><td>m1, m6</td></tr>
 <tr><td>The Server serves the client and websocket as <code>srv.asgi</code> under a <code>prefix</code></td><td><b>done</b> — <code>server.py:212-228,261-267</code>; routes are relative in <code>web.py:338-354</code>.</td><td>—</td></tr>
 <tr><td><code>/&lt;prefix&gt;/manifest.json</code> lists the files with hashes</td><td><b>done</b> — <code>web.py:484-492</code>, over <code>client_files</code> (<code>web.py:193-232</code>), including the entry module (<code>web.py:500-508</code>).</td><td>—</td></tr>
 <tr><td>A stable set of class names documented for host CSS</td><td><b>partial</b> — <code>help/library.md:310</code> names only <code>.aegis .tool</code> and the ids; there is no list and no <code>embedding.md</code>.</td><td>m7</td></tr>
-<tr><td><b>Tests</b>: each layout in a fixture page that already uses <code>composer</code> and <code>tabs</code>, host theme and host CSS, 1280 and 390 px</td><td><b>partial</b> — <code>tests/test_mount_browser.py:830</code> does this for <code>chat</code> only.</td><td>m6</td></tr>
-<tr><td><b>New help page</b> <code>embedding.md</code></td><td><b>missing</b> — the material lives in <code>help/library.md:201-320</code>.</td><td>m7</td></tr>
+<tr><td><b>Tests</b>: each layout in a fixture page that already uses <code>composer</code> and <code>tabs</code>, host theme and host CSS, 1280 and 390 px</td><td><b>partial</b> — <code>tests/test_mount_browser.py:830</code> does this for <code>chat</code> only.</td><td>m7</td></tr>
+<tr><td><b>New help page</b> <code>embedding.md</code></td><td><b>missing</b> — the material lives in <code>help/library.md:201-320</code>.</td><td>m8</td></tr>
 </tbody>
 </table></div>
 
@@ -162,7 +162,7 @@ table{margin:0}
 <tr>
 <td><b>Oikos</b><br><code>src/oikos/web/app.js:402</code></td>
 <td><code>mount(el, {token: () =&gt; …, session, layout:"chat", theme:"host", lang:"es", controls:false})</code>, then <code>on("connection")</code>, <code>on("error")</code>, <code>on("turnEnd")</code>. It reads nothing from the handle else.</td>
-<td><b>Nothing it must change.</b> The contract is additive: the same options, the same four payloads, <code>on()</code> still returns something it discards. A compatibility test mounts with exactly this option set and asserts the four events (m1, m6). <code>sessionChanged</code> is available if a project ever reuses a panel for another session; no current code needs it.</td>
+<td><b>Nothing it must change.</b> The contract is additive: the same options, the same four payloads, <code>on()</code> still returns something it discards. A compatibility test mounts with exactly this option set and asserts the four events (m1, m7). <code>sessionChanged</code> is available if a project ever reuses a panel for another session; no current code needs it.</td>
 </tr>
 <tr>
 <td><b>life</b><br><code>apiad/life#101</code></td>
@@ -306,6 +306,10 @@ await chat.send("Resume el capítulo 3");
 chat.destroy();
 </script>
 
+<h3>How a full mount boots</h3>
+<p><code>mount()</code> stays synchronous. It builds the root, acquires the socket and returns the handle at once; for <code>layout:"full"</code> it appends the layout's markup and starts <code>buildFull(mount)</code>, which loads <code>app.js</code> with <code>await import("../app.js")</code>. <code>composeFull</code> runs when that resolves. Nothing a chat or tabs mount needs is in <code>app.js</code>, so only a full layout pays for its 54 imports; the manifest lists <code>app.js</code> because <code>client_files</code> walks the client directory.</p>
+<p>Until the import resolves the mount is <em>building</em>. <code>on</code> works at once, because the listener map exists before the build. <code>open</code>, <code>focus</code> and <code>send</code> are queued in call order and run after <code>composeFull</code>, and their promises resolve then; <code>spawn</code> may run its <code>session.spawn</code> immediately and its <code>open</code> joins the queue. <code>destroy</code> before the build marks the mount dead, so <code>buildFull</code> composes nothing after its import, and the root and socket are released as usual. The constructor's <code>session</code> is applied as the first <code>open</code> after the build and before the queue runs, and that first follow is silent, as it is for chat and tabs.</p>
+
 <h3>Stable class names</h3>
 <p>These are the selectors a host may style; they are the contract <code>embedding.md</code> publishes, and a slice that renames one is a breaking change. Anything else inside the mount is private. Ids (<code>#composer</code>, <code>#input</code>, <code>#entries</code>, …) are the browser suite's, not a host's: they can repeat in the host's page, and a host must select by class or from the element it gave <code>mount()</code>.</p>
 <div class="tscroll"><table>
@@ -320,7 +324,7 @@ chat.destroy();
 </table></div>
 
 <h2>The slices</h2>
-<p>Seven slices, in this order, on one branch in this worktree. Each ends with the client working on its own, commits and pushes itself, and is one agent's session. The existing browser suite is not edited: new behaviour gets new tests. Slice code is the hypothesis; its tests judge it against the real tree.</p>
+<p>Eight slices, in this order, on one branch in this worktree. Each ends with the client working on its own, commits and pushes itself, and is one agent's session. The existing browser suite is not edited: new behaviour gets new tests. Slice code is the hypothesis; its tests judge it against the real tree.</p>
 
 <details class="task" id="m1-session-events-and-calls" data-state="pending">
 <summary><span class="num">M1</span><span><span class="ttl">Session events and the host's calls</span><span class="files">js/mount.js · js/parts/transcript.js · js/parts/composer.js · tests/test_mount_browser.py</span></span><span class="state"></span></summary>
@@ -331,9 +335,10 @@ chat.destroy();
 <li><b>The handle.</b> <code>handle()</code> (<code>mount.js:152</code>) gains <code>open</code>, <code>spawn</code> and <code>focus</code>; <code>on</code> returns the handle (a small object built once, not <code>this</code>), so a host cannot reach <code>emit</code> or <code>call</code> by accident.</li>
 <li><b>Options.</b> Add <code>agent: null</code> to the defaults. Nothing else moves in this slice.</li>
 <li><b><code>open(session)</code>.</b> <code>follow(key)</code> already does the work: it shows the transcript and the composer. Move the event into it, and make the removal path in <code>_patch</code> call <code>follow(null)</code> instead of <code>transcript.show(null)</code> so the event is one place.</li>
+<li><b>The first follow is silent.</b> Following the constructor's <code>session</code> emits no <code>sessionChanged</code>: the host already knows what it passed. Every later change emits <code>{session, previous, meta}</code>, and <code>previous</code> is <code>null</code> when nothing was shown (a first <code>open()</code> after a mount that started empty). Give <code>follow</code> a <code>quiet</code> argument that <code>mountLayout</code> passes for the constructor's call; <code>open()</code> never does.</li>
 <li><b><code>spawn(agent, prompt)</code>.</b> One <code>session.spawn</code> call, then open its log id. The policy decides, so a refusal is an <code>error</code> event and a rejected promise, never a thrown string.</li>
 <li><b><code>send()</code> on a fresh chat.</b> When no session is shown and <code>agent</code> is set, <code>Mount.send</code> and <code>ComposerPart.submit</code> spawn first and then send, which is the spec's “agent starts one on the first message”. With neither a session nor an agent, send is the no-op it is today.</li>
-<li><b><code>turnStart</code> and the shared transition.</b> Extract the working/cost logic of <code>_put</code> (<code>mount.js:299-323</code>) into <code>noteTurn(key, prev, meta)</code>, which emits <code>turnStart</code> on the entering patch (when the mount saw the previous row) and <code>turnEnd</code> on the leaving one, under <code>reportsTurn</code>. m5 reuses this from the full layout instead of duplicating it.</li>
+<li><b><code>turnStart</code> and the shared transition.</b> Extract the working/cost logic of <code>_put</code> (<code>mount.js:299-323</code>) into <code>noteTurn(key, prev, meta)</code>, which emits <code>turnStart</code> on the entering patch (when the mount saw the previous row) and <code>turnEnd</code> on the leaving one, under <code>reportsTurn</code>. m6 reuses this from the full layout instead of duplicating it.</li>
 <li><b><code>fileSent</code>.</b> In the transcript part's two snapshot loops and its patch loop, emit after <code>entry</code>: <code>{session, entry, files: entryFiles(entry)}</code>, only for <code>entry.kind === "file"</code>. <code>entryFiles</code> already collects <code>detail.files</code> and <code>detail.peek</code> (<code>entries.js:140</code>).</li>
 <li><b><code>focus()</code>.</b> <code>this.composer.input.focus()</code>; with no composer, focus the <code>.tr</code> element, which has <code>tabindex="-1"</code>.</li>
 </ol>
@@ -369,14 +374,14 @@ async spawn(agent = this.opts.agent, prompt = null) {
   return { session: out.log_id, handle: out.handle };
 }
 
-follow(key) {
+follow(key, quiet = false) {
   const previous = this.state.shown;
   key = key || null;
   this.state.shown = key;
   this.transcript?.show(key);
   this.composer?.show(key);
   this.view?.follow?.(key);
-  if (previous !== key)
+  if (!quiet && previous !== key)
     this.emit("sessionChanged", {
       session: key,
       previous,
@@ -384,6 +389,7 @@ follow(key) {
     });
 }
 
+// mountLayout: this.follow(this.opts.session, true)  — the constructor's session is silent
 noteTurn(key, prev, meta) {
   const was = prev?.state === "working";
   const now = meta.state === "working";
@@ -410,7 +416,7 @@ noteTurn(key, prev, meta) {
 </script>
 <h4>tests</h4>
 <script type="text/plain" data-lang="bash">uv run pytest -q -m browser tests/test_mount_browser.py -k "event or call or open or spawn or focus"</script>
-<p>New assertions: a second mount with <code>{agent:"opus"}</code> and no session sends, a session appears, <code>sessionChanged</code> names it once, and <code>turnStart</code> then <code>turnEnd</code> fire for its turn; <code>open(session2)</code> switches the transcript and reports <code>{session: session2, previous: session1}</code>; <code>focus()</code> leaves <code>document.activeElement</code> as the mount's own <code>#input</code>; <code>/mcp file_send</code> fires <code>fileSent</code> with one file and the same entry the <code>entry</code> event carried. A compatibility case mounts with Oikos's exact options (<code>layout:"chat", theme:"host", lang:"es", controls:false</code>, token function) and asserts <code>connection</code>, <code>error</code> and <code>turnEnd</code> still arrive with their old payloads.</p>
+<p>New assertions: a second mount with <code>{agent:"opus"}</code> and no session sends, a session appears, <code>sessionChanged</code> names it once, and <code>turnStart</code> then <code>turnEnd</code> fire for its turn; a <code>Mount</code> built directly from the exported class with a <code>session</code> registers its <code>sessionChanged</code> listener before <code>start()</code> and hears none for that first follow, while a later <code>open()</code> from a mount that started empty reports <code>previous: null</code>; <code>open(session2)</code> switches the transcript and reports <code>{session: session2, previous: session1}</code>; <code>focus()</code> leaves <code>document.activeElement</code> as the mount's own <code>#input</code>; <code>/mcp file_send</code> fires <code>fileSent</code> with one file and the same entry the <code>entry</code> event carried. A compatibility case mounts with Oikos's exact options (<code>layout:"chat", theme:"host", lang:"es", controls:false</code>, token function) and asserts <code>connection</code>, <code>error</code> and <code>turnEnd</code> still arrive with their old payloads.</p>
 <h4>done</h4>
 <p>The new cases pass at 1280 and 390; the file's existing cases pass unchanged; <code>make gates</code>; the slice's report lists each event payload it observed.</p>
 </div></details>
@@ -421,7 +427,7 @@ noteTurn(key, prev, meta) {
 <p class="meta">about 260 changed lines.</p>
 <p>life's two asks: its own tool draws its own card, and its own speech service replaces the browser's. The third task is the last switch the spec names and the code declares but ignores.</p>
 <ol>
-<li><b><code>renderers</code>.</b> Thread <code>mount.opts.renderers</code> into the transcript part's <code>render</code> options (<code>parts/transcript.js:245</code>). In <code>entries.js</code>'s <code>tool</code> renderer, when the entry is no longer <code>running</code> and <code>opts.renderers[entry.title]</code> exists, build the body, call it, and keep that body only when it returns <code>true</code>. A renderer that throws is caught, logged with the tool's name, and falls back to aegis's row; a host's bug must not blank the transcript.</li>
+<li><b><code>renderers</code>, and what a key is.</b> Thread <code>mount.opts.renderers</code> into the transcript part's <code>render</code> options (<code>parts/transcript.js:245</code>). A key is exactly <code>entry.title</code>, the tool name the server folded: an aegis tool has its <code>mcp__aegis__</code> prefix dropped, so the key is <code>file_send</code>; any other MCP tool keeps its full harness name, so a life tool is <code>mcp__life__send_card</code>. In <code>entries.js</code>'s <code>tool</code> renderer, when the entry is no longer <code>running</code> and <code>opts.renderers[entry.title]</code> exists, build the body, call it, and keep that body only when it returns <code>true</code>. A renderer that throws is caught, logged with the tool's name, and falls back to aegis's row; a host's bug must not blank the transcript.</li>
 <li><b>Called again on an update.</b> The renderer runs on each upsert of that tool's row, as <code>render</code> already does; the host must draw from the entry it is given, not keep state between calls. Say so in the help page.</li>
 <li><b><code>transcribe</code> in the engine.</b> <code>Dictation</code> takes <code>transcribe</code>; with it, <code>start()</code> still asks the mic and cuts pieces but skips <code>prepare()</code> and <code>boot()</code> (no 17.8 MB model), and <code>dispatch()</code> hands each job's <code>Float32Array</code> (16 kHz mono) to the hook instead of a worker. Extract the bookkeeping of <code>answer()</code> into <code>settle(job, text, failed, message)</code> so both paths land text in the same order, and a rejected hook lands as a failed piece, leaving provisional text alone as a worker failure does.</li>
 <li><b>The part.</b> <code>DictationPart</code> passes <code>transcribe</code> from its options or from <code>mount.opts.transcribe</code>; <code>ComposerPart.dictating()</code> hands the mount's.</li>
@@ -458,7 +464,7 @@ dispatch() {
 </script>
 <h4>tests</h4>
 <script type="text/plain" data-lang="bash">uv run pytest -q -m browser tests/test_mount_browser.py -k "renderer or transcribe or attachments"</script>
-<p>New: a mount with <code>renderers: {file_send: (e, el) =&gt; { el.textContent = "life card"; return true; }}</code> draws a <code>file_send</code> as that text and not as aegis's <code>.fcard</code>; one returning <code>false</code> leaves aegis's row; one that throws leaves the row and does not fail the page. Dictation is driven in the page as a unit: import <code>dictation.js</code>, construct it with a <code>transcribe</code> that records the sample count, enqueue one piece, and assert the text lands in a textarea, the hook saw a <code>Float32Array</code>, and <code>window.Worker</code> was never constructed. <code>attachments:false</code> hides the clip and adds no chip on paste.</p>
+<p>New: a mount with <code>renderers: {file_send: (e, el) =&gt; { el.textContent = "life card"; return true; }}</code> draws a live <code>file_send</code> as that text and not as aegis's <code>.fcard</code>; a second renderer keyed <code>mcp__life__send_card</code> is exercised by rendering a synthetic tool entry of that title directly from <code>entries.js</code>, so both key forms are covered; one returning <code>false</code> leaves aegis's row; one that throws leaves the row and does not fail the page. Dictation is driven in the page as a unit: import <code>dictation.js</code>, construct it with a <code>transcribe</code> that records the sample count, enqueue one piece, and assert the text lands in a textarea, the hook saw a <code>Float32Array</code>, and <code>window.Worker</code> was never constructed. <code>attachments:false</code> hides the clip and adds no chip on paste.</p>
 <h4>done</h4>
 <p>All three pass at both widths; the file's existing cases pass unchanged; <code>make gates</code>; the slice's report shows the custom card and aegis's own beside it.</p>
 </div></details>
@@ -562,9 +568,10 @@ export class TabsLayout {
 <p><code>mount(el, {layout:"full"})</code> builds the markup but none of the standalone client's behaviour, because that behaviour is <code>app.js</code>'s top-level code. This slice makes the same code run from a mount, without moving the router, the key table or a single controller: they stay in <code>app.js</code> where #1003 will take them.</p>
 <ol>
 <li><b>Boot as a function.</b> In <code>app.js</code>, after the imports, open <code>export function composeFull(app) {</code>; replace the page's <code>const root = document.getElementById("a2")</code> and the <code>new Mount(root, {…}); app.start();</code> block (<code>app.js:64-85</code>) with <code>const root = app.root;</code>; drop the now-unused <code>Mount</code> import; close the function at the end of the file. <b>No indentation of the body</b>: the function header and the closing brace are the whole diff, which keeps the review readable and the router where it is.</li>
-<li><b>The layout calls it.</b> <code>buildFull(root, t)</code> becomes <code>buildFull(mount)</code>: it builds <code>FULL_HTML</code> into <code>mount.root</code>, applies the labels and calls <code>composeFull(mount)</code>. <code>mount.mountLayout</code>'s full branch passes the mount. This adds one import cycle — <code>mount.js → layouts/full.js → app.js → parts/commands.js → mount.js</code> — and it is safe only because every binding the cycle carries (<code>forKey</code>) is called at runtime, never while the modules evaluate. The existing suite proves it; if a browser ever refuses it, the fallback is a dynamic <code>import("../app.js")</code> in <code>buildFull</code>, which makes only the full layout's construction async.</li>
+<li><b>The layout loads it lazily.</b> <code>buildFull(root, t)</code> becomes <code>buildFull(mount)</code>: it builds <code>FULL_HTML</code> into <code>mount.root</code>, applies the labels, then <code>await import("../app.js")</code> and calls <code>composeFull(mount)</code>. <code>mount.mountLayout</code>'s full branch starts that promise and returns, so a chat mount never downloads or evaluates <code>app.js</code> and its 54 imports, and no import cycle is added. <code>app.js</code> stays a client file, so the manifest still lists it; a host's service worker caches it for a full layout and it costs a chat nothing because the chat never asks.</li>
+<li><b>The building queue.</b> <code>Mount</code> gains <code>_built</code>, <code>_queue</code> and <code>_dead</code>: <code>on</code> registers at once, <code>open</code>/<code>focus</code>/<code>send</code> return a promise that runs after <code>built()</code> drains the queue in call order, and <code>destroy</code> before the build sets <code>_dead</code> so <code>buildFull</code> composes nothing after its import and the root and socket are released. <code>built()</code> applies the constructor's <code>session</code> as the first <code>open</code>, silently, and only then drains the queue, so a queued <code>send</code> goes to that session. The handoff is the same for a host and for <code>index.html</code>.</li>
 <li><b>The page calls the mount.</b> <code>index.html</code> keeps its head and its empty <code>#a2</code>, and its body script becomes an import of <code>mount</code> and the page's own <code>outbox</code> singleton; it calls <code>mount(#a2, {adopt:true, layout:"full", theme, lang, outbox, page:true})</code>. <code>page</code> arrives in m5; for this slice the option is accepted and unused.</li>
-<li><b>The page-level effects stay where they are.</b> This slice does not yet gate the service worker, push, title or hash: the standalone page has them as today, and a host embedding full is m5's problem. Keeping them here is what makes this slice provable by the existing suite alone.</li>
+<li><b>The page-level effects stay where they are.</b> This slice does not yet gate the service worker, push, title or hash: the standalone page has them as today, and a host embedding full is m5 and m6's problem. Keeping them here is what makes this slice provable by the existing suite alone.</li>
 <li><b>No second socket and no double outbox.</b> The mount creates the root, the socket and (unless one is passed) an outbox; <code>composeFull</code> uses <code>app.outbox</code>, which is the page's singleton because <code>index.html</code> passed it. A host that passes none gets the mount's, as a chat does.</li>
 </ol>
 <script type="text/plain" data-lang="javascript">
@@ -577,13 +584,23 @@ const phoneHeader = matchMedia("(max-width:760px)");
 // … everything from the old `const $ = …` on, unchanged …
 
 // js/layouts/full.js
-import { composeFull } from "../app.js";
-export function buildFull(mount) {
+export async function buildFull(mount) {
   const holder = document.createElement("template");
   holder.innerHTML = FULL_HTML;
   mount.root.append(holder.content);
   applyLabels(mount.root, mount.t);
-  composeFull(mount);
+  if (mount.dead) return;                    // destroyed while the module loaded
+  const { composeFull } = await import("../app.js");
+  mount.teardown = composeFull(mount);
+  mount.built();                              // drains queued open/focus/send
+}
+
+// js/mount.js, the full branch of mountLayout
+if (this.opts.layout === "full") {
+  this.root.id = "a2";
+  this.root.classList.add("app");
+  buildFull(this).catch((error) => this.fail(null, error));
+  return;
 }
 
 // client/index.html, the body
@@ -607,22 +624,28 @@ uv run pytest -q -m browser tests/test_browser.py -k "fleet or spawn or boot"</s
 </div></details>
 
 <details class="task" id="m5-full-layout-embed" data-state="pending">
-<summary><span class="num">M5</span><span><span class="ttl">The <code>full</code> layout inside a host: <code>page</code>, <code>sidebar</code>, its own hash, and the events</span><span class="files">js/mount.js · js/app.js · js/parts/sidebar.js · css/client.css · tests/test_mount_browser.py</span></span><span class="state"></span></summary>
+<summary><span class="num">M5</span><span><span class="ttl">The <code>full</code> layout in a host: <code>page:false</code>, its own hash, and lookups scoped to the root</span><span class="files">js/mount.js · js/app.js · css/client.css · tests/test_mount_browser.py</span></span><span class="state"></span></summary>
 <div class="body">
-<p class="meta">about 320 changed lines.</p>
-<p>Now a host may mount the full client and keep its own document. <code>page: false</code> keeps the router's view in the mount, starts no service worker and no push, writes no title or favicon, and never touches <code>&lt;html&gt;</code>; <code>sidebar: false</code> drops the session panel; the three missing events and <code>open</code>/<code>focus</code> reach the full layout through the same mount API.</p>
+<p class="meta">about 210 changed lines.</p>
+<p>The full layout can now live in an element the host owns without taking the page over. This is the half that keeps a host's document its own: no service worker, push, title, favicon, theme attribute or URL hash, and no page-wide selector that could match the host's nodes.</p>
 <ol>
 <li><b><code>page</code>.</b> <code>app.opts.page === true</code> only for <code>index.html</code>. Gate <code>startWorker</code>, <code>setupPush</code>, <code>listenForOpen</code>, the service-worker <code>postMessage</code>/<code>controllerchange</code>, <code>setTitle</code> (rename the import and shadow it with a no-op when not page), <code>updatePing</code>, <code>pingToast</code>, <code>redrawFavicon</code> (called from <code>setTheme</code>), and the <code>document.documentElement.dataset.theme</code> write in <code>setTheme</code>. <code>tellWatch</code> and the visibility listeners may stay: they talk to the server, not the page.</li>
 <li><b>Its own hash.</b> The router keeps its code, but its source and sink become a pair: <code>route()</code> reads <code>location.hash</code> when page, else <code>app.state.hash || ""</code>; every <code>history.pushState</code>/<code>replaceState</code> goes through one <code>setHash()</code> that writes <code>app.state.hash</code> instead when not page; the <code>hashchange</code>/<code>popstate</code> listeners are added only when page.</li>
-<li><b><code>sidebar</code>.</b> Default <code>layout === "full"</code>. When false, build no <code>SidebarPart</code> (so no grip, aside or drawer), set <code>root.dataset.sidebar = "none"</code>, and guard the 23 <code>sidebar.*</code> call sites with <code>sidebar?.</code>. The transcript's side button and <code>toggleSide()</code> do nothing without a panel.</li>
-<li><b>Nothing outside the element.</b> The document-level drag/drop handlers gain <code>if (!root.contains(ev.target)) return;</code>, so a file dropped on the host's page is the host's.</li>
-<li><b>The full layout's events.</b> <code>composeFull</code> calls <code>app.noteTurn(key, prev, meta)</code> (m1) from <code>sessionHandlers</code> for upserts and merges, so full gets <code>turnStart</code>/<code>turnEnd</code>; <code>follow(id)</code> emits <code>sessionChanged</code> with the previous id; the transcript subscription emits <code>entry</code> and, for a <code>file</code> upsert, <code>fileSent</code>.</li>
-<li><b><code>open</code>, <code>focus</code>, <code>destroy</code>.</b> <code>composeFull</code> sets <code>app.hooks = {open: openSession, focus: () => input.focus()}</code>; <code>Mount.open</code>/<code>focus</code> delegate for full. <code>composeFull</code> collects its window/document listeners, channel subscriptions and timers into a <code>teardown</code> array and returns the function that runs them; the mount stores it and calls it in <code>destroy()</code>.</li>
-<li><b>CSS.</b> <code>.aegis[data-layout=full][data-page=false]{height:100%}</code>, and <code>[data-sidebar=none] .v-session{grid-template-columns:minmax(0,1fr)}</code> with the side and grip hidden.</li>
+<li><b>The four document-wide lookups.</b> <code>app.js</code> has exactly four <code>document.querySelector</code> calls, and in a host page each could match the host's node. Each is listed here and scoped:
+<ul>
+<li><code>app.js:591</code>, <code>meta[name=aegis-build]</code>: a <code>&lt;meta&gt;</code> lives in the page's head and there is nothing inside the mount to scope it to. Read it only when page; an embedded full starts with <code>PAGE_BUILD = ""</code> and takes the build from the welcome, as the page does when the tag is absent.</li>
+<li><code>app.js:863</code>, <code>.wfcard[data-run=…]</code> and <code>.wfdcard[data-run=…]</code>: the workflow cards are the mount's transcript, so <code>root.querySelector(…)</code>.</li>
+<li><code>app.js:1864</code>, <code>.v-session .col</code>: the session column is the mount's, so <code>root.querySelector(…)</code>.</li>
+<li><code>app.js:2917</code>, <code>.v-session</code>: the session view is the mount's, so <code>root.querySelector(…)</code>.</li>
+</ul>
+After this slice <code>grep -nE 'document\.querySelector' js/app.js</code> names only the page-guarded meta read.</li>
+<li><b>Nothing else outside the element.</b> The document-level drag/drop handlers gain <code>if (!root.contains(ev.target)) return;</code>, so a file dropped on the host's page is the host's.</li>
+<li><b>CSS.</b> <code>makeRoot</code> sets <code>root.dataset.page = String(opts.page === true)</code>, and <code>.aegis[data-layout=full][data-page=false]{height:100%}</code> lets the root fill the host's box rather than the viewport.</li>
 </ol>
 <script type="text/plain" data-lang="javascript">
-// app.js: one helper for both modes
+// app.js: page-only effects and the two hash modes
 const page = app.opts.page === true;
+const PAGE_BUILD = page ? document.querySelector("meta[name=aegis-build]")?.content || "" : "";
 const setHash = (hash) => {
   if (page) history.replaceState(null, "", hash);
   else app.state.hash = hash;
@@ -637,47 +660,85 @@ if (page) {
   navigator.serviceWorker?.addEventListener("controllerchange", tellView);
 }
 
-// app.js: the full layout's events reuse the mount's transition
-function sessionHandlers(server) {
-  …
-  const note = (w) => {
-    const key = w.key;
-    const prev = app.state.sessions.get(key);
-    app.state.sessions.set(key, w);
-    app.noteTurn(key, prev, w);
-    return w;
-  };
-  …
-}
-
-// mount.js: full delegates what only the page knows
-open(session) {
-  if (this.opts.layout === "full") { this.hooks?.open?.(session); return this; }
-  …
-}
-focus() {
-  if (this.hooks?.focus) return this.hooks.focus();
-  if (this.composer) return this.composer.input.focus();
-  this.transcript?.el.querySelector(".tr")?.focus();
-}
+// app.js: the three lookups that live inside the mount (the fourth is the page meta above)
+if (root.querySelector(`.wfcard[data-run="${CSS.escape(run)}"], .wfdcard[data-run="${CSS.escape(run)}"]`)) continue;
+root.querySelector(".v-session .col").addEventListener("click", async (ev) => { … });
+root.querySelector(".v-session").addEventListener("click", (ev) => { … });
 </script>
 <h4>tests</h4>
-<script type="text/plain" data-lang="bash">uv run pytest -q -m browser tests/test_mount_browser.py -k "full or embed or sidebar"
+<script type="text/plain" data-lang="bash">uv run pytest -q -m browser tests/test_mount_browser.py -k "full or embed or page"
 uv run pytest -q -m browser tests/test_stream_browser.py</script>
-<p>New: <code>mount(#full, {layout:"full", session, token, theme:"host", page:false, sidebar:false})</code> draws the header and transcript but no <code>.side</code>; <code>document.title</code>, the favicon and <code>document.documentElement</code>'s theme are exactly what they were before the mount; <code>location.hash</code> is unchanged and the view lives in the mount; <code>open(session2)</code> moves the view and fires <code>sessionChanged</code>; a turn fires <code>turnStart</code>/<code>turnEnd</code>; a <code>file_send</code> fires <code>fileSent</code>; <code>destroy()</code> removes the root and leaves no page errors on the next hash/key event. The standalone page still passes <code>test_stream_browser.py</code> unchanged.</p>
+<p>New: <code>mount(#full, {layout:"full", session, token, theme:"host", page:false})</code> draws the full layout in the host's box; <code>document.title</code>, the favicon, <code>document.documentElement.dataset.theme</code> and <code>location.hash</code> are exactly what they were before; the page carries its own <code>.v-session</code>, <code>.col</code>, <code>.wfcard[data-run=x]</code> and a <code>meta[name=aegis-build]</code> whose content is <code>"host"</code>, and a click on the host's <code>.v-session</code> changes nothing in the mount while the mount's own session panel still answers; the host's meta never reaches the mount, so no “new version” toast appears. The standalone page still passes <code>test_stream_browser.py</code> unchanged.</p>
 <h4>done</h4>
-<p>Both runs pass; <code>make gates</code>; the standalone suite's focused run in m4 still green; the slice's report lists every page-level effect it gated and how it proved it.</p>
+<p>Both runs pass; <code>make gates</code>; the slice's report names each of the four lookups and shows the one-line grep that finds only the page-guarded meta read.</p>
 </div></details>
 
-<details class="task" id="m6-all-layouts-test" data-state="pending">
-<summary><span class="num">M6</span><span><span class="ttl">One fixture page, three layouts, two widths</span><span class="files">tests/host_fixture.py · tests/test_mount_browser.py</span></span><span class="state"></span></summary>
+<details class="task" id="m6-full-layout-sidebar-events" data-state="pending">
+<summary><span class="num">M6</span><span><span class="ttl"><code>full</code>'s sidebar switch, its events, the calls, and its teardown</span><span class="files">js/mount.js · js/app.js · js/parts/sidebar.js · css/client.css · tests/test_mount_browser.py</span></span><span class="state"></span></summary>
+<div class="body">
+<p class="meta">about 230 changed lines.</p>
+<p>The rest of the full layout's host contract: <code>sidebar:false</code>, the seven events reaching a full mount, <code>open</code>/<code>focus</code>, and a <code>destroy()</code> that takes the controllers down with the root.</p>
+<ol>
+<li><b><code>sidebar</code>.</b> Default <code>layout === "full"</code>. When false, build no <code>SidebarPart</code> (so no grip, aside or drawer), set <code>root.dataset.sidebar = "none"</code>, and guard the 23 <code>sidebar.*</code> call sites with <code>sidebar?.</code>. The transcript's side button and <code>toggleSide()</code> do nothing without a panel.</li>
+<li><b>CSS.</b> <code>.aegis[data-layout=full][data-sidebar=none] .v-session{grid-template-columns:minmax(0,1fr)}</code>, with the side and grip hidden.</li>
+<li><b>The full layout's events.</b> <code>sessionHandlers</code> calls <code>app.noteTurn(key, prev, meta)</code> (m1) for upserts and merges, so full gets <code>turnStart</code>/<code>turnEnd</code>. <code>follow(id)</code> emits <code>sessionChanged</code> with <code>{session, previous, meta}</code>; the router's first follow after the build is silent, as the constructor's session is for chat, and <code>previous</code> is null when the view started on the fleet. The transcript subscription emits <code>entry</code> and, for a <code>file</code> upsert, <code>fileSent</code>.</li>
+<li><b><code>open</code> and <code>focus</code>.</b> <code>composeFull</code> sets <code>app.hooks = {open: openSession, focus: () => input.focus()}</code>; <code>Mount.open</code>/<code>focus</code> delegate for full, after the build queue from m4 has drained. <code>open</code> on a full mount is how a host moves the router, so it goes through the same <code>go()</code>/<code>render()</code> as a tab click.</li>
+<li><b><code>destroy</code>.</b> <code>composeFull</code> collects its window/document listeners, channel subscriptions, observers and timers into a <code>teardown</code> array and returns the function that runs them; the mount stores it and calls it in <code>destroy()</code>. A full mount destroyed before its import resolved composes nothing (m4).</li>
+</ol>
+<script type="text/plain" data-lang="javascript">
+// app.js
+const sidebar = app.opts.sidebar === false ? null : new SidebarPart(app, …);
+if (!sidebar) root.dataset.sidebar = "none";
+const toggleSide = () => sidebar?.toggle();
+// the other sidebar.* call sites become sidebar?.render(...), sidebar?.drawQuota(...)
+
+let firstFollow = true;
+function follow(id) {
+  const previous = app.state.shown;
+  …
+  app.state.shown = id;
+  if (!firstFollow && previous !== id)
+    app.emit("sessionChanged", { session: id, previous, meta: app.state.sessions.get(id) || null });
+  firstFollow = false;
+  …
+}
+
+// sessionHandlers: the mount's transition, for both a full row and a merge
+const note = (w) => {
+  const prev = app.state.sessions.get(w.key);
+  app.state.sessions.set(w.key, w);
+  app.noteTurn(w.key, prev, w);          // turnStart / turnEnd
+  return w;
+};
+
+// app.js's transcript subscription, snapshot and patch alike
+for (const entry of data.entries || []) {
+  app.emit("entry", { session: id, entry });
+  if (entry.kind === "file")
+    app.emit("fileSent", { session: id, entry, files: entryFiles(entry) });
+}
+
+// composeFull's end
+app.hooks = { open: openSession, focus: () => input.focus() };
+const teardown = […];                    // every listener, subscription, observer and timer
+return () => teardown.splice(0).forEach((off) => off());
+</script>
+<h4>tests</h4>
+<script type="text/plain" data-lang="bash">uv run pytest -q -m browser tests/test_mount_browser.py -k "full or embed or sidebar or event"</script>
+<p>New: a full mount with <code>sidebar:false</code> draws no <code>.side</code>, <code>.grip</code> or <code>#side</code>, and <code>toggleSide</code> does nothing; the constructor's <code>session</code> hears no <code>sessionChanged</code>; <code>open(session2)</code> fires once with <code>previous</code> equal to the first session and moves the view; a turn fires <code>turnStart</code> and <code>turnEnd</code>; <code>/mcp file_send</code> fires <code>fileSent</code> with one file; <code>destroy()</code> removes the root, and a later hash change or keypress raises no page error; the host's own <code>.v-session</code>, <code>.col</code>, <code>.wfcard</code> and <code>meta[name=aegis-build]</code> are untouched and unused (the scoping m5 proved).</p>
+<h4>done</h4>
+<p>The run passes at 1280 and 390; <code>make gates</code>; the slice's report lists each event it observed with its payload and each teardown it verified.</p>
+</div></details>
+
+<details class="task" id="m7-all-layouts-test" data-state="pending">
+<summary><span class="num">M7</span><span><span class="ttl">One fixture page, three layouts, two widths</span><span class="files">tests/host_fixture.py · tests/test_mount_browser.py</span></span><span class="state"></span></summary>
 <div class="body">
 <p class="meta">about 160 changed lines.</p>
 <p>This is #962's own test, and it is a slice because it is the proof: the page is a stranger's, it already uses <code>#tabs</code> and <code>#composer</code>, it sets the host's theme and hides tool calls with its own CSS, and all three layouts must live in it at once without touching it.</p>
 <ol>
 <li><b>The fixture.</b> <code>HOST_PAGE</code> gains <code>#tabsbox</code> and <code>#full</code>, and its module script mounts them when the page is loaded with <code>?layouts=all</code>; without it, only the chat mounts, so every existing case and its timing are unchanged. <code>window.__tabs</code> and <code>window.__full</code> are their handles; <code>window.__host</code> still records only the host's own boxes.</li>
 <li><b>The chat compatibility case.</b> The existing whole-chat case (<code>test_mount_browser.py:830</code>) stays as it is: that is Oikos's path.</li>
-<li><b>The new case.</b> One test, parametrized 1280 and 390, loads <code>?layouts=all&amp;tools=hidden</code> and asserts, at both widths: three roots, one socket; no page errors; the host's <code>#board</code>, <code>#tabs</code> and <code>#composer</code> are byte-for-byte where <code>window.__host</code> recorded them and <code>getElementById</code> returns the host's nodes; each layout draws its own parts under its own element; the host rule hides a tool row in the chat and in the tabs view; a send from the tabs view streams back; <code>__full.open(session2)</code> changes the full view without changing <code>location.hash</code> or the title; and destroying all three leaves the host's page as it was.</li>
+<li><b>The new case.</b> One test, parametrized 1280 and 390, loads <code>?layouts=all&amp;tools=hidden</code> and asserts, at both widths: three roots, one socket; no page errors; the host's <code>#board</code>, <code>#tabs</code> and <code>#composer</code> are byte-for-byte where <code>window.__host</code> recorded them and <code>getElementById</code> returns the host's nodes; each layout draws its own parts under its own element; the host's own <code>.v-session</code>, <code>.col</code>, <code>.wfcard</code> and <code>aegis-build</code> meta are left alone by the full mount, which is m5's scoping seen from the fixture; the host rule hides a tool row in the chat and in the tabs view; a send from the tabs view streams back; <code>__full.open(session2)</code> changes the full view without changing <code>location.hash</code> or the title; and destroying all three leaves the host's page as it was.</li>
 <li><b>No test edits.</b> The file's existing cases are not changed to fit the fixture's new divs: the added nodes are outside every assertion, and the script mounts only the chat unless asked.</li>
 </ol>
 <script type="text/plain" data-lang="javascript">
@@ -699,8 +760,8 @@ if (new URLSearchParams(location.search).get("layouts") === "all") {
 <p>The whole mount suite passes, the new case at both widths; the existing cases are unchanged; <code>make gates</code>; the slice's report, and the PR, carry the 1280 and 390 screenshots of all three layouts in the host page and a terminal capture of <code>curl /aegis/manifest.json</code>.</p>
 </div></details>
 
-<details class="task" id="m7-embedding-docs" data-state="pending">
-<summary><span class="num">M7</span><span><span class="ttl">The embedding help page, DESIGN.md and the changelog fragment</span><span class="files">help/embedding.md (new) · help/library.md · DESIGN.md · changelog.d/962-mount-api.added.md (new) · tests/test_help_index.py</span></span><span class="state"></span></summary>
+<details class="task" id="m8-embedding-docs" data-state="pending">
+<summary><span class="num">M8</span><span><span class="ttl">The embedding help page, DESIGN.md and the changelog fragment</span><span class="files">help/embedding.md (new) · help/library.md · DESIGN.md · changelog.d/962-mount-api.added.md (new) · tests/test_help_index.py</span></span><span class="state"></span></summary>
 <div class="body">
 <p class="meta">about 260 changed lines, docs only.</p>
 <p>The contract a host needs, on its own page: the options, the layouts, the events with their payloads, the calls, the stable classes, the prefix, the token and the manifest, with one Python example and one proxy example. Read <code>help/writing-help-pages.md</code> first; the checks read names, not prose.</p>
@@ -709,7 +770,7 @@ if (new URLSearchParams(location.search).get("layouts") === "all") {
 <li><b>The page's sections.</b> <code>## Mount the client</code> (the one import and call), <code>## Layouts</code> (chat, tabs, full, and which element size each wants), <code>## Options</code>, <code>## Events</code> with payloads, <code>## Calls</code>, <code>## Renderers</code> (the <code>(entry, el) =&gt; boolean</code> contract, called again on updates, a throw falls back), <code>## Dictation and transcribe</code> (16 kHz mono, the model is not downloaded when the hook is set), <code>## Theming and the stable classes</code> (the variable groups and the class table from above), <code>## Serving under a prefix</code> (<code>srv.asgi</code>, routes relative, <code>/mcp</code> not on the public mount), <code>## Tokens and sign-in</code> (<code>token_for</code>, <code>sign_in</code>, the cookie for files and frames), <code>## The manifest and offline</code> (one URL and hash per file; aegis installs no service worker in an embed).</li>
 <li><b>Two examples, both real.</b> The Python host that runs <code>srv.asgi</code> under <code>/aegis</code> (the fixture's shape), and a reverse proxy that strips <code>/aegis/</code> to a loopback port, with the upgrade headers and <code>origins</code> note.</li>
 <li><b>Search.</b> Add questions to <code>tests/test_help_index.py</code>: “embed aegis in my web page” → <code>embedding</code>, “mount aegis under my own URL prefix” → <code>embedding#serving-under-a-prefix</code>, “draw my own card for a tool call” → <code>embedding#renderers</code>.</li>
-<li><b>DESIGN.md.</b> In “A client is a set of mounts” (<code>DESIGN.md:937-963</code>) state the final contract: three layouts, <code>renderers</code> and <code>transcribe</code>, the seven events and five calls, <code>page</code> and <code>sidebar</code>, and that <code>app.js</code> boots through <code>composeFull</code> while the router and key table stay there (#1003).</li>
+<li><b>DESIGN.md.</b> In “A client is a set of mounts” (<code>DESIGN.md:937-963</code>) state the final contract: three layouts, <code>renderers</code> and <code>transcribe</code>, the seven events and five calls, <code>page</code> and <code>sidebar</code>, that <code>app.js</code> is loaded with a dynamic import only for <code>full</code> and boots through <code>composeFull</code>, and that the router and key table stay there (#1003).</li>
 <li><b>Changelog.</b> <code>changelog.d/962-mount-api.added.md</code> names what a host gains and ends <code>help: embedding</code>.</li>
 <li><b>Checks.</b> <code>make lint-docs</code>, <code>tests/test_help_pages.py</code>, <code>tests/test_help_index.py</code>, <code>make changelog-check</code>. Do not name a repository path in backticks on the page (only pages about working on aegis itself may), and do not backtick an underscore name that is not a tool.</li>
 </ol>
