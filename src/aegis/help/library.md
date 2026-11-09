@@ -275,6 +275,9 @@ parts: `on`, `send`, `destroy` and `el`.
 | `composer` | `true` (the default) draws the message box; `false` gives a transcript only, as for an answer pane. |
 | `commands` | `true` builds the `/` command menu under the box; `false` (the default) leaves it out. |
 | `dictation` | `true` builds the dictation mic (and hold-to-record) beside the box; `false` (the default) leaves it out. |
+| `transcribe` | An async function that replaces the browser's speech engine: each piece of a take, 16 kHz mono as a `Float32Array`, goes to it, and its text lands in the box. With it, dictation never downloads the model. |
+| `attachments` | `true` (the default) builds the clip, and paste and drop add files. `false` builds no clip or file input and wires neither paste nor drop, so the page's own handlers get them; the tray stays when `dictation` is on, because a take is uploaded through it, so a chat that takes neither sets both false. |
+| `renderers` | A map from tool name to `(entry, el) => boolean`, for a host's own tool card. It is called with the finished call; fill `el` and return true, or return false to keep aegis's row. It runs again on every update of that row, so draw from the entry it is given and keep no state; a throw is logged and leaves aegis's row. A key is the name the server folded: `file_send` for an aegis tool, and another MCP server's full harness name for its own. |
 | `controls` | `true` (the default) draws the model, effort and permission chips under the box; `false` hides them, so a product chat's end users see no operator details. The full layout keeps them. |
 | `theme` | `"host"`, or a built-in theme's name (`"ink"`, `"riso"`), which aegis loads itself. |
 | `lang`, `labels` | `"en"` or `"es"`, and single keys to override. A key a table lacks falls back to English and is logged once. The standalone client takes the same choice in its URL, `/?lang=es`. |
