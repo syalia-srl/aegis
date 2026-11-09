@@ -65,6 +65,10 @@ only for the standalone page — it lets the mount own the document title,
 favicon, theme attribute, URL hash, service worker and push. Leave it false in
 your page.
 
+A mount scrolls only its own panes, with one exception for now: when the
+person jumps to a row or an item inside a mount that sits partly below the
+fold, the browser may scroll your page to show it.
+
 ## Options
 
 | Option | Type and default | What it does |
@@ -105,10 +109,12 @@ listeners live until `destroy()`.
 | `fileSent` | `{session, entry, files}` | A live file entry upserts: an agent's file_send, with the files it sent — a screenshot, a rendered PDF, a draft. `entry` fires too; this is the narrow event a host can react to without inspecting kinds. History replayed by a snapshot does not fire it. |
 | `error` | `{session, code, message, error}` | A call the mount made was refused, or its transcript channel failed. `error` is the client's error object for a program that wants its data. |
 
-A chat reports turns for the session it shows, so one chat per host tab does
-not hear every turn on the server. A full mount shows every session the caller
+A chat or a tabs mount reports turns for the session it shows, so one chat
+per host tab does not hear every turn on the server, and a tab strip cannot
+mark a tab in the background as working. A full mount shows every session the caller
 may see and reports turns for all of them. `entry` and `fileSent` are for the
-transcript in front of the mount.
+transcript in front of the mount. When the shown session goes away, a tabs
+mount reports two changes: to no session, then to the tab it opens next.
 
 ## Calls
 
@@ -159,7 +165,9 @@ const chat = mount(document.getElementById("chat"), {
 `transcribe` hook, a take runs a speech model in the browser. With one, each
 piece of the take is handed to your service instead: 16 kHz mono audio as a
 `Float32Array`, and its returned text lands where the local engine's would. No
-model is downloaded when the hook is set.
+model is downloaded when the hook is set. Pieces are handed over as they are
+cut, without waiting for the one before, so your service may see several
+requests at once; the text still lands in order.
 
 ```javascript
 transcribe: async (audio) => {
