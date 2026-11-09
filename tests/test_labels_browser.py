@@ -47,6 +47,23 @@ def test_a_chat_mounts_in_spanish(host, browser):  # noqa: F811
         "Escríbele al agente."
     )
     assert page.get_attribute("#chat #send", "title") == "Enviar (Enter)"
+    # A card the transcript draws (the schedule approval card's body), built
+    # through the module with the Spanish table: a host's Spanish chat must
+    # not fall back to English words inside its cards.
+    card = page.evaluate(
+        """async () => {
+          const { scheduleWorkflow } = await import(`${window.aegisHost.prefix}/static/js/entries.js`);
+          const { labelsFor } = await import(`${window.aegisHost.prefix}/static/js/labels.js`);
+          const box = document.createElement("div");
+          box.append(...scheduleWorkflow({
+            id: "nightly", title: "Nightly", sha: "1234567890abcdef", changed: false,
+            say: "Do it", steps: ["Step one"],
+            saved_by: { by: { handle: "ana" }, t: 0 },
+          }, labelsFor("es")));
+          return box.textContent;
+        }"""
+    )
+    assert "ejecuciones" in card and "guardado por ana" in card, card
     assert "Flota" not in page.text_content("#board")  # the host's page is untouched
     assert not errors, errors
     page.close()

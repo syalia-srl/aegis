@@ -307,3 +307,36 @@ def test_every_part_that_draws_markup_labels_it():
         src = (CLIENT / name).read_text(encoding="utf-8")
         assert "data-t" in src, f"{name} names no label key"
         assert "applyLabels" in src, f"{name} never fills its keys"
+
+
+def test_no_card_literal_was_left_in_entries():
+    """The cards a transcript draws take their words from the table too.
+
+    A chat mount shows the workflow, secret, secret-request, sign-in, config
+    and knowledge cards inside its transcript; a host that mounted it in
+    Spanish must not get English buttons and sentences inside them. Each row
+    names a literal the module used to carry and the key that replaced it.
+    """
+    en = table("en")
+    moved = {
+        "entries.approval.waits": "waits for your go",
+        "entries.secret.goneRevealed": "Already viewed. It cannot be shown again.",
+        "entries.secret.onlyYou": "Only you can reveal this, once.",
+        "entries.request.providedLine": "Provided: {bytes} B written to {path}.",
+        "entries.login.renewed": "Claude sign-in renewed",
+        "entries.login.step2": "Approve access in the browser.",
+        "entries.signin.starting": "Starting the {label} login…",
+        "entries.config.applied": "Applied. .aegis.yaml now holds this text",
+        "entries.knowledge.importAbout": "Moved in from /setup, as you ticked.",
+        "entries.knowledge.done.conflict": "It changed again since,",
+        "entries.workflow.notFound": "workflow not found",
+        "entries.workflow.kindGateYou": "gate · you decide",
+        "entries.workflow.waitsOnMain": "waits on the main agent: {parts}",
+        "entries.workflow.adds": "without asking. Steps that ran keep their results.",
+        "entries.decision.runAgain.one": "Run again: {kept} done step kept",
+        "entries.wfState.armed": "waits for your go",
+    }
+    src = (CLIENT / "entries.js").read_text(encoding="utf-8")
+    for key, literal in moved.items():
+        assert literal in en[key], (key, literal)
+        assert literal not in src, f"{literal} is still in entries.js"

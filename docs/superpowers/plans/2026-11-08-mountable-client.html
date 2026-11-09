@@ -1007,7 +1007,7 @@ uv run pytest -q -m browser tests/test_browser.py -k spawn</script>
 <p><code>index.html</code> has no UI markup and the full suite passes unchanged, which is the proof the DOM is the same; <code>make gates</code>; the phase's PR benchmark table is no worse than the base; shots of Fleet, a session, New session and Settings at 1280/390.</p>
 </div></details>
 
-<details class="task" id="b9-labels-remaining-and-docs" data-state="doing">
+<details class="task" id="b9-labels-remaining-and-docs" data-state="done">
 <summary><span class="num">B9</span><span><span class="ttl">Every remaining string, and what the phase ships</span><span class="files">js/labels/en.js · js/labels/es.js · js/parts/*.js · js/settings.js · js/schedules.js · js/files.js · js/knowledge.js · js/entries.js · DESIGN.md · changelog.d/961-mountable-client.changed.md (new)</span></span><span class="state"></span></summary>
 <div class="body">
 <p>The rest of the table: sidebar, tab strip, spawn, Fleet, the command menu and dictation, the other views, and the workflow/secret/sign-in/config/knowledge cards in <code>entries.js</code>. The parity test already exists; this slice makes it cover every module.</p>
@@ -1029,6 +1029,7 @@ make lint-docs</script>
 <li>Phase A keeps two copies of the transcript's markup: the part's <code>TRANSCRIPT_HTML</code> and the slice in <code>index.html</code> the full layout still uses. The a4 tests prove the mount side and <code>test_stream_browser.py</code> the page side; b1/b8 delete the <code>index.html</code> copy when the full layout mounts the parts, and until then a change to a transcript id must be made in both.</li>
 <li>A mount threads a per-mount <code>opener</code> besides its file <code>base</code>, so two mounts on one page cannot steal each other's viewer. <code>app.js</code> keeps the page's global opener (a4).</li>
 <li>A host that hands its page a token also signs the browser in for HTTP: <code>Server.sign_in(response, token, request)</code> sets the same session cookie the standalone sign-in sets, because a sent file's fetch cannot carry the websocket hello's token (a4). A minted token expires, so a host refreshes the cookie when it mints a new one.</li>
+<li>B9 labels the mount kernel, every part, the full layout's chrome, the Settings chrome and the five transcript cards a chat draws (workflow, secret and secret_request, sign-in/claude_login, config, knowledge, and the approval and workflow_decision cards). The rest of the full client's view strings — <code>app.js</code>'s toasts and menus, <code>keys.js</code>'s keymap, Schedules, Files, Monitors, Knowledge, Usage, Help, Journal, Install, Settings' long paragraphs and the small leftovers — moved to a follow-up issue rather than widening this slice.</li>
 </ul>
 
 <h2>How this runs</h2>
