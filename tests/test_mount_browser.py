@@ -1937,3 +1937,180 @@ def test_the_full_layout_leaves_the_hosts_page_alone(host, browser, width):  # n
     )
     assert errors == []
     page.close()
+
+
+# -- a full mount without its panel, its events, and its teardown (m6, #962) --
+# The host asked for the transcript alone (sidebar:false); it hears every
+# session change, turn and file its mount sees, and destroying the mount takes
+# the layout's listeners, subscriptions and timers with it.
+
+
+def mount_full_quiet(page) -> None:
+    """A full mount a host owns, without the session panel, listening for the
+    events the host contract promises. The page's own look-alike nodes stay
+    first in document order (the m5 scoping holds)."""
+    page.add_style_tag(content="#full { height: 700px; }")
+    page.evaluate(
+        """async (prefix) => {
+          const side = document.createElement("div");
+          side.id = "host-side";
+          side.className = "v-session";
+          side.innerHTML =
+            '<div class="col"><div class="fbar">' +
+            '<button class="native" data-file-id="host" data-name="host">host file</button>' +
+            '</div></div><div class="wfcard" data-run="x">host card</div>';
+          const meta = document.createElement("meta");
+          meta.name = "aegis-build";
+          meta.content = "host";
+          document.head.append(meta);
+          document.body.append(side);
+          const box = document.createElement("div");
+          box.id = "full";
+          document.body.append(box);
+          location.hash = "#host-route";
+          const { mount } = await import(`${prefix}/aegis.js`);
+          window.__ev = {changed: [], starts: [], ends: [], entries: [], files: []};
+          window.__full = mount(box, {
+            token: window.aegisHost.token,
+            session: window.aegisHost.session,
+            layout: "full",
+            sidebar: false,
+            theme: "host",
+            page: false,
+          });
+          for (const [name, key] of [
+            ["sessionChanged", "changed"], ["turnStart", "starts"],
+            ["turnEnd", "ends"], ["entry", "entries"], ["fileSent", "files"],
+          ]) window.__full.on(name, (e) => window.__ev[key].push(e));
+        }""",
+        page.evaluate("window.aegisHost.prefix"),
+    )
+    # composeFull ran, the constructor's session is the view (built() opened it
+    # through the layout's hooks), and the sessions snapshot has landed.
+    page.wait_for_function(
+        """() => {
+          const r = document.querySelector("#full > .aegis[data-layout=full]");
+          return r && r.dataset.view === "session"
+            && document.querySelector("#full #nav-side svg")
+            && window.__wsMsgs.some((m) => m.t === "welcome");
+        }""",
+        timeout=60_000,
+    )
+
+
+@pytest.mark.parametrize("width", [1280, 390])
+def test_a_full_mount_without_its_sidebar_hears_its_events(host, browser, width):  # noqa: F811
+    """sidebar:false draws no panel and its side button does nothing; the
+    constructor's session hears no sessionChanged; open() moves the router and
+    reports it; a turn reports turnStart and turnEnd; a file reports fileSent;
+    destroy() takes the root and every listener with it."""
+    page, errors = open_page(browser, width)
+    page.goto(host["url"])
+    mounted(page)
+    mount_full_quiet(page)
+
+    root = page.locator("#full > .aegis")
+    assert root.get_attribute("data-sidebar") == "none"
+    assert page.locator("#full .side, #full .grip, #full #side").count() == 0
+
+    # The navigator's side button has no panel to open.
+    page.evaluate("() => document.querySelector('#full #nav-side').click()")
+    assert (
+        page.evaluate("document.querySelector('#full > .aegis').dataset.side") is None
+    )
+    assert page.locator("#full .side").count() == 0
+
+    # focus() is this mount's own box, not the host's.
+    assert page.evaluate("window.__full.focus()") is None
+    assert page.evaluate(
+        "document.activeElement === document.querySelector('#full .aegis #input')"
+    )
+
+    # The session the host passed is not news; give a late report time to land.
+    page.wait_for_timeout(500)
+    assert page.evaluate("window.__ev.changed.length") == 0
+
+    # open() moves the router to the other session and says where from, once.
+    page.evaluate("(sid) => window.__full.open(sid)", host["session2"])
+    page.wait_for_function("() => window.__ev.changed.length === 1", timeout=10_000)
+    change = page.evaluate("window.__ev.changed[0]")
+    assert change["session"] == host["session2"]
+    assert change["previous"] == host["session"]
+    assert change["meta"]["key"] == host["session2"]
+
+    # The view moved: a message typed in that session draws in this mount.
+    send(page, host["session2"], "a message the full mount followed")
+    page.wait_for_function(
+        """() => [...document.querySelectorAll("#full #entries .row.user .body")]
+          .some((b) => b.textContent.includes("a message the full mount followed"))""",
+        timeout=60_000,
+    )
+    # entry fired for the row, and the turn it started reported both ends.
+    assert page.evaluate(
+        """() => window.__ev.entries.some((e) =>
+          e.session === window.aegisHost.session2 && e.entry.kind === "user")"""
+    )
+    page.wait_for_function("() => window.__ev.starts.length === 1", timeout=60_000)
+    start = page.evaluate("window.__ev.starts[0]")
+    assert start["session"] == host["session2"]
+    assert start["meta"]["state"] == "working"
+    page.wait_for_function("() => window.__ev.ends.length === 1", timeout=60_000)
+    end = page.evaluate("window.__ev.ends[0]")
+    assert end["session"] == host["session2"]
+    assert isinstance(end["cost_usd"], (int, float)) and end["cost_usd"] > 0
+    assert end["line"] is None
+
+    # A file an agent sends is the narrow event beside the generic one.
+    note = Path(host["root"]) / "full-event-note.txt"
+    note.write_text("a file the full mount hears about\n")
+    send(
+        page,
+        host["session2"],
+        "/mcp file_send "
+        + json.dumps({"paths": [str(note)], "caption": "a file the full mount hears"}),
+    )
+    page.wait_for_function("() => window.__ev.files.length > 0", timeout=60_000)
+    file_event = page.evaluate("window.__ev.files[0]")
+    assert file_event["session"] == host["session2"]
+    assert file_event["entry"]["kind"] == "file"
+    assert len(file_event["files"]) == 1
+    assert page.evaluate(
+        """(sent) => window.__ev.entries.some((e) =>
+          e.session === window.aegisHost.session2 && e.entry.id === sent.id)""",
+        file_event["entry"],
+    )
+
+    # The host's own look-alikes are outside the mount and untouched.
+    assert page.get_attribute('meta[name="aegis-build"]', "content") == "host"
+    assert page.inner_text("#host-side .wfcard") == "host card"
+    assert page.evaluate("location.hash") == "#host-route"
+    page.locator("#host-side .fbar .native").click()
+    assert (
+        page.evaluate("document.querySelector('#host-side .fbar .native').disabled")
+        is False
+    )
+
+    # destroy() takes the root with it, and its channel subscriptions go too:
+    # a turn in the session it showed reaches no handler of it.
+    seen = page.evaluate("window.__ev.entries.length")
+    page.evaluate("() => window.__full.destroy()")
+    assert page.locator("#full > .aegis").count() == 0
+    assert page.evaluate("document.getElementById('full').childElementCount") == 0
+    send(page, host["session2"], "after the full mount is gone")
+    page.wait_for_timeout(1500)
+    assert page.evaluate("window.__ev.entries.length") == seen
+
+    # A later hash change and keypress run nothing of the layout that could
+    # reach a node it took down.
+
+    page.evaluate(
+        """() => {
+          window.dispatchEvent(new HashChangeEvent("hashchange"));
+          document.dispatchEvent(new KeyboardEvent("keydown", {
+            key: "j", code: "KeyJ", altKey: true, bubbles: true }));
+          window.dispatchEvent(new Event("focus"));
+        }"""
+    )
+    page.wait_for_timeout(500)
+    assert errors == []
+    page.close()
