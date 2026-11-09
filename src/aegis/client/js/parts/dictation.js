@@ -14,8 +14,9 @@
 // box moved to another session goes to the draft it was spoken into
 // (dictation.js, `doc`).
 //
-// The engine opens Whisper's workers in the browser, so a mount that never
-// turns dictation on builds no button and enters no code path.
+// The engine opens Whisper's workers in the browser unless the host gave a
+// `transcribe` hook, which takes each piece instead. A mount that never turns
+// dictation on builds no button and enters no code path.
 
 import { Dictation } from "../dictation.js";
 import { HoldToRecord } from "../record.js";
@@ -52,6 +53,9 @@ export class DictationPart {
       opts.onError ? opts.onError(message) : toast(message, { kind: "error", root: mount.root });
     this.dictation = new Dictation({
       prepare: opts.prepare || (() => mount.call("dictation.prepare")),
+      // The box's own hook wins; otherwise the mount's, so a host passes
+      // `transcribe` once and every mic it builds uses it (spec 06).
+      transcribe: opts.transcribe ?? mount.opts.transcribe ?? null,
       onState: (state) => {
         for (const [button, box] of this.buttons)
           button.dataset.state = this.dictation.target?.el === box.input ? state : "idle";
