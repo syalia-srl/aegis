@@ -515,7 +515,7 @@ const unhash = (s) => {
     return s;
   }
 };
-function route(hash = location.hash) {
+function route(hash = hashNow()) {
   const h = hash.slice(1);
   // A row's link (its menu's Copy link) names the entry to reveal after "&at=".
   if (h.startsWith("s=")) {
@@ -556,12 +556,15 @@ function go(hash) {
     filesView.confirmLeave().then((ok) => ok && go(hash));
     return;
   }
-  if (location.hash !== hash) history.pushState(null, "", hash);
+  if (hashNow() !== hash) setHash(hash, true);
   render();
 }
 
-window.addEventListener("hashchange", render);
-window.addEventListener("popstate", render);
+// A host's page may route with its own hash: only the standalone page listens.
+if (page) {
+  window.addEventListener("hashchange", render);
+  window.addEventListener("popstate", render);
+}
 
 function show(view, text) {
   root.dataset.view = view;
@@ -574,7 +577,7 @@ function showLogin() {
   $("login").hidden = false;
   if (new URLSearchParams(location.search).has("refused")) {
     $("login-error").textContent = "That token was refused. Paste the one aegis serve printed.";
-    history.replaceState(null, "", location.pathname + location.hash);
+    if (page) setHash(location.pathname + location.hash);
   }
   $("login-token").focus();
 }
@@ -1296,8 +1299,8 @@ function render() {
   if (!booted) return;
   // Back or Forward away from unsaved edits: stay on the file, and ask.
   if (root.dataset.view === "files" && filesView.leaving(route())) {
-    const target = location.hash || "#fleet";
-    history.replaceState(null, "", filesHash(filesView.path));
+    const target = hashNow() || "#fleet";
+    setHash(filesHash(filesView.path));
     filesView.confirmLeave().then((ok) => ok && go(target));
     return;
   }
@@ -1308,12 +1311,12 @@ function render() {
   // none. The row waits in landEntry: a render that waits for the session
   // list runs again later with the plain hash.
   if (r.at) {
-    history.replaceState(null, "", `#s=${r.id}`);
+    setHash(`#s=${r.id}`);
     landEntry = { key: r.id, id: r.at };
   }
   // A fill is read once too, so a reload or Back never fills the form again.
   if (r.fill) {
-    history.replaceState(null, "", "#new");
+    setHash("#new");
     spawn.show(r.fill);
   }
   // A menu or the selection bar is about the view it opened in. go() moves
@@ -1329,7 +1332,7 @@ function render() {
   if (leaveIfGone(r)) return;
   // A session's link to a terminal, or the reverse, opens the right view.
   if ((r.view === "session" || r.view === "term" || r.view === "browser") && app.state.sessions.has(r.id) && `#${r.view[0]}=${r.id}` !== hashOf(r.id)) {
-    history.replaceState(null, "", hashOf(r.id));
+    setHash(hashOf(r.id));
     return render();
   }
   // A reload into a closed terminal: its row comes from term.closed.

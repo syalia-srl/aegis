@@ -516,6 +516,7 @@ export class MountState {
     this.unsubHost = null;
     this.ordered = []; // metas in this browser's tab order
     this.shown = null; // the key of the session a chat shows
+    this.hash = ""; // the full layout's route when it does not own the page (m5)
     this.kept = new Map(); // key -> the transcript part's stash (a4)
   }
 }
