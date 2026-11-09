@@ -942,7 +942,20 @@ from its own module URL, so a host that serves the app under its prefix
 (`web.py`, `Server(prefix=...)`) configures nothing; `theme: "host"` loads no
 theme and leaves the variables to the host's own CSS. The handle is the whole
 contract a host sees: `on` for `connection`, `entry`, `turnEnd` and `error`,
-`send`, `destroy`. A turn's cost is the mount's — the cumulative figure the
+`send`, `destroy`.
+
+**Every string the client shows is a key in a table.** `js/labels/en.js` and
+`js/labels/es.js` hold the same keys, and a mount picks one with `lang` while
+`labels` replaces single entries. A key one table lacks falls back to English
+and is logged by name once, so a translation lag makes noise instead of an
+empty button. A part's markup stays in English and names its key beside it
+(`data-t`, and `data-t-title`, `data-t-aria` and `data-t-placeholder` for the
+attributes `applyLabels` fills); code that builds a string calls `t("part.thing",
+{ name })`. Counts, plurals and dates stay in code and only their nouns come
+from the table, so a translator moves the word, not the arithmetic. The
+standalone page is a mount like any other and takes `?lang=es` (or the
+`aegis.lang` it remembers), which is what makes the full layout's own chrome,
+Settings and the help pages read in Spanish too. A turn's cost is the mount's — the cumulative figure the
 patch that entered working carried, subtracted from the one it left with, null
 when the mount joined mid-turn — so no host re-derives it.
 

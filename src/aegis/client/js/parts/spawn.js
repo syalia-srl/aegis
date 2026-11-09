@@ -30,7 +30,7 @@ import { toast } from "../toast.js";
 const SPAWN_HTML = `
 <form class="spawn" id="spawn">
   <div class="mark" id="sp-mark"><span>ægis</span></div>
-  <h3 class="sp-head" data-t="spawn.agents">Agents</h3>
+  <h3 class="sp-head" data-t="spawn.agents"></h3>
   <div class="cwdline"><pick-chip class="srvpick" id="sp-server" name="server" data-t-aria="spawn.server" data-t-title="spawn.serverTitle" hidden></pick-chip><span class="srvsep" id="sp-sep" hidden>:</span><input class="cwd" id="sp-cwd" spellcheck="false" data-t-aria="spawn.cwd" data-t-title="spawn.cwdTitle"></div>
   <div class="atts" id="sp-atts" hidden></div>
   <div class="box">
@@ -49,21 +49,21 @@ const SPAWN_HTML = `
     <pick-chip class="pick" id="sp-model" name="model" data-t-aria="spawn.model" free></pick-chip>
     <pick-chip class="pick" id="sp-effort" name="effort" data-t-aria="spawn.effortChip"></pick-chip>
     <pick-chip class="pick" id="sp-permission" name="permission" data-t-aria="spawn.permissionChip"></pick-chip>
-    <button type="button" class="reset" id="sp-reset" hidden data-t="spawn.reset">reset</button>
+    <button type="button" class="reset" id="sp-reset" hidden data-t="spawn.reset"></button>
   </div>
   <div class="hints" id="sp-hints">
     <div class="doc" id="hint-doctor" hidden>
       <div class="row"><span class="dot"></span><span class="sum" id="hint-doctor-sum"></span><button class="run" id="hint-doctor-go" type="button">/doctor</button><button class="more" id="hint-doctor-more" type="button" aria-expanded="false" data-t-title="spawn.doctorTitle" data-t-aria="spawn.doctor"></button></div>
       <ul id="hint-doctor-list" hidden></ul>
     </div>
-    <div class="hint" id="hint-tutorial" hidden><button class="go" id="hint-tutorial-go" type="button"><span data-t="spawn.hintRun">Run</span> <code>/tutorial</code> <span data-t="spawn.hintTutorial">for a quick guide.</span></button><button class="x" id="hint-tutorial-x" type="button" data-t-title="spawn.dismiss" data-t-aria="spawn.dismiss"></button></div>
-    <div class="hint" id="hint-whats-new" hidden><button class="go" id="hint-whats-new-go" type="button"><span data-t="spawn.hintRun">Run</span> <code>/whats-new</code> <span data-t="spawn.hintWhatsNew">to learn what's new in</span> <span id="hint-whats-new-v"></span>.</button><button class="x" id="hint-whats-new-x" type="button" data-t-title="spawn.dismiss" data-t-aria="spawn.dismiss"></button></div>
-    <div class="hint" id="hint-feedback" hidden><button class="go" id="hint-feedback-go" type="button"><span data-t="spawn.hintRun">Run</span> <code>/feedback</code> <span data-t="spawn.hintFeedback">to report a bug or ask for a feature.</span></button></div>
+    <div class="hint" id="hint-tutorial" hidden><button class="go" id="hint-tutorial-go" type="button"><span data-t="spawn.hintRun"></span> <code>/tutorial</code> <span data-t="spawn.hintTutorial"></span></button><button class="x" id="hint-tutorial-x" type="button" data-t-title="spawn.dismiss" data-t-aria="spawn.dismiss"></button></div>
+    <div class="hint" id="hint-whats-new" hidden><button class="go" id="hint-whats-new-go" type="button"><span data-t="spawn.hintRun"></span> <code>/whats-new</code> <span data-t="spawn.hintWhatsNew"></span> <span id="hint-whats-new-v"></span>.</button><button class="x" id="hint-whats-new-x" type="button" data-t-title="spawn.dismiss" data-t-aria="spawn.dismiss"></button></div>
+    <div class="hint" id="hint-feedback" hidden><button class="go" id="hint-feedback-go" type="button"><span data-t="spawn.hintRun"></span> <code>/feedback</code> <span data-t="spawn.hintFeedback"></span></button></div>
     <div class="hint tip" id="hint-tip" hidden><span class="lab"></span><button class="go" id="hint-tip-go" type="button"></button></div>
   </div>
   <p class="err-text" id="sp-error"></p>
   <section id="sp-terms" class="sp-terms" data-t-aria="spawn.terminals">
-    <h3 data-t="spawn.terminals">Terminals</h3>
+    <h3 data-t="spawn.terminals"></h3>
     <div class="sp-term-list"></div>
   </section>
 </form>`;

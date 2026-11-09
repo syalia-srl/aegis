@@ -45,99 +45,99 @@ import { Side } from "../side.js";
 // suite's hooks, and two mounts' copies are harmless because every lookup is
 // scoped to the part's own element.
 const SIDEBAR_HTML = `
-<div class="sec"><h4 data-t="sidebar.session">Session</h4>
+<div class="sec"><h4 data-t="sidebar.session"></h4>
   <div class="prow" id="p-session" tabindex="0">
     <div class="title editable" id="s-title" data-t-title="sidebar.renameTitle"></div>
     <div class="sline"><span class="handle editable" id="s-handle" data-t-title="sidebar.renameTitle"></span><span class="at" id="s-at" data-t-title="sidebar.serverTitle"></span><span class="badge" id="s-worker" hidden></span><span class="st" id="s-status"></span></div>
     <div class="pcard">
       <div class="chd"><div class="t" id="c-title"></div><div class="sub" id="c-sub"></div></div>
       <div class="csec">
-        <div class="kv"><span data-t="sidebar.kv.harness">harness</span><span id="s-harness"></span></div>
-        <div class="kv"><span data-t="sidebar.kv.model">model</span><span id="s-model"></span></div>
-        <div class="kv"><span data-t="sidebar.kv.effort">effort</span><span id="s-effort"></span></div>
-        <div class="kv"><span data-t="sidebar.kv.permission">permission</span><span id="s-perm"></span></div>
-        <div class="kv"><span data-t="sidebar.kv.directory">directory</span><span class="path" id="s-cwd"></span></div>
-        <div class="kv"><span data-t="sidebar.kv.server">server</span><span id="s-server"></span></div>
-        <div class="kv" id="s-exit-row" hidden><span data-t="sidebar.exitsVia">exits via</span><span id="s-exit"></span></div>
-        <p class="cnote" data-t="sidebar.renameNote">Click the title or the handle to rename.</p>
+        <div class="kv"><span data-t="sidebar.kv.harness"></span><span id="s-harness"></span></div>
+        <div class="kv"><span data-t="sidebar.kv.model"></span><span id="s-model"></span></div>
+        <div class="kv"><span data-t="sidebar.kv.effort"></span><span id="s-effort"></span></div>
+        <div class="kv"><span data-t="sidebar.kv.permission"></span><span id="s-perm"></span></div>
+        <div class="kv"><span data-t="sidebar.kv.directory"></span><span class="path" id="s-cwd"></span></div>
+        <div class="kv"><span data-t="sidebar.kv.server"></span><span id="s-server"></span></div>
+        <div class="kv" id="s-exit-row" hidden><span data-t="sidebar.exitsVia"></span><span id="s-exit"></span></div>
+        <p class="cnote" data-t="sidebar.renameNote"></p>
       </div>
     </div>
   </div>
   <div class="askbox" id="s-ask" hidden></div>
 </div>
-<div class="sec" id="s-plan-sec" hidden><h4 id="s-plan-h" data-t="sidebar.plan">Plan</h4>
+<div class="sec" id="s-plan-sec" hidden><h4 id="s-plan-h" data-t="sidebar.plan"></h4>
   <div class="plan" id="s-plan"></div>
   <div class="prow more" id="p-plan" tabindex="0" hidden><span id="s-plan-more"></span>
-    <div class="pcard"><div class="csec"><h5 id="s-plan-card-h" data-t="sidebar.plan">Plan</h5><div class="plan" id="s-plan-all"></div></div></div>
+    <div class="pcard"><div class="csec"><h5 id="s-plan-card-h" data-t="sidebar.plan"></h5><div class="plan" id="s-plan-all"></div></div></div>
   </div>
 </div>
-<div class="sec" id="s-skills-sec" hidden><h4 data-t="sidebar.skills">Skills loaded</h4><div class="plan" id="s-skills"></div></div>
-<div class="sec" id="s-repos-sec" hidden><h4><span data-t="sidebar.repos">Repos</span><span class="aside" id="s-repos-n"></span></h4>
+<div class="sec" id="s-skills-sec" hidden><h4 data-t="sidebar.skills"></h4><div class="plan" id="s-skills"></div></div>
+<div class="sec" id="s-repos-sec" hidden><h4><span data-t="sidebar.repos"></span><span class="aside" id="s-repos-n"></span></h4>
   <div class="prow" id="p-repos" tabindex="0">
     <div id="s-repos"></div>
     <div class="pcard">
-      <div class="chd"><div class="t" data-t="sidebar.reposTitle">Repos this session wrote to</div><div class="sub" id="s-repos-sum"></div></div>
+      <div class="chd"><div class="t" data-t="sidebar.reposTitle"></div><div class="sub" id="s-repos-sum"></div></div>
       <div id="s-repos-all"></div>
     </div>
   </div>
 </div>
-<div class="sec" id="s-journal-sec"><h4><span data-t="sidebar.journal">Journal</span><span class="aside" data-t="sidebar.today">today</span></h4>
+<div class="sec" id="s-journal-sec"><h4><span data-t="sidebar.journal"></span><span class="aside" data-t="sidebar.today"></span></h4>
   <div class="prow" id="p-journal" tabindex="0">
     <div class="jpeek" id="s-journal-peek" hidden></div>
-    <div class="foot"><span id="s-journal" data-t="sidebar.nothingYet">nothing yet today</span><span id="s-journal-at"></span></div>
+    <div class="foot"><span id="s-journal" data-t="sidebar.nothingYet"></span><span id="s-journal-at"></span></div>
     <div class="pcard">
-      <div class="chd"><div class="t" data-t="sidebar.journalTitle">This session today</div><div class="sub" data-t="sidebar.journalSub">newest first · each opens its transcript</div></div>
+      <div class="chd"><div class="t" data-t="sidebar.journalTitle"></div><div class="sub" data-t="sidebar.journalSub"></div></div>
       <div class="csec" id="s-journal-all"></div>
     </div>
   </div>
 </div>
-<div class="sec" id="s-wait-sec" hidden><h4 data-t="sidebar.waiting">Waiting on</h4><div id="s-waiting"></div></div>
-<div class="sec" id="s-mon-sec" hidden><h4 data-t="sidebar.monitors">Monitors</h4><div id="s-monitors"></div></div>
-<div class="sec"><h4 data-t="sidebar.usage">Usage</h4>
+<div class="sec" id="s-wait-sec" hidden><h4 data-t="sidebar.waiting"></h4><div id="s-waiting"></div></div>
+<div class="sec" id="s-mon-sec" hidden><h4 data-t="sidebar.monitors"></h4><div id="s-monitors"></div></div>
+<div class="sec"><h4 data-t="sidebar.usage"></h4>
   <div class="prow" id="p-usage" tabindex="0">
     <div class="tiles" id="s-tiles"></div>
     <div class="foot" id="s-foot"><span id="s-foot-l"></span><span id="s-foot-r"></span></div>
-    <div class="foot" id="s-load" hidden data-t-title="sidebar.loadTitle"><span data-t="sidebar.load">load</span><span id="s-load-v"></span></div>
+    <div class="foot" id="s-load" hidden data-t-title="sidebar.loadTitle"><span data-t="sidebar.load"></span><span id="s-load-v"></span></div>
     <div class="pcard">
-      <div class="csec"><h5><span data-t="sidebar.context">Context</span><span data-t="sidebar.thisSession">this session</span></h5>
-        <div class="big"><span class="p" id="s-tokens" data-t="sidebar.noTurn">no turn yet</span><span class="of" id="s-of"></span><span class="c" id="s-cost">$0.00</span></div>
+      <div class="csec"><h5><span data-t="sidebar.context"></span><span data-t="sidebar.thisSession"></span></h5>
+        <div class="big"><span class="p" id="s-tokens" data-t="sidebar.noTurn"></span><span class="of" id="s-of"></span><span class="c" id="s-cost">$0.00</span></div>
         <div class="bar" id="s-ctxbar"><i id="s-bar" style="width:0%"></i></div>
         <p class="cnote" id="s-ctxnote"></p>
         <p class="cnote" id="s-counters" hidden></p>
       </div>
-      <div class="csec" id="s-quota-sec"><h5><span class="qlink" id="s-quota-head" data-t-title="sidebar.quotaTitle"><span data-t="sidebar.quota">Quota</span></span><span id="s-quota-age"></span></h5><div id="s-quota"></div></div>
+      <div class="csec" id="s-quota-sec"><h5><span class="qlink" id="s-quota-head" data-t-title="sidebar.quotaTitle"><span data-t="sidebar.quota"></span></span><span id="s-quota-age"></span></h5><div id="s-quota"></div></div>
     </div>
   </div>
 </div>
-<div class="sec" id="s-host-sec" hidden><h4><span data-t="sidebar.host">Host</span><span class="aside" id="s-host-name"></span></h4>
+<div class="sec" id="s-host-sec" hidden><h4><span data-t="sidebar.host"></span><span class="aside" id="s-host-name"></span></h4>
   <div class="prow" id="p-host" tabindex="0">
     <div class="tiles" id="s-host-tiles"></div>
     <div class="pcard">
-      <div class="csec"><h5><span id="s-host-head" data-t="sidebar.host">Host</span><span data-t="sidebar.everyFive">every 5 s</span></h5><div id="s-host-rows"></div></div>
+      <div class="csec"><h5><span id="s-host-head" data-t="sidebar.host"></span><span data-t="sidebar.everyFive"></span></h5><div id="s-host-rows"></div></div>
       <div class="csec">
-        <div class="kv"><span data-t="sidebar.liveSessions">live sessions</span><span id="s-host-live"></span></div>
-        <div class="kv"><span data-t="sidebar.avgContext">average context</span><span id="s-host-ctx"></span></div>
+        <div class="kv"><span data-t="sidebar.liveSessions"></span><span id="s-host-live"></span></div>
+        <div class="kv"><span data-t="sidebar.avgContext"></span><span id="s-host-ctx"></span></div>
       </div>
     </div>
   </div>
 </div>
 <div class="side-acts live-only">
-  <button class="act stop needs-net" id="stop-session" data-t-title="sidebar.sleepTitle"><span data-t="sidebar.sleep">Sleep</span></button>
-  <button class="act" id="quiet-session" data-t-title="sidebar.quietTitle"><span data-t="sidebar.quiet">Quiet</span></button>
-  <button class="act needs-net" id="autoclose-session" aria-pressed="false" data-t-title="sidebar.autocloseTitle"><span data-t="sidebar.autoclose">Autoclose</span></button>
-  <button class="act needs-net" id="continue" data-t-title="sidebar.continueTitle"><span data-t="sidebar.continue">Continue</span></button>
-  <button class="act needs-net" id="restart" data-t-title="sidebar.restartTitle"><span data-t="sidebar.restart">Restart</span></button>
-  <button class="act needs-net" id="close" data-t-title="sidebar.archiveTitle"><span data-t="sidebar.archive">Archive</span></button>
+  <button class="act stop needs-net" id="stop-session" data-t-title="sidebar.sleepTitle"><span data-t="sidebar.sleep"></span></button>
+  <button class="act" id="quiet-session" data-t-title="sidebar.quietTitle"><span data-t="sidebar.quiet"></span></button>
+  <button class="act needs-net" id="autoclose-session" aria-pressed="false" data-t-title="sidebar.autocloseTitle"><span data-t="sidebar.autoclose"></span></button>
+  <button class="act needs-net" id="continue" data-t-title="sidebar.continueTitle"><span data-t="sidebar.continue"></span></button>
+  <button class="act needs-net" id="restart" data-t-title="sidebar.restartTitle"><span data-t="sidebar.restart"></span></button>
+  <button class="act needs-net" id="close" data-t-title="sidebar.archiveTitle"><span data-t="sidebar.archive"></span></button>
 </div>
-<div class="side-acts read-only"><button class="act reopen" id="reopen" data-t-title="sidebar.reopenTitle"><span data-t="sidebar.reopen">Reopen</span></button></div>
+<div class="side-acts read-only"><button class="act reopen" id="reopen" data-t-title="sidebar.reopenTitle"><span data-t="sidebar.reopen"></span></button></div>
 <p class="sub err-text" id="side-error"></p>
 <div class="ver" id="ver-sec" hidden>
   <div class="prow" id="p-ver" tabindex="0"><span id="ver-line"></span>
     <div class="pcard"><div class="csec"><h5 id="ver-head">aegis</h5>
-      <div class="kv"><span data-t="sidebar.running">running</span><span id="ver-run"></span></div>
-      <div class="kv dim" id="ver-ref-row" hidden><span data-t="sidebar.ref">ref</span><span class="path" id="ver-ref"></span></div>
-      <div class="kv dim" id="ver-base-row" hidden><span data-t="sidebar.base">base</span><span class="v" id="ver-base"></span></div>
-      <div class="kv"><span data-t="sidebar.latest">latest</span><span id="ver-latest"></span></div>
+      <div class="kv"><span data-t="sidebar.running"></span><span id="ver-run"></span></div>
+      <div class="kv dim" id="ver-ref-row" hidden><span data-t="sidebar.ref"></span><span class="path" id="ver-ref"></span></div>
+      <div class="kv dim" id="ver-base-row" hidden><span data-t="sidebar.base"></span><span class="v" id="ver-base"></span></div>
+      <div class="kv"><span data-t="sidebar.latest"></span><span id="ver-latest"></span></div>
     </div><div class="csec ver-upd" id="ver-upd" hidden></div></div>
   </div>
 </div>`;

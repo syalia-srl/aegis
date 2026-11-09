@@ -14,7 +14,7 @@ const TERMINAL_HTML = `
 <section class="term-pane">
   <header class="term-hd">
     <span class="term-name"></span><span class="term-state"></span>
-    <span class="term-mode" data-t="terminal.lineMode">line mode</span>
+    <span class="term-mode" data-t="terminal.lineMode"></span>
   </header>
   <div id="term-host" class="term-host"></div>
   <div id="term-keys" class="term-keys" hidden>
@@ -24,7 +24,7 @@ const TERMINAL_HTML = `
     <button type="button" data-key="ctrl-c">Ctrl-C</button>
     <button type="button" data-key="up">↑</button>
     <button type="button" data-key="down">↓</button>
-    <button type="button" data-key="done" data-t="terminal.done">done</button>
+    <button type="button" data-key="done" data-t="terminal.done"></button>
   </div>
   <form id="term-box" class="box term-box">
     <textarea id="term-input" rows="1" data-t-placeholder="terminal.placeholder" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea>
@@ -33,8 +33,8 @@ const TERMINAL_HTML = `
 <aside id="term-side" class="term-side">
   <dl class="term-proc"></dl>
   <div class="term-act">
-    <button class="btn" type="button" id="term-restart" hidden data-t="sidebar.restart">Restart</button>
-    <button class="btn" type="button" id="term-close" data-t="terminal.close">Close</button>
+    <button class="btn" type="button" id="term-restart" hidden data-t="sidebar.restart"></button>
+    <button class="btn" type="button" id="term-close" data-t="terminal.close"></button>
   </div>
 </aside>`;
 

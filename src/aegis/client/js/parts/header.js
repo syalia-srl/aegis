@@ -28,17 +28,17 @@ import { Switcher } from "../switcher.js";
 // scoped to the part's own element.
 const HEADER_HTML = `
 <button class="hdr-burger" id="hdr-burger" data-t-title="header.menu" data-t-aria="header.menu" aria-expanded="false" aria-controls="hdr-menu"></button>
-<div class="tab home" id="tab-fleet" data-t-title="header.fleetTitle" data-t="header.fleet">Fleet</div>
+<div class="tab home" id="tab-fleet" data-t-title="header.fleetTitle" data-t="header.fleet"></div>
 <div class="tablist" id="tablist"></div>
 <button class="tab-more" id="tab-more" data-t-title="header.moreTitle" data-t-aria="header.more" aria-haspopup="menu" hidden></button>
-<button class="new-session needs-net" id="tab-add" type="button" data-t-title="header.newTitle" data-t-aria="header.new"><span class="plus">+</span><span class="lbl" data-t="header.new">New session</span></button>
+<button class="new-session needs-net" id="tab-add" type="button" data-t-title="header.newTitle" data-t-aria="header.new"><span class="plus">+</span><span class="lbl" data-t="header.new"></span></button>
 <div class="gap"></div>
 <div class="hdr-scrim" id="hdr-scrim"></div>
 <div class="hdr-menu" id="hdr-menu">
-<div class="servers"><span class="dot ghost" id="conn-dot"></span><span id="conn-text" data-t="header.connecting">connecting</span><span class="ver-top" id="ver-top" hidden></span></div>
+<div class="servers"><span class="dot ghost" id="conn-dot"></span><span id="conn-text" data-t="header.connecting"></span><span class="ver-top" id="ver-top" hidden></span></div>
 <button class="menu-fleet" id="menu-fleet" data-t-title="header.fleetTitle" data-t-aria="header.fleet"></button>
-<button class="keys-btn set-btn sch-btn" id="schedules-btn" data-t-title="header.schedulesTitle" data-t-aria="header.schedules"><span class="lbl" data-t="header.schedules">Schedules</span><span class="n" id="schedules-n"></span></button>
-<button class="keys-btn set-btn" id="settings-btn" data-t-title="header.settingsTitle" data-t-aria="header.settings"><span class="lbl" data-t="header.settings">Settings</span></button>
+<button class="keys-btn set-btn sch-btn" id="schedules-btn" data-t-title="header.schedulesTitle" data-t-aria="header.schedules"><span class="lbl" data-t="header.schedules"></span><span class="n" id="schedules-n"></span></button>
+<button class="keys-btn set-btn" id="settings-btn" data-t-title="header.settingsTitle" data-t-aria="header.settings"><span class="lbl" data-t="header.settings"></span></button>
 <button class="jr-btn" id="files-btn" data-t-title="header.filesTitle" data-t-aria="header.files"></button>
 <button class="jr-btn" id="journal-btn" data-t-title="header.journalTitle" data-t-aria="header.journal"></button>
 <button class="jr-btn" id="knowledge-btn" data-t-title="header.knowledgeTitle" data-t-aria="header.knowledge"></button>

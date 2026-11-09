@@ -32,31 +32,31 @@ import { markNeedsNet } from "../net.js";
 // suite's hooks, and two mounts' copies are harmless because every lookup is
 // scoped to the part's own element.
 const FLEET_HTML = `
-<section class="install-offer" id="install-offer" hidden><div class="t"><span data-t="fleet.installOffer">Install aegis as an app</span><span data-t="fleet.installWhy">Opens from the home screen, works without a connection, and can notify you.</span></div><button class="btn" type="button" data-act="later" data-t="fleet.notNow">Not now</button><button class="btn primary" type="button" data-act="install" data-t="fleet.install">Install</button></section>
+<section class="install-offer" id="install-offer" hidden><div class="t"><span data-t="fleet.installOffer"></span><span data-t="fleet.installWhy"></span></div><button class="btn" type="button" data-act="later" data-t="fleet.notNow"></button><button class="btn primary" type="button" data-act="install" data-t="fleet.install"></button></section>
 <section class="band" id="band">
   <div class="band-mark" id="band-mark"></div>
-  <div><h5><span class="band-server" id="band-server" data-t="fleet.server">server</span><span class="band-link"></span></h5><div class="counts band-counts" id="band-counts"></div></div>
-  <div><h5 data-t="sidebar.host">Host</h5><div class="band-host" id="band-host"></div></div>
-  <div class="q band-quota-col" id="band-quota-col" hidden><h5><span class="qlink" id="band-quota-link" data-t-title="sidebar.quotaTitle"><span data-t="sidebar.quota">Quota</span></span><span class="age band-quota-age" id="band-quota-age"></span></h5><div class="band-quota" id="band-quota"></div></div>
+  <div><h5><span class="band-server" id="band-server" data-t="fleet.server"></span><span class="band-link"></span></h5><div class="counts band-counts" id="band-counts"></div></div>
+  <div><h5 data-t="sidebar.host"></h5><div class="band-host" id="band-host"></div></div>
+  <div class="q band-quota-col" id="band-quota-col" hidden><h5><span class="qlink" id="band-quota-link" data-t-title="sidebar.quotaTitle"><span data-t="sidebar.quota"></span></span><span class="age band-quota-age" id="band-quota-age"></span></h5><div class="band-quota" id="band-quota"></div></div>
 </section>
-<div class="order"><h3 data-t="fleet.sessions">Sessions</h3>
+<div class="order"><h3 data-t="fleet.sessions"></h3>
   <div class="seg" id="fleet-order">
-    <button data-order="attention" data-t="fleet.needsFirst">Needs you first</button>
-    <button data-order="tabs" data-t="fleet.tabOrder">Tab order</button>
+    <button data-order="attention" data-t="fleet.needsFirst"></button>
+    <button data-order="tabs" data-t="fleet.tabOrder"></button>
   </div>
   <div class="seg kinds" role="radiogroup" data-t-aria="fleet.show">
-    <button type="button" role="radio" data-kind="all" data-t="fleet.all">All</button>
-    <button type="button" role="radio" data-kind="agents" data-t="fleet.agents">Agents</button>
-    <button type="button" role="radio" data-kind="terminals" data-t="fleet.terminals">Terminals</button>
+    <button type="button" role="radio" data-kind="all" data-t="fleet.all"></button>
+    <button type="button" role="radio" data-kind="agents" data-t="fleet.agents"></button>
+    <button type="button" role="radio" data-kind="terminals" data-t="fleet.terminals"></button>
   </div>
 </div>
 <section class="cards" id="cards" tabindex="-1"></section>
 <div id="remotes"></div>
 <section class="archive">
-  <div class="archive-head"><h3 data-t="fleet.archive">Archive</h3><input id="arch-q" data-t-placeholder="fleet.filter" spellcheck="false"><div class="arch-servers" id="arch-servers" hidden></div><button class="arch-workers" id="arch-workers" type="button" aria-pressed="false" data-t-title="fleet.workersTitle" hidden><span data-t="fleet.workers">Queue workers</span><b></b></button></div>
+  <div class="archive-head"><h3 data-t="fleet.archive"></h3><input id="arch-q" data-t-placeholder="fleet.filter" spellcheck="false"><div class="arch-servers" id="arch-servers" hidden></div><button class="arch-workers" id="arch-workers" type="button" aria-pressed="false" data-t-title="fleet.workersTitle" hidden><span data-t="fleet.workers"></span><b></b></button></div>
   <div id="arch-list"></div>
-  <section id="arch-terms" class="arch-terms" hidden><h4 data-t="fleet.closedTerminals">Closed terminals</h4><div class="arch-term-list"></div></section>
-  <div class="arch-more" id="arch-more" hidden><span id="arch-count"></span><button class="btn" id="arch-next" type="button" data-t="fleet.showMore">Show 50 more</button></div>
+  <section id="arch-terms" class="arch-terms" hidden><h4 data-t="fleet.closedTerminals"></h4><div class="arch-term-list"></div></section>
+  <div class="arch-more" id="arch-more" hidden><span id="arch-count"></span><button class="btn" id="arch-next" type="button" data-t="fleet.showMore"></button></div>
 </section>`;
 
 // Terminals and browsers are tools, not agents: the "terminals" kind shows both.

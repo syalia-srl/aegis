@@ -211,3 +211,99 @@ def test_no_transcript_literal_was_left_in_the_modules():
         for name in names:
             src = (CLIENT / name).read_text(encoding="utf-8")
             assert literal not in src, f"{literal} is still in {name}"
+
+
+def test_the_parts_are_labelled():
+    """What b9 moved: the chrome every part draws, and the words they share.
+
+    A part keeps its markup in English and names a key beside it, so the
+    presence of a key prefix is not enough; the literals test below holds the
+    other half.
+    """
+    keys = set(table("en"))
+    for prefix in (
+        "sidebar.",
+        "header.",
+        "tabs.",
+        "spawn.",
+        "fleet.",
+        "commands.",
+        "dictation.",
+        "shell.",
+        "state.",
+        "gauges.",
+        "time.",
+        "terminal.",
+        "browser.",
+    ):
+        assert any(k.startswith(prefix) for k in keys), prefix
+    for key in (
+        "sidebar.session",
+        "sidebar.untestedTitle",
+        "header.fleet",
+        "header.switchPlaceholder",
+        "tabs.fold",
+        "spawn.agents",
+        "spawn.doctorFix.one",
+        "fleet.archive",
+        "fleet.thTitle",
+        "commands.flag.quiet",
+        "dictation.held",
+        "shell.signIn",
+        "state.needsYou",
+        "gauges.cpu",
+        "time.justNow",
+        "terminal.lineMode",
+    ):
+        assert key in keys, key
+
+
+def test_the_parts_take_their_words_from_the_table():
+    """A part's markup names a key, and the modules keep no copy of the words.
+
+    The same guard as a5's and a7's, for the rest of the client: a literal left
+    behind would keep an English heading in a Spanish mount.
+    """
+    en = table("en")
+    moved = {
+        "sidebar.renameNote": (
+            "Click the title or the handle to rename.",
+            ["parts/sidebar.js"],
+        ),
+        "sidebar.sleepTitle": ("Sleep: end the process", ["parts/sidebar.js"]),
+        "header.newTitle": ("New session (Alt+N)", ["parts/header.js"]),
+        "header.knowledgeTitle": (
+            "Knowledge: skills and memories",
+            ["parts/header.js"],
+        ),
+        "spawn.placeholder": ("What should the agent do?", ["parts/spawn.js"]),
+        "spawn.findingServiceDirective": ("Service {unit}", ["parts/spawn.js"]),
+        "fleet.installWhy": ("Opens from the home screen", ["parts/fleet.js"]),
+        "fleet.filter": ("Filter by title, handle or directory", ["parts/fleet.js"]),
+        "fleet.thActive": ("Last active", ["fleet.js"]),
+        "fleet.termAgentHolds": ("the agent holds it", ["fleet.js"]),
+        "commands.flag.cwd": ("the directory it works in", ["commands.js"]),
+        "dictation.held": ("Release to send", ["record.js"]),
+        "dictation.title": ("Dictate (Alt+M)", ["parts/dictation.js"]),
+        "shell.connecting": ("Connecting…", ["layouts/full.js"]),
+        "terminal.lineMode": ("line mode", ["parts/terminal.js"]),
+    }
+    for key, (literal, names) in moved.items():
+        assert literal in en[key], (key, literal)
+        for name in names:
+            src = (CLIENT / name).read_text(encoding="utf-8")
+            assert literal not in src, f"{literal} is still in {name}"
+
+
+def test_every_part_that_draws_markup_labels_it():
+    """Every part's markup names keys rather than carrying the words alone."""
+    for name in (
+        "parts/sidebar.js",
+        "parts/header.js",
+        "parts/spawn.js",
+        "parts/fleet.js",
+        "parts/terminal.js",
+    ):
+        src = (CLIENT / name).read_text(encoding="utf-8")
+        assert "data-t" in src, f"{name} names no label key"
+        assert "applyLabels" in src, f"{name} never fills its keys"
