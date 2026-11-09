@@ -1354,3 +1354,266 @@ def test_file_sent_skips_history_and_fires_once_for_a_live_file(host, browser): 
     assert page.locator("#chat .aegis #entries .row.file").count() >= 2
     assert errors == []
     page.close()
+
+
+@pytest.mark.parametrize("width", [1280, 390])
+def test_renderers_draw_a_live_tool_card(host, browser, width):  # noqa: F811
+    """A host's renderer for a finished tool call replaces aegis's row with
+    its own card, keyed by the folded title (``file_send`` for aegis's own
+    tool), and it is called again whenever that row upserts."""
+    note = Path(host["root"]) / "renderer-note.txt"
+    note.write_text("a tool card a host draws\n")
+    page, errors = open_page(browser, width)
+    page.goto(host["url"])
+    mounted(page)
+    prefix = page.evaluate("window.aegisHost.prefix")
+    page.add_style_tag(content="#chat2 { height: 700px; }")
+    page.evaluate(
+        """async (prefix) => {
+          const { mount } = await import(`${prefix}/aegis.js`);
+          window.__drawn = [];
+          window.__custom = mount(document.getElementById("chat2"), {
+            token: window.aegisHost.token,
+            session: window.aegisHost.session,
+            layout: "chat",
+            theme: "host",
+            renderers: {
+              file_send: (entry, el) => {
+                window.__drawn.push({title: entry.title, status: entry.status});
+                el.textContent = "life card";
+                return true;
+              },
+            },
+          });
+        }""",
+        prefix,
+    )
+    page.wait_for_function(
+        "() => document.querySelector('#chat2 .aegis #input')", timeout=30_000
+    )
+    send(
+        page,
+        host["session"],
+        "/mcp file_send "
+        + json.dumps({"paths": [str(note)], "caption": "a host's own card"}),
+    )
+    page.wait_for_function(
+        """() => [...document.querySelectorAll("#chat2 .aegis .row.tool .body")]
+          .some((b) => b.textContent === "life card")""",
+        timeout=60_000,
+    )
+    drawn = page.evaluate("window.__drawn")
+    assert drawn
+    assert all(d["title"] == "file_send" for d in drawn)
+    assert all(d["status"] != "running" for d in drawn)
+    # The custom row is the host's own body under aegis's row shape: none of
+    # aegis's details/summary tool drawing survives in it.
+    assert page.evaluate(
+        """() => {
+          const row = [...document.querySelectorAll("#chat2 .aegis .row.tool")]
+            .find((r) => r.textContent.includes("life card"));
+          return !!row && !row.querySelector("details") && !row.querySelector(".tn");
+        }"""
+    )
+    # The file card the same call sent is still aegis's own: the renderer is
+    # for the tool row, not the file board.
+    assert page.locator("#chat2 .aegis #entries .row.file").count() >= 1
+    assert errors == []
+    page.close()
+
+
+def test_renderers_take_both_key_forms_and_fall_back_on_false_or_throw(host, browser):  # noqa: F811
+    """A second MCP server's tool keeps its full harness name as its key; a
+    renderer that declines keeps aegis's row, and one that throws leaves the
+    row too and does not fail the page (one console line names the tool)."""
+    page, errors = open_page(browser, 1280)
+    page.goto(host["url"])
+    page.wait_for_function("() => window.aegisHost", timeout=30_000)
+    prefix = page.evaluate("window.aegisHost.prefix")
+    got = page.evaluate(
+        """async (prefix) => {
+          const { render } = await import(`${prefix}/static/js/entries.js`);
+          const entry = (title) => ({
+            id: `synthetic-${title}`,
+            kind: "tool",
+            status: "ok",
+            ts: Date.now(),
+            title,
+            summary: "did the thing",
+            glyph: "comms",
+            detail: {args: "", steps: 0, result: "done"},
+          });
+          const host = document.createElement("div");
+          host.id = "synthetic";
+          const custom = render(entry("mcp__life__send_card"), {
+            renderers: {
+              "mcp__life__send_card": (e, el) => {
+                el.textContent = `life ${e.title}`;
+                return true;
+              },
+            },
+          });
+          const declines = render(entry("file_send"), {
+            renderers: {file_send: () => false},
+          });
+          const throws = render(entry("file_send"), {
+            renderers: {file_send: () => { throw new Error("a host bug"); }},
+          });
+          host.append(custom, declines, throws);
+          document.body.append(host);
+          return {
+            custom: custom.querySelector(".body").textContent,
+            declines: !!declines.querySelector("details .line"),
+            throws: !!throws.querySelector("details .line"),
+            rows: host.querySelectorAll(".row.tool").length,
+          };
+        }""",
+        prefix,
+    )
+    assert got["custom"] == "life mcp__life__send_card"
+    assert got["declines"] is True
+    assert got["throws"] is True
+    assert got["rows"] == 3
+    # The throw is aegis's own log line, not an uncaught page error.
+    assert len(errors) == 1
+    assert "aegis: renderer file_send" in errors[0]
+    assert "a host bug" in errors[0]
+    page.close()
+
+
+def test_transcribe_replaces_the_workers(host, browser):  # noqa: F811
+    """A transcribe hook takes each 16 kHz mono piece as a Float32Array and its
+    text lands in the box; the model is never loaded and no Worker is made."""
+    page, errors = open_page(browser, 1280)
+    page.goto(host["url"])
+    page.wait_for_function("() => window.aegisHost", timeout=30_000)
+    prefix = page.evaluate("window.aegisHost.prefix")
+    got = page.evaluate(
+        """async (prefix) => {
+          const Native = window.Worker;
+          window.__workers = 0;
+          window.Worker = class extends Native {
+            constructor(...args) {
+              window.__workers += 1;
+              super(...args);
+            }
+          };
+          const { Dictation } = await import(`${prefix}/static/js/dictation.js`);
+          const box = document.createElement("textarea");
+          document.body.append(box);
+          let prepares = 0;
+          const seen = {};
+          const engine = new Dictation({
+            prepare: async () => {
+              prepares += 1;
+              return {};
+            },
+            transcribe: async (audio) => {
+              seen.type = audio.constructor.name;
+              seen.length = audio.length;
+              return "spoken words";
+            },
+          });
+          const SR = 16000;
+          const source = async (onSamples) => {
+            // Nine seconds of voice: the chunker cuts one 4-8 second piece.
+            onSamples(new Float32Array(9 * SR).fill(0.5));
+            return async () => {};
+          };
+          const target = {el: box, key: null, current: () => null, heard: () => {}};
+          await engine.start(target, source);
+          await new Promise((ok, no) => {
+            const until = Date.now() + 5000;
+            const tick = () => {
+              if (box.value) return ok();
+              if (Date.now() > until) return no(new Error("no text landed"));
+              setTimeout(tick, 25);
+            };
+            tick();
+          });
+          return {
+            text: box.value,
+            type: seen.type,
+            length: seen.length,
+            prepares,
+            workers: window.__workers,
+          };
+        }""",
+        prefix,
+    )
+    assert got["text"] == "spoken words"
+    assert got["type"] == "Float32Array"
+    assert 4 * 16000 <= got["length"] <= 8 * 16000
+    assert got["prepares"] == 0
+    assert got["workers"] == 0
+    assert errors == []
+    page.close()
+
+
+@pytest.mark.parametrize("width", [1280, 390])
+def test_attachments_false_hides_the_clip_and_ignores_paste(host, browser, width):  # noqa: F811
+    """`attachments: false` builds no clip or file input and wires neither
+    paste nor drop, while the tray stays for a dictation take; a mount that
+    left the default still takes a pasted file."""
+    page, errors = open_page(browser, width)
+    page.goto(host["url"])
+    mounted(page)
+    assert page.locator("#chat .aegis #attach").count() == 1
+    prefix = page.evaluate("window.aegisHost.prefix")
+    page.add_style_tag(content="#chat2 { height: 700px; }")
+    page.evaluate(
+        """async (prefix) => {
+          const { mount } = await import(`${prefix}/aegis.js`);
+          window.__noatt = mount(document.getElementById("chat2"), {
+            token: window.aegisHost.token,
+            session: window.aegisHost.session,
+            layout: "chat",
+            theme: "host",
+            attachments: false,
+          });
+        }""",
+        prefix,
+    )
+    page.wait_for_function(
+        "() => document.querySelector('#chat2 .aegis #input')", timeout=30_000
+    )
+    assert page.locator("#chat2 .aegis #attach").count() == 0
+    assert page.locator("#chat2 .aegis #attach-pick").count() == 0
+    assert page.locator("#chat2 .aegis #atts").count() == 1
+    # The paste is not the mount's: the page keeps it.
+    assert (
+        page.evaluate(
+            """() => {
+              const input = document.querySelector("#chat2 .aegis #input");
+              const dt = new DataTransfer();
+              dt.items.add(new File(["pasted"], "paste.txt", {type: "text/plain"}));
+              const ev = new ClipboardEvent("paste", {
+                clipboardData: dt, bubbles: true, cancelable: true,
+              });
+              input.dispatchEvent(ev);
+              return ev.defaultPrevented;
+            }"""
+        )
+        is False
+    )
+    page.wait_for_timeout(300)
+    assert page.locator("#chat2 .aegis #atts .chip").count() == 0
+    # A mount that kept the default takes the same paste as a chip.
+    assert (
+        page.evaluate(
+            """() => {
+              const input = document.querySelector("#chat .aegis #input");
+              const dt = new DataTransfer();
+              dt.items.add(new File(["kept"], "kept.txt", {type: "text/plain"}));
+              const ev = new ClipboardEvent("paste", {
+                clipboardData: dt, bubbles: true, cancelable: true,
+              });
+              input.dispatchEvent(ev);
+              return ev.defaultPrevented;
+            }"""
+        )
+        is True
+    )
+    page.wait_for_selector("#chat .aegis #atts .chip", timeout=10_000)
+    assert errors == []
+    page.close()
