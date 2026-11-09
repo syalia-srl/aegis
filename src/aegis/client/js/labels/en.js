@@ -8,6 +8,10 @@
 // can move the variable within the sentence. A count's plural is chosen in
 // code and only its noun comes from here.
 export default {
+  "sidebar.feeds": "Feeds",
+  "fleet.feeds.one": "{n} feed",
+  "fleet.feeds.other": "{n} feeds",
+  "fleet.feeds.waiting": "{n} waiting",
   "toast.aegis": "aegis",
   "toast.error": "aegis · error",
   "toast.open": "· open",

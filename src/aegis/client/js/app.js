@@ -36,6 +36,7 @@ import { attachTabCard } from "./tabcard.js";
 import { blocksOf } from "./groups.js";
 import { clampToRow, insertIntoComposer, quoted, rangeText } from "./quote.js";
 import { closeMonitorCard, tickMonitors } from "./monitors.js";
+import { closeFeedCard, tickFeeds } from "./feeds.js";
 import { Settings } from "./settings.js";
 import { Journal } from "./journal.js";
 import { Usage } from "./usage.js";
@@ -141,6 +142,7 @@ const sidebar = new SidebarPart(app, root.querySelector(".v-session"), {
   revealRow: (id) => revealToolRow(id),
   revealEntry: (source) => transcript.reveal(source),
   closeMonitorCard: () => closeMonitorCard(),
+  closeFeedCard: () => closeFeedCard(),
   drawer: () => drawerMode.matches,
   setVersionTop: (nodes, title) => header.setVersion(nodes, title),
   archiveInvalidate: () => {
@@ -1802,6 +1804,7 @@ setInterval(tickWorking, 60);
 
 setInterval(() => {
   tickMonitors();
+  tickFeeds();
   fleet.tick();
   if (root.dataset.view === "session" && app.state.shown) {
     const s = app.state.sessions.get(app.state.shown);
@@ -2121,7 +2124,7 @@ installKeys(
       if (header.close()) return;
       if (root.dataset.side === "open") return closeSide();
       if (!keymap.hidden) help(false);
-      else if (cmenu.close() || cmenu.unbar() || viewer.close() || find.close() || closeMonitorCard() || sidebar.closeCard()) return;
+      else if (cmenu.close() || cmenu.unbar() || viewer.close() || find.close() || closeMonitorCard() || closeFeedCard() || sidebar.closeCard()) return;
       else if (route().view === "session" && !sidebar.isEditing()) interrupt();
     },
     help: () => help(),

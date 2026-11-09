@@ -131,6 +131,7 @@ class Registry(Host):
         self.tokens = None
         self.server_name = "aegis"
         self.monitors = None
+        self.feeds = None  # feeds.Feeds, set by the app
         self.side_notes = None
         self.secrets = None  # secret_store.SecretStore, set by the app
         self.queues = None
@@ -243,6 +244,8 @@ class Registry(Host):
 
     def turn_ended(self, session: Session) -> None:
         self.event("turn_end", session.log_id, {})
+        if self.feeds is not None:
+            self.feeds.turn_ended(session)
         if self.queues is not None:
             self.queues.turn_ended(session)
         if self.quota is not None:
@@ -339,17 +342,21 @@ class Registry(Host):
             frontier = {s.log_id for s in kids}
         return out[::-1]
 
-    def wakers(self, s: Session, *, run: bool = True) -> list[str]:
+    def wakers(self, s: Session, *, run: bool = True, feeds: bool = True) -> list[str]:
         """What will still wake ``s`` with a new turn, one phrase each: its
-        approved run, monitors, background tasks and callback queue tasks.
+        approved run, monitors, live feeds, background tasks and callback
+        queue tasks. ``feeds=False`` leaves the feeds out, for a handoff: they
+        follow its successor.
         turn_end refuses done while any is live (#608): the task is not over.
         Its children are not here; they do not wake it, and one spawned for the
         person may outlive the task that started it. ``run=False`` leaves the
         run out, for a handoff: a run follows its owner's successor."""
         n_mon = len(self.monitors.of(s.log_id)) if self.monitors is not None else 0
         n_tasks = sum(1 for w in self._waiting_for(s) if w["kind"] == "task")
+        n_feeds = len(self.feeds.live(s.log_id)) if feeds and self.feeds else 0
         counts = (
             (n_mon, "monitor"),
+            (n_feeds, "feed"),
             (len(s.open_tasks), "background task"),
             (n_tasks, "queue task"),
         )
@@ -540,6 +547,7 @@ class Registry(Host):
             "monitors": self.monitors.card(session.log_id)
             if self.monitors is not None
             else [],
+            "feeds": self.feeds.card(session.log_id) if self.feeds is not None else [],
             **self._attention(session),
             "waiting_for": self._waiting_for(session),
             **self._worker(session),
@@ -672,6 +680,8 @@ class Registry(Host):
             self.workflows.changed()
         if self.notices is not None:
             self.notices.set(session.log_id, HELD_SOURCE, held_items(session.held))
+        if self.feeds is not None:
+            self.feeds.session_changed(session.log_id)
 
     def finished(self, s: Session) -> bool:
         """Done working, which a turn ending is not: not busy (held messages
@@ -1019,6 +1029,8 @@ class Registry(Host):
         s = self.open(log_id)
         if self.monitors is not None:
             self.monitors.drop_owner(log_id)
+        if self.feeds is not None:
+            self.feeds.drop_owner(log_id)
         if self.side_notes is not None:
             self.side_notes.drop(log_id)
         if self.knowledge is not None:

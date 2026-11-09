@@ -283,6 +283,12 @@ export function card(m, onOpen, onClose, t = en) {
   if (m.unread) ft.append(el("span", "unr", t("fleet.unread", { n: m.unread })));
   const mons = (m.monitors || []).length;
   if (mons) ft.append(el("span", "mons", t(mons > 1 ? "fleet.monitors.other" : "fleet.monitors.one", { n: mons })));
+  const fds = m.feeds || [];
+  if (fds.length) {
+    const waiting = fds.reduce((n, f) => n + (f.pending || 0), 0);
+    const txt = t(fds.length > 1 ? "fleet.feeds.other" : "fleet.feeds.one", { n: fds.length });
+    ft.append(el("span", "mons", waiting ? `${txt} · ${t("fleet.feeds.waiting", { n: waiting })}` : txt));
+  }
   if (m.plan_total) ft.append(planProg(m));
   ft.append(el("span", "ctx", `${pct}%`));
   parts.push(bar, ft);

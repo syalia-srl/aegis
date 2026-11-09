@@ -49,6 +49,7 @@ export class Mount {
       lang: "en",
       labels: {},
       composer: true,
+      controls: true,
       dictation: false,
       commands: false,
       attachments: true,

@@ -30,6 +30,8 @@ class Ops:
     @property
     def dictation(self) -> _dictation: ...
     @property
+    def feed(self) -> _feed: ...
+    @property
     def file(self) -> _file: ...
     @property
     def fs(self) -> _fs: ...
@@ -304,6 +306,28 @@ class _config:
 class _dictation:
     async def prepare(self) -> Any:
         """The engine and model the browser transcribes with, on disk and verified, and the words to bias it toward (dictation.py)."""
+
+class _feed:
+    async def cancel(self, *, name: str) -> Any:
+        """Remove a feed. Items still waiting are not sent."""
+    async def list(self) -> Any:
+        """Your feeds, with their state, what waits and what was delivered."""
+    async def pause(self, *, name: str) -> Any:
+        """Stop a feed waking you. It keeps reading, and what came while it was paused goes as the next batch when you feed_resume it."""
+    async def resume(self, *, name: str) -> Any:
+        """Start a paused feed again, its error count cleared."""
+    async def send(self, *, name: str) -> Any:
+        """A person's Send now: what waits goes without the debounce, or when the session's turn ends."""
+    async def start(
+        self,
+        *,
+        name: str,
+        source: dict[str, Any],
+        debounce_s: float = ...,
+        max_items: int = ...,
+        cwd: str | None = ...,
+    ) -> Any:
+        """Start a feed: a file that grows, or a command with a cursor, read every interval_s. Each batch of new items wakes you as one message `> from feed:<name> · batch#<n> · …`, after debounce_s with no new item, or when your turn ends if you are working. aegis keeps the cursor; the feed stays until feed_cancel or your session closes. Use it instead of re-arming a monitor on a file that grows."""
 
 class _file:
     async def open(self, *, file_id: str, name: str) -> Any:

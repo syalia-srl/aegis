@@ -108,6 +108,11 @@ class Operation:
     # sign-ins): HostPolicy.guard refuses it to every caller a host
     # identified; StandalonePolicy's one person keeps it (#959).
     server: bool = False
+    # Starts work when it names no session (a spawn, a queue task, a schedule
+    # fire or resume, a workflow run, a monitor, a browser, a script, a shell,
+    # a sign-in, a server resume or update): can(who, "spawn", None) decides
+    # (#993). Other session-less operations ask can(who, "read"|"write", None).
+    work: bool = False
 
     @property
     def tool_name(self) -> str:
@@ -188,6 +193,7 @@ class Registry:
         names: tuple[tuple[str, str], ...] = (),
         access: str = "write",
         server: bool = False,
+        work: bool = False,
     ) -> Callable[[Handler], Handler]:
         def register(handler: Handler) -> Handler:
             if name in self._ops:
@@ -204,6 +210,7 @@ class Registry:
                 names,
                 access,
                 server,
+                work,
             )
             return handler
 
@@ -211,6 +218,21 @@ class Registry:
 
     def names(self) -> list[str]:
         return sorted(self._ops)
+
+    def _check_sessionless(self, op: Operation, who: Any, caller: Caller) -> None:
+        """Ask ``can`` for an operation that names no session, before it starts
+        work or changes state (#993). An agent's operation names its own
+        session instead, so ``_check_named`` decides it."""
+        assert self.policy is not None
+        if op.names or (caller.is_agent and caller.log_id):
+            return
+        from .policy import Action, Refused
+
+        action: Action = (
+            "spawn" if op.work else ("read" if op.access == "read" else "write")
+        )
+        if not self.policy.can(who, action, None):
+            raise Refused(f"you may not run {op.name}")
 
     def _check_named(
         self, op: Operation, params: Any, who: Any, caller: Caller
@@ -270,6 +292,11 @@ class Registry:
             self.policy.guard(op, who, info)
         else:
             default_guard(op, info)
+        if self.policy is not None and self.narrows():
+            # Before validation: a session-less operation needs no params to
+            # know whether it may run at all, and a policy that refuses it
+            # must answer that rather than a bad-params error (#993).
+            self._check_sessionless(op, who, caller)
         try:
             params = op.params.model_validate(raw if raw is not None else {})
         except ValidationError as e:

@@ -261,7 +261,7 @@ def register_artifact_ops(app: App) -> None:
                 out |= {"docked": False, "reason": str(e)}
         return out
 
-    @r.op("artifact.read", ArtifactId, agent=True)
+    @r.op("artifact.read", ArtifactId, agent=True, access="read")
     async def read(p: ArtifactId, caller):
         """The page's status (draft, live, submitted, closed), its latest state,
         its last 20 events, the submit's data and label, and `errors`: how

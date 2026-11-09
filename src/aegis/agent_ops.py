@@ -109,6 +109,83 @@ class MonitorId(_Strict):
     monitor_id: str
 
 
+FEED_NAME = r"^[a-z0-9]+(-[a-z0-9]+){0,3}$"
+
+
+class FeedFromLine(_Strict):
+    line: int = Field(ge=0, description="Start after this many lines.")
+
+
+class FeedSource(_Strict):
+    """A file that grows, or a command with a cursor: exactly one of the two."""
+
+    model_config = {"extra": "forbid", "populate_by_name": True}
+    file: str | None = Field(
+        None, description="A file of lines that grows; relative to cwd, ~ allowed."
+    )
+    format: Literal["lines", "jsonl"] = Field(
+        "lines",
+        description="lines: each non-blank line is an item. jsonl: one JSON value per line.",
+    )
+    filter: str | None = Field(
+        None,
+        description="jsonl only: a jq expression run on each line; what it prints "
+        "is the item, and a line it prints nothing for is dropped.",
+    )
+    start: Literal["end", "start"] | FeedFromLine = Field(
+        "end",
+        alias="from",
+        description='Where a file feed starts: "end" (only new lines), "start", or {"line": N}.',
+    )
+    command: str | None = Field(
+        None,
+        description="Bash run every interval_s with the cursor in $AEGIS_FEED_CURSOR "
+        "(empty the first time): it prints one item per line, writes the next "
+        "cursor to the file $AEGIS_FEED_NEXT, and exits 0 (items), 1 (nothing "
+        "new) or anything else (an error).",
+    )
+    interval_s: float | None = Field(
+        None,
+        ge=1,
+        le=3600,
+        description="How often it is read: 5 s for a file, 30 s for a command by default.",
+    )
+
+    @model_validator(mode="after")
+    def _one(self):
+        if (self.file is None) == (self.command is None):
+            raise ValueError("give exactly one of file and command")
+        if self.command is not None and (
+            self.filter or self.format != "lines" or self.start != "end"
+        ):
+            raise ValueError("format, filter and from apply to a file source only")
+        if self.filter and self.format != "jsonl":
+            raise ValueError("a filter needs format jsonl")
+        return self
+
+
+class FeedStart(_Strict):
+    name: str = Field(
+        pattern=FEED_NAME,
+        description="Lowercase words joined by hyphens, unique among your feeds.",
+    )
+    source: FeedSource
+    debounce_s: float = Field(
+        15, ge=0, le=600, description="Seconds with no new item before a batch goes."
+    )
+    max_items: int = Field(50, ge=1, le=500, description="Items per message at most.")
+    cwd: str | None = Field(
+        None, description="Where the source is read; relative to your session's cwd."
+    )
+
+
+class FeedName(_Strict):
+    name: str
+    # A person's call names the session (its log id or handle); an agent
+    # acts on its own.
+    log_id: SkipJsonSchema[str | None] = None
+
+
 class FarAgent(_Strict):
     """An agent on a linked server, as that server's link names it."""
 
@@ -719,7 +796,7 @@ def register_agent_ops(app: App) -> None:
             if m.id != but
         ]
 
-    @r.op("monitor.start", MonitorStart, agent=True)
+    @r.op("monitor.start", MonitorStart, agent=True, work=True)
     async def monitor_start(p: MonitorStart, caller):
         """Watch a long-running process without polling: bash conditions run every
         interval_s, and you are woken through your inbox when `done` or `fail` exits 0
@@ -816,7 +893,7 @@ def register_agent_ops(app: App) -> None:
         app.monitors.cancel(m.id)
         return {"cancelled": m.id, "remaining": roster(m.owner)}
 
-    @r.op("monitor.list", NoArgs, agent=True, read=True)
+    @r.op("monitor.list", NoArgs, agent=True, read=True, access="read")
     async def monitor_list(_, caller):
         """Your live monitors."""
         me = app.who(caller)
@@ -834,7 +911,123 @@ def register_agent_ops(app: App) -> None:
             for m in items
         ]
 
-    @r.op("queue.enqueue", Enqueue, agent=True)
+    def feed_of(p: FeedName, caller: Caller):
+        """The feed ``p`` names: an agent's own, or for a person one of the
+        session it names, which the host policy has let it change (names)."""
+        if caller.is_agent:
+            s = own(caller)
+        else:
+            if not p.log_id:
+                raise OpError("bad_params", "name the session the feed belongs to")
+            s = target(p.log_id)
+        f = app.feeds.get(s.log_id, p.name)
+        if f is None:
+            raise OpError("no_feed", f"no feed {p.name!r} on {s.handle}")
+        return f
+
+    def feed_row(f) -> dict:
+        s = reg.sessions.get(f.owner)
+        return {
+            "name": f.name,
+            "source": f.where(),
+            "state": f.state(s),
+            "paused": f.paused,
+            "pending": len(f.pending),
+            "delivered": f.delivered,
+            "batches": f.batch,
+            "last_item_at": f.last_new,
+            "last_error": f.last_error or None,
+        }
+
+    @r.op("feed.start", FeedStart, agent=True, work=True)
+    async def feed_start(p: FeedStart, caller):
+        """Start a feed: a file that grows, or a command with a cursor, read
+        every interval_s. Each batch of new items wakes you as one message
+        `> from feed:<name> · batch#<n> · …`, after debounce_s with no new
+        item, or when your turn ends if you are working. aegis keeps the
+        cursor; the feed stays until feed_cancel or your session closes. Use it
+        instead of re-arming a monitor on a file that grows."""
+        s = own(caller)
+        if app.feeds.get(s.log_id, p.name) is not None:
+            raise OpError("name_taken", f"you already have a feed {p.name!r}")
+        from .feeds import MAX_PER_SESSION, SourceError, check_jq
+
+        if len(app.feeds.of(s.log_id)) >= MAX_PER_SESSION:
+            raise OpError("too_many", f"a session has at most {MAX_PER_SESSION} feeds")
+        cwd = Path(p.cwd).expanduser() if p.cwd else s.spec.cwd
+        if not cwd.is_absolute():
+            cwd = s.spec.cwd / cwd
+        if not cwd.is_dir():
+            raise OpError("bad_params", f"cwd {cwd} is not a directory")
+        src = p.source.model_dump(exclude_none=True, by_alias=True)
+        if p.source.file is not None:
+            src.pop("command", None)
+            if isinstance(p.source.start, FeedFromLine):
+                src["from"] = {"line": p.source.start.line}
+        else:
+            for k in ("format", "from", "filter"):
+                src.pop(k, None)
+        if p.source.filter and (why := await check_jq(p.source.filter)):
+            raise OpError("bad_filter", why)
+        try:
+            f = await app.feeds.start(
+                s.log_id, str(cwd), p.name, src,
+                debounce_s=p.debounce_s, max_items=p.max_items,
+            )  # fmt: skip
+        except SourceError as e:
+            raise OpError("bad_source", str(e)) from None
+        return {
+            "feed": feed_row(f),
+            "first_poll": f.last_error
+            or (f"{len(f.pending)} items already new" if f.pending else "ok"),
+            "other_feeds": [x.name for x in app.feeds.of(s.log_id) if x is not f],
+        }
+
+    @r.op("feed.list", NoArgs, agent=True, read=True, access="read")
+    async def feed_list(_, caller):
+        """Your feeds, with their state, what waits and what was delivered."""
+        me = app.who(caller)
+        items = (
+            app.feeds.of(caller.log_id)
+            if caller.is_agent
+            else [f for f in app.feeds.items.values() if app.sees(me, f.owner)]
+        )
+        return [feed_row(f) for f in items]
+
+    @r.op("feed.pause", FeedName, agent=True, read=True, names=(("log_id", "session"),))
+    async def feed_pause(p: FeedName, caller):
+        """Stop a feed waking you. It keeps reading, and what came while it was
+        paused goes as the next batch when you feed_resume it."""
+        f = feed_of(p, caller)
+        app.feeds.pause(f, "by an agent" if caller.is_agent else "by a person")
+        return feed_row(f)
+
+    @r.op(
+        "feed.resume", FeedName, agent=True, read=True, names=(("log_id", "session"),)
+    )
+    async def feed_resume(p: FeedName, caller):
+        """Start a paused feed again, its error count cleared."""
+        f = feed_of(p, caller)
+        app.feeds.resume(f)
+        return feed_row(f)
+
+    @r.op(
+        "feed.cancel", FeedName, agent=True, read=True, names=(("log_id", "session"),)
+    )
+    async def feed_cancel(p: FeedName, caller):
+        """Remove a feed. Items still waiting are not sent."""
+        f = feed_of(p, caller)
+        app.feeds.cancel(f.owner, f.name)
+        return {"cancelled": f.name, "unsent": len(f.pending)}
+
+    @r.op("feed.send", FeedName, names=(("log_id", "session"),))
+    async def feed_send(p: FeedName, caller):
+        """A person's Send now: what waits goes without the debounce, or
+        when the session's turn ends."""
+        f = feed_of(p, caller)
+        return {"did": app.feeds.send_now(f), **feed_row(f)}
+
+    @r.op("queue.enqueue", Enqueue, agent=True, work=True)
     async def queue_enqueue(p: Enqueue, caller):
         """Hand a self-contained task to a fresh worker on a queue. Returns at once
         with the task id; the worker's final message reaches your inbox when it
@@ -1097,7 +1290,7 @@ def register_agent_ops(app: App) -> None:
         lines = [x for e in entries[-p.last * 3 :] if (x := _render(e, p.tools))]
         return "\n".join(lines[-p.last :]) or "(nothing yet)"
 
-    @r.op("session.list", NoArgs, agent=True, read=True)
+    @r.op("session.list", NoArgs, agent=True, read=True, access="read")
     async def session_list(_, caller):
         """The open sessions on this server, each with its state, what it needs
         (attention and its line, what it waits on), its plan and what it is
@@ -1544,7 +1737,7 @@ def register_agent_ops(app: App) -> None:
         toasted[s.log_id] = [*recent, now]
         return {"shown": app.toast(p.text, p.kind, s)}
 
-    @r.op("meta", NoArgs, agent=True, read=True)
+    @r.op("meta", NoArgs, agent=True, read=True, access="read")
     async def meta(_, caller):
         """How aegis works for you, and its tools."""
         s = reg.sessions.get(caller.log_id or "")

@@ -177,7 +177,7 @@ def register_browser_ops(app: App) -> None:
 
     # -- shared by the agent and the person -----------------------------------
 
-    @r.op("browser.open", BrowserOpen, agent=True)
+    @r.op("browser.open", BrowserOpen, agent=True, work=True)
     async def open_(p: BrowserOpen, caller):
         """Start a browser on the server and load a URL. It docks beside your
         transcript (dock=) and shows as a tab, where the person watches and
@@ -365,13 +365,13 @@ def register_browser_ops(app: App) -> None:
 
     # -- the person's pane -----------------------------------------------------
 
-    @r.op("browser.available")
+    @r.op("browser.available", access="read")
     async def avail(_, caller):
         """Whether this server runs browsers, and why not when it does not."""
         why = br.available()
         return {"ok": why is None, "why": why}
 
-    @r.op("browser.spawn", PaneOpen)
+    @r.op("browser.spawn", PaneOpen, work=True)
     async def spawn(p: PaneOpen, caller):
         """Open a browser the caller owns and holds, with no agent."""
         b = await br.open_(app.who(caller).name, p.url, profile=p.profile)

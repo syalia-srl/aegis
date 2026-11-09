@@ -9,6 +9,10 @@
 // quien traduce puede mover la variable dentro de la frase. El plural de un
 // conteo se elige en el código y aquí solo vive el sustantivo.
 export default {
+  "sidebar.feeds": "Feeds",
+  "fleet.feeds.one": "{n} feed",
+  "fleet.feeds.other": "{n} feeds",
+  "fleet.feeds.waiting": "{n} en espera",
   "toast.aegis": "aegis",
   "toast.error": "aegis · error",
   "toast.open": "· abrir",

@@ -164,7 +164,7 @@ without `srv.as_who(...)`, and aegis's own work.
 | `identify(cred)` | A browser's hello, an HTTP request or a linked server's hello brings a token aegis does not read itself. Return a who, or raise `Refused`. The server's own token and a token from `srv.token_for(...)` never reach it, except over a link. The default refuses links. |
 | `key(who)`, `restore(key)` | aegis stores `key(who)` wherever it keeps an owner (sessions, schedules, queue tasks, workflow runs), and calls `restore` to get the who back with nobody connected, such as after a restart. A `restore` that raises `Refused` stops that work with your message. |
 | `guard(op, who, caller)` | Before every operation. The default keeps aegis's own checks (operations closed to agents, read-permission sessions, schedule runs with `spawn: false`, operations closed to links); call `super().guard(...)` to keep them. |
-| `can(who, action, session)` | `action` is `"list"`, `"read"` or `"write"`. Before a session appears in the tab bar, `session_list`, the archive or the journal; before its transcript is read or subscribed to; before a sent file of its is served; and before anything is sent to it or changed on it. |
+| `can(who, action, session)` | `action` is `"list"`, `"read"`, `"write"` or `"spawn"`. Before a session appears in the tab bar, `session_list`, the archive or the journal; before its transcript is read or subscribed to; before a sent file of its is served; and before anything is sent to it or changed on it. For an operation that names no session, `session` is `None`: `"spawn"` before one that starts work (a spawn, a queue task, a schedule fire or resume, a workflow run, a monitor, a browser, a script, a shell, a sign-in, a server resume or update), and `"read"` or `"write"` before the rest. |
 | `catalog(who)` | What the pickers offer: agents, harnesses, models, efforts, permissions, folders. A start outside it is refused. |
 | `spawn(who, req)` | Before any session starts: a spawn, a handoff, a queue worker, a schedule or workflow run, and a stopped session waking. Return the `SpawnRequest` to run, rewritten with `req.replace(...)`, or raise `Refused`. On a wake only model, effort and permission change. `env` reaches the process and is never written to disk. |
 | `tools(who, session)` | When a harness starts: the names of the aegis tools it gets, or `None` for all. The rest are hidden from its tool list and refused when called. |
@@ -219,7 +219,9 @@ Fleet, session panel, Settings and all — in Spanish.
 and every URL aegis writes — the client's files, the websocket, the manifest —
 carries that prefix, so the page configures nothing. `srv.url` stays the
 standalone sign-in URL: the loopback listener keeps serving the MCP tools at
-the app's root, and a prefixed server's own page is not browsable.
+the app's root, and a prefixed server's own page is not browsable. The app you
+mount does not serve MCP at all, so the host's public origin never exposes the
+tools harness children use.
 
 ```python
 from starlette.applications import Starlette
@@ -273,6 +275,7 @@ parts: `on`, `send`, `destroy` and `el`.
 | `composer` | `true` (the default) draws the message box; `false` gives a transcript only, as for an answer pane. |
 | `commands` | `true` builds the `/` command menu under the box; `false` (the default) leaves it out. |
 | `dictation` | `true` builds the dictation mic (and hold-to-record) beside the box; `false` (the default) leaves it out. |
+| `controls` | `true` (the default) draws the model, effort and permission chips under the box; `false` hides them, so a product chat's end users see no operator details. The full layout keeps them. |
 | `theme` | `"host"`, or a built-in theme's name (`"ink"`, `"riso"`), which aegis loads itself. |
 | `lang`, `labels` | `"en"` or `"es"`, and single keys to override. A key a table lacks falls back to English and is logged once. The standalone client takes the same choice in its URL, `/?lang=es`. |
 

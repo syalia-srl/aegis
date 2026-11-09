@@ -36,6 +36,7 @@ import {
 } from "../gauges.js";
 import { entryIcon, factIcon, glyph, icon, iconText } from "../glyphs.js";
 import { entry as journalEntry, opens } from "../journal.js";
+import { renderFeeds } from "../feeds.js";
 import { renderMonitors } from "../monitors.js";
 import { dur, planTimes } from "../plantime.js";
 import { applyLabels, labelsFor, stateLabel } from "../labels.js";
@@ -93,6 +94,7 @@ const SIDEBAR_HTML = `
 </div>
 <div class="sec" id="s-wait-sec" hidden><h4 data-t="sidebar.waiting"></h4><div id="s-waiting"></div></div>
 <div class="sec" id="s-mon-sec" hidden><h4 data-t="sidebar.monitors"></h4><div id="s-monitors"></div></div>
+<div class="sec" id="s-feed-sec" hidden><h4 data-t="sidebar.feeds"></h4><div id="s-feeds"></div></div>
 <div class="sec"><h4 data-t="sidebar.usage"></h4>
   <div class="prow" id="p-usage" tabindex="0">
     <div class="tiles" id="s-tiles"></div>
@@ -222,6 +224,8 @@ export class SidebarPart {
     this.waiting = n("s-waiting");
     this.monSec = n("s-mon-sec");
     this.monitors = n("s-monitors");
+    this.feedSec = n("s-feed-sec");
+    this.feeds = n("s-feeds");
     this.tiles = n("s-tiles");
     this.foot = n("s-foot");
     this.footL = n("s-foot-l");
@@ -264,7 +268,7 @@ export class SidebarPart {
     this.verLatest = n("ver-latest");
     this.verUpd = n("ver-upd");
 
-    this.side = new Side({ root: this.root, side: this.el, grip, onCardOpen: () => this.act.closeMonitorCard?.() });
+    this.side = new Side({ root: this.root, side: this.el, grip, onCardOpen: () => this.act.closeMonitorCard?.() || this.act.closeFeedCard?.() });
     this.icons();
     this.wire();
 
@@ -435,6 +439,9 @@ export class SidebarPart {
     const mons = s.monitors || [];
     this.monSec.hidden = !mons.length;
     renderMonitors(this.monitors, mons, (id) => this.act.revealRow?.(id));
+    const fds = s.feeds || [];
+    this.feedSec.hidden = !fds.length;
+    renderFeeds(this.feeds, fds, (op, params) => this.act.callFor?.(s.key, op, params));
     // A workflow's node is the engine's while its run lives, and a handed-off
     // session its successor's (#874).
     const held = !!this.act.locked?.(s) || !!s.continued_by;

@@ -293,7 +293,7 @@ the click, so the main agent's card falls through to waiting on the run, and
 the click wakes it once to tell the person where the run next stops (#474); its plan comes from `plan_update`. `turn_end` refuses done
 while the plan has an item not done, because a done card offers to archive the
 session and the person should not have to read it to learn the task goes on.
-For the same reason it refuses done while a monitor, a callback queue task, a
+For the same reason it refuses done while a monitor, a live feed, a callback queue task, a
 background task or an approved run will still wake the session
 (`Registry.wakers`, #608); its children do not count, since they do not wake it.
 A done it accepts names, in its answer, what the session left in its repos
@@ -362,13 +362,18 @@ pydantic params model. A websocket `call` is one projection of the registry, MCP
 tools are another, and plugins add operations to it. Nothing reaches the client as
 an action that is not an operation, so a subsystem cannot exist for agents and be
 missing from the UI. The retired September client died of the opposite: a protocol
-in which every subsystem needed its own fields.
+in which every subsystem needed its own fields. Under a host policy every call
+asks `can` before it runs: an operation that names a session asks `list`, `read`
+or `write` on it, and one that names none asks `spawn` when it starts work or
+`read`/`write` otherwise, with `session=None` (#993).
 
 **Agents call the same operations, as MCP tools named after them.** An operation
 marked for agents is served at `/mcp` under its name with the dot as an underscore,
 so `monitor.start` is `mcp__aegis__monitor_start`. The caller is the session whose
 token the request carries; the token is minted for each harness process and rides
-in the `X-Aegis-Session` header of its MCP config. No tool takes the caller's handle as an argument,
+in the `X-Aegis-Session` header of its MCP config. That endpoint is on the
+Server's own loopback listener only; the app a host mounts at its prefix leaves
+it out (#993). No tool takes the caller's handle as an argument,
 because an argument can be wrong and the token cannot.
 
 **The same operations run from the agent's shell.** aegis exports the endpoint
@@ -528,6 +533,17 @@ when the harness declares `steers_mid_turn` (Claude Code, Codex), records the se
 as `steered`, and holds it otherwise. While messages are held, the `held` notice
 source gives the busy agent one warning per message, its sender and first line, on
 its next aegis tool result; the warnings end silently when the batch is sent.
+
+**A feed is a source that keeps waking its session** (`feeds.py`, #998): a file
+of lines or a command with a cursor, polled, with what it read and has not
+delivered kept as pending in `feeds.json`. A batch goes to `deliver` after a
+debounce when the session is idle, never mid-turn: at a turn's end
+`Registry.turn_ended` has each feed add one block to the held flush, before the
+flush task takes it, so bursts during a long turn arrive as one block per feed.
+The position is saved after the hand-off and a `sending` mark before it, so a
+crash in between sends that batch again marked `again` rather than losing it.
+A live feed counts in `Registry.wakers`, so `turn_end` refuses done; a local
+handoff moves the feeds to the successor instead of refusing.
 
 **aegis nudges an agent that drifts, once.** A live, idle session that is
 not a queue worker, whose card says done or review, gets an inbox message
@@ -932,6 +948,8 @@ views are parts as well: the Fleet, the new-session form, Settings, Journal,
 Usage, Knowledge, Files, Schedules, Help, the terminal and the browser each
 build the `<main class="view">` they draw in and hand their module that node,
 so the router only chooses which one the root's `data-view` shows.
+A product chat may also switch off the composer's model, effort and permission
+chips (`controls: false`, #994).
 A part owns the markup it draws, looks every node up under its own element and
 never asks the page for an id, and every stylesheet a mount loads is scoped to
 `.aegis`, so a host page keeps its own `#tabs`, its own `#composer` and its own

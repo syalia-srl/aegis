@@ -594,6 +594,39 @@ def test_the_composer_sends_from_the_mount_and_the_reply_streams(
     page.close()
 
 
+def test_the_controls_option_hides_the_composer_chips_at_phone_width(host, browser):  # noqa: F811
+    """A product chat hides the model, effort and permission chips (#994);
+    the mount beside it keeps the default."""
+    page, errors = open_page(browser, 390)
+    page.goto(host["url"])
+    mounted(page)
+    prefix = page.evaluate("window.aegisHost.prefix")
+    page.add_style_tag(content="#chat2 { height: 700px; }")
+    page.evaluate(
+        """async (prefix) => {
+          const { mount } = await import(`${prefix}/aegis.js`);
+          window.__nochips = mount(document.getElementById("chat2"), {
+            token: window.aegisHost.token,
+            session: window.aegisHost.session,
+            layout: "chat",
+            theme: "host",
+            controls: false,
+          });
+        }""",
+        prefix,
+    )
+    page.wait_for_function(
+        "() => document.querySelector('#chat2 .aegis #input')", timeout=30_000
+    )
+    for chip in ("chip-model", "chip-effort", "chip-perm"):
+        assert page.locator(f"#chat .aegis #{chip}").is_visible()
+        assert not page.locator(f"#chat2 .aegis #{chip}").is_visible()
+    assert page.locator("#chat .aegis #composer").count() == 1
+    assert page.locator("#chat2 .aegis #composer").count() == 1
+    assert errors == []
+    page.close()
+
+
 def test_an_attachment_uploads_as_a_chip_and_goes_out_with_the_message(host, browser):  # noqa: F811
     """A file chosen on the mount's paperclip uploads into the session as a
     chip, and the send names it: the row that lands carries its card."""
