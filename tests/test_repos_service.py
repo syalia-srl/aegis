@@ -409,3 +409,43 @@ def test_pending_probes_again_instead_of_reading_the_last_probe(world, repo):
     world.committed("L1", repo, run(repo, "rev-parse", "HEAD"), "add c")
     # The probe cached above still says c.py is dirty: pending must not read it.
     assert world.repos.pending("L1") == []
+
+
+def test_a_commit_row_without_a_branch_names_no_branch(world, repo, monkeypatch):
+    # `git commit -q` prints nothing: the journal row is "<hash> <subject>",
+    # with no " · branch" for the subject to be mistaken for (#997).
+    monkeypatch.setattr(gh.shutil, "which", lambda name: "/bin/gh")
+    asked = []
+    monkeypatch.setattr(gh, "prs", lambda top, b, user=None: asked.append(b) or [])
+    (repo / "b.py").write_text("b\n")
+    run(repo, "add", "b.py")
+    run(repo, "commit", "-q", "-m", "fix(area): add b")
+    run(repo, "push", "-q")
+    sha = run(repo, "rev-parse", "HEAD")
+    world.rec += 1
+    db.insert(
+        world.con,
+        db.Entry(
+            "L1", world.rec, 0, 2.0, "h", str(repo), "commit", "",
+            f"{sha[:7]} fix(area): add b", None, False, [], top=str(repo), sha=sha,
+        ),
+    )  # fmt: skip
+    assert world.repos.pending("L1") == []
+    assert "fix(area): add b" not in asked
+
+
+def test_a_pr_the_journal_saw_opened_is_asked_for_its_state(world, repo, monkeypatch):
+    # Merged by someone else, its branch unknown to the journal: only
+    # `gh pr view` can tell it is no longer open (#997).
+    monkeypatch.setattr(gh.shutil, "which", lambda name: "/bin/gh")
+    monkeypatch.setattr(gh, "prs", lambda top, b, user=None: [])
+    asked = []
+    monkeypatch.setattr(
+        gh,
+        "pr",
+        lambda top, n: asked.append(n) or {"n": n, "state": "merged", "ci": ""},
+    )
+    world.pr("L1", repo, "opened https://github.com/o/repo/pull/12 · feat: x")
+    world.pr("L1", repo, "merged #9")
+    assert world.repos.pending("L1") == []
+    assert asked == [12]
