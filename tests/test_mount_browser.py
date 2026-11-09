@@ -1206,3 +1206,151 @@ def test_oikos_options_still_get_their_events(host, browser, width):  # noqa: F8
     assert turn["cost_usd"] > 0
     assert errors == []
     page.close()
+
+
+def test_two_sends_before_the_spawn_answers_start_one_session(host, browser):  # noqa: F811
+    """Two send() calls with no session yet share one spawn: one sessionChanged
+    and both messages in that one session, never two sessions."""
+    page, errors = open_page(browser, 1280)
+    page.goto(host["url"])
+    mounted(page)
+    prefix = page.evaluate("window.aegisHost.prefix")
+    page.add_style_tag(content="#chat2 { height: 700px; }")
+    page.evaluate(
+        """async (prefix) => {
+          const { mount } = await import(`${prefix}/aegis.js`);
+          window.__fresh = {changed: []};
+          window.__agent = mount(document.getElementById("chat2"), {
+            token: window.aegisHost.token,
+            agent: "opus",
+            layout: "chat",
+            theme: "host",
+          });
+          window.__agent.on("sessionChanged", (e) => window.__fresh.changed.push(e));
+        }""",
+        prefix,
+    )
+    page.wait_for_function(
+        "() => document.querySelector('#chat2 .aegis #input')", timeout=30_000
+    )
+    # Both start before session.spawn has answered.
+    page.evaluate(
+        """() => {
+          const one = window.__agent.send("first before the spawn answers");
+          const two = window.__agent.send("second before the spawn answers");
+          window.__both = Promise.all([one, two]).catch((e) => e && e.message);
+        }"""
+    )
+    page.wait_for_function("() => window.__fresh.changed.length === 1", timeout=60_000)
+    page.wait_for_function(
+        """() => {
+          const rows = [...document.querySelectorAll("#chat2 .aegis #entries .row.user .body")]
+            .map((b) => b.textContent);
+          return rows.some((t) => t.includes("first before the spawn answers"))
+            && rows.some((t) => t.includes("second before the spawn answers"));
+        }""",
+        timeout=60_000,
+    )
+    page.evaluate("() => window.__both")
+    assert page.evaluate("window.__fresh.changed.length") == 1
+    assert page.evaluate("window.__fresh.changed[0].session")
+    assert errors == []
+    page.close()
+
+
+def test_an_empty_send_with_an_agent_starts_nothing(host, browser):  # noqa: F811
+    """An empty box sends nothing: with an agent set, the button and a host's
+    empty send must not start a session on their own."""
+    page, errors = open_page(browser, 1280)
+    page.goto(host["url"])
+    mounted(page)
+    prefix = page.evaluate("window.aegisHost.prefix")
+    page.add_style_tag(content="#chat2 { height: 700px; }")
+    page.evaluate(
+        """async (prefix) => {
+          const { mount } = await import(`${prefix}/aegis.js`);
+          window.__changes = [];
+          window.__agent = mount(document.getElementById("chat2"), {
+            token: window.aegisHost.token,
+            agent: "opus",
+            layout: "chat",
+            theme: "host",
+          });
+          window.__agent.on("sessionChanged", (e) => window.__changes.push(e));
+        }""",
+        prefix,
+    )
+    page.wait_for_function(
+        "() => document.querySelector('#chat2 .aegis #send')", timeout=30_000
+    )
+    page.click("#chat2 .aegis #send")  # an empty box's button
+    page.evaluate("() => window.__agent.send('   ')")  # a host's empty line
+    page.wait_for_timeout(1500)  # a spawn would land here
+    assert page.evaluate("window.__changes.length") == 0
+    assert page.locator("#chat2 .aegis #input").input_value() == ""
+    assert errors == []
+    page.close()
+
+
+def test_file_sent_skips_history_and_fires_once_for_a_live_file(host, browser):  # noqa: F811
+    """Opening a session that already holds a file_send replays entry but not
+    fileSent; a file sent while the mount watches fires exactly one."""
+    old = Path(host["root"]) / "history-note.txt"
+    old.write_text("a file from before the mount watched\n")
+    new = Path(host["root"]) / "live-note.txt"
+    new.write_text("a file the mount sees arrive\n")
+    page, errors = open_page(browser, 1280)
+    page.goto(host["url"])
+    mounted(page)
+    # The second session gets a file while the chat still shows the first.
+    send(
+        page,
+        host["session2"],
+        "/mcp file_send " + json.dumps({"paths": [str(old)], "caption": "older file"}),
+    )
+    # Its turn ends, so the file is in the session's transcript.
+    page.wait_for_function(
+        """sid => {
+          for (const m of window.__wsMsgs) {
+            if (m.channel !== "sessions") continue;
+            const rows = m.t === "snapshot"
+              ? (m.data || [])
+              : (m.ops || []).map((o) => o.merge || o.upsert).filter(Boolean);
+            const row = rows.find((r) => r && r.log_id === sid);
+            if (row && row.state !== "working" && row.cost_usd > 0) return true;
+          }
+          return false;
+        }""",
+        arg=host["session2"],
+        timeout=60_000,
+    )
+    page.evaluate(
+        """() => {
+          window.__files = [];
+          window.__entries = [];
+          window.__chat.on("fileSent", (e) => window.__files.push(e));
+          window.__chat.on("entry", (e) => window.__entries.push(e));
+        }"""
+    )
+    # The history's file draws, but fileSent does not replay it.
+    page.evaluate("s => window.__chat.open(s)", host["session2"])
+    page.wait_for_selector("#chat .aegis #entries .row.file", timeout=60_000)
+    page.wait_for_timeout(1000)
+    assert page.evaluate("window.__files.length") == 0
+    assert any(e["entry"]["kind"] == "file" for e in page.evaluate("window.__entries"))
+    # A new file in the watched session is announced once.
+    send(
+        page,
+        host["session2"],
+        "/mcp file_send " + json.dumps({"paths": [str(new)], "caption": "live file"}),
+    )
+    page.wait_for_function("() => window.__files.length === 1", timeout=60_000)
+    page.wait_for_timeout(1500)  # a second upsert would announce here
+    assert page.evaluate("window.__files.length") == 1
+    event = page.evaluate("window.__files[0]")
+    assert event["session"] == host["session2"]
+    assert event["entry"]["kind"] == "file"
+    assert len(event["files"]) == 1
+    assert page.locator("#chat .aegis #entries .row.file").count() >= 2
+    assert errors == []
+    page.close()
