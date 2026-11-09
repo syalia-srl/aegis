@@ -7,7 +7,7 @@
 // An agent is drawn as a card whose chips are the new-tab composer's, so a
 // preset looks like the session it starts.
 //
-// "This browser" comes first: the theme, which only this browser keeps
+// this.t("settings.thisBrowser") comes first: the theme, which only this browser keeps
 // (localStorage), so it is not part of the form and Save does not write it,
 // then this device as an app: installed or not, and the build the service
 // worker keeps for offline use (install.js, appworker.js).
@@ -17,6 +17,7 @@
 // operations and `config` channel, sent through the link.
 
 import { elapsed } from "./gauges.js";
+import { labelsFor } from "./labels.js";
 import { modelMeta, modelPrice } from "./models.js";
 import "./pick.js";
 import { who } from "./me.js";
@@ -54,8 +55,9 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 const readout = (l) => `start ${l.launch === "pace" ? "on pace" : `below ${l.launch}%`} · stop at ${l.stop}%`;
 
 export class Settings {
-  constructor(conn, box, { themes, setTheme, speaker = null, lastSession = () => null, openSession = () => {} }) {
+  constructor(conn, box, { themes, setTheme, speaker = null, lastSession = () => null, openSession = () => {}, t = labelsFor("en") }) {
     this.conn = conn;
+    this.t = t;
     // The session the person last looked at, and how to go to it: Sign in
     // opens its card there (signin.start).
     this.lastSession = lastSession;
@@ -231,7 +233,7 @@ export class Settings {
     // The title first, then what this browser keeps, then the servers; the
     // loading and no-config pages keep the same width and order.
     const page = (...kids) => h("div", { className: "set-page" }, ...kids, this.browser(), this.knowledge(), this.servers());
-    if (!w || !this.doc) return this.box.replaceChildren(page(h("p", { className: "notice", textContent: "Loading…" })));
+    if (!w || !this.doc) return this.box.replaceChildren(page(h("p", { className: "notice", textContent: this.t("settings.loading") })));
     if (!w.exists && !this.dirty) return this.box.replaceChildren(page(this.empty()));
     const full = h(
       "div",
@@ -271,7 +273,7 @@ export class Settings {
     return h(
       "p",
       { className: "set-alert", id: "set-stale", textContent: "The file changed on disk since you opened it. " },
-      button("Reload from disk", "set-reload", () => {
+      button(this.t("settings.reload"), "set-reload", () => {
         this.load(this.wire);
         this.findings = null;
         this.draw();
@@ -284,7 +286,7 @@ export class Settings {
   browser() {
     if (!this.browserNode) {
       this.themeChip = h("pick-chip", { id: "set-theme", name: "theme", className: "pick" });
-      this.themeChip.setAttribute("aria-label", "Theme");
+      this.themeChip.setAttribute("aria-label", this.t("settings.theme"));
       this.themeChip.options = this.themes;
       this.themeChip.addEventListener("change", () => this.setTheme(this.themeChip.value));
       this.speakNode = h("div", { id: "set-speak" });
@@ -300,8 +302,8 @@ export class Settings {
       this.browserNode = h(
         "section",
         { className: "set-browser", id: "set-browser" },
-        h("h3", { textContent: "This browser" }),
-        h("div", { className: "set-browser-row" }, h("span", { className: "set-browser-k", textContent: "Theme" }), this.themeChip),
+        h("h3", { textContent: this.t("settings.thisBrowser") }),
+        h("div", { className: "set-browser-row" }, h("span", { className: "set-browser-k", textContent: this.t("settings.theme") }), this.themeChip),
         this.speakNode,
         this.appNode,
         this.pushNode,
@@ -340,13 +342,13 @@ export class Settings {
           this.drawNative(!want, String(e?.message || e), true);
         }
       });
-      this.nativeRetry = button("Retry", "set-native-retry", () => this.loadNative());
+      this.nativeRetry = button(this.t("settings.retry"), "set-native-retry", () => this.loadNative());
       this.nativeRetry.hidden = true;
       this.knowledgeNode = h(
         "section",
         { className: "set-knowledge", id: "set-knowledge" },
-        h("h3", { textContent: "Skills and memory" }),
-        h("label", { className: "set-browser-row set-native" }, this.nativeBox, h("span", { textContent: "Only aegis's skills and memory in my sessions" })),
+        h("h3", { textContent: this.t("settings.skillsMemory") }),
+        h("label", { className: "set-browser-row set-native" }, this.nativeBox, h("span", { textContent: this.t("settings.onlyAegis") })),
         this.nativeNote,
         this.nativeRetry,
       );
@@ -385,9 +387,9 @@ export class Settings {
     if (!this.speaker) return;
     const s = this.speaker.settings;
     const chip = h("pick-chip", { id: "set-speak-engine", name: "speech", className: "pick" });
-    chip.setAttribute("aria-label", "Read aloud voice");
+    chip.setAttribute("aria-label", this.t("settings.voice"));
     chip.options = [
-      { value: "builtin", label: "Built-in" },
+      { value: "builtin", label: this.t("settings.builtin") },
       { value: "phonon", label: "Phonon" },
     ];
     chip.value = s.engine;
@@ -400,12 +402,12 @@ export class Settings {
     else note = "the browser's own voice, in every language it has; Phonon sounds better: a 65 MB download, English only";
     const kids = [h("span", { className: "set-app-v set-speak-note", textContent: note })];
     if (!busy && s.engine !== "phonon" && m && m.speed < MIN_SPEED) {
-      const b = button("Use it anyway", null, () => this.chooseSpeech("phonon", true));
+      const b = button(this.t("settings.useAnyway"), null, () => this.chooseSpeech("phonon", true));
       b.dataset.act = "speak-anyway";
       kids.push(b);
     }
     this.speakNode.replaceChildren(
-      h("div", { className: "set-browser-row" }, h("span", { className: "set-browser-k", textContent: "Read aloud" }), chip),
+      h("div", { className: "set-browser-row" }, h("span", { className: "set-browser-k", textContent: this.t("settings.readAloud") }), chip),
       h("div", { className: "set-speak-line" }, ...kids),
     );
   }
@@ -437,11 +439,11 @@ export class Settings {
     const row = (k, v) => h("div", { className: "set-browser-row" }, h("span", { className: "set-browser-k", textContent: k }), v);
     const { canPrompt, installed } = installState();
     let app;
-    if (installed) app = h("span", { className: "set-app-v", textContent: "installed" });
+    if (installed) app = h("span", { className: "set-app-v", textContent: this.t("settings.installed") });
     else if (canPrompt) {
-      app = button("Install", null, openInstallDialog);
+      app = button(this.t("settings.install"), null, openInstallDialog);
       app.dataset.act = "install";
-    } else app = h("span", { className: "set-app-v", textContent: "your browser's menu installs it" });
+    } else app = h("span", { className: "set-app-v", textContent: this.t("settings.installMenu") });
     const copy = h("span", { className: "set-app-v", textContent: navigator.serviceWorker ? "downloading" : "not kept: needs https" });
     const push = pushState();
     const note = !push.supported
@@ -449,7 +451,7 @@ export class Settings {
       : push.subscribed
         ? `push on · ${push.sources.length} sources · the bell chooses them`
         : "push off · the bell turns it on";
-    this.appNode.replaceChildren(row("App", app), row("Offline copy", copy), row("Notifications", h("span", { className: "set-app-v", textContent: note })));
+    this.appNode.replaceChildren(row(this.t("settings.app"), app), row(this.t("settings.offline"), copy), row(this.t("settings.notifications"), h("span", { className: "set-app-v", textContent: note })));
     deviceCopy().then((c) => {
       if (c?.complete) copy.textContent = `build ${c.build} · ${Math.round(c.bytes / 1024).toLocaleString()} KB · ready`;
     });
@@ -472,7 +474,7 @@ export class Settings {
     const here = pushState().id;
     const when = (t) => (t ? new Date(t * 1000).toLocaleString([], { dateStyle: "short", timeStyle: "short" }) : "never");
     const rows = (this.pushRows || []).map((r) => {
-      const remove = button("Remove", null, async () => {
+      const remove = button(this.t("settings.remove"), null, async () => {
         remove.disabled = true;
         if (r.id === here) await unsubscribePush().catch(() => {});
         else await this.conn.call("push.remove", { id: r.id }).catch(() => {});
@@ -482,14 +484,14 @@ export class Settings {
       const el = h(
         "div",
         { className: "set-push-row" },
-        h("span", { className: "set-push-dev" }, h("b", { textContent: r.device }), r.id === here && h("span", { className: "set-push-here", textContent: " · this device" })),
+        h("span", { className: "set-push-dev" }, h("b", { textContent: r.device }), r.id === here && h("span", { className: "set-push-here", textContent: this.t("settings.thisDevice") })),
         h("span", { className: "set-push-facts", textContent: facts.join(" · ") }),
         remove,
       );
       el.dataset.id = r.id;
       return el;
     });
-    this.pushNode.replaceChildren(...(rows.length ? [h("div", { className: "set-browser-k", textContent: "Push to" }), ...rows] : []));
+    this.pushNode.replaceChildren(...(rows.length ? [h("div", { className: "set-browser-k", textContent: this.t("settings.pushTo") }), ...rows] : []));
   }
 
   // What aegis starts from now on reaches the internet from this link (exit.py).
@@ -533,7 +535,7 @@ export class Settings {
         .catch(() => {});
     }
     const rows = [
-      h("tr", {}, h("td", {}, h("b", { textContent: this.home })), h("td", { className: "m", textContent: "this server" }), h("td", {}, h("span", { className: "set-pill ok", textContent: "serving" })), h("td")),
+      h("tr", {}, h("td", {}, h("b", { textContent: this.home })), h("td", { className: "m", textContent: "this server" }), h("td", {}, h("span", { className: "set-pill ok", textContent: this.t("settings.serving") })), h("td")),
       ...this.links.map((l) =>
         h(
           "tr",
@@ -541,7 +543,7 @@ export class Settings {
           h("td", {}, h("b", { textContent: l.name })),
           h("td", { className: "m", textContent: l.url }),
           h("td", {}, h("span", { className: `set-pill ${l.state === "linked" ? "ok" : "bad"}`, textContent: state(l) })),
-          h("td", {}, !this.server && l.state === "linked" ? exitButton(l.name === this.doc?.exit_via ? "Stop exit" : "Exit here", null, () => this.exitVia(l.name === this.doc?.exit_via ? null : l.name)) : null, button("Remove", null, () => this.unlink(l.name))),
+          h("td", {}, !this.server && l.state === "linked" ? exitButton(l.name === this.doc?.exit_via ? "Stop exit" : "Exit here", null, () => this.exitVia(l.name === this.doc?.exit_via ? null : l.name)) : null, button(this.t("settings.remove"), null, () => this.unlink(l.name))),
         ),
       ),
       ...this.incoming.map((l) =>
@@ -557,7 +559,7 @@ export class Settings {
     ];
     const url = h("input", { className: "set-in", id: "set-link-url", placeholder: "https://dev.example", spellcheck: false });
     const token = h("input", { className: "set-in", id: "set-link-token", placeholder: "its token; kept in links.json, never in .aegis.yaml", type: "password" });
-    const add = button("Link", "set-link-add", () => this.link(url.value.trim(), token.value.trim()), "btn primary");
+    const add = button(this.t("settings.link"), "set-link-add", () => this.link(url.value.trim(), token.value.trim()), "btn primary");
     const via = this.doc?.exit_via;
     const exitLine = h("p", { className: "set-none", id: "set-exit", textContent: via ? `What aegis starts reaches the internet through ${via}.` : "What aegis starts uses this machine's route. A linked server's row can make it the exit." });
     exitLine.dataset.key = "exit_via";
@@ -566,7 +568,7 @@ export class Settings {
       h(
         "div",
         { className: "set-srvpick", id: "set-srvpick" },
-        h("span", { textContent: "Editing the config of" }),
+        h("span", { textContent: this.t("settings.editingConfig") }),
         ...[null, ...this.links.map((l) => l.name)].map((name) => {
           const b = button(name ?? this.home, null, () => this.pick(name), `btn${name === this.server ? " primary" : ""}`);
           b.dataset.server = name ?? "";
@@ -576,7 +578,7 @@ export class Settings {
     return h(
       "section",
       { className: "set-servers", id: "set-servers" },
-      h("h3", { textContent: "Servers" }),
+      h("h3", { textContent: this.t("settings.servers") }),
       h("p", { className: "set-none", textContent: "A link joins two servers both ways: each one's sessions show in the other's Fleet and tab bar, and agents on each act on the other as at home." }),
       h("table", { className: "tbl" }, ...rows),
       exitLine,
@@ -611,12 +613,12 @@ export class Settings {
     };
     const on = this.paused;
     const since = on && new Date(on.at * 1000).toLocaleString([], { dateStyle: "short", timeStyle: "short" });
-    const b = on ? button("Resume all", "set-resume-all", () => act("server.resume"), "btn primary") : button("Pause all", "set-pause-all", () => act("server.pause"));
+    const b = on ? button(this.t("settings.resumeAll"), "set-resume-all", () => act("server.resume"), "btn primary") : button(this.t("settings.pauseAll"), "set-pause-all", () => act("server.pause"));
     b.disabled = !!this.pauseBusy;
     return h(
       "section",
       { className: "set-pause", id: "set-pause" },
-      h("h3", { textContent: "Sessions" }),
+      h("h3", { textContent: this.t("settings.sessions") }),
       h("p", {
         className: "set-none",
         textContent: on
@@ -664,7 +666,7 @@ export class Settings {
     return h(
       "header",
       { className: "set-head" },
-      h("div", {}, h("h2", { textContent: "Settings" }), h("code", { id: "set-path", textContent: this.wire.path })),
+      h("div", {}, h("h2", { textContent: this.t("settings.title") }), h("code", { id: "set-path", textContent: this.wire.path })),
       harnesses,
     );
   }
@@ -714,7 +716,7 @@ export class Settings {
           "div",
           { className: "set-queue-line set-accepted" },
           h("span", { className: "set-name", textContent: `${harness} ${v}` }),
-          button("Remove", null, () => {
+          button(this.t("settings.remove"), null, () => {
             hv.accepted[harness] = hv.accepted[harness].filter((x) => x !== v);
             if (!hv.accepted[harness].length) delete hv.accepted[harness];
             this.touch();
@@ -725,11 +727,11 @@ export class Settings {
     );
     const box = h("div", { className: "set-queue" }, ...rows);
     box.dataset.row = "harness_versions";
-    const head = h("div", { className: "set-section-head" }, h("h3", { textContent: "Untested versions" }));
+    const head = h("div", { className: "set-section-head" }, h("h3", { textContent: this.t("settings.untested") }));
     const note = h("p", { className: "set-none", textContent: "A harness version outside the ones this aegis release was tested with: ask asks the person first, warn starts it with a notice in the transcript, off says nothing." });
     const list = accepted.length
-      ? h("div", { className: "set-queues", id: "set-accepted" }, h("p", { className: "set-none", textContent: "Accepted for good:" }), ...accepted)
-      : h("p", { className: "set-none", id: "set-accepted", textContent: "No version accepted for good." });
+      ? h("div", { className: "set-queues", id: "set-accepted" }, h("p", { className: "set-none", textContent: this.t("settings.accepted") }), ...accepted)
+      : h("p", { className: "set-none", id: "set-accepted", textContent: this.t("settings.noAccepted") });
     list.dataset.key = "harness_versions.accepted";
     return h("section", { id: "set-untested" }, head, note, h("div", { className: "set-queues" }, box), list);
   }
@@ -737,8 +739,8 @@ export class Settings {
   // Each harness aegis can sign in (signin/status.py): installed, version,
   // and the sign-in aegis keeps. Sign in opens the card in the last session.
   harnesses() {
-    const box = h("section", { id: "set-harnesses" }, h("div", { className: "set-section-head" }, h("h3", { textContent: "Harnesses" })));
-    const list = h("div", { className: "set-queues" }, h("p", { className: "set-none", textContent: "Reading…" }));
+    const box = h("section", { id: "set-harnesses" }, h("div", { className: "set-section-head" }, h("h3", { textContent: this.t("settings.harnesses") })));
+    const list = h("div", { className: "set-queues" }, h("p", { className: "set-none", textContent: this.t("settings.reading") }));
     const note = h("p", { className: "set-none" });
     box.append(list, note);
     const server = this.server;
@@ -787,7 +789,7 @@ export class Settings {
   checks() {
     const f = this.findings;
     const line = h("div", { className: "set-summary", id: "set-summary" });
-    if (f === null) line.append(h("span", { textContent: "Not checked since you opened this page." }));
+    if (f === null) line.append(h("span", { textContent: this.t("settings.notChecked") }));
     else {
       const errors = f.filter((x) => x.level === "error").length;
       const warns = f.filter((x) => x.level === "warn").length;
@@ -801,7 +803,7 @@ export class Settings {
           }, "link"),
         );
     }
-    line.append(button("Run doctor", "set-doctor", () => this.runDoctor(), "btn"));
+    line.append(button(this.t("settings.runDoctor"), "set-doctor", () => this.runDoctor(), "btn"));
     // Every check when asked; otherwise mark() lists the problems that have
     // no card or row to sit on.
     const list = h("ul", { id: "set-findings", className: "set-findings" });
@@ -866,7 +868,7 @@ export class Settings {
       const [x, y] = [key(p), key(q)];
       return y[0] - x[0] || y[1] - x[1] || y[2] - x[2];
     };
-    const sort = button("Sort by ranking", null, () => set([...list].sort(order)), "link set-casc-sort");
+    const sort = button(this.t("settings.sortRanking"), null, () => set([...list].sort(order)), "link set-casc-sort");
     const warn = h("p", { className: "set-casc-warn" });
     const attr = h("p", { className: "set-attr" });
     const set = (next, focus) => {
@@ -904,7 +906,7 @@ export class Settings {
           };
           const up = act("up", "↑", "Move up", swap(i - 1));
           const down = act("down", "↓", "Move down", swap(i + 1));
-          const rm = act("rm", "×", "Remove", () => list.filter((_, k) => k !== i));
+          const rm = act("rm", "×", this.t("settings.remove"), () => list.filter((_, k) => k !== i));
           up.disabled = i === 0;
           down.disabled = i === list.length - 1;
           rm.disabled = list.length === 1; // an agent runs at least one model
@@ -945,11 +947,11 @@ export class Settings {
   // Every model the installed harnesses run, the ones agents use first:
   // filtered by harness and price, sorted by any column (models.list).
   modelsView() {
-    const head = h("div", { className: "set-section-head" }, h("h3", { textContent: "Models" }));
+    const head = h("div", { className: "set-section-head" }, h("h3", { textContent: this.t("settings.models") }));
     const box = h("section", { id: "set-models" }, head);
     const m = this.models;
     if (!m || m.error) {
-      box.append(h("p", { className: "set-none", textContent: m ? m.error : "Loading…" }));
+      box.append(h("p", { className: "set-none", textContent: m ? m.error : this.t("settings.loading") }));
       return box;
     }
     const view = this.modelView;
@@ -1014,13 +1016,13 @@ export class Settings {
       r.dataset.model = x.value;
       return r;
     };
-    const body = list.length ? list.map(row) : [h("p", { className: "set-none", textContent: "No model matches." })];
+    const body = list.length ? list.map(row) : [h("p", { className: "set-none", textContent: this.t("settings.noModel") })];
     return h("div", { className: "set-mrows" }, hd, ...body);
   }
 
   agents() {
     const v = this.wire.vocab;
-    const head = h("div", { className: "set-section-head" }, h("h3", { textContent: "Agents" }), button("Add agent", "set-add-agent", () => {
+    const head = h("div", { className: "set-section-head" }, h("h3", { textContent: this.t("settings.agents") }), button(this.t("settings.addAgent"), "set-add-agent", () => {
       this.doc.agents.push({ name: "", harness: v.harnesses[0], model: "", models: [], effort: "", permission: "", priming: null, keep_harness_tools: [], mcp: [] });
       this.touch();
       this.draw();
@@ -1092,7 +1094,7 @@ export class Settings {
     }, isDefault ? "set-default on" : "set-default");
     star.disabled = isDefault || !a.name;
     star.dataset.key = "default_agent";
-    const del = button("Remove", null, () => {
+    const del = button(this.t("settings.remove"), null, () => {
       this.doc.agents.splice(i, 1);
       if (this.doc.default_agent === a.name) this.doc.default_agent = null;
       if (this.doc.max_agents) delete this.doc.max_agents[a.name];
@@ -1235,7 +1237,7 @@ export class Settings {
           this.touch();
         });
       }
-      const del = button("Remove", null, () => {
+      const del = button(this.t("settings.remove"), null, () => {
         this.doc.queues.splice(i, 1);
         this.touch();
         this.draw();
@@ -1243,7 +1245,7 @@ export class Settings {
       row.append(h("div", { className: "set-queue-line" }, name, h("span", { textContent: "runs" }), agent, h("span", { textContent: "at priority" }), priority, quiet, del));
       return row;
     });
-    const head = h("div", { className: "set-section-head" }, h("h3", { textContent: "Queues" }), button("Add queue", "set-add-queue", () => {
+    const head = h("div", { className: "set-section-head" }, h("h3", { textContent: this.t("settings.queues") }), button(this.t("settings.addQueue"), "set-add-queue", () => {
       this.doc.queues.push({ name: "", agent: this.doc.default_agent || names[0] || "", priority: null });
       this.touch();
       this.draw();
@@ -1296,16 +1298,16 @@ export class Settings {
           this.touch();
         });
       }
-      const del = button("Remove", null, () => {
+      const del = button(this.t("settings.remove"), null, () => {
         this.doc.terminals.splice(i, 1);
         this.touch();
         this.draw();
       }, "link danger");
-      const more = h("details", { className: "set-priming", open: !!(Object.keys(t.env).length || Object.keys(t.access).length) }, h("summary", { textContent: "Environment and access" }), env, access);
+      const more = h("details", { className: "set-priming", open: !!(Object.keys(t.env).length || Object.keys(t.access).length) }, h("summary", { textContent: this.t("settings.envAccess") }), env, access);
       row.append(h("div", { className: "set-queue-line" }, name, cmd, h("span", { textContent: "in" }), cwd, restart, del), more);
       return row;
     });
-    const head = h("div", { className: "set-section-head" }, h("h3", { textContent: "Terminals" }), button("Add terminal", "set-add-terminal", () => {
+    const head = h("div", { className: "set-section-head" }, h("h3", { textContent: this.t("settings.terminals") }), button(this.t("settings.addTerminal"), "set-add-terminal", () => {
       this.doc.terminals.push({ name: "", cmd: "", cwd: ".", restart: "", env: {}, access: {} });
       this.touch();
       this.draw();
@@ -1369,7 +1371,7 @@ export class Settings {
         this.touch();
         this.draw();
       });
-      const test = button("Test", null, async () => {
+      const test = button(this.t("settings.test"), null, async () => {
         result.textContent = "Connecting…";
         try {
           const r = await this.call("mcp.test", { entry: m });
@@ -1380,7 +1382,7 @@ export class Settings {
         }
         result.textContent = this.mcpTests[i];
       }, "link");
-      const del = button("Remove", null, () => {
+      const del = button(this.t("settings.remove"), null, () => {
         this.doc.mcp.splice(i, 1);
         for (const a of this.doc.agents) if (a.mcp) a.mcp = a.mcp.filter((n) => n !== m.name);
         this.mcpTests = {};
@@ -1392,7 +1394,7 @@ export class Settings {
       row.append(h("div", { className: "set-queue-line" }, name, pick, fields[0], test, del), more, result);
       return row;
     });
-    const head = h("div", { className: "set-section-head" }, h("h3", { textContent: "MCP servers" }), button("Add MCP server", "set-add-mcp", () => {
+    const head = h("div", { className: "set-section-head" }, h("h3", { textContent: this.t("settings.mcp") }), button(this.t("settings.addMcp"), "set-add-mcp", () => {
       this.doc.mcp.push({ name: "", url: "", headers: {}, command: "", args: [], env: {} });
       this.touch();
       this.draw();
@@ -1491,7 +1493,7 @@ export class Settings {
       row.append(h("div", { className: "set-queue-line" }, h("span", { className: "set-name", textContent: name }), h("span", { textContent: "parks after" }), input, h("span", { textContent: "min idle" })));
       return row;
     });
-    const head = h("div", { className: "set-section-head" }, h("h3", { textContent: "Parking" }));
+    const head = h("div", { className: "set-section-head" }, h("h3", { textContent: this.t("settings.parking") }));
     const note = h("p", { className: "set-none", textContent: "An idle session that nothing needs gives its harness's memory back, and the next message resumes it. Blank keeps every session of that harness running." });
     return h("section", {}, head, note, h("div", { className: "set-queues", id: "set-park" }, ...rows));
   }
@@ -1502,7 +1504,7 @@ export class Settings {
   workflows() {
     const file = h("input", { type: "file", id: "set-wf-import", accept: ".yaml,.yml", hidden: true });
     file.addEventListener("change", () => file.files[0] && this.importWorkflow(file.files[0]).finally(() => (file.value = "")));
-    const head = h("div", { className: "set-section-head" }, h("h3", { textContent: "Workflows" }), button("Import…", "set-wf-import-btn", () => file.click()), file);
+    const head = h("div", { className: "set-section-head" }, h("h3", { textContent: this.t("settings.workflows") }), button(this.t("settings.import"), "set-wf-import-btn", () => file.click()), file);
     const note = h("p", { className: "set-none", textContent: "The pool bounds the node sessions every workflow on this server has open at once; blank is the default, 4 in all, and an agent left blank is bound by the total. Saved workflows are files in .aegis/workflows beside .aegis.yaml: Import and Export act on them at once, without Save changes." });
     if (this.savedWf === undefined) this.loadSaved();
     const pool = h("div", { className: "set-queues", id: "set-wf-pool" }, ...this.poolRows());
@@ -1534,7 +1536,7 @@ export class Settings {
     const stray = Object.keys(m).filter((k) => k !== "total" && !names.has(k)).map((k) => {
       const row = h("div", { className: "set-queue" });
       row.dataset.row = `workflows.${k}`;
-      row.append(h("div", { className: "set-queue-line" }, h("span", { className: "set-name", textContent: k }), h("span", { textContent: `at most ${m[k]}: not an agent` }), button("Clear", null, () => {
+      row.append(h("div", { className: "set-queue-line" }, h("span", { className: "set-name", textContent: k }), h("span", { textContent: `at most ${m[k]}: not an agent` }), button(this.t("settings.clear"), null, () => {
         delete m[k];
         row.remove();
         this.touch();
@@ -1567,7 +1569,7 @@ export class Settings {
           r.k = name.value.trim();
           sync();
         });
-        const del = button("Remove", null, () => {
+        const del = button(this.t("settings.remove"), null, () => {
           list.splice(list.indexOf(r), 1);
           row.remove();
           sync();
@@ -1584,7 +1586,7 @@ export class Settings {
       }, "link");
       return h("div", {}, h("div", { className: "set-section-head" }, h("h4", { textContent: label }), more), box);
     };
-    const head = h("div", { className: "set-section-head" }, h("h3", { textContent: "Usage" }));
+    const head = h("div", { className: "set-section-head" }, h("h3", { textContent: this.t("settings.usage") }));
     const note = h("p", { className: "set-none", textContent: "How aegis usage and the usage page split the work. Owners name who owns each local repo, by its directory name; owner names are how each owner is shown. Subscriptions give an account, the part after the colon in aegis usage --split billing, a name and a monthly fee in USD, which is shared over the work that ran on it." });
     return h("section", { id: "set-usage" }, head, note,
       map("usage.owners", "Owners", "Add owner", ["repo", "owner"]),
@@ -1629,14 +1631,14 @@ export class Settings {
       const row = h("div", { className: "set-wf" });
       row.dataset.wf = w.id;
       const steps = h("ul", { className: "set-wf-steps", hidden: true });
-      const show = button("Steps", null, async () => {
+      const show = button(this.t("settings.steps"), null, async () => {
         if (steps.hidden && !steps.childElementCount) {
           const r = await this.call("workflow.read", { id: w.id });
           steps.replaceChildren(...(r.steps || []).map((s) => h("li", { textContent: s.say, style: `padding-left:${s.depth * 14}px` })));
         }
         steps.hidden = !steps.hidden;
       });
-      const exp = button("Export", null, () => this.exportWorkflow(w.id));
+      const exp = button(this.t("settings.export"), null, () => this.exportWorkflow(w.id));
       row.append(
         h("div", { className: "set-wf-line" }, h("span", { className: "set-name", textContent: w.title || w.id }), h("code", { textContent: w.id }), h("span", { className: "set-none", textContent: who }), h("span", { className: "set-wf-acts" }, show, exp)),
         w.error ? h("p", { className: "set-why error", textContent: w.error }) : "",
@@ -1694,9 +1696,9 @@ export class Settings {
     const dirty = this.dirty;
     const status = this.status || (dirty ? "Unsaved changes" : "");
     b.classList.toggle("dirty", dirty);
-    const save = button("Save changes", "set-save", () => !offline() && this.save(), "btn primary needs-net");
+    const save = button(this.t("settings.save"), "set-save", () => !offline() && this.save(), "btn primary needs-net");
     save.disabled = !dirty || this.saving;
-    const discard = button("Discard", "set-discard", () => {
+    const discard = button(this.t("settings.discard"), "set-discard", () => {
       this.load(this.wire);
       this.findings = null;
       this.status = "";
@@ -1750,7 +1752,7 @@ export class Settings {
   }
 
   async runDoctor() {
-    const b = document.getElementById("set-doctor");
+    const b = this.box.querySelector("#set-doctor");
     if (b) {
       b.disabled = true;
       b.textContent = "Checking…";
@@ -1771,15 +1773,15 @@ export class Settings {
         ? `aegis found ${usable.map((f) => `${f.label} ${f.version.replace(/\s*\(.*\)$/, "")}`).join(" and ")} on this machine.`
         : "aegis found no harness on this machine. Install Claude Code or OpenCode, then reload this page."
       : "Looking for the harnesses installed on this machine…";
-    const setup = button("Set up from what is installed", "set-setup", () => this.setup(), "btn primary");
+    const setup = button(this.t("settings.setup"), "set-setup", () => this.setup(), "btn primary");
     setup.disabled = !usable.length;
     return h(
       "div",
       { className: "set-empty" },
-      h("h2", { textContent: "No configuration yet" }),
+      h("h2", { textContent: this.t("settings.noConfig") }),
       h("p", {}, "There is no ", h("code", { textContent: ".aegis.yaml" }), ` in ${this.wire.root}. ${found}`),
       setup,
-      h("p", { className: "set-none", textContent: "You can change every value before it is saved." }),
+      h("p", { className: "set-none", textContent: this.t("settings.canChange") }),
     );
   }
 

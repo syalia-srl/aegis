@@ -15,12 +15,15 @@
 //
 // The outbox is per mount (a6) even when no composer draws it: drafts are one
 // device's, keyed by session, and a chat that is only a transcript still puts
-// one out when the connection comes back.
+// one out when the connection comes back. A page that already has one lends it
+// instead of letting this mount open a second window on the same drafts.
 
 import { acquire } from "./connection.js";
 import { installGlyphs } from "./glyphs.js";
 import { labelsFor } from "./labels.js";
+import { lifecycle } from "./lifecycle.js";
 import { Outbox } from "./outbox.js";
+import { buildFull } from "./layouts/full.js";
 import { ComposerPart } from "./parts/composer.js";
 import { TranscriptPart } from "./parts/transcript.js";
 
@@ -52,6 +55,15 @@ export class Mount {
       attachments: true,
       session: null,
       token: "",
+      // `adopt`: build no root, take the element the host gives us as one. The
+      // standalone page does this over its empty #a2 (b8); a host that has an
+      // element of its own passes only `layout`.
+      adopt: false,
+      // The page's own outbox, when it already has one: the full layout's
+      // module singleton (outbox.js) is what its queued row and the browser
+      // suite call by name, so the mount borrows it rather than opening a
+      // second window onto the same drafts.
+      outbox: null,
       ...options,
     };
     this.urls = {
@@ -71,41 +83,58 @@ export class Mount {
     this._working = new Set(); // keys whose turn this mount saw start
     this._costAt = new Map(); // key -> the cumulative cost_usd when it did
     this._dead = false;
-    this.outbox = null;
+    this.outbox = options.outbox || null;
     this.composer = null;
   }
 
   start() {
     this.root = makeRoot(this.el, this.opts, this.urls);
-    this.outbox = new Outbox({ root: this.root, t: this.t });
-    // Until a composer draws in this mount, a queued draft still goes out: the
-    // composer replaces this with the fuller path (the 5 s verdict and the
-    // untested-harness question) when it is built.
-    this.outbox.setSender((key, params) => this.callFor(key, "session.send", params));
-    this.outbox.load();
+    if (!this.outbox) {
+      this.outbox = new Outbox({ root: this.root, t: this.t });
+      // Until a composer draws in this mount, a queued draft still goes out: the
+      // composer replaces this with the fuller path (the 5 s verdict and the
+      // untested-harness question) when it is built.
+      this.outbox.setSender((key, params) => this.callFor(key, "session.send", params));
+      this.outbox.load();
+    }
     const held = acquire(this.urls.ws.href, {
       token: this.opts.token,
       onState: (state, server) => {
         this.emit("connection", { state, server });
         // A chat flushes only the session it shows: every draft on the device
         // is another mount's or the full layout's to send.
-        if (state === "open") this.outbox.flushNow((key) => key === this.state.shown).catch(() => {});
+        if (state === "open" && !this.opts.outbox)
+          this.outbox.flushNow((key) => key === this.state.shown).catch(() => {});
       },
     });
     this.conn = held.conn;
     this._release = held.release;
-    this._unsubSessions = this.conn.subscribe(
-      "sessions",
-      (list) => this._snapshot(list),
-      (ops) => this._patch(ops),
-    );
+    // A chat follows one server's sessions and keeps the metas it draws. The
+    // full layout already subscribes them itself (linked servers included,
+    // with the Fleet and the tabs to redraw), and two writers of one map would
+    // clear each other: it leaves the map to the page and b1 gives that page
+    // this mount's state.
+    if (this.opts.layout !== "full") {
+      this._unsubSessions = this.conn.subscribe(
+        "sessions",
+        (list) => this._snapshot(list),
+        (ops) => this._patch(ops),
+      );
+    }
     this.mountLayout();
   }
 
-  // Phase A composes the chat layout only. "full" is accepted (the standalone
-  // page passes it at b1) but composes nothing until b8.
+  // The standalone client's page: the full layout builds the netbanner, the
+  // boot view and the session view in this root, and app.js composes the parts
+  // it holds. It keeps the id the browser suite addresses (b8). A chat composes
+  // one transcript and, unless the host asked for none, its box.
   mountLayout() {
-    if (this.opts.layout === "full") return;
+    if (this.opts.layout === "full") {
+      this.root.id = "a2";
+      this.root.classList.add("app");
+      buildFull(this.root, this.t);
+      return;
+    }
     if (this.opts.layout !== "chat") throw new Error(`aegis: no layout ${this.opts.layout}`);
     const chat = el("div", "aegis-chat");
     this.root.append(chat);
@@ -167,7 +196,7 @@ export class Mount {
     if (this._dead) return;
     this._dead = true;
     for (const p of this.parts) p.destroy?.();
-    this.outbox?.destroy();
+    if (!this.opts.outbox) this.outbox?.destroy();
     this._unsubSessions?.();
     this._release?.();
     this.root?.remove();
@@ -189,6 +218,31 @@ export class Mount {
   callFor(key, op, params = {}) {
     const { server, log_id } = forKey(key);
     return this.conn.call(op, { ...params, log_id }, server);
+  }
+
+  // The key helpers, on the mount: a session's key, and back; the link that
+  // holds a server; an operation on whichever server holds a session. They are
+  // methods because they read this mount's links (b1 moved them off the page).
+  keyOf(server, logId) {
+    return keyOf(server, logId);
+  }
+
+  forKey(key) {
+    return forKey(key);
+  }
+
+  linkOf(server) {
+    return this.state.links.find((l) => l.name === server);
+  }
+
+  isOff(server) {
+    return !!server && this.linkOf(server)?.state !== "linked";
+  }
+
+  // A session's meta as the page's views draw it: its lifecycle, its server,
+  // its key, and whether that server is unreachable.
+  withKey(m, server = null) {
+    return { ...lifecycle(m), server, key: keyOf(server, m.log_id), off: this.isOff(server) };
   }
 
   // `sessions`: a snapshot replaces every meta this mount holds. A session
@@ -287,7 +341,16 @@ export class Mount {
 
 export class MountState {
   constructor() {
-    this.sessions = new Map(); // log_id -> meta, from the sessions channel
+    this.sessions = new Map(); // key -> meta, from the sessions channel
+    this.links = []; // the home server's links, from the `links` channel
+    this.linksLoaded = false; // the first `links` snapshot has arrived
+    this.linksReady = new Promise((ok) => (this.linksArrived = ok)); // resolves with it
+    this.linksSig = ""; // the links' names and states the archive was last read for
+    this.remote = new Map(); // linked server -> {unsubs, quota, host, unsubHost, loaded, state}
+    this.quota = { providers: [] };
+    this.host = null;
+    this.unsubHost = null;
+    this.ordered = []; // metas in this browser's tab order
     this.shown = null; // the key of the session a chat shows
     this.kept = new Map(); // key -> the transcript part's stash (a4)
   }
@@ -310,12 +373,15 @@ function el(tag, cls) {
 }
 
 // The root the mount owns: a .aegis element inside the host's, its theme, the
-// stylesheets it needs and the glyph sprite. The host decides nothing.
+// stylesheets it needs and the glyph sprite. The host decides nothing. With
+// `adopt`, the host's element is the root: the standalone page gives it an
+// empty #a2, and the mount fills it with the full layout.
 function makeRoot(host, opts, urls) {
-  const root = el("div", "aegis");
+  const root = opts.adopt && host ? host : el("div", "aegis");
+  root.classList.add("aegis");
   root.dataset.theme = opts.theme;
   root.dataset.layout = opts.layout;
-  host.append(root);
+  if (root !== host) host.append(root);
   linkStyles(opts.theme, urls);
   installGlyphs(root);
   return root;
