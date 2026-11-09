@@ -469,7 +469,7 @@ export class SidebarPart {
     const tiles = [meter(this.t("gauges.cpu"), h.cpu), meter(this.t("gauges.ram"), h.ram.pct)];
     const rows = [hostRow(this.t("gauges.cpu"), h.cpu, ""), hostRow(this.t("gauges.ram"), h.ram.pct, `${h.ram.used_gb} / ${h.ram.total_gb} GB`)];
     if (h.disk) tiles.push(meter(this.t("gauges.disk"), h.disk.pct)); // the fullest
-    rows.push(...diskRows(h));
+    rows.push(...diskRows(h, this.t));
     const net = h.net;
     if (net) {
       const sp = net.speed;
