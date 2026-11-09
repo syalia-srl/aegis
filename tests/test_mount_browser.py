@@ -1912,5 +1912,28 @@ def test_the_full_layout_leaves_the_hosts_page_alone(host, browser, width):  # n
         page.evaluate("document.querySelector('#host-side .fbar .native').disabled")
         is False
     )
+
+    # A hash link the layout draws routes the mount, not the host's URL: the
+    # page's hash stays put and the view moves to the session.
+    page.evaluate(
+        """(sid) => {
+          const a = document.createElement("a");
+          a.id = "in-mount-hash";
+          a.href = "#s=" + sid;
+          a.textContent = "go";
+          document.querySelector("#full .tabs").append(a);
+        }""",
+        host["session2"],
+    )
+    page.locator("#in-mount-hash").click()
+    page.wait_for_function(
+        "() => document.querySelector('#full > .aegis').dataset.view === 'session'",
+        timeout=15_000,
+    )
+    assert page.evaluate("location.hash") == "#host-route"
+    assert (
+        page.evaluate("document.querySelector('#full > .aegis').dataset.view")
+        == "session"
+    )
     assert errors == []
     page.close()
