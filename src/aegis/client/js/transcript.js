@@ -323,10 +323,21 @@ export class Transcript {
     // live turn's upserts, and the reply vanishes. The first after a reconnect
     // is authoritative; any other one that is not newer keeps the newer rows
     // (#961). A live entry grows without moving its revision, so an equal
-    // revision can still be older than what this tab drew: it is not newer.
+    // revision can still be behind it: keep what this tab drew when the
+    // snapshot is missing that entry or has less of it. Any other equal
+    // snapshot replaces, as a switch to a session whose ids repeat does.
     const force = this.reset;
     this.reset = false;
-    if (!force && Number.isFinite(data.rev) && data.rev <= this.rev) return;
+    const behind =
+      Number.isFinite(data.rev) &&
+      (data.rev < this.rev ||
+        (data.rev === this.rev &&
+          [...this.entries].some(([id, e]) => {
+            if (!e.live) return false;
+            const got = data.entries.find((n) => n.id === id);
+            return !got || String(got.md || "").length < String(e.md || "").length;
+          })));
+    if (!force && behind) return;
     const { sinceId, sinceText } = this;
     this.clear();
     this.sinceId = sinceId;
