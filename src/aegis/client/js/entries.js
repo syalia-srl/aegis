@@ -843,7 +843,9 @@ export const workflowTitle = (run) => workflows.summary(run)?.title;
 // rename; this only draws that.
 export const workflowLocked = (m) => !!m?.workflow && ["armed", "running"].includes(workflows.summary(m.workflow.run)?.status);
 export function refreshWorkflows(runs) {
-  const mine = (c) => !runs || runs.has(c.dataset.run);
+  // Only a card inside an aegis root is aegis's: a host page may draw its own
+  // `.wfcard` with the same class, and must be left alone (m5).
+  const mine = (c) => (!runs || runs.has(c.dataset.run)) && !!c.closest(".aegis");
   for (const c of document.querySelectorAll(".wfcard")) if (mine(c)) fillWorkflow(c);
   for (const c of document.querySelectorAll(".wfdcard")) if (mine(c)) fillDecision(c);
 }
@@ -853,6 +855,7 @@ export function refreshWorkflows(runs) {
 // back a Stop already pressed.
 export function tickWorkflows() {
   for (const c of document.querySelectorAll(".wfcard")) {
+    if (!c.closest(".aegis")) continue; // a host's card, not ours (m5)
     const w = workflows.get(c.dataset.run);
     if (!w || w.status !== "running") continue;
     const host = hostOf(c, `wf-${w.run}`);
