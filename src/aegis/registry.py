@@ -40,7 +40,7 @@ from .roots import Roots
 from .policy import EventKind, McpServer, Refused
 from .session import Host, Session, SpawnSpec
 from .transcript.entries import Fold, fold_records, tool_output
-from .transcript.store import Store, read_store
+from .transcript.store import Store, read_store, stored
 from .transcript.wire import withheld_text
 
 log = logging.getLogger("aegis.registry")
@@ -966,7 +966,7 @@ class Registry(Host):
         if log_id not in self.sessions and log_id not in self.archived:
             raise OpError("no_session", f"no session {log_id!r}")
         path = self.store_path(log_id)
-        return tool_output(read_store(path)[0], entry_id) if path.exists() else None
+        return tool_output(read_store(path)[0], entry_id) if stored(path) else None
 
     def archived_entries(self, log_id: str) -> list[dict]:
         """An archived session's transcript entries, read from its store."""
@@ -974,7 +974,7 @@ class Registry(Host):
 
     def _archived_fold(self, log_id: str) -> Fold:
         path = self.store_path(log_id)
-        return fold_records(read_store(path)[0]) if path.exists() else Fold()
+        return fold_records(read_store(path)[0]) if stored(path) else Fold()
 
     async def spawn(
         self,

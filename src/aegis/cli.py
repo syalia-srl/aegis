@@ -408,6 +408,27 @@ def doctor(
     raise typer.Exit(1 if _report(findings) else 0)
 
 
+@app.command()
+def gc(
+    root: Path | None = typer.Option(
+        None, help="Config root; default: the nearest ancestor holding .aegis.yaml."
+    ),
+    days: int = typer.Option(
+        7, min=1, help="Reclaim sessions archived longer ago than this."
+    ),
+    apply: bool = typer.Option(
+        False, "--apply", help="Delete and pack; without it, only list."
+    ),
+) -> None:
+    """Pack old sessions' transcripts and delete their files, uploads and browsers."""
+    from .gc import run
+    from .roots import make_roots
+
+    roots = make_roots(start=Path.cwd(), root=root)
+    for line in run(roots.state_root, days=days, apply=apply).lines():
+        typer.echo(line)
+
+
 @app.command("import-legacy")
 def import_legacy(
     source: Path = typer.Argument(
