@@ -92,6 +92,11 @@ export class Mount {
     this._working = new Set(); // keys whose turn this mount saw start
     this._costAt = new Map(); // key -> the cumulative cost_usd when it did
     this._dead = false;
+    // A full mount is building until app.js's boot runs (layouts/full.js):
+    // `_built` is false then, and the calls a host makes wait in `_queue`.
+    this._built = true;
+    this._queue = [];
+    this._connState = null; // the last state, for a listener that joins later
     this._handle = null;
     this._spawning = null; // the spawn a send is waiting on, shared by its peers
     this.outbox = options.outbox || null;
@@ -111,6 +116,7 @@ export class Mount {
     const held = acquire(this.urls.ws.href, {
       token: this.opts.token,
       onState: (state, server) => {
+        this._connState = { state, server };
         this.emit("connection", { state, server });
         // A chat flushes only the session it shows: every draft on the device
         // is another mount's or the full layout's to send.
@@ -137,14 +143,17 @@ export class Mount {
 
   // The standalone client's page: the full layout builds the netbanner, the
   // boot view and the session view in this root, and app.js composes the parts
-  // it holds. It keeps the id the browser suite addresses (b8). A chat composes
-  // one transcript and, unless the host asked for none, its box; tabs compose
-  // the same two under a strip of the sessions the policy lists.
+  // it holds. Its markup comes from layouts/full.js at once; its behaviour is
+  // app.js's, loaded and composed a moment later, so the mount is building
+  // until then. It keeps the id the browser suite addresses (b8). A chat
+  // composes one transcript and, unless the host asked for none, its box; tabs
+  // compose the same two under a strip of the sessions the policy lists.
   mountLayout() {
     if (this.opts.layout === "full") {
       this.root.id = "a2";
       this.root.classList.add("app");
-      buildFull(this.root, this.t);
+      this._built = false;
+      buildFull(this).catch((error) => this.fail(null, error));
       return;
     }
     if (this.opts.layout === "tabs") {
@@ -193,6 +202,23 @@ export class Mount {
   on(name, fn) {
     if (!this.listeners.has(name)) this.listeners.set(name, new Set());
     this.listeners.get(name).add(fn);
+    // The connection's last state reaches a listener that joins after it: the
+    // full layout loads app.js after the socket may already have opened, and
+    // a host that mounts into a page with a socket already up must not sit at
+    // "connecting" until the next change. It arrives in a microtask, after the
+    // listener's own synchronous setup has finished: app.js registers it
+    // halfway through its boot and reads declarations made after.
+    if (name === "connection" && this._connState) {
+      const state = this._connState;
+      queueMicrotask(() => {
+        if (this._dead || !this.listeners.get(name)?.has(fn)) return;
+        try {
+          fn(state);
+        } catch (e) {
+          console.error("aegis:", name, e);
+        }
+      });
+    }
     return this;
   }
 
@@ -218,6 +244,7 @@ export class Mount {
   }
 
   send(text) {
+    if (!this._built) return this._afterBuild(() => this.send(text));
     if (this.composer) return this.composer.send(text);
     return this.ensureSession().then((key) => {
       // A transcript-only mount still lets a reply pill's send arrive.
@@ -229,6 +256,7 @@ export class Mount {
   // Show another session (a log id or a `server/log_id` key). The constructor's
   // own session is followed quietly; this always reports when it changes.
   open(session) {
+    if (!this._built) return this._afterBuild(() => this.open(session));
     if (this.opts.layout === "full") return this.hooks?.open?.(session) ?? this;
     this.follow(session || null);
     return this;
@@ -271,14 +299,46 @@ export class Mount {
   // Put the caret in this mount's box, or focus the transcript when it has
   // none (its .tr has tabindex="-1").
   focus() {
+    if (!this._built) return this._afterBuild(() => this.focus());
     if (this.opts.layout === "full" && this.hooks?.focus) return this.hooks.focus();
     if (this.composer?.input) return this.composer.input.focus();
     this.transcript?.tr?.focus();
   }
 
+  // A call made while a full mount is still building waits here, in call
+  // order, and runs once the layout is composed. A mount destroyed first
+  // composes nothing, so its waiting calls settle as no-ops.
+  _afterBuild(fn) {
+    if (this._dead) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      this._queue.push(() => {
+        try {
+          resolve(fn());
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+  }
+
+  // The layout is composed. The constructor's session is the first follow,
+  // silently, as it is for chat and tabs; then the host's calls run.
+  built() {
+    if (this._dead) return;
+    this._built = true;
+    if (this.opts.session) this.follow(this.opts.session, true);
+    for (const run of this._queue.splice(0)) run();
+  }
+
+  // Whether a destroy got here before the full layout's module did.
+  get dead() {
+    return this._dead;
+  }
+
   destroy() {
     if (this._dead) return;
     this._dead = true;
+    for (const run of this._queue.splice(0)) run();
     for (const p of this.parts) p.destroy?.();
     if (!this.opts.outbox) this.outbox?.destroy();
     this._unsubSessions?.();

@@ -74,11 +74,18 @@ export const FULL_HTML = `
 <div id="probes" hidden aria-hidden="true"></div>
 `;
 
-// Build the full layout into `root`. The mount calls it before any part is
-// composed, so a part may find its nodes under the root at once.
-export function buildFull(root, t) {
+// Build the full layout into the mount's root. The layout's markup is here;
+// its behaviour is app.js's boot, which this module loads with a dynamic
+// import so a chat or tabs mount never downloads or evaluates it. The mount
+// calls this after its root and socket exist, and `built()` lets the calls a
+// host made while the module loaded run against the composed layout.
+export async function buildFull(mount) {
   const holder = document.createElement("template");
   holder.innerHTML = FULL_HTML;
-  root.append(holder.content);
-  if (t) applyLabels(root, t);
+  mount.root.append(holder.content);
+  applyLabels(mount.root, mount.t);
+  const { composeFull } = await import("../app.js");
+  if (mount.dead) return; // destroyed while the module loaded
+  mount.teardown = composeFull(mount);
+  mount.built();
 }
