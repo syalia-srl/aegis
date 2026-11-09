@@ -2114,3 +2114,212 @@ def test_a_full_mount_without_its_sidebar_hears_its_events(host, browser, width)
     page.wait_for_timeout(500)
     assert errors == []
     page.close()
+
+
+# -- one page, three layouts, two widths (m7, #962) ---------------------------
+# #962's own proof: a stranger's page that already uses the ids #tabs and
+# #composer, sets the host's theme and hides tool calls with its own CSS, and
+# mounts all three layouts in it at once. Without ?layouts=all the fixture
+# mounts only the chat, so every case above it is unchanged.
+
+ROOTS = """() => ({
+  chat: document.querySelectorAll("#chat > .aegis[data-layout=chat]").length,
+  tabs: document.querySelectorAll("#tabsbox > .aegis[data-layout=tabs]").length,
+  full: document.querySelectorAll("#full > .aegis[data-layout=full]").length,
+})"""
+
+# The host's own boxes in document coordinates, in the shape window.__host
+# recorded at scroll 0. The full layout scrolls its own tab into view on the
+# page's scrollbar, so a viewport-relative rect would move with the page and
+# say nothing about whether the host's boxes themselves moved.
+HOST_DOC = """() => {
+  const out = {};
+  for (const id of ["board", "tabs", "composer"]) {
+    const n = document.getElementById(id);
+    const r = n.getBoundingClientRect();
+    out[id] = {text: n.textContent, x: r.x, y: r.y + window.scrollY,
+               width: r.width, height: r.height};
+  }
+  return out;
+}"""
+
+
+@pytest.mark.parametrize("width", [1280, 390])
+def test_all_three_layouts_in_one_host_page(host, browser, width):  # noqa: F811
+    """The chat, tabs and full layouts in one page that already had their ids:
+    three roots on one socket, each drawing its own parts under its own
+    element; the host's boxes, look-alikes and CSS untouched; a send from the
+    tabs view streams back; open() moves only the full view, not the page's
+    hash or title; and destroy() leaves the page as it was."""
+    page, errors = open_page(browser, width)
+    page.goto(host["url"] + "?layouts=all&tools=hidden")
+    mounted(page)
+    # The tabs strip lists the caller's two sessions, and the full layout has
+    # composed its boot and followed the constructor's session like m6's.
+    page.wait_for_function(
+        """() => {
+          const full = document.querySelector('#full > .aegis[data-layout=full]');
+          return document.querySelectorAll(
+              '#tabsbox .aegis-tab:not(.aegis-tab-new)').length === 2
+            && full && full.dataset.view === 'session'
+            && document.querySelector('#full #nav-side svg')
+            && window.__chat && window.__tabs && window.__full;
+        }""",
+        timeout=60_000,
+    )
+    before = {
+        "title": page.title(),
+        "hash": page.evaluate("location.hash"),
+        "meta": page.get_attribute('meta[name="aegis-build"]', "content"),
+        "wfcard": page.inner_text("#host-side .wfcard"),
+    }
+
+    # Three roots, one socket, all in the host's theme.
+    assert page.evaluate(ROOTS) == {"chat": 1, "tabs": 1, "full": 1}
+    assert page.evaluate("window.__ws.length") == 1
+    assert page.evaluate("window.__ws[0].closed") is False
+    assert page.evaluate(
+        """() => ["#chat > .aegis", "#tabsbox > .aegis", "#full > .aegis"]
+          .map((s) => document.querySelector(s).dataset.theme)"""
+    ) == ["host", "host", "host"]
+
+    # The host's own boxes stand exactly where they stood before any mount,
+    # and an id aegis also uses still returns the host's node.
+    assert page.evaluate(HOST_DOC) == page.evaluate("window.__host")
+    assert (
+        page.evaluate("document.getElementById('board').textContent") == "A host page"
+    )
+    assert page.evaluate("document.getElementById('tabs').textContent") == (
+        "the host's own tabs"
+    )
+    assert page.evaluate("document.getElementById('composer').textContent") == (
+        "the host's own input"
+    )
+    assert page.evaluate("document.getElementById('tabs').closest('.aegis')") is None
+    assert (
+        page.evaluate("document.getElementById('composer').closest('.aegis')") is None
+    )
+    # The ids repeat inside the three mounts; the first is the chat's, as it
+    # mounted first.
+    assert page.evaluate("document.querySelectorAll('#input').length") == 3
+    assert (
+        page.evaluate(
+            "document.getElementById('input').closest('.aegis').dataset.layout"
+        )
+        == "chat"
+    )
+
+    # Each layout draws its own parts under its own element.
+    assert page.locator("#chat .aegis-chat > #composer").count() == 1
+    assert page.locator("#chat .aegis #entries").count() == 1
+    assert page.locator("#tabsbox .aegis-tabstrip").count() == 1
+    assert page.locator("#tabsbox .aegis-pane > .tr-pane").count() == 1
+    assert page.locator("#tabsbox .aegis-pane > .composer").count() == 1
+    assert page.locator("#tabsbox .aegis #entries").count() == 1
+    assert (
+        page.evaluate("document.querySelector('#tabsbox .aegis-tab.on').dataset.key")
+        == host["session"]
+    )
+    assert page.locator("#full .v-session .col").count() == 1
+    assert page.locator("#full .composer #input").count() == 1
+    assert page.locator("#full #nav-side svg").count() == 1
+
+    # The page's own .v-session, .col, .wfcard and build meta are its own: the
+    # full mount neither reads nor moves them (m5's scoping, seen from here).
+    assert (
+        page.evaluate("document.getElementById('host-side').closest('.aegis')") is None
+    )
+    assert (
+        page.evaluate("document.querySelector('#host-side .col').closest('.aegis')")
+        is None
+    )
+    assert page.inner_text("#host-side .wfcard") == "host card"
+    assert page.get_attribute('meta[name="aegis-build"]', "content") == "host"
+    page.locator("#host-side .fbar .native").click()
+    assert (
+        page.evaluate("document.querySelector('#host-side .fbar .native').disabled")
+        is False
+    )
+
+    # The host's own rule hides a tool row in the chat and in the tabs view.
+    send(page, host["session"], "/many 3")
+    page.wait_for_selector(
+        "#chat .aegis #entries .row.tool", state="attached", timeout=60_000
+    )
+    page.wait_for_selector(
+        "#tabsbox .aegis #entries .row.tool", state="attached", timeout=60_000
+    )
+    assert page.locator("#chat .aegis #entries .row.tool").first.is_hidden()
+    assert page.locator("#tabsbox .aegis #entries .row.tool").first.is_hidden()
+
+    # A message typed in the tabs view goes out through the shared socket and
+    # the answer streams back under it in that view.
+    box = page.locator("#tabsbox .aegis #input")
+    box.click()
+    box.fill("typed in the tabs view of a host page")
+    box.press("Enter")
+    page.wait_for_function(
+        """() => [...document.querySelectorAll(
+          "#tabsbox .aegis #entries .row.user .body")]
+          .some((b) => b.textContent.includes("typed in the tabs view of a host page"))""",
+        timeout=60_000,
+    )
+    page.wait_for_function(
+        """() => {
+          const rows = [...document.querySelectorAll("#tabsbox .aegis #entries > .row")];
+          const at = rows.findIndex((r) =>
+            r.textContent.includes("typed in the tabs view of a host page"));
+          return at >= 0 && rows.slice(at + 1).some(
+            (r) => r.classList.contains("prose") && r.textContent.trim());
+        }""",
+        timeout=60_000,
+    )
+
+    # The host's open() moves the full view alone: the chat and the tabs stay
+    # on the first session, the page's hash and title do not move, and the
+    # full mount follows the message sent to the other session.
+    page.evaluate("(sid) => window.__full.open(sid)", host["session2"])
+    page.wait_for_function(
+        """() => document.querySelector('#full > .aegis[data-layout=full]')
+          .dataset.view === 'session'"""
+    )
+    send(page, host["session2"], "a message only the full mount follows")
+    page.wait_for_function(
+        """() => [...document.querySelectorAll("#full #entries .row.user .body")]
+          .some((b) => b.textContent.includes("a message only the full mount follows"))""",
+        timeout=60_000,
+    )
+    assert not page.evaluate(
+        """() => [...document.querySelectorAll("#chat .aegis #entries .row.user .body")]
+          .some((b) => b.textContent.includes("a message only the full mount follows"))"""
+    )
+    assert not page.evaluate(
+        """() => [...document.querySelectorAll("#tabsbox .aegis #entries .row.user .body")]
+          .some((b) => b.textContent.includes("a message only the full mount follows"))"""
+    )
+    assert page.title() == before["title"]
+    assert page.evaluate("location.hash") == before["hash"] == ""
+
+    # Destroying all three gives the page back as it was: no roots, no boxes'
+    # content, the same host measures, look-alikes and build meta.
+    page.evaluate(
+        """() => {
+          window.__chat.destroy();
+          window.__tabs.destroy();
+          window.__full.destroy();
+        }"""
+    )
+    page.wait_for_timeout(500)
+    assert page.evaluate(ROOTS) == {"chat": 0, "tabs": 0, "full": 0}
+    assert page.evaluate("document.querySelectorAll('.aegis').length") == 0
+    assert page.evaluate("document.getElementById('chat').childElementCount") == 0
+    assert page.evaluate("document.getElementById('tabsbox').childElementCount") == 0
+    assert page.evaluate("document.getElementById('full').childElementCount") == 0
+    assert page.evaluate(HOST_DOC) == page.evaluate("window.__host")
+    assert page.title() == before["title"]
+    assert page.evaluate("location.hash") == before["hash"]
+    assert page.get_attribute('meta[name="aegis-build"]', "content") == before["meta"]
+    assert page.inner_text("#host-side .wfcard") == before["wfcard"]
+
+    assert errors == []
+    page.close()
