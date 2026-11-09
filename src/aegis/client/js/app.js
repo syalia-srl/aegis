@@ -2320,8 +2320,7 @@ const ruler = document.createElement("textarea");
 ruler.ariaHidden = "true";
 ruler.tabIndex = -1;
 ruler.style.cssText = "position:absolute;left:-9999px;top:0;visibility:hidden;height:0;padding-top:0;padding-bottom:0;border:0;overflow:hidden;box-sizing:border-box";
-// Inside the mount, so the host's page gains no node it did not ask for (m5).
-root.append(ruler);
+document.body.append(ruler);
 function stackActs(t) {
   const box = t.closest(".box");
   if (!box.clientWidth) return box.classList.remove("stacked");
