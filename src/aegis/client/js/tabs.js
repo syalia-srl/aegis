@@ -107,30 +107,11 @@ export function patchTab(list, m, focusId, actions) {
 
 // What is being dragged: one member inside its group, or a whole block.
 let dragging = null;
-// The tab whose pointer went down and has not been released yet: a drag starts
-// a moment later, and a strip that redraws in between loses the node the
-// browser was about to drag. Redraws wait from pointerdown until dragend (or
-// pointerup, for a plain click).
-let holding = null;
 
 // Whether a drag owns the strip right now. A part that draws tabs asks this
 // before rebuilding them: replacing the node under the pointer cancels the
 // drag, and a sessions patch may arrive at any moment.
-export const draggingTab = () => dragging !== null || holding !== null;
-
-function releaseHold() {
-  const node = holding;
-  holding = null;
-  document.removeEventListener("pointerup", releaseHold);
-  document.removeEventListener("pointercancel", releaseHold);
-  node?.dispatchEvent(new CustomEvent("aegis-tabdrag-end", { bubbles: true }));
-}
-
-function holdTab(node) {
-  holding = node;
-  document.addEventListener("pointerup", releaseHold);
-  document.addEventListener("pointercancel", releaseHold);
-}
+export const draggingTab = () => dragging !== null;
 
 // Where a drop on tab `t` at `x` puts what is dragged: the key it goes before
 // (null: the end), or undefined when it may not go there.
@@ -200,9 +181,6 @@ function tab(m, focusId, { onFocus, onMove, onClose, t = labelsFor("en") }, role
   if (m.server) node.append(Object.assign(document.createElement("span"), { className: "where", textContent: m.server }));
   node.addEventListener("click", () => onFocus(m.key));
   closeOnMiddle(node, () => onClose(m.key));
-  node.addEventListener("pointerdown", (ev) => {
-    if (ev.button === 0) holdTab(node);
-  });
   node.addEventListener("dragstart", (ev) => {
     ev.dataTransfer.setData("text/aegis-tab", m.key);
     ev.dataTransfer.effectAllowed = "move";
@@ -215,9 +193,6 @@ function tab(m, focusId, { onFocus, onMove, onClose, t = labelsFor("en") }, role
     node.closest(".tblock")?.classList.remove("dragging");
     node.classList.remove("dragging");
     dragging = null;
-    if (holding === node) holding = null;
-    document.removeEventListener("pointerup", releaseHold);
-    document.removeEventListener("pointercancel", releaseHold);
     // A strip that was asked to redraw during the drag waited for this.
     node.dispatchEvent(new CustomEvent("aegis-tabdrag-end", { bubbles: true }));
   });
