@@ -204,12 +204,12 @@ LEAD = {
 }
 CRITICAL = " This is critical."
 ACT = {
-    "disk": "Free what this session created and no longer needs (your merged worktrees, build output, temporary files), re-measuring with df before you delete. Do not touch shared caches, another session's work or anything tracked by git. Start no large download or build.",
+    "disk": "Free what this session created and no longer needs (your merged worktrees, build output, temporary files), re-measuring with df before you delete. Do not touch shared caches, another session's work or anything tracked by git. Run `aegis gc` to see what the sessions archived over a week ago still hold (their uploads, sent files, browsers and the harness's copy of their transcripts), and `aegis gc --apply` to free it: their history stays readable with peer_read. Start no large download or build.",
     "memory": "Stop the servers and watchers you started and no longer use. Run no parallel test lane or build, and enqueue no more workers.",
     "cpu": "Run tests with fewer workers. Re-run a timing failure or a make bench number before you trust it, and say the host was loaded when you report one.",
     "quota": "Use the cheapest queue for workers, spawn no new session, and finish what you started before you start more.",
 }
-DISK_OTHER = "Free what this session created and no longer needs (your merged worktrees, build output, temporary files), re-measuring with df before you delete. Do not touch shared caches, another session's work or anything tracked by git. {mount} has {free_gb} GB free: as far as you can, put new large files there (clones, build output, caches, downloads) instead of on this disk, and move nothing another session or git owns."
+DISK_OTHER = "Free what this session created and no longer needs (your merged worktrees, build output, temporary files), re-measuring with df before you delete. Do not touch shared caches, another session's work or anything tracked by git. {mount} has {free_gb} GB free: as far as you can, put new large files there (clones, build output, caches, downloads) instead of on this disk, and move nothing another session or git owns. Run `aegis gc` to see what the sessions archived over a week ago still hold (their uploads, sent files, browsers and the harness's copy of their transcripts), and `aegis gc --apply` to free it: their history stays readable with peer_read."
 QUOTA_CRITICAL = " Tell the person before you enqueue anything."
 # The session's own share (load.py, #762), and who holds the most. The
 # heaviest is named only above a floor: on a quiet host the top session may
