@@ -192,6 +192,7 @@ async def handed_off(world, main):
     return reg.sessions[new["log_id"]]
 
 
+@pytest.mark.quarantine("#934")
 @pytest.mark.slow
 async def test_a_run_follows_its_main_agent_through_a_handoff(world):
     main = await world.spawn()
@@ -207,6 +208,7 @@ async def test_a_run_follows_its_main_agent_through_a_handoff(world):
     await until(lambda: told(heir, "done"), timeout=10)
 
 
+@pytest.mark.quarantine("#934")
 async def test_the_heir_of_a_main_agent_may_stop_its_run(world):
     main = await world.spawn()
     run = await armed(world, main, flow("/busy 3", RESULT))

@@ -9,10 +9,9 @@
 // socket and callFor are its only way to the server, so two mounts on one
 // page never send through each other's session.
 //
-// The mic and the command menu are slots, empty in phase A: dictation and
-// commands are off by default in a host's chat, and b4 fills the slots when
-// the options turn them on. Until then `this.menu` and `this.dictation` stay
-// null and every code path that would use them is skipped.
+// The mic and the command menu are slots, empty in a host's chat unless the
+// host asks for them: with `commands` and `dictation` off, this part builds no
+// menu and no mic and every code path that would use them is skipped.
 //
 // Every word it draws comes from the mount's label table (a7), through `t`, so
 // a Spanish chat's box, its errors and its attachments read Spanish too.
@@ -24,6 +23,8 @@ import { workflowLocked, workflowTitle } from "../entries.js";
 import { factIcon, icon } from "../glyphs.js";
 import { idleFor } from "../lifecycle.js";
 import { forKey, keyOf } from "../mount.js";
+import { CommandsPart, catalogFor } from "./commands.js";
+import { DictationPart } from "./dictation.js";
 import { toast } from "../toast.js";
 
 export const COMPOSER_HTML = `
@@ -69,7 +70,6 @@ export class ComposerPart {
     this.menu = null; // the command menu part (b4)
     this.dictation = null; // the dictation part (b4)
     this.warmed = null; // the parked session whose first keystroke asked for session.warm
-    this.catalogs = new Map(); // key -> the menu's catalog promise
     this.spoken = new Set(); // draft keys that got dictated text since their last send
     this.sending = new Set(); // keys whose composer send waits on its answer
     this.waiting = new Set(); // keys whose send waits on its uploads
@@ -112,6 +112,45 @@ export class ComposerPart {
     });
     this.observer.observe(this.input);
     this.outbox.setSender((key, params, opts) => this.deliver(key, params, opts));
+    // The two optional parts, each into its slot under this box: a host that
+    // left them off has an empty slot and no menu or mic at all.
+    if (mount.opts.commands) this.menu = mount.add(this.commands());
+    if (mount.opts.dictation) this.dictation = mount.add(this.dictating());
+  }
+
+  // The menu under this box: this session's catalog, the box's own line, and
+  // the mount's socket for the send an overlay's Enter runs.
+  commands() {
+    return new CommandsPart(this.mount, this.el, {
+      fetch: (key) => catalogFor(this.mount, key),
+      run: (line) => this.sendLine(line, false),
+      getLine: () => this.input.value,
+      setLine: (v) => {
+        this.input.value = v;
+        this.autosize();
+        if (this.key) localStorage.setItem(`aegis.draft.${this.key}`, v);
+        this.input.focus();
+      },
+      meta: () => this.meta(),
+    });
+  }
+
+  // The mic under this box: a finished take is one of its attachments, and the
+  // send goes out as a held mic does (record.js).
+  dictating() {
+    return new DictationPart(this.mount, this.el, {
+      input: this.input,
+      draft: () => (this.key ? `aegis.draft.${this.key}` : null),
+      heard: (key) => key && this.spoken.add(key),
+      ctx: () => ({ key: this.key }),
+      canStart: () => !!this.mount.conn?.open,
+      prepare: () => this.mount.call("dictation.prepare"),
+      onTake: (file, ms, ctx) => {
+        if (!ctx?.key) return;
+        this.atts.add([file], ctx.key);
+        if (this.key === ctx.key) this.send();
+      },
+    });
   }
 
   // The part draws its own glyphs; the sprite is in the mount's root. Its
@@ -202,6 +241,9 @@ export class ComposerPart {
       this.renderMeta();
       return;
     }
+    // A recording belongs to the box it started in; moving the box to another
+    // session ends it, as the page's follow() always did.
+    this.dictation?.stopIfHere(this.input, "tab");
     this.key = key;
     this.atts.show(key);
     this.input.value = key ? localStorage.getItem(`aegis.draft.${key}`) || "" : "";
@@ -444,7 +486,7 @@ export class ComposerPart {
     const call = this.mount.callFor(key, "session.send", params);
     const sent = (r) => {
       this.unconfirmed.delete(key);
-      if (/^\/model\s/.test(text)) this.catalogs.delete(key); // its efforts may differ
+      if (/^\/model\s/.test(text)) this.menu?.forget(key); // its efforts may differ
       if (fromComposer) {
         localStorage.removeItem(`aegis.draft.${key}`);
         this.spoken.delete(`aegis.draft.${key}`);

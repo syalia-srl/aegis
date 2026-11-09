@@ -131,10 +131,10 @@ export function hostRow(label, pct, tail) {
 
 // One row per disk the host mounts, named by its mount point when there are
 // several. A linked server older than #541 sends only `disk`.
-export function diskRows(h) {
+export function diskRows(h, t = (k) => k) {
   const disks = h.disks || (h.disk ? [h.disk] : []);
   return disks.map((d) => {
-    const row = hostRow(disks.length > 1 ? d.mount : "Disk", d.pct, `${d.used_gb} / ${d.total_gb} GB`);
+    const row = hostRow(disks.length > 1 ? d.mount : t("gauges.disk"), d.pct, `${d.used_gb} / ${d.total_gb} GB`);
     if (d.mount) row.firstChild.title = d.mount;
     return row;
   });

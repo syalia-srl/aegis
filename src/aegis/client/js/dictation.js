@@ -11,6 +11,8 @@ export const SR = 16000;
 // provisional pieces of 4 to 8 s that show words a second after a pause, and
 // final pieces of 20 to 28 s made of them, whose text replaces the provisional
 // text. Joined-up finals measured 29.4% WER against 30.4% for a plain 20 s cut.
+import { labelsFor } from "./labels.js";
+
 const PREVIEW_MIN = 4 * SR;
 const PREVIEW_MAX = 8 * SR;
 const FINAL_MIN = 20 * SR;
@@ -149,8 +151,8 @@ export class Chunker {
 
 // A stop the person did not ask for says why; the four they ask for say nothing.
 const STOPPED = {
-  track: "Microphone stopped: the browser ended the microphone",
-  suspended: "Microphone stopped: the browser suspended the audio",
+  track: "dictation.stoppedTrack",
+  suspended: "dictation.stoppedSuspended",
 };
 
 // The microphone, mono at 16 kHz. Resolves to the function that stops it.
@@ -311,8 +313,8 @@ export async function store(base) {
 }
 
 export class Dictation {
-  constructor({ prepare, onState = () => {}, onLevel = () => {}, onError = () => {} }) {
-    Object.assign(this, { prepare, onState, onLevel, onError });
+  constructor({ prepare, onState = () => {}, onLevel = () => {}, onError = () => {}, t = labelsFor("en") }) {
+    Object.assign(this, { prepare, onState, onLevel, onError, t });
     this.state = "idle";
     this.target = null;
     this.rec = null; // the recording that is listening
@@ -377,7 +379,7 @@ export class Dictation {
         (why) => this.rec === rec && this.stop(why),
       );
     } catch (e) {
-      return this.abort(rec, `Microphone unavailable: ${e?.message ?? e}`);
+      return this.abort(rec, this.t("dictation.unavailable", { error: e?.message ?? e }));
     }
     if (rec.stopped) await rec.stopCapture(); // stopped while asking for the mic
     try {
@@ -385,7 +387,7 @@ export class Dictation {
       rec.keywords = (p.keywords || []).join("\n");
       await this.boot(p.base);
     } catch (e) {
-      return this.abort(rec, `Dictation model unavailable: ${e?.message ?? e}`);
+      return this.abort(rec, this.t("dictation.modelUnavailable", { error: e?.message ?? e }));
     }
     if (this.rec === rec) this.setState("listening");
     this.dispatch();
@@ -400,7 +402,7 @@ export class Dictation {
     this.onLevel(0);
     for (const p of rec.chunker.finish(rec.emitted === 0)) this.enqueue(rec, p);
     this.settle();
-    if (STOPPED[reason]) this.onError(STOPPED[reason]);
+    if (STOPPED[reason]) this.onError(this.t(STOPPED[reason]));
   }
 
   boot(base) {
@@ -461,7 +463,7 @@ export class Dictation {
     else {
       item.texts[job.i] = "";
       item.failed = true;
-      this.onError(`A piece of ${job.secs.toFixed(1)} s could not be transcribed: ${data.message}`);
+      this.onError(this.t("dictation.pieceFailed", { secs: job.secs.toFixed(1), message: data.message }));
     }
     item.jobs--;
     // Provisional pieces land in order. A final lands as soon as its parts are

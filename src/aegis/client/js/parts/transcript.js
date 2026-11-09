@@ -18,6 +18,7 @@ import { loadTranscript, saveTranscript } from "../devicestore.js";
 import { byId } from "../dom.js";
 import { Find } from "../find.js";
 import { icon, glyph } from "../glyphs.js";
+import { applyLabels } from "../labels.js";
 import { forKey, keyOf } from "../mount.js";
 import { toast } from "../toast.js";
 import { Transcript } from "../transcript.js";
@@ -74,15 +75,6 @@ function el(tag, cls, text) {
   if (text !== undefined && text !== null) n.textContent = text;
   return n;
 }
-
-// The attributes a key can fill on the part's own markup: the words, and the
-// three attributes that hold a label instead of text.
-const T_ATTRS = [
-  ["data-t", (n, v) => (n.textContent = v)],
-  ["data-t-title", (n, v) => (n.title = v)],
-  ["data-t-aria", (n, v) => n.setAttribute("aria-label", v)],
-  ["data-t-placeholder", (n, v) => n.setAttribute("placeholder", v)],
-];
 
 const fmtTokens = (n) => (n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
 
@@ -171,6 +163,10 @@ export class TranscriptPart {
     this.wire();
     this.drawNavNow();
     this.drawOfflineNotice();
+    // A snapshot after the socket came back is the server's whole transcript,
+    // even when its store is shorter than what this tab held (a restart cuts
+    // the tail): the Transcript decides with this state.
+    this.mount.on("connection", ({ state }) => this.transcript.connection(state));
     // The session's drafts are the mount's outbox (a6): a send queued offline
     // draws here, after the last row, whichever part put it there.
     this.unsubDrafts = this.mount.outbox?.on(() => this.drawQueued());
@@ -179,9 +175,7 @@ export class TranscriptPart {
   // The part's own words, from the mount's table. Every key the markup names
   // is filled once, before any icon is appended to a button it would wipe.
   applyLabels() {
-    for (const [attr, set] of T_ATTRS) {
-      for (const n of this.pane.querySelectorAll(`[${attr}]`)) set(n, this.t(n.getAttribute(attr)));
-    }
+    applyLabels(this.pane, this.t);
   }
 
   // A part draws its own glyphs; the sprite is in the mount's root (glyphs.js

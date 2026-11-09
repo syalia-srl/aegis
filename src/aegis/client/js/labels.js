@@ -13,6 +13,31 @@ import es from "./labels/es.js";
 const TABLES = { en, es };
 const warned = new Set();
 
+// The attributes a key can fill on a part's own markup: the words, and the
+// three attributes that hold a label instead of text. A part keeps its markup
+// in English and names a key beside it, so the table is the only place a
+// translator edits.
+const T_ATTRS = [
+  ["data-t", (n, v) => (n.textContent = v)],
+  ["data-t-title", (n, v) => (n.title = v)],
+  ["data-t-aria", (n, v) => n.setAttribute("aria-label", v)],
+  ["data-t-placeholder", (n, v) => n.setAttribute("placeholder", v)],
+];
+
+// The word a session's attention is called by: the states the server names,
+// in the mount's language. An unknown state has no key, and the caller falls
+// back to the state itself.
+const STATE_KEYS = { working: "state.working", needs_you: "state.needsYou", error: "state.error", review: "state.review", waiting: "state.waiting", done: "state.done" };
+export const stateLabel = (t, name) => (name in STATE_KEYS ? t(STATE_KEYS[name]) : "");
+
+// Fill every `data-t` in one subtree, once, before anything appends an icon or
+// a count to a node whose text it would wipe.
+export function applyLabels(root, t) {
+  for (const [attr, set] of T_ATTRS) {
+    for (const n of root.querySelectorAll(`[${attr}]`)) set(n, t(n.getAttribute(attr)));
+  }
+}
+
 export function labelsFor(lang = "en", overrides = {}) {
   const known = lang in TABLES;
   const table = known ? TABLES[lang] : en;
