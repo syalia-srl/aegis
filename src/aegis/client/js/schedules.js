@@ -237,7 +237,13 @@ export class Schedules {
   setServer(server) {
     if (server === this.server) return;
     Object.assign(this, { server, cur: null, form: null, runs: null, err: "" });
-    if (this.visible) this.open();
+    if (!this.visible) return;
+    // Draw what this page already holds for that server before the roster and
+    // pools: those are the far server's round trips, each with the link's own
+    // timeout, and the list must not wait on them (a far server can be slow to
+    // answer while its schedules channel has already delivered).
+    this.draw();
+    this.open();
   }
 
   changed(names, server) {
