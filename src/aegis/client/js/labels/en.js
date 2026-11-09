@@ -180,6 +180,9 @@ export default {
   "copy.copied": "Copied",
   "copy.failed": "Copy failed: {error}",
 
+  "tabs.newTitle": "New session",
+  "tabs.empty": "No sessions yet",
+
   "composer.placeholder.locked": "Step {node} of the workflow {title}. You can read it; it takes no messages until the run stops.",
   "composer.placeholder.off": "This session's server is out of reach; nothing can be sent until it is back.",
   "composer.placeholder.asleepIdle": "Asleep after {idle} idle. Typing wakes it.",
