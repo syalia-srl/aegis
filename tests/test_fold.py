@@ -1390,6 +1390,34 @@ def test_a_tool_row_carries_the_language_its_views_draw_in():
     }
 
 
+def test_a_tool_row_carries_what_its_call_does():
+    """The running row's verb comes from this (#1012): usage's activity, and
+    debugging for a test or a read while the last shell command failed."""
+    r = Rec()
+    r.call("t1", "Read", {"file_path": "/x/a.py"})
+    r.call("t2", "Edit", {"file_path": "/x/a.py", "old_string": "a", "new_string": "b"})
+    r.call("t3", "Bash", {"command": "pytest -q"})
+    r.output("t3", "Exit code 1\n1 failed", is_error=True)
+    r.call("t4", "Grep", {"pattern": "boom"})
+    r.call("t5", "Edit", {"file_path": "/x/a.py", "old_string": "b", "new_string": "c"})
+    r.call("t6", "Bash", {"command": "pytest -q"})
+    r.output("t6", "3 passed")
+    r.call("t7", "Bash", {"command": "git commit -m 'fix: boom'"})
+    r.call("t8", "WebSearch", {"query": "x"})
+    f, _ = run(r)
+    acts = {e["id"]: e["detail"]["activity"] for e in f.entries()}
+    assert acts == {
+        "t1": "reading",
+        "t2": "editing",
+        "t3": "testing",
+        "t4": "debugging",
+        "t5": "editing",
+        "t6": "debugging",
+        "t7": "committing",
+        "t8": "web",
+    }
+
+
 def test_a_read_with_numbered_lines_carries_a_file_view():
     r = Rec()
     r.call("t1", "Read", {"file_path": "/x/a.py"})
