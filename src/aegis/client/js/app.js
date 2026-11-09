@@ -6,7 +6,6 @@
 // the focus in the URL hash. A session is known by its key: its log id at
 // home, `<server>/<log_id>` on a linked server (links.py).
 
-import { Mount } from "./mount.js";
 import { byId } from "./dom.js";
 import { Transcript } from "./transcript.js";
 import { artifactStage, btwFolds, entryFiles, fadeTables, fileUrl, refreshApprovals, refreshWorkflows, setApprovals, setDocker, setFileBase, setOpener, setSecrets, setSpeaker, setWorkflows, syncDock, tickWorkflows, workflowLocked, workflowTitle } from "./entries.js";
@@ -62,28 +61,14 @@ import { outbox } from "./outbox.js";
 import { idleFor, lifecycle } from "./lifecycle.js";
 import { serverNow } from "./clock.js";
 
-const root = document.getElementById("a2");
+// The full layout's boot: the mount calls this once its markup is in the root
+// (js/layouts/full.js), so a page that loads this module pays for its imports
+// only when it asks for the full layout. `app` is the mount that owns the
+// root, the socket and the state every view below reads.
+export function composeFull(app) {
+const root = app.root;
 const phoneHeader = matchMedia("(max-width:760px)"); // the one-row header (client.css)
 
-// The page is the full layout of one mount: index.html holds only its head and
-// an empty #a2, and the mount builds the rest (js/layouts/full.js). It takes
-// the page's shared socket and owns the state every view below reads. The theme
-// is the one index.html applied to <html> before the first paint, so the first
-// render draws what the last one did.
-// A page mounted with ?lang=es, or one that chose a language before, reads
-// its whole layout in that table: the full client is mountable too (b9).
-const langOf = () =>
-  new URLSearchParams(location.search).get("lang") || localStorage.getItem("aegis.lang") || "en";
-const app = new Mount(root, {
-  adopt: true,
-  layout: "full",
-  lang: langOf(),
-  theme: localStorage.getItem("aegis.theme") || document.documentElement.dataset.theme || "ink",
-  // The page's outbox is outbox.js's singleton (the queued row and the browser
-  // suite call it by that name), handed to the mount that owns its flush.
-  outbox,
-});
-app.start();
 // Every node below is found under the root the mount built; the page keeps no
 // markup of its own to ask for.
 const $ = (id) => byId(root, id);
@@ -3216,3 +3201,4 @@ async function openToolFile(id) {
 // The transcript's own scroll listener runs first: it still follows after a
 // scroll it made, or one the browser made when a remounted row shrank the list.
 cmenu.follow($("tr"), () => transcript.following);
+}
