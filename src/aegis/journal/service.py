@@ -46,6 +46,7 @@ from ..usage import tables
 from ..usage.context import successor_start
 from ..usage.owners import owner_of
 from ..usage.store import sessions as stored_sessions
+from ..usage.store import stores
 from ..usage.turns import Derived, SessionInfo, UsageDeriver
 from . import db, paths
 from .derive import Deriver, Row
@@ -404,7 +405,7 @@ class Journal:
         if token is None:
             token = _token()
             tables.mark(con, token)
-        total = sum(1 for _ in (self.state_root / "transcripts").glob("*.jsonl"))
+        total = len(stores(self.state_root / "transcripts"))
         self._progress = {"done": 0, "total": total}
         n = 0
         for k, s in enumerate(stored_sessions(self.state_root)):

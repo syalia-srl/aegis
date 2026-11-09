@@ -99,6 +99,7 @@ and no aegis command is refused before it costs a turn.
 | `aegis map diff [base]` | each definition changed since base (the merge-base with origin/main), its sizes before and after and its users; `--json` |
 | `aegis call <tool> [args]` | from an agent's shell, call one of its aegis tools as that agent; see below |
 | `aegis tools [tool]` | from an agent's shell, list its aegis tools, or print one tool's description and JSON schema |
+| `aegis gc [--days N] [--apply]` | reclaim the disk that sessions archived more than N days ago (7 by default) still hold. Their transcripts are packed: images emptied, the rest gzipped, still read by `peer_read`, the archive and the journal. Their uploads, sent files, stderr logs, browser folders and the harness's own transcript (`~/.claude/projects`) are deleted, so they can no longer resume, and so is every browser profile no browser used in that time. Without `--apply` it only lists what would go and how much |
 | `aegis import-legacy <dir>` | copy the sessions of aegis before 2.0 into the archive, to read |
 
 Every subcommand but `aegis map` takes `--root` to name the root instead of finding it from
