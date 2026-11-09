@@ -19,6 +19,9 @@
    the element the host gave mount() (data-layout=chat), which is what lets a
    host put it in a panel or a sheet. */
 .aegis[data-layout=full]{height:100dvh;display:grid;grid-template-rows:auto 1fr;grid-template-columns:minmax(0,1fr)}
+/* Embedded, the root fills the box the host gave mount(), not the viewport
+   (m5): the page's own height and scrollbars are the host's. */
+.aegis[data-layout=full][data-page=false]{height:100%}
 .aegis[data-layout=chat]{height:100%;display:flex;flex-direction:column;min-height:0}
 /* A chat's transcript fills the element the host gave mount(); the composer
    (a6) will sit under it. A host that wants a bare answer pane hides the

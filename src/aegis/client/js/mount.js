@@ -546,6 +546,10 @@ function makeRoot(host, opts, urls) {
   root.classList.add("aegis");
   root.dataset.theme = opts.theme;
   root.dataset.layout = opts.layout;
+  // Whether this mount owns the document. Only the standalone page's full
+  // layout does (index.html passes page:true); a host's mount keeps the page's
+  // title, hash, theme, worker and push to itself (m5).
+  root.dataset.page = String(opts.page === true);
   if (root !== host) host.append(root);
   linkStyles(opts.theme, urls);
   installGlyphs(root);

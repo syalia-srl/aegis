@@ -2240,16 +2240,21 @@ input.addEventListener("paste", (ev) => {
 // the browser would navigate away to the file.
 const carriesFiles = (ev) => ev.dataTransfer?.types.includes("Files");
 const onSession = () => root.dataset.view === "session";
+// A file dropped on the host's page is the host's: only a drop inside this
+// mount's root attaches to its session (m5).
 document.addEventListener("dragover", (ev) => {
+  if (!root.contains(ev.target)) return;
   if (!carriesFiles(ev)) return;
   ev.preventDefault();
   $("composer").classList.toggle("dropping", onSession());
 });
 document.addEventListener("dragleave", (ev) => {
+  if (!root.contains(ev.target)) return;
   if (ev.relatedTarget) return;
   $("composer").classList.remove("dropping");
 });
 document.addEventListener("drop", (ev) => {
+  if (!root.contains(ev.target)) return;
   if (!carriesFiles(ev)) return;
   ev.preventDefault();
   $("composer").classList.remove("dropping");
@@ -2315,7 +2320,8 @@ const ruler = document.createElement("textarea");
 ruler.ariaHidden = "true";
 ruler.tabIndex = -1;
 ruler.style.cssText = "position:absolute;left:-9999px;top:0;visibility:hidden;height:0;padding-top:0;padding-bottom:0;border:0;overflow:hidden;box-sizing:border-box";
-document.body.append(ruler);
+// Inside the mount, so the host's page gains no node it did not ask for (m5).
+root.append(ruler);
 function stackActs(t) {
   const box = t.closest(".box");
   if (!box.clientWidth) return box.classList.remove("stacked");
