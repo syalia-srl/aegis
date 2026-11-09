@@ -360,6 +360,7 @@ class Repos:
             if not (p and p.slug and pr["url"] and probe.slug(pr["url"]) != p.slug)
         }
         merged_branches = set()
+        answered = set()  # PRs gh just told the state of
         no_pr = []
         # gh answers from any checkout of the repo: a removed worktree asks
         # its main checkout.
@@ -372,9 +373,19 @@ class Repos:
             if not found:
                 no_pr.append(b)
             for pr in found:
+                answered.add(pr["n"])
                 prs[pr["n"]] = {**prs.get(pr["n"], {}), **pr}
                 if pr["state"] == "merged":
                     merged_branches.add(b)
+        # A PR the journal saw opened whose branch gh was not asked about
+        # (merged elsewhere, a commit row with no branch): ask it by number.
+        for n, pr in list(prs.items()):
+            if ask and pr["state"] == "open" and n not in answered:
+                found = gh.pr(ask, n)
+                if found is None:
+                    ok = False
+                else:
+                    prs[n] = {**pr, **found}
         shas = [s for s, _, _, b in commits if s and b not in merged_branches]
         base = probe.base(top, p.upstream) if p else ""
         found_left = probe.unpushed(top, shas, base) if p else []
@@ -451,10 +462,11 @@ class Repos:
 
 
 def _subject(text: str) -> tuple[str, str, str]:
-    """(short hash, subject, branch) from a commit row's text."""
+    """(short hash, subject, branch) from a commit row's text. A commit that
+    printed no line of its own has no " · branch" (#997)."""
     h, _, rest = text.partition(" ")
-    subject, _, branch = rest.rpartition(" · ")
-    return h, (subject or rest), branch
+    subject, sep, branch = rest.rpartition(" · ")
+    return (h, subject, branch) if sep else (h, rest, "")
 
 
 def _left(ln: dict) -> list[str]:
