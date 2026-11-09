@@ -193,13 +193,16 @@ const PRESSABLE = new Set(["A", "BUTTON", "SUMMARY"]);
 
 // runs: what each action does, by id; each becomes its action's `run`. An
 // action without one, or one for no action, is a mistake caught at boot.
+// Returns the function that removes the listener: a full layout destroyed
+// with its root must not leave a keypress running actions on nodes it took
+// down (m6).
 export function installKeys(runs, view) {
   const ids = new Set(ACTIONS.map((a) => a.id));
   const missing = [...ids].filter((id) => !runs[id]);
   const extra = Object.keys(runs).filter((id) => !ids.has(id));
   if (missing.length || extra.length) throw new Error(`keys.js: no run for ${missing}; no action for ${extra}`);
   for (const a of ACTIONS) a.run = runs[a.id];
-  document.addEventListener("keydown", (ev) => {
+  const onKey = (ev) => {
     if (ev.defaultPrevented || ev.isComposing) return;
     const v = view();
     // In the Files view Ctrl+S saves from any field, the picker's included:
@@ -211,5 +214,7 @@ export function installKeys(runs, view) {
     if (b.native && PRESSABLE.has(ev.target.tagName)) return;
     ev.preventDefault();
     b.action.run(ev);
-  });
+  };
+  document.addEventListener("keydown", onKey);
+  return () => document.removeEventListener("keydown", onKey);
 }

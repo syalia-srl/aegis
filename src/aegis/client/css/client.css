@@ -22,6 +22,12 @@
 /* Embedded, the root fills the box the host gave mount(), not the viewport
    (m5): the page's own height and scrollbars are the host's. */
 .aegis[data-layout=full][data-page=false]{height:100%}
+/* A full layout a host asked for without its session panel (sidebar:false,
+   m6): one column, no grip, and no dead side button in the navigator. */
+.aegis[data-layout=full][data-sidebar=none] .v-session{grid-template-columns:minmax(0,1fr)}
+.aegis[data-layout=full][data-sidebar=none] .v-session>.side,
+.aegis[data-layout=full][data-sidebar=none] .v-session>.grip,
+.aegis[data-layout=full][data-sidebar=none] .side-btn{display:none}
 .aegis[data-layout=chat]{height:100%;display:flex;flex-direction:column;min-height:0}
 /* A chat's transcript fills the element the host gave mount(); the composer
    (a6) will sit under it. A host that wants a bare answer pane hides the

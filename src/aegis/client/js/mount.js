@@ -47,6 +47,9 @@ export class Mount {
     this.el = el;
     this.opts = {
       layout: "chat",
+      // full only: the session panel (title, plan, repos, journal, usage,
+      // actions). It shows unless a host asks for a transcript on its own.
+      sidebar: null,
       theme: "ink",
       lang: "en",
       labels: {},
@@ -75,6 +78,9 @@ export class Mount {
       outbox: null,
       ...options,
     };
+    // The panel belongs to the full layout alone; chat and tabs ignore the
+    // option, and a host that asked for none keeps only the transcript.
+    if (this.opts.sidebar == null) this.opts.sidebar = this.opts.layout === "full";
     this.urls = {
       client: CLIENT,
       static: new URL("static/", CLIENT),
@@ -152,6 +158,10 @@ export class Mount {
     if (this.opts.layout === "full") {
       this.root.id = "a2";
       this.root.classList.add("app");
+      // A host that wants the transcript without the panel: no aside, no
+      // grip, one column (css/client.css), and the navigator's side button
+      // does nothing.
+      if (!this.opts.sidebar) this.root.dataset.sidebar = "none";
       this._built = false;
       buildFull(this).catch((error) => this.fail(null, error));
       return;
@@ -322,11 +332,17 @@ export class Mount {
   }
 
   // The layout is composed. The constructor's session is the first follow,
-  // silently, as it is for chat and tabs; then the host's calls run.
+  // silently, as it is for chat and tabs; then the host's calls run. A full
+  // layout's shown session belongs to its router, so its own hooks open it:
+  // following it here would set the shown key without the layout's transcript
+  // subscription (m6).
   built() {
     if (this._dead) return;
     this._built = true;
-    if (this.opts.session) this.follow(this.opts.session, true);
+    if (this.opts.session) {
+      if (this.opts.layout === "full") this.hooks?.open?.(this.opts.session);
+      else this.follow(this.opts.session, true);
+    }
     for (const run of this._queue.splice(0)) run();
   }
 
@@ -339,6 +355,9 @@ export class Mount {
     if (this._dead) return;
     this._dead = true;
     for (const run of this._queue.splice(0)) run();
+    // A full layout's controllers are not the mount's `parts`: app.js returns
+    // them as one teardown, run before the root goes (m6).
+    this.teardown?.();
     for (const p of this.parts) p.destroy?.();
     if (!this.opts.outbox) this.outbox?.destroy();
     this._unsubSessions?.();
