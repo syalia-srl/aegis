@@ -68,7 +68,7 @@ const PAGE = 100;
 const NEAR_TOP_PX = 400;
 
 export class Transcript {
-  constructor(scroller, list, jump, { loadDetail, statPaths = null, onRead = () => {}, onSelect = () => {}, onReply = () => {}, seen = () => true, base = null, opener = null, t = labelsFor("en") } = {}) {
+  constructor(scroller, list, jump, { loadDetail, statPaths = null, onRead = () => {}, onSelect = () => {}, onReply = () => {}, seen = () => true, base = null, opener = null, renderers = {}, t = labelsFor("en") } = {}) {
     this.scroller = scroller;
     // The mount's label table; the standalone page passes none and reads
     // English, as it does until b9 labels the whole client.
@@ -80,6 +80,9 @@ export class Transcript {
     // no prefix, and "/aegis[/via/<server>]" a host's. A part sets it before
     // each switch; render(entry, { base }) uses it.
     this.base = base;
+    // The host's own tool cards: tool name -> (entry, el) => boolean. Empty
+    // for the standalone page, which draws every row itself.
+    this.renderers = renderers;
     this.opener = opener; // what a sent file's or artifact's Open does
     this.entries = new Map(); // id -> entry, in transcript order
     this.nodes = new Map(); // id -> row, for the mounted suffix
@@ -242,7 +245,7 @@ export class Transcript {
   }
 
   mount(e) {
-    const n = render(this.whole(e), { base: this.base ?? undefined, open: this.opener, t: this.t });
+    const n = render(this.whole(e), { base: this.base ?? undefined, open: this.opener, renderers: this.renderers, t: this.t });
     for (const f of n.querySelectorAll(".fence")) watch(f);
     if (this.statPaths && n.querySelector(".md code.ref[data-index]")) {
       const known = this.kinds.get(e.id);
@@ -318,10 +321,23 @@ export class Transcript {
     // taken before a delta this tab already applied would take that delta's
     // rows away: on a busy server the mount's first snapshot can land after a
     // live turn's upserts, and the reply vanishes. The first after a reconnect
-    // is authoritative; any other older one keeps the newer rows (#961).
+    // is authoritative; any other one that is not newer keeps the newer rows
+    // (#961). A live entry grows without moving its revision, so an equal
+    // revision can still be behind it: keep what this tab drew when the
+    // snapshot is missing that entry or has less of it. Any other equal
+    // snapshot replaces, as a switch to a session whose ids repeat does.
     const force = this.reset;
     this.reset = false;
-    if (!force && Number.isFinite(data.rev) && data.rev < this.rev) return;
+    const behind =
+      Number.isFinite(data.rev) &&
+      (data.rev < this.rev ||
+        (data.rev === this.rev &&
+          [...this.entries].some(([id, e]) => {
+            if (!e.live) return false;
+            const got = data.entries.find((n) => n.id === id);
+            return !got || String(got.md || "").length < String(e.md || "").length;
+          })));
+    if (!force && behind) return;
     const { sinceId, sinceText } = this;
     this.clear();
     this.sinceId = sinceId;
@@ -436,7 +452,7 @@ export class Transcript {
         const done = e.kind === "prose" && !e.live && (!known || prev.live);
         const old = this.nodes.get(e.id);
         if (old) {
-          if (update(e, old, prev, { base: this.base ?? undefined, open: this.opener, t: this.t }))
+          if (update(e, old, prev, { base: this.base ?? undefined, open: this.opener, renderers: this.renderers, t: this.t }))
             this.nodes.set(e.id, old);
           else {
             this.watch.unobserve(old);

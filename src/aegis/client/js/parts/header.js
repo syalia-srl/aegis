@@ -234,9 +234,15 @@ export class HeaderPart {
     return patchTab(this.list, meta, focusId, this.tabActions);
   }
 
-  // The tab in view, scrolled into the strip when it is out of reach.
+  // The tab in view, scrolled into the strip when it is out of reach. Only the
+  // strip scrolls: scrollIntoView would also scroll a host's page (m7).
   focus() {
-    this.list.querySelector(".tab.on")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    const tab = this.list.querySelector(".tab.on");
+    if (!tab) return;
+    const strip = this.list.getBoundingClientRect();
+    const r = tab.getBoundingClientRect();
+    if (r.left < strip.left) this.list.scrollLeft -= strip.left - r.left;
+    else if (r.right > strip.right) this.list.scrollLeft += r.right - strip.right;
   }
 
   // Which header control is on, from the view the page draws.

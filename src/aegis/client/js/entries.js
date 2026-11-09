@@ -844,7 +844,9 @@ export const workflowTitle = (run) => workflows.summary(run)?.title;
 // rename; this only draws that.
 export const workflowLocked = (m) => !!m?.workflow && ["armed", "running"].includes(workflows.summary(m.workflow.run)?.status);
 export function refreshWorkflows(runs) {
-  const mine = (c) => !runs || runs.has(c.dataset.run);
+  // Only a card inside an aegis root is aegis's: a host page may draw its own
+  // `.wfcard` with the same class, and must be left alone (m5).
+  const mine = (c) => (!runs || runs.has(c.dataset.run)) && !!c.closest(".aegis");
   for (const c of document.querySelectorAll(".wfcard")) if (mine(c)) fillWorkflow(c);
   for (const c of document.querySelectorAll(".wfdcard")) if (mine(c)) fillDecision(c);
 }
@@ -854,6 +856,7 @@ export function refreshWorkflows(runs) {
 // back a Stop already pressed.
 export function tickWorkflows() {
   for (const c of document.querySelectorAll(".wfcard")) {
+    if (!c.closest(".aegis")) continue; // a host's card, not ours (m5)
     const w = workflows.get(c.dataset.run);
     if (!w || w.status !== "running") continue;
     const host = hostOf(c, `wf-${w.run}`);
@@ -1923,6 +1926,20 @@ const RENDERERS = {
   },
 
   tool(e, opts = {}) {
+    // A host's renderer draws the finished call: the key is exactly the title
+    // the server folded ("file_send" for aegis's own tool, the harness's full
+    // name for another MCP server's). It runs again on every upsert of this
+    // row, so a renderer draws from the entry it is given and keeps no state;
+    // a throw is the host's bug and leaves aegis's own row in place.
+    const draw = opts.renderers?.[e.title];
+    if (draw && e.status !== "running") {
+      const body = el("div", "body");
+      try {
+        if (draw(e, body) === true) return row(e, `tool ${e.status}`, body);
+      } catch (err) {
+        console.error("aegis: renderer", e.title, err);
+      }
+    }
     const t = opts.t || en;
     const det = e.detail || {};
     const d = el("details");

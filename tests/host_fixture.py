@@ -7,10 +7,20 @@ with the loopback listener still serving the MCP tools at its own root.
 
 The page is a stranger's: a board, tabs and a composer of its own, a host
 stylesheet that sets every variable aegis reads, and a #chat div that the
-client mounts into. It records every socket and message on ``window`` so the
+client mounts into, beside an empty #chat2 and #tabsbox for the cases that
+mount a second chat or the tabs layout. It records every socket and message on ``window`` so the
 browser test can count sockets and read the welcome without reaching into
 aegis's objects; ``window.__chat`` is the handle mount() returned, and
 ``window.__host`` is the page's own boxes as they stood before the mount drew.
+
+Loaded with ``?layouts=all`` it mounts all three layouts at once (the plan's
+m7): the chat as always, the tabs layout in #tabsbox and the full layout in a
+#full box, each handle on ``window`` as ``__chat``, ``__tabs`` and ``__full``.
+The page also draws its own look-alikes then (#host-side with a .v-session, a
+.col and a .wfcard, and a meta[name=aegis-build]) ahead of the full mount, so
+a document-wide lookup in the client would find the host's node first. Without
+the query only the chat mounts, so every other case and its timing are
+unchanged.
 
 The host's stylesheet hides tool calls only when the page is loaded with
 ``?tools=hidden``: the tests that click a tool row need the row on screen, and
@@ -97,6 +107,7 @@ HOST_PAGE = """\
 <div id="composer" class="host-input">the host's own input</div>
 <div id="chat"></div>
 <div id="chat2"></div>
+<div id="tabsbox"></div>
 <script>
 window.aegisHost = {token: "__TOKEN__", session: "__SESSION__", session2: "__SESSION2__", prefix: "__PREFIX__"};
 // A host that wants no tool calls turns them off with its own CSS. It is asked
@@ -135,6 +146,33 @@ window.WebSocket = class extends Native {
   }
 };
 window.__board = document.getElementById("board").outerHTML;
+// ?layouts=all: the page draws its own look-alikes and a box for the full
+// layout before the module script mounts anything (m7). #host-side is first in
+// document order, so a page-wide lookup inside a mount would find the host's
+// .v-session, .col, .wfcard or build meta instead of the mount's own.
+if (new URLSearchParams(location.search).get("layouts") === "all") {
+  const side = document.createElement("div");
+  side.id = "host-side";
+  side.className = "v-session";
+  side.innerHTML =
+    '<div class="col"><div class="fbar">' +
+    '<button class="native" data-file-id="host" data-name="host">host file</button>' +
+    '</div></div><div class="wfcard" data-run="x">host card</div>';
+  const meta = document.createElement("meta");
+  meta.name = "aegis-build";
+  meta.content = "host";
+  document.head.append(meta);
+  const full = document.createElement("div");
+  full.id = "full";
+  document.body.append(side, full);
+  // The two extra boxes are the host's, like #chat: a height the host decides
+  // and a rule of its own, added only for this mode so no other case sees it.
+  const css = document.createElement("style");
+  css.textContent =
+    "#tabsbox, #full { height: 560px; margin: 0 16px 16px;" +
+    " border: 1px solid var(--rule); }";
+  document.head.append(css);
+}
 </script>
 <script type="module">
 import { mount } from "__PREFIX__/aegis.js";
@@ -147,6 +185,26 @@ const chat = mount(document.getElementById("chat"), {
   lang: new URLSearchParams(location.search).get("lang") || "en",
 });
 window.__chat = chat;
+// ?layouts=all also mounts the tabs and full layouts beside the chat (m7):
+// three roots and one socket in a page that already uses their ids.
+if (new URLSearchParams(location.search).get("layouts") === "all") {
+  window.__tabs = mount(document.getElementById("tabsbox"), {
+    token: window.aegisHost.token,
+    session: window.aegisHost.session,
+    layout: "tabs",
+    theme: "host",
+    lang: "en",
+  });
+  window.__full = mount(document.getElementById("full"), {
+    token: window.aegisHost.token,
+    session: window.aegisHost.session,
+    layout: "full",
+    theme: "host",
+    lang: "en",
+    page: false,
+    sidebar: false,
+  });
+}
 </script>
 </body>
 </html>

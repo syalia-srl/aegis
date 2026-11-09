@@ -946,3 +946,1380 @@ def test_the_whole_chat_in_a_page_that_already_had_the_ids(
 
     assert errors == []
     page.close()
+
+
+# -- the host's calls and the missing events (m1, #962) -----------------------
+# A chat host can change the session it shows, start one, put the caret in the
+# box, and hear a turn start and a file arrive. These are additive: every case
+# above them is the regression, and Oikos's exact options get their old
+# payloads unchanged.
+
+
+@pytest.mark.parametrize("width", [1280, 390])
+def test_open_and_focus_are_the_hosts_calls(host, browser, width):  # noqa: F811
+    """open(session) moves the transcript and box and reports the change once;
+    focus() puts the caret in this mount's own box, or in its transcript when it
+    has no box."""
+    page, errors = open_page(browser, width)
+    page.goto(host["url"])
+    mounted(page)
+    page.evaluate("""() => {
+      window.__changes = [];
+      window.__chat.on("sessionChanged", (e) => window.__changes.push(e));
+    }""")
+    assert page.evaluate("window.__chat.focus()") is None
+    assert page.evaluate(
+        "document.activeElement === document.querySelector('#chat .aegis #input')"
+    )
+    # A chat that started on one session reports the next one it shows, with
+    # the one it left, and open() stays chainable.
+    assert page.evaluate(
+        "window.__chat.open(window.aegisHost.session2) === window.__chat"
+    )
+    page.wait_for_function("() => window.__changes.length === 1", timeout=10_000)
+    change = page.evaluate("window.__changes[0]")
+    assert change["session"] == host["session2"]
+    assert change["previous"] == host["session"]
+    assert change["meta"]["key"] == host["session2"]
+    # The transcript is the new session's: a message typed now draws there.
+    composer_send(page, "a message for the second session")
+    page.wait_for_function(
+        """() => [...document.querySelectorAll("#chat .aegis #entries .row.user .body")]
+          .some((b) => b.textContent.includes("a message for the second session"))""",
+        timeout=60_000,
+    )
+
+    # A transcript-only mount focuses its .tr, which has tabindex="-1".
+    prefix = page.evaluate("window.aegisHost.prefix")
+    page.evaluate(
+        """async (prefix) => {
+          const { mount } = await import(`${prefix}/aegis.js`);
+          window.__bare = mount(document.getElementById("chat2"), {
+            token: window.aegisHost.token,
+            session: window.aegisHost.session,
+            layout: "chat",
+            theme: "host",
+            composer: false,
+          });
+        }""",
+        prefix,
+    )
+    page.wait_for_function(
+        "() => document.querySelector('#chat2 .aegis .tr')", timeout=30_000
+    )
+    assert page.evaluate("window.__bare.focus()") is None
+    assert page.evaluate(
+        "document.activeElement === document.querySelector('#chat2 .aegis .tr')"
+    )
+    assert errors == []
+    page.close()
+
+
+@pytest.mark.parametrize("width", [1280, 390])
+def test_a_mount_with_an_agent_spawns_on_its_first_send(host, browser, width):  # noqa: F811
+    """No session and an agent: the first send starts a session, opens it (one
+    sessionChanged with previous null), and the turn reports turnStart then
+    turnEnd with its own cost."""
+    page, errors = open_page(browser, width)
+    page.goto(host["url"])
+    mounted(page)
+    prefix = page.evaluate("window.aegisHost.prefix")
+    page.add_style_tag(content="#chat2 { height: 700px; }")
+    page.evaluate(
+        """async (prefix) => {
+          const { mount } = await import(`${prefix}/aegis.js`);
+          window.__fresh = {changed: [], starts: [], ends: [], entries: []};
+          window.__agent = mount(document.getElementById("chat2"), {
+            token: window.aegisHost.token,
+            agent: "opus",
+            layout: "chat",
+            theme: "host",
+          });
+          window.__agent.on("sessionChanged", (e) => window.__fresh.changed.push(e));
+          window.__agent.on("turnStart", (e) => window.__fresh.starts.push(e));
+          window.__agent.on("turnEnd", (e) => window.__fresh.ends.push(e));
+          window.__agent.on("entry", (e) => window.__fresh.entries.push(e));
+        }""",
+        prefix,
+    )
+    page.wait_for_function(
+        "() => document.querySelector('#chat2 .aegis #input')", timeout=30_000
+    )
+    # Nothing was invented before the first message.
+    assert page.evaluate("window.__fresh.changed.length") == 0
+    assert page.evaluate("window.__fresh.starts.length") == 0
+
+    page.evaluate("() => window.__agent.send('hello from a fresh chat')")
+    page.wait_for_function("() => window.__fresh.changed.length === 1", timeout=60_000)
+    change = page.evaluate("window.__fresh.changed[0]")
+    assert change["previous"] is None
+    assert change["session"]
+    assert change["meta"]["key"] == change["session"]
+
+    page.wait_for_function("() => window.__fresh.starts.length === 1", timeout=60_000)
+    start = page.evaluate("window.__fresh.starts[0]")
+    assert start["session"] == change["session"]
+    assert start["meta"]["state"] == "working"
+
+    page.wait_for_function("() => window.__fresh.ends.length === 1", timeout=60_000)
+    end = page.evaluate("window.__fresh.ends[0]")
+    assert end["session"] == change["session"]
+    assert isinstance(end["cost_usd"], (int, float))
+    assert end["cost_usd"] > 0
+    assert end["line"] is None
+
+    page.wait_for_function(
+        """() => [...document.querySelectorAll("#chat2 .aegis #entries .row.user .body")]
+          .some((b) => b.textContent.includes("hello from a fresh chat"))""",
+        timeout=60_000,
+    )
+    assert errors == []
+    page.close()
+
+
+@pytest.mark.parametrize("width", [1280, 390])
+def test_session_changed_is_silent_for_the_constructor_session(host, browser, width):  # noqa: F811
+    """A Mount built directly can register its listener before start(): the
+    constructor's session is followed silently, and a later open() reports it."""
+    page, errors = open_page(browser, width)
+    page.goto(host["url"])
+    mounted(page)
+    prefix = page.evaluate("window.aegisHost.prefix")
+    page.add_style_tag(content="#chat2 { height: 700px; }")
+    page.evaluate(
+        """async (prefix) => {
+          const { Mount } = await import(`${prefix}/static/js/mount.js`);
+          window.__ev = [];
+          const m = new Mount(document.getElementById("chat2"), {
+            token: window.aegisHost.token,
+            session: window.aegisHost.session,
+            layout: "chat",
+            theme: "host",
+          });
+          m.on("sessionChanged", (e) => window.__ev.push(e));
+          window.__direct = m;
+          m.start();
+        }""",
+        prefix,
+    )
+    page.wait_for_function(
+        "() => document.querySelector('#chat2 .aegis #input')", timeout=30_000
+    )
+    page.wait_for_timeout(500)  # a first follow that reported lands here
+    assert page.evaluate("window.__ev.length") == 0
+    page.evaluate("s => window.__direct.open(s)", host["session2"])
+    page.wait_for_function("() => window.__ev.length === 1", timeout=10_000)
+    ev = page.evaluate("window.__ev[0]")
+    assert ev["session"] == host["session2"]
+    assert ev["previous"] == host["session"]
+    assert errors == []
+    page.close()
+
+
+@pytest.mark.parametrize("width", [1280, 390])
+def test_file_sent_event_reports_its_entry_and_files(host, browser, width):  # noqa: F811
+    """A file card's upsert fires fileSent beside entry, with the card's files
+    and the same entry the generic event carried."""
+    note = Path(host["root"]) / "event-note.txt"
+    note.write_text("a file the host hears about\n")
+    page, errors = open_page(browser, width)
+    page.goto(host["url"])
+    mounted(page)
+    page.evaluate("""() => {
+      window.__files = [];
+      window.__entries = [];
+      window.__chat.on("fileSent", (e) => window.__files.push(e));
+      window.__chat.on("entry", (e) => window.__entries.push(e));
+    }""")
+    send(
+        page,
+        host["session"],
+        "/mcp file_send "
+        + json.dumps({"paths": [str(note)], "caption": "a file the host hears"}),
+    )
+    page.wait_for_function("() => window.__files.length > 0", timeout=60_000)
+    file_event = page.evaluate("window.__files[0]")
+    assert file_event["session"] == host["session"]
+    assert file_event["entry"]["kind"] == "file"
+    assert len(file_event["files"]) == 1
+    entries = page.evaluate("window.__entries")
+    same = [
+        e
+        for e in entries
+        if e["entry"] == file_event["entry"] and e["session"] == host["session"]
+    ]
+    assert len(same) == 1  # the entry event carried the same object
+    assert errors == []
+    page.close()
+
+
+@pytest.mark.parametrize("width", [1280, 390])
+def test_oikos_options_still_get_their_events(host, browser, width):  # noqa: F811
+    """Oikos's exact options (a token function, chat, host theme, Spanish, no
+    controls) still get connection, error and turnEnd with their old payloads."""
+    page, errors = open_page(browser, width)
+    page.goto(host["url"])
+    mounted(page)
+    prefix = page.evaluate("window.aegisHost.prefix")
+    page.add_style_tag(content="#chat2 { height: 700px; }")
+    page.evaluate(
+        """async (prefix) => {
+          const { mount } = await import(`${prefix}/aegis.js`);
+          window.__oikos = {conn: [], errs: [], turns: []};
+          window.__o = mount(document.getElementById("chat2"), {
+            token: () => window.aegisHost.token,
+            session: window.aegisHost.session,
+            layout: "chat",
+            theme: "host",
+            lang: "es",
+            controls: false,
+          });
+          window.__o.on("connection", (e) => window.__oikos.conn.push(e));
+          window.__o.on("error", (e) => window.__oikos.errs.push(e));
+          window.__o.on("turnEnd", (e) => window.__oikos.turns.push(e));
+        }""",
+        prefix,
+    )
+    page.wait_for_function("() => window.__oikos.conn.length > 0", timeout=30_000)
+    conn = page.evaluate("window.__oikos.conn[0]")
+    assert set(conn) == {"state", "server"}
+    assert conn["state"] in {"connecting", "open"}
+
+    # A refused call reaches the host as its code and message, and the error.
+    page.evaluate("() => { window.__o.spawn('no-such-agent').catch(() => {}); }")
+    page.wait_for_function("() => window.__oikos.errs.length > 0", timeout=30_000)
+    err = page.evaluate("window.__oikos.errs[0]")
+    assert set(err) == {"session", "code", "message", "error"}
+    assert err["session"] is None
+    assert isinstance(err["code"], str) and err["code"]
+    assert isinstance(err["message"], str)
+
+    box = page.locator("#chat2 .aegis #input")
+    box.click()
+    box.fill("hola desde oikos")
+    box.press("Enter")
+    page.wait_for_function("() => window.__oikos.turns.length > 0", timeout=60_000)
+    turn = page.evaluate("window.__oikos.turns[0]")
+    assert set(turn) == {"session", "cost_usd", "line", "meta"}
+    assert turn["session"] == host["session"]
+    assert isinstance(turn["cost_usd"], (int, float))
+    assert turn["cost_usd"] > 0
+    assert errors == []
+    page.close()
+
+
+def test_two_sends_before_the_spawn_answers_start_one_session(host, browser):  # noqa: F811
+    """Two send() calls with no session yet share one spawn: one sessionChanged
+    and both messages in that one session, never two sessions."""
+    page, errors = open_page(browser, 1280)
+    page.goto(host["url"])
+    mounted(page)
+    prefix = page.evaluate("window.aegisHost.prefix")
+    page.add_style_tag(content="#chat2 { height: 700px; }")
+    page.evaluate(
+        """async (prefix) => {
+          const { mount } = await import(`${prefix}/aegis.js`);
+          window.__fresh = {changed: []};
+          window.__agent = mount(document.getElementById("chat2"), {
+            token: window.aegisHost.token,
+            agent: "opus",
+            layout: "chat",
+            theme: "host",
+          });
+          window.__agent.on("sessionChanged", (e) => window.__fresh.changed.push(e));
+        }""",
+        prefix,
+    )
+    page.wait_for_function(
+        "() => document.querySelector('#chat2 .aegis #input')", timeout=30_000
+    )
+    # Both start before session.spawn has answered.
+    page.evaluate(
+        """() => {
+          const one = window.__agent.send("first before the spawn answers");
+          const two = window.__agent.send("second before the spawn answers");
+          window.__both = Promise.all([one, two]).catch((e) => e && e.message);
+        }"""
+    )
+    page.wait_for_function("() => window.__fresh.changed.length === 1", timeout=60_000)
+    page.wait_for_function(
+        """() => {
+          const rows = [...document.querySelectorAll("#chat2 .aegis #entries .row.user .body")]
+            .map((b) => b.textContent);
+          return rows.some((t) => t.includes("first before the spawn answers"))
+            && rows.some((t) => t.includes("second before the spawn answers"));
+        }""",
+        timeout=60_000,
+    )
+    page.evaluate("() => window.__both")
+    assert page.evaluate("window.__fresh.changed.length") == 1
+    assert page.evaluate("window.__fresh.changed[0].session")
+    assert errors == []
+    page.close()
+
+
+def test_an_empty_send_with_an_agent_starts_nothing(host, browser):  # noqa: F811
+    """An empty box sends nothing: with an agent set, the button and a host's
+    empty send must not start a session on their own."""
+    page, errors = open_page(browser, 1280)
+    page.goto(host["url"])
+    mounted(page)
+    prefix = page.evaluate("window.aegisHost.prefix")
+    page.add_style_tag(content="#chat2 { height: 700px; }")
+    page.evaluate(
+        """async (prefix) => {
+          const { mount } = await import(`${prefix}/aegis.js`);
+          window.__changes = [];
+          window.__agent = mount(document.getElementById("chat2"), {
+            token: window.aegisHost.token,
+            agent: "opus",
+            layout: "chat",
+            theme: "host",
+          });
+          window.__agent.on("sessionChanged", (e) => window.__changes.push(e));
+        }""",
+        prefix,
+    )
+    page.wait_for_function(
+        "() => document.querySelector('#chat2 .aegis #send')", timeout=30_000
+    )
+    page.click("#chat2 .aegis #send")  # an empty box's button
+    page.evaluate("() => window.__agent.send('   ')")  # a host's empty line
+    page.wait_for_timeout(1500)  # a spawn would land here
+    assert page.evaluate("window.__changes.length") == 0
+    assert page.locator("#chat2 .aegis #input").input_value() == ""
+    assert errors == []
+    page.close()
+
+
+def test_file_sent_skips_history_and_fires_once_for_a_live_file(host, browser):  # noqa: F811
+    """Opening a session that already holds a file_send replays entry but not
+    fileSent; a file sent while the mount watches fires exactly one."""
+    old = Path(host["root"]) / "history-note.txt"
+    old.write_text("a file from before the mount watched\n")
+    new = Path(host["root"]) / "live-note.txt"
+    new.write_text("a file the mount sees arrive\n")
+    page, errors = open_page(browser, 1280)
+    page.goto(host["url"])
+    mounted(page)
+    # The second session gets a file while the chat still shows the first.
+    send(
+        page,
+        host["session2"],
+        "/mcp file_send " + json.dumps({"paths": [str(old)], "caption": "older file"}),
+    )
+    # Its turn ends, so the file is in the session's transcript.
+    page.wait_for_function(
+        """sid => {
+          for (const m of window.__wsMsgs) {
+            if (m.channel !== "sessions") continue;
+            const rows = m.t === "snapshot"
+              ? (m.data || [])
+              : (m.ops || []).map((o) => o.merge || o.upsert).filter(Boolean);
+            const row = rows.find((r) => r && r.log_id === sid);
+            if (row && row.state !== "working" && row.cost_usd > 0) return true;
+          }
+          return false;
+        }""",
+        arg=host["session2"],
+        timeout=60_000,
+    )
+    page.evaluate(
+        """() => {
+          window.__files = [];
+          window.__entries = [];
+          window.__chat.on("fileSent", (e) => window.__files.push(e));
+          window.__chat.on("entry", (e) => window.__entries.push(e));
+        }"""
+    )
+    # The history's file draws, but fileSent does not replay it.
+    page.evaluate("s => window.__chat.open(s)", host["session2"])
+    page.wait_for_selector("#chat .aegis #entries .row.file", timeout=60_000)
+    page.wait_for_timeout(1000)
+    assert page.evaluate("window.__files.length") == 0
+    assert any(e["entry"]["kind"] == "file" for e in page.evaluate("window.__entries"))
+    # A new file in the watched session is announced once.
+    send(
+        page,
+        host["session2"],
+        "/mcp file_send " + json.dumps({"paths": [str(new)], "caption": "live file"}),
+    )
+    page.wait_for_function("() => window.__files.length === 1", timeout=60_000)
+    page.wait_for_timeout(1500)  # a second upsert would announce here
+    assert page.evaluate("window.__files.length") == 1
+    event = page.evaluate("window.__files[0]")
+    assert event["session"] == host["session2"]
+    assert event["entry"]["kind"] == "file"
+    assert len(event["files"]) == 1
+    assert page.locator("#chat .aegis #entries .row.file").count() >= 2
+    assert errors == []
+    page.close()
+
+
+@pytest.mark.parametrize("width", [1280, 390])
+def test_renderers_draw_a_live_tool_card(host, browser, width):  # noqa: F811
+    """A host's renderer for a finished tool call replaces aegis's row with
+    its own card, keyed by the folded title (``file_send`` for aegis's own
+    tool), and it is called again whenever that row upserts."""
+    note = Path(host["root"]) / "renderer-note.txt"
+    note.write_text("a tool card a host draws\n")
+    page, errors = open_page(browser, width)
+    page.goto(host["url"])
+    mounted(page)
+    prefix = page.evaluate("window.aegisHost.prefix")
+    page.add_style_tag(content="#chat2 { height: 700px; }")
+    page.evaluate(
+        """async (prefix) => {
+          const { mount } = await import(`${prefix}/aegis.js`);
+          window.__drawn = [];
+          window.__custom = mount(document.getElementById("chat2"), {
+            token: window.aegisHost.token,
+            session: window.aegisHost.session,
+            layout: "chat",
+            theme: "host",
+            renderers: {
+              file_send: (entry, el) => {
+                window.__drawn.push({title: entry.title, status: entry.status});
+                el.textContent = "life card";
+                return true;
+              },
+            },
+          });
+        }""",
+        prefix,
+    )
+    page.wait_for_function(
+        "() => document.querySelector('#chat2 .aegis #input')", timeout=30_000
+    )
+    send(
+        page,
+        host["session"],
+        "/mcp file_send "
+        + json.dumps({"paths": [str(note)], "caption": "a host's own card"}),
+    )
+    page.wait_for_function(
+        """() => [...document.querySelectorAll("#chat2 .aegis .row.tool .body")]
+          .some((b) => b.textContent === "life card")""",
+        timeout=60_000,
+    )
+    drawn = page.evaluate("window.__drawn")
+    assert drawn
+    assert all(d["title"] == "file_send" for d in drawn)
+    assert all(d["status"] != "running" for d in drawn)
+    # The custom row is the host's own body under aegis's row shape: none of
+    # aegis's details/summary tool drawing survives in it.
+    assert page.evaluate(
+        """() => {
+          const row = [...document.querySelectorAll("#chat2 .aegis .row.tool")]
+            .find((r) => r.textContent.includes("life card"));
+          return !!row && !row.querySelector("details") && !row.querySelector(".tn");
+        }"""
+    )
+    # The file card the same call sent is still aegis's own: the renderer is
+    # for the tool row, not the file board.
+    assert page.locator("#chat2 .aegis #entries .row.file").count() >= 1
+    assert errors == []
+    page.close()
+
+
+@pytest.mark.parametrize("width", [1280, 390])
+def test_renderers_take_both_keys_and_fall_back(host, browser, width):  # noqa: F811
+    """A second MCP server's tool keeps its full harness name as its key; a
+    renderer that declines keeps aegis's row, and one that throws leaves the
+    row too and does not fail the page (one console line names the tool)."""
+    page, errors = open_page(browser, width)
+    page.goto(host["url"])
+    page.wait_for_function("() => window.aegisHost", timeout=30_000)
+    prefix = page.evaluate("window.aegisHost.prefix")
+    got = page.evaluate(
+        """async (prefix) => {
+          const { render } = await import(`${prefix}/static/js/entries.js`);
+          const entry = (title) => ({
+            id: `synthetic-${title}`,
+            kind: "tool",
+            status: "ok",
+            ts: Date.now(),
+            title,
+            summary: "did the thing",
+            glyph: "comms",
+            detail: {args: "", steps: 0, result: "done"},
+          });
+          const host = document.createElement("div");
+          host.id = "synthetic";
+          const custom = render(entry("mcp__life__send_card"), {
+            renderers: {
+              "mcp__life__send_card": (e, el) => {
+                el.textContent = `life ${e.title}`;
+                return true;
+              },
+            },
+          });
+          const declines = render(entry("file_send"), {
+            renderers: {file_send: () => false},
+          });
+          const throws = render(entry("file_send"), {
+            renderers: {file_send: () => { throw new Error("a host bug"); }},
+          });
+          host.append(custom, declines, throws);
+          document.body.append(host);
+          return {
+            custom: custom.querySelector(".body").textContent,
+            declines: !!declines.querySelector("details .line"),
+            throws: !!throws.querySelector("details .line"),
+            rows: host.querySelectorAll(".row.tool").length,
+          };
+        }""",
+        prefix,
+    )
+    assert got["custom"] == "life mcp__life__send_card"
+    assert got["declines"] is True
+    assert got["throws"] is True
+    assert got["rows"] == 3
+    # The throw is aegis's own log line, not an uncaught page error.
+    assert len(errors) == 1
+    assert "aegis: renderer file_send" in errors[0]
+    assert "a host bug" in errors[0]
+    page.close()
+
+
+@pytest.mark.parametrize("width", [1280, 390])
+def test_transcribe_replaces_the_workers(host, browser, width):  # noqa: F811
+    """A transcribe hook takes each 16 kHz mono piece as a Float32Array and its
+    text lands in the box; the model is never loaded and no Worker is made."""
+    page, errors = open_page(browser, width)
+    page.goto(host["url"])
+    page.wait_for_function("() => window.aegisHost", timeout=30_000)
+    prefix = page.evaluate("window.aegisHost.prefix")
+    got = page.evaluate(
+        """async (prefix) => {
+          const Native = window.Worker;
+          window.__workers = 0;
+          window.Worker = class extends Native {
+            constructor(...args) {
+              window.__workers += 1;
+              super(...args);
+            }
+          };
+          const { Dictation } = await import(`${prefix}/static/js/dictation.js`);
+          const box = document.createElement("textarea");
+          document.body.append(box);
+          let prepares = 0;
+          const seen = {};
+          const engine = new Dictation({
+            prepare: async () => {
+              prepares += 1;
+              return {};
+            },
+            transcribe: async (audio) => {
+              seen.type = audio.constructor.name;
+              seen.length = audio.length;
+              return "spoken words";
+            },
+          });
+          const SR = 16000;
+          const source = async (onSamples) => {
+            // Nine seconds of voice: the chunker cuts one 4-8 second piece.
+            onSamples(new Float32Array(9 * SR).fill(0.5));
+            return async () => {};
+          };
+          const target = {el: box, key: null, current: () => null, heard: () => {}};
+          await engine.start(target, source);
+          await new Promise((ok, no) => {
+            const until = Date.now() + 5000;
+            const tick = () => {
+              if (box.value) return ok();
+              if (Date.now() > until) return no(new Error("no text landed"));
+              setTimeout(tick, 25);
+            };
+            tick();
+          });
+          return {
+            text: box.value,
+            type: seen.type,
+            length: seen.length,
+            prepares,
+            workers: window.__workers,
+          };
+        }""",
+        prefix,
+    )
+    assert got["text"] == "spoken words"
+    assert got["type"] == "Float32Array"
+    assert 4 * 16000 <= got["length"] <= 8 * 16000
+    assert got["prepares"] == 0
+    assert got["workers"] == 0
+    assert errors == []
+    page.close()
+
+
+@pytest.mark.parametrize("width", [1280, 390])
+def test_attachments_false_hides_the_clip_and_ignores_paste(host, browser, width):  # noqa: F811
+    """`attachments: false` builds no clip or file input and wires neither
+    paste nor drop, while the tray stays for a dictation take; a mount that
+    left the default still takes a pasted file."""
+    page, errors = open_page(browser, width)
+    page.goto(host["url"])
+    mounted(page)
+    assert page.locator("#chat .aegis #attach").count() == 1
+    prefix = page.evaluate("window.aegisHost.prefix")
+    page.add_style_tag(content="#chat2 { height: 700px; }")
+    page.evaluate(
+        """async (prefix) => {
+          const { mount } = await import(`${prefix}/aegis.js`);
+          window.__noatt = mount(document.getElementById("chat2"), {
+            token: window.aegisHost.token,
+            session: window.aegisHost.session,
+            layout: "chat",
+            theme: "host",
+            attachments: false,
+          });
+        }""",
+        prefix,
+    )
+    page.wait_for_function(
+        "() => document.querySelector('#chat2 .aegis #input')", timeout=30_000
+    )
+    assert page.locator("#chat2 .aegis #attach").count() == 0
+    assert page.locator("#chat2 .aegis #attach-pick").count() == 0
+    assert page.locator("#chat2 .aegis #atts").count() == 1
+    # The paste is not the mount's: the page keeps it.
+    assert (
+        page.evaluate(
+            """() => {
+              const input = document.querySelector("#chat2 .aegis #input");
+              const dt = new DataTransfer();
+              dt.items.add(new File(["pasted"], "paste.txt", {type: "text/plain"}));
+              const ev = new ClipboardEvent("paste", {
+                clipboardData: dt, bubbles: true, cancelable: true,
+              });
+              input.dispatchEvent(ev);
+              return ev.defaultPrevented;
+            }"""
+        )
+        is False
+    )
+    page.wait_for_timeout(300)
+    assert page.locator("#chat2 .aegis #atts .chip").count() == 0
+    # A mount that kept the default takes the same paste as a chip.
+    assert (
+        page.evaluate(
+            """() => {
+              const input = document.querySelector("#chat .aegis #input");
+              const dt = new DataTransfer();
+              dt.items.add(new File(["kept"], "kept.txt", {type: "text/plain"}));
+              const ev = new ClipboardEvent("paste", {
+                clipboardData: dt, bubbles: true, cancelable: true,
+              });
+              input.dispatchEvent(ev);
+              return ev.defaultPrevented;
+            }"""
+        )
+        is True
+    )
+    page.wait_for_selector("#chat .aegis #atts .chip", timeout=10_000)
+    assert errors == []
+    page.close()
+
+
+# -- the tabs layout (m3, #962) ----------------------------------------------
+# The sessions the policy lists for this caller, as a strip over one session's
+# transcript and box, with a button that starts a new one. The host's own #tabs
+# keeps its text and stays outside the mount: the strip is addressable only by
+# class (`.aegis-tabstrip`, `.aegis-tab`, `.aegis-pane`), because `tabs` is an
+# id hosts already use.
+
+
+def mount_tabs(page) -> None:
+    """A tabs mount in the fixture's #tabsbox, after the page's own chat is up."""
+    page.add_style_tag(content="#tabsbox { height: 700px; }")
+    page.evaluate(
+        """async (prefix) => {
+          const { mount } = await import(`${prefix}/aegis.js`);
+          window.__tabChanges = [];
+          window.__tabs = mount(document.getElementById("tabsbox"), {
+            token: window.aegisHost.token,
+            session: window.aegisHost.session,
+            layout: "tabs",
+            theme: "host",
+          });
+          window.__tabs.on("sessionChanged", (e) => window.__tabChanges.push(e));
+        }""",
+        page.evaluate("window.aegisHost.prefix"),
+    )
+    page.wait_for_function(
+        """() => document.querySelector('#tabsbox > .aegis[data-layout=tabs]')
+          && document.querySelectorAll(
+            '#tabsbox .aegis-tab:not(.aegis-tab-new)').length === 2""",
+        timeout=30_000,
+    )
+
+
+@pytest.mark.parametrize("width", [1280, 390])
+def test_the_tabs_layout_lists_the_sessions_and_switches(host, browser, width):  # noqa: F811
+    """The strip lists the caller's agent sessions by key with the constructor's
+    session shown; a click moves the transcript and box to another one and
+    reports the change once; the host's #tabs is untouched and outside the
+    mount; at phone width the strip scrolls rather than wrapping."""
+    page, errors = open_page(browser, width)
+    page.goto(host["url"])
+    mounted(page)
+    mount_tabs(page)
+
+    keys = page.evaluate(
+        """() => [...document.querySelectorAll(
+          '#tabsbox .aegis-tab:not(.aegis-tab-new)')].map((b) => b.dataset.key)"""
+    )
+    assert keys == sorted([host["session"], host["session2"]])
+    assert (
+        page.evaluate("document.querySelector('#tabsbox .aegis-tab.on').dataset.key")
+        == host["session"]
+    )
+    # The pane is this mount's own transcript and box, under the strip.
+    assert page.locator("#tabsbox .aegis .aegis-pane > .tr-pane").count() == 1
+    assert page.locator("#tabsbox .aegis .aegis-pane > .composer").count() == 1
+    # The host's own #tabs keeps its text and is not inside any mount.
+    assert (
+        page.evaluate("document.getElementById('tabs').textContent")
+        == "the host's own tabs"
+    )
+    assert page.evaluate("document.getElementById('tabs').closest('.aegis')") is None
+
+    # One row of tabs at both widths: the strip scrolls sideways, it never wraps.
+    layout = page.evaluate(
+        """() => {
+          const strip = document.querySelector('#tabsbox .aegis-tabstrip');
+          const tab = strip.querySelector('.aegis-tab');
+          const s = getComputedStyle(strip);
+          return {wrap: s.flexWrap, overflowX: s.overflowX,
+                  strip: strip.clientHeight, tab: tab.offsetHeight};
+        }"""
+    )
+    assert layout["wrap"] == "nowrap"
+    assert layout["overflowX"] == "auto"
+    assert layout["strip"] < layout["tab"] * 2
+
+    # Clicking the second tab switches the pane and reports the change once.
+    page.locator(f'#tabsbox .aegis-tab[data-key="{host["session2"]}"]').click()
+    page.wait_for_function("() => window.__tabChanges.length === 1", timeout=10_000)
+    change = page.evaluate("window.__tabChanges[0]")
+    assert change["session"] == host["session2"]
+    assert change["previous"] == host["session"]
+    assert change["meta"]["key"] == host["session2"]
+    assert (
+        page.evaluate("document.querySelector('#tabsbox .aegis-tab.on').dataset.key")
+        == host["session2"]
+    )
+
+    # The transcript under the strip is the second session's: a message typed
+    # there draws in this mount, and never in the page's chat on the first one.
+    box = page.locator("#tabsbox .aegis #input")
+    box.click()
+    box.fill("typed under the second tab")
+    box.press("Enter")
+    page.wait_for_function(
+        """() => [...document.querySelectorAll(
+          "#tabsbox .aegis #entries .row.user .body")]
+          .some((b) => b.textContent.includes("typed under the second tab"))""",
+        timeout=60_000,
+    )
+    assert not page.evaluate(
+        """() => [...document.querySelectorAll("#chat .aegis #entries .row.user .body")]
+          .some((b) => b.textContent.includes("typed under the second tab"))"""
+    )
+    assert errors == []
+    page.close()
+
+
+def test_the_tabs_new_button_spawns_and_opens_the_new_session(host, browser):  # noqa: F811
+    """The strip's new-chat button starts a session through the policy, opens
+    it as a third tab and reports the change from the one that was shown."""
+    page, errors = open_page(browser, 1280)
+    page.goto(host["url"])
+    mounted(page)
+    mount_tabs(page)
+    page.locator("#tabsbox .aegis-tab-new").click()
+    page.wait_for_function(
+        """() => document.querySelectorAll(
+          '#tabsbox .aegis-tab:not(.aegis-tab-new)').length === 3""",
+        timeout=60_000,
+    )
+    shown = page.evaluate(
+        "document.querySelector('#tabsbox .aegis-tab.on').dataset.key"
+    )
+    assert shown not in (host["session"], host["session2"])
+    change = page.evaluate("window.__tabChanges.at(-1)")
+    assert change["session"] == shown
+    assert change["previous"] == host["session"]
+    assert errors == []
+    page.close()
+
+
+def test_a_chat_mount_never_loads_the_full_layouts_boot(host, browser):  # noqa: F811
+    """The full layout's behaviour is app.js's, and a m4 mount imports it only
+    for a full layout: a chat host never downloads or evaluates its module
+    graph, so the page's own resource list has no app.js."""
+    page, errors = open_page(browser, 1280)
+    page.goto(host["url"])
+    mounted(page)
+    loaded = page.evaluate(
+        """() => performance.getEntriesByType("resource")
+          .map((e) => new URL(e.name).pathname)"""
+    )
+    assert [n for n in loaded if n.endswith("/js/app.js")] == []
+    assert errors == []
+    page.close()
+
+
+# -- the full layout in a host (m5, #962) -------------------------------------
+# A host's full mount keeps the document: no title, favicon, theme attribute,
+# URL hash, service worker, push or page-wide selector of the host's is used or
+# changed. The page carries its own look-alikes (a .v-session, a .col, a
+# .wfcard and an aegis-build meta) before the mount in document order, so a
+# document-wide lookup would find the host's node first.
+
+
+def mount_full(page) -> None:
+    """A full mount in a box the host owns, with the host's look-alikes."""
+    page.add_style_tag(content="#full { height: 700px; }")
+    page.evaluate(
+        """async (prefix) => {
+          // The host's own nodes, named the way the client names its own, and
+          // first in the document: before #full and before the mount's root.
+          const side = document.createElement("div");
+          side.id = "host-side";
+          side.className = "v-session";
+          side.innerHTML =
+            '<div class="col"><div class="fbar">' +
+            '<button class="native" data-file-id="host" data-name="host">host file</button>' +
+            '</div></div><div class="wfcard" data-run="x">host card</div>';
+          const meta = document.createElement("meta");
+          meta.name = "aegis-build";
+          meta.content = "host";
+          document.head.append(meta);
+          const favicon = document.createElement("link");
+          favicon.id = "favicon";
+          favicon.rel = "icon";
+          favicon.href = "data:image/svg+xml,host";
+          document.head.append(favicon);
+          document.body.append(side);
+          const box = document.createElement("div");
+          box.id = "full";
+          document.body.append(box);
+          location.hash = "#host-route";
+          window.__before = {
+            title: document.title,
+            hash: location.hash,
+            theme: document.documentElement.dataset.theme || "",
+            favicon: document.getElementById("favicon").href,
+          };
+          window.__marker = 1;
+          const { mount } = await import(`${prefix}/aegis.js`);
+          window.__full = mount(box, {
+            token: window.aegisHost.token,
+            session: window.aegisHost.session,
+            layout: "full",
+            theme: "host",
+            page: false,
+          });
+        }""",
+        page.evaluate("window.aegisHost.prefix"),
+    )
+    # composeFull ran: it filled the navigator's side button with its glyph,
+    # and the welcome the mount shares has arrived.
+    page.wait_for_function(
+        """() => document.querySelector('#full .aegis[data-layout=full] #nav-side svg')
+          && window.__wsMsgs.some((m) => m.t === 'welcome')""",
+        timeout=60_000,
+    )
+
+
+@pytest.mark.parametrize("width", [1280, 390])
+def test_the_full_layout_leaves_the_hosts_page_alone(host, browser, width):  # noqa: F811
+    """The full layout fills the host's box, draws its own parts there, and
+    neither reads nor writes the page's title, favicon, theme attribute, hash
+    or build meta; the host's look-alike nodes answer no click meant for the
+    mount, and the mount's own panel still does."""
+    page, errors = open_page(browser, width)
+    page.goto(host["url"])
+    mounted(page)
+    mount_full(page)
+
+    before = page.evaluate("window.__before")
+    assert page.title() == before["title"]
+    assert page.evaluate("location.hash") == before["hash"] == "#host-route"
+    assert (
+        page.evaluate("document.documentElement.dataset.theme || ''") == before["theme"]
+    )
+    assert page.evaluate("document.getElementById('favicon').href") == before["favicon"]
+    # The host's build meta is its own: the mount neither reads nor moves it.
+    assert page.get_attribute('meta[name="aegis-build"]', "content") == "host"
+
+    # The root fills the host's box rather than the viewport, and the full
+    # layout is drawn under it.
+    root = page.evaluate(
+        """() => {
+          const r = document.querySelector("#full > .aegis");
+          return {layout: r.dataset.layout, page: r.dataset.page,
+                  rootH: r.clientHeight,
+                  boxH: document.getElementById("full").clientHeight};
+        }"""
+    )
+    assert root["layout"] == "full"
+    assert root["page"] == "false"
+    assert abs(root["rootH"] - root["boxH"]) <= 1
+    assert page.locator("#full .v-session .col").count() >= 1
+    assert page.locator("#full .composer").count() == 1
+
+    # The host's look-alikes are outside the mount and untouched.
+    assert (
+        page.evaluate("document.getElementById('host-side').closest('.aegis')") is None
+    )
+    assert page.inner_text("#host-side .wfcard") == "host card"
+
+    # The host's meta never became PAGE_BUILD: no reload for a newer build and
+    # no "new version" toast (a reload would drop the marker).
+    page.wait_for_timeout(1000)
+    assert page.evaluate("window.__marker") == 1
+    assert not page.evaluate(
+        "document.body.textContent.includes('A new version of aegis is ready.')"
+    )
+
+    # A click on the host's .v-session reaches nothing; the mount's own panel
+    # answers the same click. The listener is the mount's, not whichever node
+    # the document finds first.
+    page.evaluate(
+        """() => {
+          document.querySelector("#full > .aegis").dataset.side = "open";
+          document.getElementById("host-side").dispatchEvent(
+            new MouseEvent("click", {bubbles: true}));
+        }"""
+    )
+    assert (
+        page.evaluate("document.querySelector('#full > .aegis').dataset.side") == "open"
+    )
+    page.evaluate(
+        """() => document.querySelector("#full .v-session").dispatchEvent(
+          new MouseEvent("click", {bubbles: true}))"""
+    )
+    assert (
+        page.evaluate("document.querySelector('#full > .aegis').dataset.side") != "open"
+    )
+
+    # The host's .col keeps the click handler to itself: its own file button is
+    # never disabled by the mount's file.open listener.
+    page.locator("#host-side .fbar .native").click()
+    assert (
+        page.evaluate("document.querySelector('#host-side .fbar .native').disabled")
+        is False
+    )
+
+    # A hash link the layout draws routes the mount, not the host's URL: the
+    # page's hash stays put and the view moves to the session.
+    page.evaluate(
+        """(sid) => {
+          const a = document.createElement("a");
+          a.id = "in-mount-hash";
+          a.href = "#s=" + sid;
+          a.textContent = "go";
+          document.querySelector("#full .tabs").append(a);
+        }""",
+        host["session2"],
+    )
+    page.locator("#in-mount-hash").click()
+    page.wait_for_function(
+        "() => document.querySelector('#full > .aegis').dataset.view === 'session'",
+        timeout=15_000,
+    )
+    assert page.evaluate("location.hash") == "#host-route"
+    assert (
+        page.evaluate("document.querySelector('#full > .aegis').dataset.view")
+        == "session"
+    )
+    assert errors == []
+    page.close()
+
+
+# -- a full mount without its panel, its events, and its teardown (m6, #962) --
+# The host asked for the transcript alone (sidebar:false); it hears every
+# session change, turn and file its mount sees, and destroying the mount takes
+# the layout's listeners, subscriptions and timers with it.
+
+
+def mount_full_quiet(page) -> None:
+    """A full mount a host owns, without the session panel, listening for the
+    events the host contract promises. The page's own look-alike nodes stay
+    first in document order (the m5 scoping holds)."""
+    page.add_style_tag(content="#full { height: 700px; }")
+    page.evaluate(
+        """async (prefix) => {
+          const side = document.createElement("div");
+          side.id = "host-side";
+          side.className = "v-session";
+          side.innerHTML =
+            '<div class="col"><div class="fbar">' +
+            '<button class="native" data-file-id="host" data-name="host">host file</button>' +
+            '</div></div><div class="wfcard" data-run="x">host card</div>';
+          const meta = document.createElement("meta");
+          meta.name = "aegis-build";
+          meta.content = "host";
+          document.head.append(meta);
+          document.body.append(side);
+          const box = document.createElement("div");
+          box.id = "full";
+          document.body.append(box);
+          location.hash = "#host-route";
+          const { mount } = await import(`${prefix}/aegis.js`);
+          window.__ev = {changed: [], starts: [], ends: [], entries: [], files: []};
+          window.__full = mount(box, {
+            token: window.aegisHost.token,
+            session: window.aegisHost.session,
+            layout: "full",
+            sidebar: false,
+            theme: "host",
+            page: false,
+          });
+          for (const [name, key] of [
+            ["sessionChanged", "changed"], ["turnStart", "starts"],
+            ["turnEnd", "ends"], ["entry", "entries"], ["fileSent", "files"],
+          ]) window.__full.on(name, (e) => window.__ev[key].push(e));
+        }""",
+        page.evaluate("window.aegisHost.prefix"),
+    )
+    # composeFull ran, the constructor's session is the view (built() opened it
+    # through the layout's hooks), and the sessions snapshot has landed.
+    page.wait_for_function(
+        """() => {
+          const r = document.querySelector("#full > .aegis[data-layout=full]");
+          return r && r.dataset.view === "session"
+            && document.querySelector("#full #nav-side svg")
+            && window.__wsMsgs.some((m) => m.t === "welcome");
+        }""",
+        timeout=60_000,
+    )
+
+
+@pytest.mark.parametrize("width", [1280, 390])
+def test_a_full_mount_without_its_sidebar_hears_its_events(host, browser, width):  # noqa: F811
+    """sidebar:false draws no panel and its side button does nothing; the
+    constructor's session hears no sessionChanged; open() moves the router and
+    reports it; a turn reports turnStart and turnEnd; a file reports fileSent;
+    destroy() takes the root and every listener with it."""
+    page, errors = open_page(browser, width)
+    page.goto(host["url"])
+    mounted(page)
+    mount_full_quiet(page)
+
+    root = page.locator("#full > .aegis")
+    assert root.get_attribute("data-sidebar") == "none"
+    assert page.locator("#full .side, #full .grip, #full #side").count() == 0
+
+    # The navigator's side button has no panel to open.
+    page.evaluate("() => document.querySelector('#full #nav-side').click()")
+    assert (
+        page.evaluate("document.querySelector('#full > .aegis').dataset.side") is None
+    )
+    assert page.locator("#full .side").count() == 0
+
+    # focus() is this mount's own box, not the host's.
+    assert page.evaluate("window.__full.focus()") is None
+    assert page.evaluate(
+        "document.activeElement === document.querySelector('#full .aegis #input')"
+    )
+
+    # The session the host passed is not news; give a late report time to land.
+    page.wait_for_timeout(500)
+    assert page.evaluate("window.__ev.changed.length") == 0
+
+    # open() moves the router to the other session and says where from, once.
+    page.evaluate("(sid) => window.__full.open(sid)", host["session2"])
+    page.wait_for_function("() => window.__ev.changed.length === 1", timeout=10_000)
+    change = page.evaluate("window.__ev.changed[0]")
+    assert change["session"] == host["session2"]
+    assert change["previous"] == host["session"]
+    assert change["meta"]["key"] == host["session2"]
+
+    # The view moved: a message typed in that session draws in this mount.
+    send(page, host["session2"], "a message the full mount followed")
+    page.wait_for_function(
+        """() => [...document.querySelectorAll("#full #entries .row.user .body")]
+          .some((b) => b.textContent.includes("a message the full mount followed"))""",
+        timeout=60_000,
+    )
+    # entry fired for the row, and the turn it started reported both ends.
+    assert page.evaluate(
+        """() => window.__ev.entries.some((e) =>
+          e.session === window.aegisHost.session2 && e.entry.kind === "user")"""
+    )
+    page.wait_for_function("() => window.__ev.starts.length === 1", timeout=60_000)
+    start = page.evaluate("window.__ev.starts[0]")
+    assert start["session"] == host["session2"]
+    assert start["meta"]["state"] == "working"
+    page.wait_for_function("() => window.__ev.ends.length === 1", timeout=60_000)
+    end = page.evaluate("window.__ev.ends[0]")
+    assert end["session"] == host["session2"]
+    assert isinstance(end["cost_usd"], (int, float)) and end["cost_usd"] > 0
+    assert end["line"] is None
+
+    # A file an agent sends is the narrow event beside the generic one.
+    note = Path(host["root"]) / "full-event-note.txt"
+    note.write_text("a file the full mount hears about\n")
+    send(
+        page,
+        host["session2"],
+        "/mcp file_send "
+        + json.dumps({"paths": [str(note)], "caption": "a file the full mount hears"}),
+    )
+    page.wait_for_function("() => window.__ev.files.length > 0", timeout=60_000)
+    file_event = page.evaluate("window.__ev.files[0]")
+    assert file_event["session"] == host["session2"]
+    assert file_event["entry"]["kind"] == "file"
+    assert len(file_event["files"]) == 1
+    assert page.evaluate(
+        """(sent) => window.__ev.entries.some((e) =>
+          e.session === window.aegisHost.session2 && e.entry.id === sent.id)""",
+        file_event["entry"],
+    )
+
+    # The host's own look-alikes are outside the mount and untouched.
+    assert page.get_attribute('meta[name="aegis-build"]', "content") == "host"
+    assert page.inner_text("#host-side .wfcard") == "host card"
+    assert page.evaluate("location.hash") == "#host-route"
+    page.locator("#host-side .fbar .native").click()
+    assert (
+        page.evaluate("document.querySelector('#host-side .fbar .native').disabled")
+        is False
+    )
+
+    # destroy() takes the root with it, and its channel subscriptions go too:
+    # a turn in the session it showed reaches no handler of it.
+    seen = page.evaluate("window.__ev.entries.length")
+    page.evaluate("() => window.__full.destroy()")
+    assert page.locator("#full > .aegis").count() == 0
+    assert page.evaluate("document.getElementById('full').childElementCount") == 0
+    send(page, host["session2"], "after the full mount is gone")
+    page.wait_for_timeout(1500)
+    assert page.evaluate("window.__ev.entries.length") == seen
+
+    # A later hash change and keypress run nothing of the layout that could
+    # reach a node it took down.
+
+    page.evaluate(
+        """() => {
+          window.dispatchEvent(new HashChangeEvent("hashchange"));
+          document.dispatchEvent(new KeyboardEvent("keydown", {
+            key: "j", code: "KeyJ", altKey: true, bubbles: true }));
+          window.dispatchEvent(new Event("focus"));
+        }"""
+    )
+    page.wait_for_timeout(500)
+    assert errors == []
+    page.close()
+
+
+# -- one page, three layouts, two widths (m7, #962) ---------------------------
+# #962's own proof: a stranger's page that already uses the ids #tabs and
+# #composer, sets the host's theme and hides tool calls with its own CSS, and
+# mounts all three layouts in it at once. Without ?layouts=all the fixture
+# mounts only the chat, so every case above it is unchanged.
+
+ROOTS = """() => ({
+  chat: document.querySelectorAll("#chat > .aegis[data-layout=chat]").length,
+  tabs: document.querySelectorAll("#tabsbox > .aegis[data-layout=tabs]").length,
+  full: document.querySelectorAll("#full > .aegis[data-layout=full]").length,
+})"""
+
+# The host's own boxes in document coordinates, in the shape window.__host
+# recorded at scroll 0. The full layout scrolls its own tab into view on the
+# page's scrollbar, so a viewport-relative rect would move with the page and
+# say nothing about whether the host's boxes themselves moved.
+HOST_DOC = """() => {
+  const out = {};
+  for (const id of ["board", "tabs", "composer"]) {
+    const n = document.getElementById(id);
+    const r = n.getBoundingClientRect();
+    out[id] = {text: n.textContent, x: r.x, y: r.y + window.scrollY,
+               width: r.width, height: r.height};
+  }
+  return out;
+}"""
+
+
+@pytest.mark.parametrize("width", [1280, 390])
+def test_all_three_layouts_in_one_host_page(host, browser, width):  # noqa: F811
+    """The chat, tabs and full layouts in one page that already had their ids:
+    three roots on one socket, each drawing its own parts under its own
+    element; the host's boxes, look-alikes and CSS untouched; a send from the
+    tabs view streams back; open() moves only the full view, not the page's
+    hash or title; and destroy() leaves the page as it was."""
+    page, errors = open_page(browser, width)
+    page.goto(host["url"] + "?layouts=all&tools=hidden")
+    mounted(page)
+    # The tabs strip lists the caller's two sessions, and the full layout has
+    # composed its boot and followed the constructor's session like m6's.
+    page.wait_for_function(
+        """() => {
+          const full = document.querySelector('#full > .aegis[data-layout=full]');
+          return document.querySelectorAll(
+              '#tabsbox .aegis-tab:not(.aegis-tab-new)').length === 2
+            && full && full.dataset.view === 'session'
+            && document.querySelector('#full #nav-side svg')
+            && window.__chat && window.__tabs && window.__full;
+        }""",
+        timeout=60_000,
+    )
+    before = {
+        "title": page.title(),
+        "hash": page.evaluate("location.hash"),
+        "meta": page.get_attribute('meta[name="aegis-build"]', "content"),
+        "wfcard": page.inner_text("#host-side .wfcard"),
+    }
+
+    # Three roots, one socket, all in the host's theme.
+    assert page.evaluate(ROOTS) == {"chat": 1, "tabs": 1, "full": 1}
+    assert page.evaluate("window.__ws.length") == 1
+    assert page.evaluate("window.__ws[0].closed") is False
+    assert page.evaluate(
+        """() => ["#chat > .aegis", "#tabsbox > .aegis", "#full > .aegis"]
+          .map((s) => document.querySelector(s).dataset.theme)"""
+    ) == ["host", "host", "host"]
+
+    # The host's own boxes stand exactly where they stood before any mount,
+    # and an id aegis also uses still returns the host's node.
+    assert page.evaluate(HOST_DOC) == page.evaluate("window.__host")
+    assert (
+        page.evaluate("document.getElementById('board').textContent") == "A host page"
+    )
+    assert page.evaluate("document.getElementById('tabs').textContent") == (
+        "the host's own tabs"
+    )
+    assert page.evaluate("document.getElementById('composer').textContent") == (
+        "the host's own input"
+    )
+    assert page.evaluate("document.getElementById('tabs').closest('.aegis')") is None
+    assert (
+        page.evaluate("document.getElementById('composer').closest('.aegis')") is None
+    )
+    # The ids repeat inside the three mounts; the first is the chat's, as it
+    # mounted first.
+    assert page.evaluate("document.querySelectorAll('#input').length") == 3
+    assert (
+        page.evaluate(
+            "document.getElementById('input').closest('.aegis').dataset.layout"
+        )
+        == "chat"
+    )
+
+    # Each layout draws its own parts under its own element.
+    assert page.locator("#chat .aegis-chat > #composer").count() == 1
+    assert page.locator("#chat .aegis #entries").count() == 1
+    assert page.locator("#tabsbox .aegis-tabstrip").count() == 1
+    assert page.locator("#tabsbox .aegis-pane > .tr-pane").count() == 1
+    assert page.locator("#tabsbox .aegis-pane > .composer").count() == 1
+    assert page.locator("#tabsbox .aegis #entries").count() == 1
+    assert (
+        page.evaluate("document.querySelector('#tabsbox .aegis-tab.on').dataset.key")
+        == host["session"]
+    )
+    assert page.locator("#full .v-session .col").count() == 1
+    assert page.locator("#full .composer #input").count() == 1
+    assert page.locator("#full #nav-side svg").count() == 1
+
+    # The page's own .v-session, .col, .wfcard and build meta are its own: the
+    # full mount neither reads nor moves them (m5's scoping, seen from here).
+    assert (
+        page.evaluate("document.getElementById('host-side').closest('.aegis')") is None
+    )
+    assert (
+        page.evaluate("document.querySelector('#host-side .col').closest('.aegis')")
+        is None
+    )
+    assert page.inner_text("#host-side .wfcard") == "host card"
+    assert page.get_attribute('meta[name="aegis-build"]', "content") == "host"
+    page.locator("#host-side .fbar .native").click()
+    assert (
+        page.evaluate("document.querySelector('#host-side .fbar .native').disabled")
+        is False
+    )
+
+    # The host's own rule hides a tool row in the chat and in the tabs view.
+    send(page, host["session"], "/many 3")
+    page.wait_for_selector(
+        "#chat .aegis #entries .row.tool", state="attached", timeout=60_000
+    )
+    page.wait_for_selector(
+        "#tabsbox .aegis #entries .row.tool", state="attached", timeout=60_000
+    )
+    assert page.locator("#chat .aegis #entries .row.tool").first.is_hidden()
+    assert page.locator("#tabsbox .aegis #entries .row.tool").first.is_hidden()
+
+    # A message typed in the tabs view goes out through the shared socket and
+    # the answer streams back under it in that view.
+    box = page.locator("#tabsbox .aegis #input")
+    box.click()
+    box.fill("typed in the tabs view of a host page")
+    box.press("Enter")
+    page.wait_for_function(
+        """() => [...document.querySelectorAll(
+          "#tabsbox .aegis #entries .row.user .body")]
+          .some((b) => b.textContent.includes("typed in the tabs view of a host page"))""",
+        timeout=60_000,
+    )
+    page.wait_for_function(
+        """() => {
+          const rows = [...document.querySelectorAll("#tabsbox .aegis #entries > .row")];
+          const at = rows.findIndex((r) =>
+            r.textContent.includes("typed in the tabs view of a host page"));
+          return at >= 0 && rows.slice(at + 1).some(
+            (r) => r.classList.contains("prose") && r.textContent.trim());
+        }""",
+        timeout=60_000,
+    )
+
+    # The host's open() moves the full view alone: the chat and the tabs stay
+    # on the first session, the page's hash and title do not move, and the
+    # full mount follows the message sent to the other session.
+    page.evaluate("(sid) => window.__full.open(sid)", host["session2"])
+    page.wait_for_function(
+        """() => document.querySelector('#full > .aegis[data-layout=full]')
+          .dataset.view === 'session'"""
+    )
+    send(page, host["session2"], "a message only the full mount follows")
+    page.wait_for_function(
+        """() => [...document.querySelectorAll("#full #entries .row.user .body")]
+          .some((b) => b.textContent.includes("a message only the full mount follows"))""",
+        timeout=60_000,
+    )
+    assert not page.evaluate(
+        """() => [...document.querySelectorAll("#chat .aegis #entries .row.user .body")]
+          .some((b) => b.textContent.includes("a message only the full mount follows"))"""
+    )
+    assert not page.evaluate(
+        """() => [...document.querySelectorAll("#tabsbox .aegis #entries .row.user .body")]
+          .some((b) => b.textContent.includes("a message only the full mount follows"))"""
+    )
+    assert page.title() == before["title"]
+    assert page.evaluate("location.hash") == before["hash"] == ""
+
+    # Destroying all three gives the page back as it was: no roots, no boxes'
+    # content, the same host measures, look-alikes and build meta.
+    page.evaluate(
+        """() => {
+          window.__chat.destroy();
+          window.__tabs.destroy();
+          window.__full.destroy();
+        }"""
+    )
+    page.wait_for_timeout(500)
+    assert page.evaluate(ROOTS) == {"chat": 0, "tabs": 0, "full": 0}
+    assert page.evaluate("document.querySelectorAll('.aegis').length") == 0
+    assert page.evaluate("document.getElementById('chat').childElementCount") == 0
+    assert page.evaluate("document.getElementById('tabsbox').childElementCount") == 0
+    assert page.evaluate("document.getElementById('full').childElementCount") == 0
+    assert page.evaluate(HOST_DOC) == page.evaluate("window.__host")
+    assert page.title() == before["title"]
+    assert page.evaluate("location.hash") == before["hash"]
+    assert page.get_attribute('meta[name="aegis-build"]', "content") == before["meta"]
+    assert page.inner_text("#host-side .wfcard") == before["wfcard"]
+
+    assert errors == []
+    page.close()

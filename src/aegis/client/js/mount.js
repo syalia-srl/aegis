@@ -7,11 +7,12 @@
 // it. A host that serves the client under /aegis gets /aegis/ws and
 // /aegis/files/... without setting anything.
 //
-// The handle mount() returns is deliberately small (phase A; #962 adds the
-// rest): on(name, fn) for connection, turnEnd, entry and error; send(text),
-// which the composer part sends (a6); and destroy(), which removes the root
-// and gives the socket back. A part is added by a later slice with its markup,
-// its nodes and its live wiring.
+// The handle mount() returns is deliberately small: on(name, fn) for
+// connection, sessionChanged, turnStart, turnEnd, entry, fileSent and error;
+// open(session), spawn(agent, prompt) and focus() for a host that moves the
+// mount itself; send(text), which the composer part sends (a6); and destroy(),
+// which removes the root and gives the socket back. A part is added by a later
+// slice with its markup, its nodes and its live wiring.
 //
 // The outbox is per mount (a6) even when no composer draws it: drafts are one
 // device's, keyed by session, and a chat that is only a transcript still puts
@@ -24,6 +25,7 @@ import { labelsFor } from "./labels.js";
 import { lifecycle } from "./lifecycle.js";
 import { Outbox } from "./outbox.js";
 import { buildFull } from "./layouts/full.js";
+import { TabsLayout } from "./layouts/tabs.js";
 import { ComposerPart } from "./parts/composer.js";
 import { TranscriptPart } from "./parts/transcript.js";
 
@@ -45,6 +47,9 @@ export class Mount {
     this.el = el;
     this.opts = {
       layout: "chat",
+      // full only: the session panel (title, plan, repos, journal, usage,
+      // actions). It shows unless a host asks for a transcript on its own.
+      sidebar: null,
       theme: "ink",
       lang: "en",
       labels: {},
@@ -53,7 +58,14 @@ export class Mount {
       dictation: false,
       commands: false,
       attachments: true,
+      // A host's own tool cards: tool name -> (entry, el) => boolean. The
+      // transcript part hands them to entries.js, which calls one when the
+      // call is no longer running and keeps its body only when it says true.
+      renderers: {},
+      // A host's own speech service, in place of the browser's Whistle workers.
+      transcribe: null,
       session: null,
+      agent: null,
       token: "",
       // `adopt`: build no root, take the element the host gives us as one. The
       // standalone page does this over its empty #a2 (b8); a host that has an
@@ -66,6 +78,9 @@ export class Mount {
       outbox: null,
       ...options,
     };
+    // The panel belongs to the full layout alone; chat and tabs ignore the
+    // option, and a host that asked for none keeps only the transcript.
+    if (this.opts.sidebar == null) this.opts.sidebar = this.opts.layout === "full";
     this.urls = {
       client: CLIENT,
       static: new URL("static/", CLIENT),
@@ -83,6 +98,13 @@ export class Mount {
     this._working = new Set(); // keys whose turn this mount saw start
     this._costAt = new Map(); // key -> the cumulative cost_usd when it did
     this._dead = false;
+    // A full mount is building until app.js's boot runs (layouts/full.js):
+    // `_built` is false then, and the calls a host makes wait in `_queue`.
+    this._built = true;
+    this._queue = [];
+    this._connState = null; // the last state, for a listener that joins later
+    this._handle = null;
+    this._spawning = null; // the spawn a send is waiting on, shared by its peers
     this.outbox = options.outbox || null;
     this.composer = null;
   }
@@ -100,6 +122,7 @@ export class Mount {
     const held = acquire(this.urls.ws.href, {
       token: this.opts.token,
       onState: (state, server) => {
+        this._connState = { state, server };
         this.emit("connection", { state, server });
         // A chat flushes only the session it shows: every draft on the device
         // is another mount's or the full layout's to send.
@@ -126,13 +149,27 @@ export class Mount {
 
   // The standalone client's page: the full layout builds the netbanner, the
   // boot view and the session view in this root, and app.js composes the parts
-  // it holds. It keeps the id the browser suite addresses (b8). A chat composes
-  // one transcript and, unless the host asked for none, its box.
+  // it holds. Its markup comes from layouts/full.js at once; its behaviour is
+  // app.js's, loaded and composed a moment later, so the mount is building
+  // until then. It keeps the id the browser suite addresses (b8). A chat
+  // composes one transcript and, unless the host asked for none, its box; tabs
+  // compose the same two under a strip of the sessions the policy lists.
   mountLayout() {
     if (this.opts.layout === "full") {
       this.root.id = "a2";
       this.root.classList.add("app");
-      buildFull(this.root, this.t);
+      // A host that wants the transcript without the panel: no aside, no
+      // grip, one column (css/client.css), and the navigator's side button
+      // does nothing.
+      if (!this.opts.sidebar) this.root.dataset.sidebar = "none";
+      this._built = false;
+      buildFull(this).catch((error) => this.fail(null, error));
+      return;
+    }
+    if (this.opts.layout === "tabs") {
+      this.view = this.add(new TabsLayout(this, this.root));
+      // The constructor's session is not news to the host: it passed it.
+      this.follow(this.opts.session, true);
       return;
     }
     if (this.opts.layout !== "chat") throw new Error(`aegis: no layout ${this.opts.layout}`);
@@ -140,7 +177,8 @@ export class Mount {
     this.root.append(chat);
     this.transcript = this.add(new TranscriptPart(this, chat));
     if (this.opts.composer) this.composer = this.add(new ComposerPart(this, chat));
-    this.follow(this.opts.session);
+    // The constructor's session is not news to the host: it passed it.
+    this.follow(this.opts.session, true);
   }
 
   add(part) {
@@ -148,19 +186,49 @@ export class Mount {
     return part;
   }
 
-  // The host's handle.
+  // The host's handle: one small object, built once, whose calls are the
+  // mount's own. It is not `this`, so a host cannot reach emit, call or a part.
   handle() {
-    return {
+    if (this._handle) return this._handle;
+    const h = {
       el: this.root,
-      on: (name, fn) => this.on(name, fn),
+      on: (name, fn) => {
+        this.on(name, fn);
+        return h;
+      },
+      open: (session) => {
+        this.open(session);
+        return h;
+      },
+      spawn: (agent, prompt) => this.spawn(agent, prompt),
       send: (text) => this.send(text),
+      focus: () => this.focus(),
       destroy: () => this.destroy(),
     };
+    this._handle = h;
+    return h;
   }
 
   on(name, fn) {
     if (!this.listeners.has(name)) this.listeners.set(name, new Set());
     this.listeners.get(name).add(fn);
+    // The connection's last state reaches a listener that joins after it: the
+    // full layout loads app.js after the socket may already have opened, and
+    // a host that mounts into a page with a socket already up must not sit at
+    // "connecting" until the next change. It arrives in a microtask, after the
+    // listener's own synchronous setup has finished: app.js registers it
+    // halfway through its boot and reads declarations made after.
+    if (name === "connection" && this._connState) {
+      const state = this._connState;
+      queueMicrotask(() => {
+        if (this._dead || !this.listeners.get(name)?.has(fn)) return;
+        try {
+          fn(state);
+        } catch (e) {
+          console.error("aegis:", name, e);
+        }
+      });
+    }
     return this;
   }
 
@@ -186,15 +254,110 @@ export class Mount {
   }
 
   send(text) {
+    if (!this._built) return this._afterBuild(() => this.send(text));
     if (this.composer) return this.composer.send(text);
-    // A transcript-only mount still lets a reply pill's send arrive.
-    if (!this.state.shown) return Promise.resolve();
-    return this.callFor(this.state.shown, "session.send", { text }).catch((error) => this.fail(this.state.shown, error));
+    return this.ensureSession().then((key) => {
+      // A transcript-only mount still lets a reply pill's send arrive.
+      if (!key) return;
+      return this.callFor(key, "session.send", { text }).catch((error) => this.fail(key, error));
+    });
+  }
+
+  // Show another session (a log id or a `server/log_id` key). The constructor's
+  // own session is followed quietly; this always reports when it changes.
+  open(session) {
+    if (!this._built) return this._afterBuild(() => this.open(session));
+    if (this.opts.layout === "full") return this.hooks?.open?.(session) ?? this;
+    this.follow(session || null);
+    return this;
+  }
+
+  // Start a session through session.spawn (the policy decides), open it, and
+  // send it a first prompt when one was given. A refusal is the error event
+  // and a rejected promise, never a thrown string.
+  async spawn(agent = this.opts.agent, prompt = null) {
+    const params = {};
+    if (agent) params.agent = agent;
+    if (prompt) params.prompt = prompt;
+    let out;
+    try {
+      out = await this.call("session.spawn", params);
+    } catch (error) {
+      this.fail(null, error);
+      throw error;
+    }
+    this.open(out.log_id);
+    return { session: out.log_id, handle: out.handle };
+  }
+
+  // The session a send writes to: the one shown, or one the host's agent starts
+  // first (spec 06: an agent starts one on the first message). Two sends that
+  // race before the spawn answers share the one promise: one session, never two.
+  async ensureSession() {
+    if (this.state.shown) return this.state.shown;
+    if (!this.opts.agent) return null;
+    if (!this._spawning) {
+      this._spawning = this.spawn(this.opts.agent)
+        .then(({ session }) => session)
+        .finally(() => {
+          this._spawning = null;
+        });
+    }
+    return this._spawning;
+  }
+
+  // Put the caret in this mount's box, or focus the transcript when it has
+  // none (its .tr has tabindex="-1").
+  focus() {
+    if (!this._built) return this._afterBuild(() => this.focus());
+    if (this.opts.layout === "full" && this.hooks?.focus) return this.hooks.focus();
+    if (this.composer?.input) return this.composer.input.focus();
+    this.transcript?.tr?.focus();
+  }
+
+  // A call made while a full mount is still building waits here, in call
+  // order, and runs once the layout is composed. A mount destroyed first
+  // composes nothing, so its waiting calls settle as no-ops.
+  _afterBuild(fn) {
+    if (this._dead) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      this._queue.push(() => {
+        try {
+          resolve(fn());
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+  }
+
+  // The layout is composed. The constructor's session is the first follow,
+  // silently, as it is for chat and tabs; then the host's calls run. A full
+  // layout's shown session belongs to its router, so its own hooks open it:
+  // following it here would set the shown key without the layout's transcript
+  // subscription (m6).
+  built() {
+    if (this._dead) return;
+    this._built = true;
+    if (this.opts.session) {
+      if (this.opts.layout === "full") this.hooks?.open?.(this.opts.session);
+      else this.follow(this.opts.session, true);
+    }
+    for (const run of this._queue.splice(0)) run();
+  }
+
+  // Whether a destroy got here before the full layout's module did.
+  get dead() {
+    return this._dead;
   }
 
   destroy() {
     if (this._dead) return;
     this._dead = true;
+    for (const run of this._queue.splice(0)) run();
+    // A full layout's controllers are not the mount's `parts`: app.js returns
+    // them as one teardown, run before the root goes (m6).
+    this.teardown?.();
     for (const p of this.parts) p.destroy?.();
     if (!this.opts.outbox) this.outbox?.destroy();
     this._unsubSessions?.();
@@ -204,11 +367,22 @@ export class Mount {
     this.parts = [];
   }
 
-  // A chat has one session; the full layout picks one from its tabs.
-  follow(key) {
-    this.state.shown = key || null;
-    if (this.transcript) this.transcript.show(this.state.shown);
-    if (this.composer) this.composer.show(this.state.shown);
+  // A chat has one session; the full layout picks one from its tabs. The
+  // constructor's session passes `quiet`, and it is the only first follow: a
+  // host already knows what it passed.
+  follow(key, quiet = false) {
+    const previous = this.state.shown;
+    key = key || null;
+    this.state.shown = key;
+    if (this.transcript) this.transcript.show(key);
+    if (this.composer) this.composer.show(key);
+    this.view?.follow?.(key);
+    if (!quiet && previous !== key)
+      this.emit("sessionChanged", {
+        session: key,
+        previous,
+        meta: key ? this.state.sessions.get(key) || null : null,
+      });
   }
 
   call(op, params = {}, server = null) {
@@ -263,6 +437,8 @@ export class Mount {
     const meta = this.state.sessions.get(this.state.shown);
     this.transcript?.sessionChanged(this.state.shown, meta);
     this.composer?.sessionChanged(this.state.shown, meta);
+    // The tabs layout redraws its strip from what just arrived (m3).
+    this.view?.draw?.();
   }
 
   _patch(ops) {
@@ -277,15 +453,16 @@ export class Mount {
         this.state.sessions.delete(op.remove);
         this._forget(op.remove);
         if (this.state.shown === op.remove) {
-          this.state.shown = null;
-          this.transcript?.show(null);
-          this.composer?.show(null);
+          // One place for the shown session changing: follow() reports it.
+          this.follow(null);
         } else {
           this.transcript?.sessionChanged(op.remove, undefined);
           this.composer?.sessionChanged(op.remove, undefined);
         }
       }
     }
+    // The tabs layout redraws its strip from what just arrived (m3).
+    this.view?.draw?.();
   }
 
   _put(raw) {
@@ -296,16 +473,22 @@ export class Mount {
     this.state.sessions.set(key, meta);
     this.transcript?.sessionChanged(key, meta);
     this.composer?.sessionChanged(key, meta);
+    this.noteTurn(key, prev, meta);
+  }
+
+  // The working transition of one session's row, for every layout: turnStart
+  // when it enters working in a patch this mount saw, turnEnd when it leaves.
+  // The cost before the turn is the cumulative figure it will add to (a fresh
+  // session has none yet, which is a cumulative cost of zero). A session first
+  // heard of already working is a turn this mount joined halfway; it is not
+  // tracked, so its end reports no cost rather than part of one.
+  noteTurn(key, prev, meta) {
     const was = prev?.state === "working";
     const now = meta.state === "working";
     if (now && !was && prev) {
-      // The patch that enters working: the cost before this turn is the
-      // cumulative figure it will add to (a fresh session has none yet, which
-      // is a cumulative cost of zero). A session first heard of already
-      // working is a turn this mount joined halfway; it is not tracked, so its
-      // end reports no cost rather than part of one.
       this._working.add(key);
       this._costAt.set(key, Number.isFinite(meta.cost_usd) ? meta.cost_usd : 0);
+      if (this.reportsTurn(key)) this.emit("turnStart", { session: key, meta });
       return;
     }
     if (was && !now) {
@@ -352,6 +535,7 @@ export class MountState {
     this.unsubHost = null;
     this.ordered = []; // metas in this browser's tab order
     this.shown = null; // the key of the session a chat shows
+    this.hash = ""; // the full layout's route when it does not own the page (m5)
     this.kept = new Map(); // key -> the transcript part's stash (a4)
   }
 }
@@ -381,6 +565,10 @@ function makeRoot(host, opts, urls) {
   root.classList.add("aegis");
   root.dataset.theme = opts.theme;
   root.dataset.layout = opts.layout;
+  // Whether this mount owns the document. Only the standalone page's full
+  // layout does (index.html passes page:true); a host's mount keeps the page's
+  // title, hash, theme, worker and push to itself (m5).
+  root.dataset.page = String(opts.page === true);
   if (root !== host) host.append(root);
   linkStyles(opts.theme, urls);
   installGlyphs(root);
