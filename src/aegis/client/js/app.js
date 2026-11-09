@@ -599,7 +599,9 @@ $("login").addEventListener("submit", async (ev) => {
 let wasClosed = false; // a reconnect checks for a new build
 // The build this page is (web.py writes it in), against the one the server
 // names in each welcome: they differ after an upgrade (#499).
-const PAGE_BUILD = document.querySelector("meta[name=aegis-build]")?.content || "";
+// A <meta> lives in the page's head and nothing inside the mount can stand in
+// for it: an embedded full starts with no build and takes it from the welcome.
+const PAGE_BUILD = page ? document.querySelector("meta[name=aegis-build]")?.content || "" : "";
 
 // The banner while the connection is down: a state, so it stays at the top of
 // the page rather than a toast. A socket that comes back within 3 s never
@@ -875,7 +877,7 @@ function wfGet(run) {
 // A run whose cards all left the page is no longer followed.
 function wfForget() {
   for (const [run, d] of wfWhole) {
-    if (document.querySelector(`.wfcard[data-run="${CSS.escape(run)}"], .wfdcard[data-run="${CSS.escape(run)}"]`)) continue;
+    if (root.querySelector(`.wfcard[data-run="${CSS.escape(run)}"], .wfdcard[data-run="${CSS.escape(run)}"]`)) continue;
     d.unsub();
     wfWhole.delete(run);
   }
@@ -1889,7 +1891,7 @@ document.addEventListener("visibilitychange", () => {
 });
 
 // -- Open natively on a sent file's card, or in the viewer's bar --------------
-document.querySelector(".v-session .col").addEventListener("click", async (ev) => {
+root.querySelector(".v-session .col").addEventListener("click", async (ev) => {
   const b = ev.target.closest(".fbar .native");
   if (!b) return;
   b.disabled = true;
@@ -2942,7 +2944,7 @@ new ResizeObserver(() => root.style.setProperty("--composer-h", `${$("composer")
 $("nav-side").addEventListener("click", toggleSide);
 // The dimmed transcript is the session view's own ::after, so a tap on it
 // lands on the view itself and goes no further.
-document.querySelector(".v-session").addEventListener("click", (ev) => {
+root.querySelector(".v-session").addEventListener("click", (ev) => {
   if (ev.target === ev.currentTarget && root.dataset.side === "open") closeSide();
 });
 
