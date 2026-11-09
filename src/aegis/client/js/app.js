@@ -44,7 +44,7 @@ import { Knowledge } from "./knowledge.js";
 import { FilePicker, Files, filesHash, parseTarget } from "./files.js";
 import { Schedules } from "./schedules.js";
 import { Help } from "./help.js";
-import { listenForOpen, pingToast, redrawFavicon, setTitle, updatePing } from "./ping.js";
+import { listenForOpen, pingToast, redrawFavicon, setTitle as setPageTitle, updatePing } from "./ping.js";
 import { ask, cancelAsk, choose } from "./dialog.js";
 import "./pick.js";
 import { Attachments } from "./attach.js";
@@ -67,6 +67,26 @@ import { serverNow } from "./clock.js";
 // root, the socket and the state every view below reads.
 export function composeFull(app) {
 const root = app.root;
+
+// Whether this mount owns the document. Only index.html's full layout does;
+// a host that embeds the layout keeps its own title, favicon, theme attribute,
+// service worker, push and URL hash (m5). Everything guarded by `page` below
+// is a page-level effect a host must not inherit.
+const page = app.opts.page === true;
+// The router's source and sink: the URL on the page, this mount's state in a
+// host. A host may route with its own hash; aegis never reads or writes it.
+const hashNow = () => (page ? location.hash : app.state.hash || "");
+const setHash = (hash, push = false) => {
+  if (!page) {
+    app.state.hash = hash;
+    return;
+  }
+  if (push) history.pushState(null, "", hash);
+  else history.replaceState(null, "", hash);
+};
+// A host's document is not ours to rename: the page's title is off limits.
+const setTitle = page ? setPageTitle : () => {};
+
 const phoneHeader = matchMedia("(max-width:760px)"); // the one-row header (client.css)
 
 // Every node below is found under the root the mount built; the page keeps no
@@ -187,10 +207,12 @@ const THEMES = [
   { value: "poster", label: "Poster" },
 ];
 function setTheme(name) {
-  document.documentElement.dataset.theme = name;
+  // A host's page keeps its own theme attribute and favicon (m5); the mount
+  // restyles its own root either way.
+  if (page) document.documentElement.dataset.theme = name;
   root.dataset.theme = name;
   localStorage.setItem("aegis.theme", name);
-  redrawFavicon();
+  if (page) redrawFavicon();
   artifacts.theme();
 }
 
@@ -647,7 +669,11 @@ function bannerState(state) {
 }
 // This device's push against the server's row (pushpanel.js): on every
 // connect, and whenever the page comes back in front.
-const checkPush = () => checkRotation().catch((e) => console.warn("aegis: checking push failed", e));
+const checkPush = () => {
+  // Push belongs to the page that registered it: a host has its own (m5).
+  if (!page) return;
+  checkRotation().catch((e) => console.warn("aegis: checking push failed", e));
+};
 
 // The page's socket is the mount's (acquire, from mount.start): this only
 // hears every state it passes through and draws the header, the banner and the
@@ -1165,7 +1191,8 @@ function onSessions() {
 // the page was closed would ping on every cold start.
 let homeLive = false;
 function ping() {
-  if (homeLive) updatePing([...app.state.sessions.values()].filter((m) => !m.stale && !isTool(m)), { onOpen: openSession });
+  // The count in the title and on the favicon is the page's, not a host's.
+  if (page && homeLive) updatePing([...app.state.sessions.values()].filter((m) => !m.stale && !isTool(m)), { onOpen: openSession });
 }
 
 // -- rendering -----------------------------------------------------------------
@@ -1182,12 +1209,16 @@ function termCard(key) {
 }
 // The service worker (sw.js): it keeps this build for offline use and raises
 // notifications. A new build downloads beside this one; reloading takes it.
-startWorker({
-  onUpdate: () =>
-    toast("A new version of aegis is ready.", { ms: Infinity, action: { label: "Reload", run: applyUpdate } }),
-});
-setupPush((op, params) => app.conn.call(op, params));
-listenForOpen(openSession);
+// The worker, push and notification taps belong to the page: a host has its
+// own (m5). The in-page toasts below stay, because they are the mount's.
+if (page) {
+  startWorker({
+    onUpdate: () =>
+      toast("A new version of aegis is ready.", { ms: Infinity, action: { label: "Reload", run: applyUpdate } }),
+  });
+  setupPush((op, params) => app.conn.call(op, params));
+  listenForOpen(openSession);
+}
 setToastOpener(openSession);
 // Toasts from the server (App.toast): every browser shows each one once, and
 // an agent's goes to the desktop too while the page is hidden. The snapshot is
@@ -1199,7 +1230,8 @@ app.conn.subscribe(
     for (const { toast: t } of ops) {
       if (!t) continue;
       toast(t.text, { kind: t.kind, from: t.from });
-      pingToast(t, openSession);
+      // The desktop notification is the page's; a host draws the toast itself.
+      if (page) pingToast(t, openSession);
     }
   },
 );
@@ -1521,13 +1553,18 @@ let follows = 0; // which follow() a device read answers
 // A window tab shows a session's panes, not its transcript: it quiets no push,
 // and a notification's click never opens a session in it.
 function tellView() {
-  const win = route().view === "window";
-  navigator.serviceWorker?.controller?.postMessage({
-    t: "view",
-    key: win ? "" : app.state.shown || "",
-    visible: !document.hidden && document.hasFocus(),
-    window: win,
-  });
+  // The worker's view message is the page's: a host's worker must hear nothing
+  // from this mount (m5). Watching the session for parking stays: it is the
+  // server's, not the page's.
+  if (page) {
+    const win = route().view === "window";
+    navigator.serviceWorker?.controller?.postMessage({
+      t: "view",
+      key: win ? "" : app.state.shown || "",
+      visible: !document.hidden && document.hasFocus(),
+      window: win,
+    });
+  }
   tellWatch();
 }
 // Which session this page shows while it is visible, for parking (park.py): a
@@ -1550,8 +1587,8 @@ window.addEventListener("hashchange", tellWatch);
 for (const ev of ["focus", "blur"]) window.addEventListener(ev, tellView);
 document.addEventListener("visibilitychange", tellView);
 // A worker that took this page over, on a first visit or after an update, has
-// heard nothing from it yet.
-navigator.serviceWorker?.addEventListener("controllerchange", tellView);
+// heard nothing from it yet. A host's worker is not ours to greet (m5).
+if (page) navigator.serviceWorker?.addEventListener("controllerchange", tellView);
 
 function follow(id) {
   if (app.state.shown === id) return;
