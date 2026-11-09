@@ -6,7 +6,6 @@
 // the focus in the URL hash. A session is known by its key: its log id at
 // home, `<server>/<log_id>` on a linked server (links.py).
 
-import { Mount } from "./mount.js";
 import { byId } from "./dom.js";
 import { Transcript } from "./transcript.js";
 import { artifactStage, btwFolds, entryFiles, fadeTables, fileUrl, refreshApprovals, refreshWorkflows, setApprovals, setDocker, setFileBase, setOpener, setSecrets, setSpeaker, setWorkflows, syncDock, tickWorkflows, workflowLocked, workflowTitle } from "./entries.js";
@@ -45,7 +44,7 @@ import { Knowledge } from "./knowledge.js";
 import { FilePicker, Files, filesHash, parseTarget } from "./files.js";
 import { Schedules } from "./schedules.js";
 import { Help } from "./help.js";
-import { listenForOpen, pingToast, redrawFavicon, setTitle, updatePing } from "./ping.js";
+import { listenForOpen, pingToast, redrawFavicon, setTitle as setPageTitle, updatePing } from "./ping.js";
 import { ask, cancelAsk, choose } from "./dialog.js";
 import "./pick.js";
 import { Attachments } from "./attach.js";
@@ -62,28 +61,60 @@ import { outbox } from "./outbox.js";
 import { idleFor, lifecycle } from "./lifecycle.js";
 import { serverNow } from "./clock.js";
 
-const root = document.getElementById("a2");
+// The full layout's boot: the mount calls this once its markup is in the root
+// (js/layouts/full.js), so a page that loads this module pays for its imports
+// only when it asks for the full layout. `app` is the mount that owns the
+// root, the socket and the state every view below reads.
+export function composeFull(app) {
+const root = app.root;
+
+// Everything this layout hooked into the page or the socket, and takes down
+// with its root (m6). A listener on a node inside the root dies with the node;
+// these are the ones that outlive it, and the controllers the layout built are
+// not the mount's `parts`, so their own destroy runs here too. Each helper
+// records its undo, and the function this returns runs them all in order.
+const teardown = [];
+const listen = (target, name, fn, opts) => {
+  target.addEventListener(name, fn, opts);
+  teardown.push(() => target.removeEventListener(name, fn, opts));
+};
+const channel = (...args) => {
+  const off = app.conn.subscribe(...args);
+  teardown.push(off);
+  return off;
+};
+const every = (ms, fn) => {
+  const id = setInterval(fn, ms);
+  teardown.push(() => clearInterval(id));
+  return id;
+};
+const observe = (observer, target) => {
+  observer.observe(target);
+  teardown.push(() => observer.disconnect());
+  return observer;
+};
+
+// Whether this mount owns the document. Only index.html's full layout does;
+// a host that embeds the layout keeps its own title, favicon, theme attribute,
+// service worker, push and URL hash (m5). Everything guarded by `page` below
+// is a page-level effect a host must not inherit.
+const page = app.opts.page === true;
+// The router's source and sink: the URL on the page, this mount's state in a
+// host. A host may route with its own hash; aegis never reads or writes it.
+const hashNow = () => (page ? location.hash : app.state.hash || "");
+const setHash = (hash, push = false) => {
+  if (!page) {
+    app.state.hash = hash;
+    return;
+  }
+  if (push) history.pushState(null, "", hash);
+  else history.replaceState(null, "", hash);
+};
+// A host's document is not ours to rename: the page's title is off limits.
+const setTitle = page ? setPageTitle : () => {};
+
 const phoneHeader = matchMedia("(max-width:760px)"); // the one-row header (client.css)
 
-// The page is the full layout of one mount: index.html holds only its head and
-// an empty #a2, and the mount builds the rest (js/layouts/full.js). It takes
-// the page's shared socket and owns the state every view below reads. The theme
-// is the one index.html applied to <html> before the first paint, so the first
-// render draws what the last one did.
-// A page mounted with ?lang=es, or one that chose a language before, reads
-// its whole layout in that table: the full client is mountable too (b9).
-const langOf = () =>
-  new URLSearchParams(location.search).get("lang") || localStorage.getItem("aegis.lang") || "en";
-const app = new Mount(root, {
-  adopt: true,
-  layout: "full",
-  lang: langOf(),
-  theme: localStorage.getItem("aegis.theme") || document.documentElement.dataset.theme || "ink",
-  // The page's outbox is outbox.js's singleton (the queued row and the browser
-  // suite call it by that name), handed to the mount that owns its flush.
-  outbox,
-});
-app.start();
 // Every node below is found under the root the mount built; the page keeps no
 // markup of its own to ask for.
 const $ = (id) => byId(root, id);
@@ -118,8 +149,10 @@ root.insertBefore(header.el, root.querySelector("main.view"));
 // index.html used to hold, owns the card, the plan, repos, journal, usage,
 // quota, host, the actions, the version/update card and the drawer. The page
 // hands it the session in front and the operations only the router, the Fleet
-// and the transcript know.
-const sidebar = new SidebarPart(app, root.querySelector(".v-session"), {
+// and the transcript know. A host may ask for a full layout without it
+// (sidebar:false, m6): then there is no part, and every call below is a
+// no-op through `sidebar?.`.
+const sidebar = app.opts.sidebar === false ? null : new SidebarPart(app, root.querySelector(".v-session"), {
   focused: () => focused(),
   route: () => route(),
   view: () => root.dataset.view,
@@ -202,10 +235,12 @@ const THEMES = [
   { value: "poster", label: "Poster" },
 ];
 function setTheme(name) {
-  document.documentElement.dataset.theme = name;
+  // A host's page keeps its own theme attribute and favicon (m5); the mount
+  // restyles its own root either way.
+  if (page) document.documentElement.dataset.theme = name;
   root.dataset.theme = name;
   localStorage.setItem("aegis.theme", name);
-  redrawFavicon();
+  if (page) redrawFavicon();
   artifacts.theme();
 }
 
@@ -378,7 +413,7 @@ function showCanvas(s) {
   syncDock();
 }
 setScroller($("tr"));
-new ResizeObserver(() => fadeTables($("entries"))).observe($("tr"));
+observe(new ResizeObserver(() => fadeTables($("entries"))), $("tr"));
 const copyDeps = {
   entry: (id) => transcript.entries.get(id),
   output: (id) => app.callFor(app.state.shown, "transcript.output", { id }).then((r) => r.text),
@@ -509,7 +544,7 @@ const unhash = (s) => {
     return s;
   }
 };
-function route(hash = location.hash) {
+function route(hash = hashNow()) {
   const h = hash.slice(1);
   // A row's link (its menu's Copy link) names the entry to reveal after "&at=".
   if (h.startsWith("s=")) {
@@ -550,12 +585,33 @@ function go(hash) {
     filesView.confirmLeave().then((ok) => ok && go(hash));
     return;
   }
-  if (location.hash !== hash) history.pushState(null, "", hash);
+  if (hashNow() !== hash) setHash(hash, true);
   render();
 }
 
-window.addEventListener("hashchange", render);
-window.addEventListener("popstate", render);
+// A host's page may route with its own hash: only the standalone page listens.
+if (page) {
+  listen(window, "hashchange", render);
+  listen(window, "popstate", render);
+}
+// The layout draws real anchors with hash hrefs (a terminal's Show link, a
+// continued-by link, a message's #s= link). In a host they route this mount,
+// not the page's URL: one listener for all of them, since a part that draws a
+// link does not know whether it is on the page or in an embed (m5).
+if (!page) {
+  root.addEventListener("click", (ev) => {
+    if (ev.defaultPrevented || ev.button !== 0) return;
+    if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
+    const a = ev.target.closest?.('a[href^="#"]');
+    // Only a real HTML anchor inside this mount; a <use> in the glyph sprite
+    // has a hash href but is not a link.
+    if (!a || !root.contains(a) || !(a instanceof HTMLAnchorElement)) return;
+    if (a.target && a.target !== "_self") return;
+    ev.preventDefault();
+    setHash(a.getAttribute("href"), true);
+    render();
+  });
+}
 
 function show(view, text) {
   root.dataset.view = view;
@@ -568,7 +624,7 @@ function showLogin() {
   $("login").hidden = false;
   if (new URLSearchParams(location.search).has("refused")) {
     $("login-error").textContent = "That token was refused. Paste the one aegis serve printed.";
-    history.replaceState(null, "", location.pathname + location.hash);
+    if (page) setHash(location.pathname + location.hash);
   }
   $("login-token").focus();
 }
@@ -589,7 +645,9 @@ $("login").addEventListener("submit", async (ev) => {
 let wasClosed = false; // a reconnect checks for a new build
 // The build this page is (web.py writes it in), against the one the server
 // names in each welcome: they differ after an upgrade (#499).
-const PAGE_BUILD = document.querySelector("meta[name=aegis-build]")?.content || "";
+// A <meta> lives in the page's head and nothing inside the mount can stand in
+// for it: an embedded full starts with no build and takes it from the welcome.
+const PAGE_BUILD = page ? document.querySelector("meta[name=aegis-build]")?.content || "" : "";
 
 // The banner while the connection is down: a state, so it stays at the top of
 // the page rather than a toast. A socket that comes back within 3 s never
@@ -662,7 +720,11 @@ function bannerState(state) {
 }
 // This device's push against the server's row (pushpanel.js): on every
 // connect, and whenever the page comes back in front.
-const checkPush = () => checkRotation().catch((e) => console.warn("aegis: checking push failed", e));
+const checkPush = () => {
+  // Push belongs to the page that registered it: a host has its own (m5).
+  if (!page) return;
+  checkRotation().catch((e) => console.warn("aegis: checking push failed", e));
+};
 
 // The page's socket is the mount's (acquire, from mount.start): this only
 // hears every state it passes through and draws the header, the banner and the
@@ -705,15 +767,15 @@ function onState(state, server) {
     if (app.conn.native) root.dataset.native = "";
     else delete root.dataset.native;
     spawn.loadAgents();
-    sidebar.loadVersion();
+    sidebar?.loadVersion();
     filesView?.online();
   }
 }
 app.on("connection", ({ state, server }) => onState(state, server));
 // Retry at once when the network or the app comes back, or when asked.
 $("netbanner-retry").addEventListener("click", () => app.conn.retryNow());
-window.addEventListener("online", () => app.conn.retryNow());
-document.addEventListener("visibilitychange", () => {
+listen(window, "online", () => app.conn.retryNow());
+listen(document, "visibilitychange", () => {
   if (document.hidden) return;
   app.conn.retryNow();
   if (app.conn.open) checkPush(); // otherwise the connect does
@@ -781,16 +843,16 @@ const sideJournalChanged = () => {
   journal.changed();
   // Away from the session view nothing refetches; the panel forgets what it
   // drew so the next render of any session does.
-  sidebar.journalChanged();
+  sidebar?.journalChanged();
 };
-app.conn.subscribe("journal", sideJournalChanged, sideJournalChanged);
+channel("journal", sideJournalChanged, sideJournalChanged);
 // The usage page (usage.js): the channel says a turn was counted, the page
 // asks again while it is shown.
 const usage = new Usage(app.conn, views.usage, {
   onOpen: (r) => go(r.open ? `#s=${r.session}` : `#read=${r.session}`),
 });
 const usageChanged = () => usage.changed();
-app.conn.subscribe("usage", usageChanged, usageChanged);
+channel("usage", usageChanged, usageChanged);
 // The Schedules view (schedules.js); its button counts them, red while one is
 // paused by errors.
 const schedules = new Schedules(app.conn, views.schedules, {
@@ -820,7 +882,7 @@ const scheduleHandlers = (server) => [
     refreshApprovals();
   },
 ];
-app.conn.subscribe("schedules", ...scheduleHandlers(null));
+channel("schedules", ...scheduleHandlers(null));
 
 // The workflow runs (workflows.py), for their cards in the transcript and
 // their canvas panes. A running card counts its times up once a second.
@@ -844,7 +906,7 @@ function wfGet(run) {
       d.w = { ...w, run };
       wfChanged(new Set([run]));
     };
-    d.unsub = app.conn.subscribe(
+    d.unsub = channel(
       `workflow:${run}`,
       land,
       (ops) => {
@@ -861,12 +923,12 @@ function wfGet(run) {
 // A run whose cards all left the page is no longer followed.
 function wfForget() {
   for (const [run, d] of wfWhole) {
-    if (document.querySelector(`.wfcard[data-run="${CSS.escape(run)}"], .wfdcard[data-run="${CSS.escape(run)}"]`)) continue;
+    if (root.querySelector(`.wfcard[data-run="${CSS.escape(run)}"], .wfdcard[data-run="${CSS.escape(run)}"]`)) continue;
     d.unsub();
     wfWhole.delete(run);
   }
 }
-setInterval(wfForget, 10000);
+every(10000, wfForget);
 setWorkflows({
   get: wfGet,
   summary: (run) => wfRuns.get(run) || null,
@@ -911,10 +973,10 @@ function wfHandlers(server) {
     },
   ];
 }
-app.conn.subscribe("workflow-runs", ...wfHandlers(null));
-setInterval(() => {
+channel("workflow-runs", ...wfHandlers(null));
+every(1000, () => {
   if ([...wfRuns.values()].some((w) => w.status === "running")) tickWorkflows();
-}, 1000);
+});
 
 // Each server's `sessions` channel: a snapshot replaces that server's metas,
 // patches upsert, merge (only the fields that changed) and remove them.
@@ -936,14 +998,20 @@ function sessionHandlers(server) {
       for (const op of ops) {
         if (op.upsert) {
           const w = app.withKey(op.upsert, server);
-          if (!app.state.sessions.has(w.key)) setChanged = true;
+          const prev = app.state.sessions.get(w.key);
+          if (!prev) setChanged = true;
           app.state.sessions.set(w.key, w);
+          // The mount's working transition (m1): a full layout reports
+          // turnStart/turnEnd for every session it knows (m6).
+          app.noteTurn(w.key, prev, w);
           changed.add(w.key);
         } else if (op.merge) {
           const k = app.keyOf(server, op.merge.log_id);
           const held = app.state.sessions.get(k);
           if (!held) continue;
-          app.state.sessions.set(k, app.withKey({ ...held, ...op.merge }, server));
+          const w = app.withKey({ ...held, ...op.merge }, server);
+          app.state.sessions.set(k, w);
+          app.noteTurn(k, held, w);
           changed.add(k);
         } else if (op.remove !== undefined) {
           app.state.sessions.delete(app.keyOf(server, op.remove));
@@ -971,7 +1039,7 @@ function sessionHandlers(server) {
     },
   ];
 }
-app.conn.subscribe("sessions", ...sessionHandlers(null));
+channel("sessions", ...sessionHandlers(null));
 
 // The servers this one links. A link that comes back resubscribes everything
 // on it, each with the revision it holds; one removed takes its sessions along.
@@ -998,10 +1066,10 @@ function onLinks(list) {
       r = { unsubs: [], quota: { providers: [] }, host: null, unsubHost: null, loaded: false, state: l.state };
       app.state.remote.set(l.name, r);
       r.unsubs.push(
-        app.conn.subscribe("sessions", ...sessionHandlers(l.name), undefined, undefined, l.name),
-        app.conn.subscribe("workflow-runs", ...wfHandlers(l.name), undefined, undefined, l.name),
-        app.conn.subscribe("schedules", ...scheduleHandlers(l.name), undefined, undefined, l.name),
-        app.conn.subscribe(
+        channel("sessions", ...sessionHandlers(l.name), undefined, undefined, l.name),
+        channel("workflow-runs", ...wfHandlers(l.name), undefined, undefined, l.name),
+        channel("schedules", ...scheduleHandlers(l.name), undefined, undefined, l.name),
+        channel(
           "quota",
           (snap) => {
             r.quota = snap || { providers: [] };
@@ -1032,7 +1100,7 @@ function onLinks(list) {
   if (root.dataset.view === "fleet") watchHost("all");
   if (booted) onSessions();
 }
-app.conn.subscribe(
+channel(
   "links",
   onLinks,
   (ops) => {
@@ -1040,7 +1108,7 @@ app.conn.subscribe(
   },
   () => onLinks([]), // a server without links
 );
-app.conn.subscribe(
+channel(
   "quota",
   (snap) => {
     app.state.quota = snap || { providers: [] };
@@ -1051,7 +1119,7 @@ app.conn.subscribe(
     drawQuota();
   },
 );
-app.conn.subscribe(
+channel(
   "config",
   (w) => settings.onHomeConfig(w),
   (ops) => {
@@ -1112,7 +1180,7 @@ function flushTranscript(closing = false) {
 }
 // Going hidden writes the Fleet even unchanged: its saved_at is when this
 // device last saw the server, which is what "seen N min ago" says offline.
-document.addEventListener("visibilitychange", () => {
+listen(document, "visibilitychange", () => {
   if (!document.hidden) return;
   flushFleet();
   if (trSave) flushTranscript();
@@ -1180,7 +1248,8 @@ function onSessions() {
 // the page was closed would ping on every cold start.
 let homeLive = false;
 function ping() {
-  if (homeLive) updatePing([...app.state.sessions.values()].filter((m) => !m.stale && !isTool(m)), { onOpen: openSession });
+  // The count in the title and on the favicon is the page's, not a host's.
+  if (page && homeLive) updatePing([...app.state.sessions.values()].filter((m) => !m.stale && !isTool(m)), { onOpen: openSession });
 }
 
 // -- rendering -----------------------------------------------------------------
@@ -1197,24 +1266,29 @@ function termCard(key) {
 }
 // The service worker (sw.js): it keeps this build for offline use and raises
 // notifications. A new build downloads beside this one; reloading takes it.
-startWorker({
-  onUpdate: () =>
-    toast("A new version of aegis is ready.", { ms: Infinity, action: { label: "Reload", run: applyUpdate } }),
-});
-setupPush((op, params) => app.conn.call(op, params));
-listenForOpen(openSession);
+// The worker, push and notification taps belong to the page: a host has its
+// own (m5). The in-page toasts below stay, because they are the mount's.
+if (page) {
+  startWorker({
+    onUpdate: () =>
+      toast("A new version of aegis is ready.", { ms: Infinity, action: { label: "Reload", run: applyUpdate } }),
+  });
+  setupPush((op, params) => app.conn.call(op, params));
+  listenForOpen(openSession);
+}
 setToastOpener(openSession);
 // Toasts from the server (App.toast): every browser shows each one once, and
 // an agent's goes to the desktop too while the page is hidden. The snapshot is
 // always empty, so a reconnect replays nothing.
-app.conn.subscribe(
+channel(
   "toasts",
   () => {},
   (ops) => {
     for (const { toast: t } of ops) {
       if (!t) continue;
       toast(t.text, { kind: t.kind, from: t.from });
-      pingToast(t, openSession);
+      // The desktop notification is the page's; a host draws the toast itself.
+      if (page) pingToast(t, openSession);
     }
   },
 );
@@ -1280,8 +1354,8 @@ function render() {
   if (!booted) return;
   // Back or Forward away from unsaved edits: stay on the file, and ask.
   if (root.dataset.view === "files" && filesView.leaving(route())) {
-    const target = location.hash || "#fleet";
-    history.replaceState(null, "", filesHash(filesView.path));
+    const target = hashNow() || "#fleet";
+    setHash(filesHash(filesView.path));
     filesView.confirmLeave().then((ok) => ok && go(target));
     return;
   }
@@ -1292,12 +1366,12 @@ function render() {
   // none. The row waits in landEntry: a render that waits for the session
   // list runs again later with the plain hash.
   if (r.at) {
-    history.replaceState(null, "", `#s=${r.id}`);
+    setHash(`#s=${r.id}`);
     landEntry = { key: r.id, id: r.at };
   }
   // A fill is read once too, so a reload or Back never fills the form again.
   if (r.fill) {
-    history.replaceState(null, "", "#new");
+    setHash("#new");
     spawn.show(r.fill);
   }
   // A menu or the selection bar is about the view it opened in. go() moves
@@ -1313,7 +1387,7 @@ function render() {
   if (leaveIfGone(r)) return;
   // A session's link to a terminal, or the reverse, opens the right view.
   if ((r.view === "session" || r.view === "term" || r.view === "browser") && app.state.sessions.has(r.id) && `#${r.view[0]}=${r.id}` !== hashOf(r.id)) {
-    history.replaceState(null, "", hashOf(r.id));
+    setHash(hashOf(r.id));
     return render();
   }
   // A reload into a closed terminal: its row comes from term.closed.
@@ -1423,7 +1497,7 @@ function render() {
     renderMeta(app.state.sessions.get(r.id));
     if (newView) {
       drawQuota();
-      sidebar.drawHost();
+      sidebar?.drawHost();
     }
   } else if (r.view === "browser") {
     watchHost(null);
@@ -1464,7 +1538,7 @@ function watchHost(want) {
   const wants = (name) => want === "all" || want === name;
   for (const [name, r] of app.state.remote) {
     if (wants(name) && !r.unsubHost)
-      r.unsubHost = app.conn.subscribe(
+      r.unsubHost = channel(
         "host",
         (snap) => {
           r.host = snap;
@@ -1485,7 +1559,7 @@ function watchHost(want) {
     }
   }
   if (wants("") && !app.state.unsubHost) {
-    app.state.unsubHost = app.conn.subscribe(
+    app.state.unsubHost = channel(
       "host",
       (snap) => {
         app.state.host = snap;
@@ -1505,7 +1579,7 @@ function watchHost(want) {
 
 function drawHost() {
   if (root.dataset.view === "fleet") fleet.band();
-  else if (root.dataset.view === "session") sidebar.drawHost();
+  else if (root.dataset.view === "session") sidebar?.drawHost();
 }
 
 // A speed reading now, on the server the row belongs to; the host channel
@@ -1518,12 +1592,12 @@ function drawQuota() {
   if (root.dataset.view === "fleet") {
     fleet.quota();
   } else if (root.dataset.view === "session") {
-    sidebar.drawQuota();
+    sidebar?.drawQuota();
   }
 }
 
 // Countdowns and the tick move with the clock; their unit is minutes.
-setInterval(drawQuota, 30 * 1000);
+every(30 * 1000, drawQuota);
 
 // The last TAB_CACHE tabs left, newest last: a return to one shows it at once
 // and asks only for what changed since (transcript/wire.py, Fold.snapshot).
@@ -1536,13 +1610,18 @@ let follows = 0; // which follow() a device read answers
 // A window tab shows a session's panes, not its transcript: it quiets no push,
 // and a notification's click never opens a session in it.
 function tellView() {
-  const win = route().view === "window";
-  navigator.serviceWorker?.controller?.postMessage({
-    t: "view",
-    key: win ? "" : app.state.shown || "",
-    visible: !document.hidden && document.hasFocus(),
-    window: win,
-  });
+  // The worker's view message is the page's: a host's worker must hear nothing
+  // from this mount (m5). Watching the session for parking stays: it is the
+  // server's, not the page's.
+  if (page) {
+    const win = route().view === "window";
+    navigator.serviceWorker?.controller?.postMessage({
+      t: "view",
+      key: win ? "" : app.state.shown || "",
+      visible: !document.hidden && document.hasFocus(),
+      window: win,
+    });
+  }
   tellWatch();
 }
 // Which session this page shows while it is visible, for parking (park.py): a
@@ -1561,15 +1640,39 @@ function tellWatch() {
   if (server) msg.server = server;
   app.conn.post(msg);
 }
-window.addEventListener("hashchange", tellWatch);
-for (const ev of ["focus", "blur"]) window.addEventListener(ev, tellView);
-document.addEventListener("visibilitychange", tellView);
+listen(window, "hashchange", tellWatch);
+for (const ev of ["focus", "blur"]) listen(window, ev, tellView);
+listen(document, "visibilitychange", tellView);
 // A worker that took this page over, on a first visit or after an update, has
-// heard nothing from it yet.
-navigator.serviceWorker?.addEventListener("controllerchange", tellView);
+// heard nothing from it yet. A host's worker is not ours to greet (m5).
+if (page && navigator.serviceWorker) listen(navigator.serviceWorker, "controllerchange", tellView);
 
+// What a full mount's host hears for one row: entry always, and fileSent for
+// a file card (spec 06). A full snapshot is history, so entry replays and
+// fileSent does not; a row already announced is never announced twice (m6).
+const sentFiles = new Set();
+function report(session, entry, live = false) {
+  app.emit("entry", { session, entry });
+  if (entry.kind !== "file") return;
+  const id = entry.id;
+  if (!live) return void (id != null && sentFiles.add(id));
+  if (id != null) {
+    if (sentFiles.has(id)) return;
+    sentFiles.add(id);
+  }
+  app.emit("fileSent", { session, entry, files: entryFiles(entry) });
+}
+
+// The router's first follow is the constructor's own session: the host passed
+// it, so it hears no sessionChanged for it (m6). A full mount that started on
+// the fleet has no such first follow, and its later open() reports previous
+// null as chat does.
+let firstFollow = true;
 function follow(id) {
   if (app.state.shown === id) return;
+  const previous = app.state.shown;
+  const quiet = firstFollow && id === app.opts.session;
+  firstFollow = false;
   if (trSave) flushTranscript(); // before its rows go
   closeSide();
   if (unsubTranscript) unsubTranscript();
@@ -1584,6 +1687,14 @@ function follow(id) {
   dictation.stopIfHere(input, "tab"); // a recording belongs to its session
   speaker.stop(); // what is being read belongs to the session on screen
   app.state.shown = id;
+  // The host hears where the view moved, with the row as the tab sees it and
+  // null before the server's list names it (m6).
+  if (!quiet && previous !== id)
+    app.emit("sessionChanged", {
+      session: id,
+      previous,
+      meta: (id && app.state.sessions.get(id)) || null,
+    });
   drawSpeak();
   if (app.state.sessions.has(id)) sessionStorage.setItem("aegis.lastShown", (lastShown = id));
   tellView();
@@ -1618,8 +1729,14 @@ function follow(id) {
         // A server that cannot resume from the revision asked (the session was
         // reset, its store rewritten) answers in full, and the full answer
         // replaces whatever was drawn.
-        if (data.since !== undefined) transcript.resume(data);
-        else transcript.snapshot(data);
+        if (data.since !== undefined) {
+          transcript.resume(data);
+          for (const entry of data.entries || []) report(id, entry, true);
+        } else {
+          transcript.snapshot(data);
+          // History: entry replays for the host, fileSent does not.
+          for (const entry of data.entries || []) report(id, entry);
+        }
         canvas.refresh();
         keepTranscript();
         drawOfflineNotice();
@@ -1643,6 +1760,7 @@ function follow(id) {
         transcript.apply(ops);
         if (fresh) canvas.mark("transcript");
         for (const op of ops) if (op.upsert) canvas.onEntry(op.upsert);
+        for (const op of ops) if (op.upsert) report(id, op.upsert, true);
         keepTranscript();
       },
       undefined,
@@ -1699,7 +1817,7 @@ function renderMeta(s) {
   // The panel draws its own card, plan, repos, journal, usage, quota, host,
   // monitors and actions; the page draws the transcript, the composer and the
   // title around them.
-  sidebar.render(s);
+  sidebar?.render(s);
   if (s.key === app.state.shown) showCanvas(s);
   drawReplies(s);
   drawCold(s);
@@ -1803,18 +1921,18 @@ function tickWorking() {
   const text = `${VERBS[typer.verb]}…`.slice(0, typer.at);
   if ($("working-verb").textContent !== text) drawVerb(text);
 }
-setInterval(tickWorking, 60);
+every(60, tickWorking);
 
-setInterval(() => {
+every(1000, () => {
   tickMonitors();
   tickFeeds();
   fleet.tick();
   if (root.dataset.view === "session" && app.state.shown) {
     const s = app.state.sessions.get(app.state.shown);
-    sidebar.tickPlan(s);
+    sidebar?.tickPlan(s);
     drawCold(s);
   }
-}, 1000);
+});
 
 function span(cls, text, name) {
   const el = document.createElement("span");
@@ -1859,12 +1977,12 @@ $("entries").addEventListener("click", (ev) => {
   }
 });
 // Coming back to the page is landing again; the server decides.
-document.addEventListener("visibilitychange", () => {
+listen(document, "visibilitychange", () => {
   if (document.visibilityState === "visible" && app.state.shown) askRecap(false);
 });
 
 // -- Open natively on a sent file's card, or in the viewer's bar --------------
-document.querySelector(".v-session .col").addEventListener("click", async (ev) => {
+root.querySelector(".v-session .col").addEventListener("click", async (ev) => {
   const b = ev.target.closest(".fbar .native");
   if (!b) return;
   b.disabled = true;
@@ -1945,7 +2063,7 @@ async function reopen(id) {
     fleet.invalidateArchive();
     go(`#s=${id}`);
   } catch (e) {
-    sidebar.fail(e.message);
+    sidebar?.fail(e.message);
   }
 }
 
@@ -2035,7 +2153,7 @@ function nextNeed() {
 // a key is pressed only after this module has run.
 // A transcript key does nothing while the canvas's tabs hide the transcript.
 const onTranscript = (run) => (ev) => canvas.transcriptShown() && run(ev);
-installKeys(
+const offKeys = installKeys(
   {
     composer() {
       const v = route().view;
@@ -2127,16 +2245,16 @@ installKeys(
       if (header.close()) return;
       if (root.dataset.side === "open") return closeSide();
       if (!keymap.hidden) help(false);
-      else if (cmenu.close() || cmenu.unbar() || viewer.close() || find.close() || closeMonitorCard() || closeFeedCard() || sidebar.closeCard()) return;
-      else if (route().view === "session" && !sidebar.isEditing()) interrupt();
+      else if (cmenu.close() || cmenu.unbar() || viewer.close() || find.close() || closeMonitorCard() || closeFeedCard() || sidebar?.closeCard()) return;
+      else if (route().view === "session" && !sidebar?.isEditing()) interrupt();
     },
     help: () => help(),
     side: () => toggleSide(),
     archive() {
-      if (route().view === "session") sidebar.archive();
+      if (route().view === "session") sidebar?.archive();
     },
     quiet() {
-      if (route().view === "session") sidebar.quietSession();
+      if (route().view === "session") sidebar?.quietSession();
     },
     palette: () => palette.toggle(),
     sessions: () => {
@@ -2146,6 +2264,7 @@ installKeys(
   },
   () => (booted ? route().view : "boot"),
 );
+teardown.push(offKeys);
 
 // -- composer ---------------------------------------------------------------
 const input = $("input");
@@ -2216,16 +2335,21 @@ input.addEventListener("paste", (ev) => {
 // the browser would navigate away to the file.
 const carriesFiles = (ev) => ev.dataTransfer?.types.includes("Files");
 const onSession = () => root.dataset.view === "session";
-document.addEventListener("dragover", (ev) => {
+// A file dropped on the host's page is the host's: only a drop inside this
+// mount's root attaches to its session (m5).
+listen(document, "dragover", (ev) => {
+  if (!root.contains(ev.target)) return;
   if (!carriesFiles(ev)) return;
   ev.preventDefault();
   $("composer").classList.toggle("dropping", onSession());
 });
-document.addEventListener("dragleave", (ev) => {
+listen(document, "dragleave", (ev) => {
+  if (!root.contains(ev.target)) return;
   if (ev.relatedTarget) return;
   $("composer").classList.remove("dropping");
 });
-document.addEventListener("drop", (ev) => {
+listen(document, "drop", (ev) => {
+  if (!root.contains(ev.target)) return;
   if (!carriesFiles(ev)) return;
   ev.preventDefault();
   $("composer").classList.remove("dropping");
@@ -2321,11 +2445,14 @@ $("composer").querySelector(".acts").addEventListener("mousedown", (ev) => touch
 // narrows the message box: its lines wrap again, so it measures again. Width
 // only, so its own height is no loop.
 let composerWidth = 0;
-new ResizeObserver(([e]) => {
-  if (Math.round(e.contentRect.width) === composerWidth) return;
-  composerWidth = Math.round(e.contentRect.width);
-  autosize();
-}).observe(input);
+observe(
+  new ResizeObserver(([e]) => {
+    if (Math.round(e.contentRect.width) === composerWidth) return;
+    composerWidth = Math.round(e.contentRect.width);
+    autosize();
+  }),
+  input,
+);
 
 function focused() {
   const r = route();
@@ -2431,7 +2558,7 @@ function drawQueued() {
   box.querySelector(".text").textContent = d.text;
   if (transcript.following) transcript.toBottom();
 }
-outbox.on(drawQueued);
+teardown.push(outbox.on(drawQueued));
 outbox.load();
 // A queued draft's send gets the composer's deadline: with no answer the socket
 // is dropped, which settles the send as unreached and the draft waits again.
@@ -2509,7 +2636,7 @@ async function closeSession(s) {
   try {
     await app.callFor(s.key, "session.close");
   } catch (e) {
-    sidebar.fail(e.message);
+    sidebar?.fail(e.message);
   }
 }
 
@@ -2770,7 +2897,7 @@ for (const [id, cmd] of [
 // A session action's error: in the panel when it is the shown session's,
 // else a toast (a card's or a tab's menu acts on any session).
 function failed(key, e) {
-  if (key === app.state.shown) sidebar.fail(e.message);
+  if (key === app.state.shown && sidebar) sidebar.fail(e.message);
   else toast(e.message, { kind: "error" });
 }
 
@@ -2900,9 +3027,11 @@ $("interrupt").addEventListener("click", interrupt);
 // -- the panel: a drawer on a phone (client.css, max-width 760px), collapsible
 // and resizable on a desktop (side.js, through the sidebar part) --------------
 const drawerMode = matchMedia("(max-width: 760px)");
-// Closing the drawer returns to the desktop state this browser keeps.
-const closeSide = () => sidebar.closeDrawer();
-const toggleSide = () => sidebar.toggle();
+// Closing the drawer returns to the desktop state this browser keeps. With no
+// panel built (sidebar:false) both are no-ops, and the navigator hides the
+// button (css/client.css).
+const closeSide = () => sidebar?.closeDrawer();
+const toggleSide = () => sidebar?.toggle();
 // A monitor's link to the tool call it waits on: the row open, as find opens it.
 const revealToolRow = (id) => {
   if (!transcript.entries.has(id)) return false;
@@ -2913,11 +3042,11 @@ const revealToolRow = (id) => {
 };
 
 // The navigator floats just above the composer, which grows with its lines.
-new ResizeObserver(() => root.style.setProperty("--composer-h", `${$("composer").offsetHeight}px`)).observe($("composer"));
+observe(new ResizeObserver(() => root.style.setProperty("--composer-h", `${$("composer").offsetHeight}px`)), $("composer"));
 $("nav-side").addEventListener("click", toggleSide);
 // The dimmed transcript is the session view's own ::after, so a tap on it
 // lands on the view itself and goes no further.
-document.querySelector(".v-session").addEventListener("click", (ev) => {
+root.querySelector(".v-session").addEventListener("click", (ev) => {
   if (ev.target === ev.currentTarget && root.dataset.side === "open") closeSide();
 });
 
@@ -2928,7 +3057,8 @@ document.querySelector(".v-session").addEventListener("click", (ev) => {
 async function renameKey(key) {
   await openCard(key);
   const s = app.state.sessions.get(key);
-  for (let i = 0; i < 30 && s && sidebar.handleText() !== s.handle; i++) await new Promise(requestAnimationFrame);
+  if (!s || !sidebar) return; // no panel, nothing in place to rename
+  for (let i = 0; i < 30 && sidebar.handleText() !== s.handle; i++) await new Promise(requestAnimationFrame);
   sidebar.startRename("handle");
 }
 
@@ -2982,17 +3112,19 @@ function attachCardMenu(box, opts = {}) {
 // the left of
 // the panel and level with its row, where the panel's own cards open. The row
 // is the sidebar part's; the card is the page's until b8.
-const waitCard = attachTabCard(sidebar.waiting, {
-  meta: (key) => app.state.sessions.get(key),
-  card: (m) => fleetCard(m, openCard, (k) => app.state.sessions.get(k) && closeSession(app.state.sessions.get(k)), app.t),
-  items: sessionMenu,
-  item: ".wait",
-  place: (box, r) => {
-    box.style.left = `${Math.max(8, sidebar.el.getBoundingClientRect().left - box.offsetWidth - 12)}px`;
-    box.style.top = `${Math.max(12, Math.min(r.top - 8, innerHeight - box.offsetHeight - 12))}px`;
-  },
-});
-attachCardMenu(sidebar.waiting, { touch: (t) => t.matches(".wait[data-id]") && waitCard.sheet(t) });
+if (sidebar) {
+  const waitCard = attachTabCard(sidebar.waiting, {
+    meta: (key) => app.state.sessions.get(key),
+    card: (m) => fleetCard(m, openCard, (k) => app.state.sessions.get(k) && closeSession(app.state.sessions.get(k)), app.t),
+    items: sessionMenu,
+    item: ".wait",
+    place: (box, r) => {
+      box.style.left = `${Math.max(8, sidebar.el.getBoundingClientRect().left - box.offsetWidth - 12)}px`;
+      box.style.top = `${Math.max(12, Math.min(r.top - 8, innerHeight - box.offsetHeight - 12))}px`;
+    },
+  });
+  attachCardMenu(sidebar.waiting, { touch: (t) => t.matches(".wait[data-id]") && waitCard.sheet(t) });
+}
 
 
 // What a selection in the transcript offers (spec 05). The text is taken now:
@@ -3216,3 +3348,37 @@ async function openToolFile(id) {
 // The transcript's own scroll listener runs first: it still follows after a
 // scroll it made, or one the browser made when a remounted row shrank the list.
 cmenu.follow($("tr"), () => transcript.following);
+
+// -- the host's contract (m6) ----------------------------------------------
+// open() moves the router through the same go()/render() a tab click does;
+// focus() puts the caret in this layout's own box. The mount delegates here
+// once its build queue from m4 has drained.
+app.hooks = { open: openSession, focus: () => input.focus() };
+
+// Everything that outlives the root: the shown session's subscription, the
+// outbox's redraw, the timers the page armed, and the parts the layout built
+// (they are not the mount's `parts`). destroy() runs this once, in order.
+teardown.push(() => unsubTranscript?.());
+teardown.push(() => {
+  clearInterval(bannerTimer);
+  clearTimeout(fleetSave);
+  clearTimeout(trSave);
+  if (navFrame) cancelAnimationFrame(navFrame);
+});
+teardown.push(
+  () => terminal.destroy(),
+  () => terminalPart.destroy(),
+  () => browserTab.close(),
+  () => browserPart.destroy(),
+  () => header.destroy(),
+  () => sidebar?.destroy(),
+  () => views.destroy(),
+  () => fleet.destroy(),
+  () => spawn.destroy(),
+  () => dictation.destroy(),
+  () => menu.destroy(),
+  () => speaker.stop(),
+  () => ruler.remove(),
+);
+return () => teardown.splice(0).forEach((off) => off());
+}

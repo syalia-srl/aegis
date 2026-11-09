@@ -31,6 +31,25 @@ document.documentElement.dataset.theme = localStorage.getItem("aegis.theme") || 
 </head>
 <body>
 <div id="a2" class="app aegis" data-theme="ink" data-layout="full" data-view="boot"></div>
+<!-- The full layout's behaviour, named ahead of the mount so the page's load
+     event still waits for it, as it did when this page was that module's own
+     entry. The mount loads it by itself too; a chat host never pays for it. -->
 <script type="module" src="__AEGIS_PREFIX__/static/js/app.js"></script>
+<script type="module">
+  // The page is one full mount: it owns the document, the root above and the
+  // socket. The mount builds the layout's markup and has app.js compose it.
+  import { mount } from "__AEGIS_PREFIX__/static/js/mount.js";
+  // The page's outbox is outbox.js's singleton (the queued row and the browser
+  // suite call it by that name), handed to the mount that owns its flush.
+  import { outbox } from "__AEGIS_PREFIX__/static/js/outbox.js";
+  mount(document.getElementById("a2"), {
+    adopt: true, // the div above is the root, not a host element to fill
+    layout: "full",
+    outbox,
+    page: true, // the mount owns the document: title, hash, worker, push
+    theme: localStorage.getItem("aegis.theme") || document.documentElement.dataset.theme || "ink",
+    lang: new URLSearchParams(location.search).get("lang") || localStorage.getItem("aegis.lang") || "en",
+  });
+</script>
 </body>
 </html>

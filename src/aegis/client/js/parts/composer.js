@@ -12,6 +12,8 @@
 // The mic and the command menu are slots, empty in a host's chat unless the
 // host asks for them: with `commands` and `dictation` off, this part builds no
 // menu and no mic and every code path that would use them is skipped.
+// `attachments: false` is the same for files: no clip, no file input, and no
+// paste or drop listener, while the tray stays for a dictation take.
 //
 // Every word it draws comes from the mount's label table (a7), through `t`, so
 // a Spanish chat's box, its errors and its attachments read Spanish too.
@@ -84,8 +86,16 @@ export class ComposerPart {
     const n = (id) => byId(this.el, id);
     this.input = n("input");
     this.sendBtn = n("send");
-    this.attachBtn = n("attach");
-    this.pick = n("attach-pick");
+    // A host that takes no files builds no clip and no file input. The tray
+    // and its Attachments stay: a dictation take is uploaded through them,
+    // and a host that wants neither turns `dictation` off too (spec 06).
+    this.attachments = mount.opts.attachments !== false;
+    this.attachBtn = this.attachments ? n("attach") : null;
+    this.pick = this.attachments ? n("attach-pick") : null;
+    if (!this.attachments) {
+      n("attach")?.remove();
+      n("attach-pick")?.remove();
+    }
     this.attsTray = n("atts");
     this.error = n("send-error");
     this.interruptBtn = n("interrupt");
@@ -145,6 +155,8 @@ export class ComposerPart {
       ctx: () => ({ key: this.key }),
       canStart: () => !!this.mount.conn?.open,
       prepare: () => this.mount.call("dictation.prepare"),
+      // A host's speech service replaces the browser's workers.
+      transcribe: this.mount.opts.transcribe,
       onTake: (file, ms, ctx) => {
         if (!ctx?.key) return;
         this.atts.add([file], ctx.key);
@@ -156,57 +168,66 @@ export class ComposerPart {
   // The part draws its own glyphs; the sprite is in the mount's root. Its
   // words come from the mount's table, so a Spanish chat's buttons are Spanish.
   icons() {
-    this.attachBtn.title = this.t("composer.attach");
-    this.attachBtn.setAttribute("aria-label", this.t("composer.attach"));
+    if (this.attachBtn) {
+      this.attachBtn.title = this.t("composer.attach");
+      this.attachBtn.setAttribute("aria-label", this.t("composer.attach"));
+      this.attachBtn.append(icon("clip"));
+    }
     this.interruptBtn.title = this.t("composer.interruptTitle");
     this.interruptBtn.setAttribute("aria-label", this.t("composer.interrupt"));
     this.sendBtn.title = this.t("composer.sendTitle");
     this.sendBtn.setAttribute("aria-label", this.t("composer.send"));
-    this.attachBtn.append(icon("clip"));
     this.sendBtn.append(icon("send"));
     this.interruptBtn.append(icon("stop"));
   }
 
   wire() {
-    this.input.addEventListener("paste", (ev) => {
-      const files = this.pasted(ev);
-      if (files) this.atts.add(files);
-    });
+    // Paste and drop are the same switch as the clip: a mount that takes no
+    // files wires neither, so its box leaves the event to the host's page.
+    if (this.attachments)
+      this.input.addEventListener("paste", (ev) => {
+        const files = this.pasted(ev);
+        if (files) this.atts.add(files);
+      });
     this.input.addEventListener("input", () => this.typed());
     this.input.addEventListener("keydown", (ev) => this.onKey(ev));
     this.input.addEventListener("focus", () => this.autosize());
     this.input.addEventListener("blur", () => this.autosize());
     this.sendBtn.addEventListener("click", () => this.send());
     this.interruptBtn.addEventListener("click", () => this.interrupt());
-    this.attachBtn.addEventListener("click", () => this.mount.conn.open && this.pick.click());
-    this.pick.addEventListener("change", (ev) => {
-      this.atts.add([...ev.target.files]);
-      ev.target.value = "";
-    });
+    if (this.attachments) {
+      this.attachBtn.addEventListener("click", () => this.mount.conn.open && this.pick.click());
+      this.pick.addEventListener("change", (ev) => {
+        this.atts.add([...ev.target.files]);
+        ev.target.value = "";
+      });
+    }
     // A tap on the box's buttons leaves the focus in the text: a blur would
     // unstack the box and move the button out from under the finger (#707).
     this.el.querySelector(".acts")?.addEventListener("mousedown", (ev) => touch.matches && ev.preventDefault());
 
-    // A file dropped on the mount belongs to its composer, and nowhere else
-    // would the browser navigate away to the file.
-    this.dragOver = (ev) => {
-      if (!this.carriesFiles(ev)) return;
-      ev.preventDefault();
-      this.el.classList.toggle("dropping", true);
-    };
-    this.dragOut = (ev) => {
-      if (ev.relatedTarget) return;
-      this.el.classList.remove("dropping");
-    };
-    this.dropped = (ev) => {
-      if (!this.carriesFiles(ev)) return;
-      ev.preventDefault();
-      this.el.classList.remove("dropping");
-      if (this.key) this.atts.add([...ev.dataTransfer.files]);
-    };
-    this.mount.root.addEventListener("dragover", this.dragOver);
-    this.mount.root.addEventListener("dragleave", this.dragOut);
-    this.mount.root.addEventListener("drop", this.dropped);
+    if (this.attachments) {
+      // A file dropped on the mount belongs to its composer, and nowhere else
+      // would the browser navigate away to the file.
+      this.dragOver = (ev) => {
+        if (!this.carriesFiles(ev)) return;
+        ev.preventDefault();
+        this.el.classList.toggle("dropping", true);
+      };
+      this.dragOut = (ev) => {
+        if (ev.relatedTarget) return;
+        this.el.classList.remove("dropping");
+      };
+      this.dropped = (ev) => {
+        if (!this.carriesFiles(ev)) return;
+        ev.preventDefault();
+        this.el.classList.remove("dropping");
+        if (this.key) this.atts.add([...ev.dataTransfer.files]);
+      };
+      this.mount.root.addEventListener("dragover", this.dragOver);
+      this.mount.root.addEventListener("dragleave", this.dragOut);
+      this.mount.root.addEventListener("drop", this.dropped);
+    }
     // A connection that comes or goes changes what the box may do: the paperclip
     // needs the socket, while plain text becomes the draft instead (a6).
     this.onConnection = () => this.renderMeta();
@@ -267,7 +288,7 @@ export class ComposerPart {
     this.interruptBtn.hidden = !working;
     this.interruptBtn.disabled = held;
     this.input.disabled = !this.key || held || down;
-    this.attachBtn.disabled = !this.mount.conn?.open || held || down;
+    if (this.attachBtn) this.attachBtn.disabled = !this.mount.conn?.open || held || down;
     this.drawSending(down || held);
     this.drawChips(s);
     this.drawHint(s);
@@ -401,19 +422,31 @@ export class ComposerPart {
 
   // -- sending ---------------------------------------------------------------
   // The host's call: send(text) sends that text; send() sends what the box
-  // holds, with its attachments. Resolves when the send has an answer.
-  send(text) {
-    if (typeof text === "string") return this.sendLine(text, false, [], this.meta());
+  // holds, with its attachments. Resolves when the send has an answer. A mount
+  // with an `agent` and no session starts one on this first message.
+  async send(text) {
+    if (typeof text === "string") {
+      if (!text.trim()) return; // nothing to send: start no session
+      const key = await this.mount.ensureSession?.();
+      if (!key) return;
+      return this.sendLine(text, false, [], this.meta() || { key });
+    }
     return this.submit();
   }
 
   async submit() {
     await this.dictation?.finish(this.input);
-    const s = this.meta();
-    if (!s || this.waiting.has(s.key) || this.sending.has(s.key)) return;
-    // The text and the session as they were at Enter, so a send that waits on
+    // The text and the files as they were at Enter, so a send that waits on
     // uploads still goes where and as it was typed.
     const text = this.input.value.trim();
+    const files = this.key ? this.atts.list(this.key) : [];
+    // An empty box sends nothing, and with an agent set it must not start a
+    // session on its own.
+    if (!text && !files.length) return;
+    // A host gave this mount an agent: its first message starts the session.
+    await this.mount.ensureSession?.();
+    const s = this.meta() || (this.key ? { key: this.key } : null);
+    if (!s || this.waiting.has(s.key) || this.sending.has(s.key)) return;
     if (this.atts.list(s.key).length) {
       // Enter during an upload sends when it finishes, never without the files.
       this.waiting.add(s.key);
