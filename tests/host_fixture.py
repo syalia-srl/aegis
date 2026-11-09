@@ -7,7 +7,8 @@ with the loopback listener still serving the MCP tools at its own root.
 
 The page is a stranger's: a board, tabs and a composer of its own, a host
 stylesheet that sets every variable aegis reads, and a #chat div that the
-client mounts into. It records every socket and message on ``window`` so the
+client mounts into, beside an empty #chat2 and #tabsbox for the cases that
+mount a second chat or the tabs layout. It records every socket and message on ``window`` so the
 browser test can count sockets and read the welcome without reaching into
 aegis's objects; ``window.__chat`` is the handle mount() returned, and
 ``window.__host`` is the page's own boxes as they stood before the mount drew.
@@ -97,6 +98,7 @@ HOST_PAGE = """\
 <div id="composer" class="host-input">the host's own input</div>
 <div id="chat"></div>
 <div id="chat2"></div>
+<div id="tabsbox"></div>
 <script>
 window.aegisHost = {token: "__TOKEN__", session: "__SESSION__", session2: "__SESSION2__", prefix: "__PREFIX__"};
 // A host that wants no tool calls turns them off with its own CSS. It is asked

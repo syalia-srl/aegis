@@ -1619,3 +1619,136 @@ def test_attachments_false_hides_the_clip_and_ignores_paste(host, browser, width
     page.wait_for_selector("#chat .aegis #atts .chip", timeout=10_000)
     assert errors == []
     page.close()
+
+
+# -- the tabs layout (m3, #962) ----------------------------------------------
+# The sessions the policy lists for this caller, as a strip over one session's
+# transcript and box, with a button that starts a new one. The host's own #tabs
+# keeps its text and stays outside the mount: the strip is addressable only by
+# class (`.aegis-tabstrip`, `.aegis-tab`, `.aegis-pane`), because `tabs` is an
+# id hosts already use.
+
+
+def mount_tabs(page) -> None:
+    """A tabs mount in the fixture's #tabsbox, after the page's own chat is up."""
+    page.add_style_tag(content="#tabsbox { height: 700px; }")
+    page.evaluate(
+        """async (prefix) => {
+          const { mount } = await import(`${prefix}/aegis.js`);
+          window.__tabChanges = [];
+          window.__tabs = mount(document.getElementById("tabsbox"), {
+            token: window.aegisHost.token,
+            session: window.aegisHost.session,
+            layout: "tabs",
+            theme: "host",
+          });
+          window.__tabs.on("sessionChanged", (e) => window.__tabChanges.push(e));
+        }""",
+        page.evaluate("window.aegisHost.prefix"),
+    )
+    page.wait_for_function(
+        """() => document.querySelector('#tabsbox > .aegis[data-layout=tabs]')
+          && document.querySelectorAll(
+            '#tabsbox .aegis-tab:not(.aegis-tab-new)').length === 2""",
+        timeout=30_000,
+    )
+
+
+@pytest.mark.parametrize("width", [1280, 390])
+def test_the_tabs_layout_lists_the_sessions_and_switches(host, browser, width):  # noqa: F811
+    """The strip lists the caller's agent sessions by key with the constructor's
+    session shown; a click moves the transcript and box to another one and
+    reports the change once; the host's #tabs is untouched and outside the
+    mount; at phone width the strip scrolls rather than wrapping."""
+    page, errors = open_page(browser, width)
+    page.goto(host["url"])
+    mounted(page)
+    mount_tabs(page)
+
+    keys = page.evaluate(
+        """() => [...document.querySelectorAll(
+          '#tabsbox .aegis-tab:not(.aegis-tab-new)')].map((b) => b.dataset.key)"""
+    )
+    assert keys == sorted([host["session"], host["session2"]])
+    assert (
+        page.evaluate("document.querySelector('#tabsbox .aegis-tab.on').dataset.key")
+        == host["session"]
+    )
+    # The pane is this mount's own transcript and box, under the strip.
+    assert page.locator("#tabsbox .aegis .aegis-pane > .tr-pane").count() == 1
+    assert page.locator("#tabsbox .aegis .aegis-pane > .composer").count() == 1
+    # The host's own #tabs keeps its text and is not inside any mount.
+    assert (
+        page.evaluate("document.getElementById('tabs').textContent")
+        == "the host's own tabs"
+    )
+    assert page.evaluate("document.getElementById('tabs').closest('.aegis')") is None
+
+    # One row of tabs at both widths: the strip scrolls sideways, it never wraps.
+    layout = page.evaluate(
+        """() => {
+          const strip = document.querySelector('#tabsbox .aegis-tabstrip');
+          const tab = strip.querySelector('.aegis-tab');
+          const s = getComputedStyle(strip);
+          return {wrap: s.flexWrap, overflowX: s.overflowX,
+                  strip: strip.clientHeight, tab: tab.offsetHeight};
+        }"""
+    )
+    assert layout["wrap"] == "nowrap"
+    assert layout["overflowX"] == "auto"
+    assert layout["strip"] < layout["tab"] * 2
+
+    # Clicking the second tab switches the pane and reports the change once.
+    page.locator(f'#tabsbox .aegis-tab[data-key="{host["session2"]}"]').click()
+    page.wait_for_function("() => window.__tabChanges.length === 1", timeout=10_000)
+    change = page.evaluate("window.__tabChanges[0]")
+    assert change["session"] == host["session2"]
+    assert change["previous"] == host["session"]
+    assert change["meta"]["key"] == host["session2"]
+    assert (
+        page.evaluate("document.querySelector('#tabsbox .aegis-tab.on').dataset.key")
+        == host["session2"]
+    )
+
+    # The transcript under the strip is the second session's: a message typed
+    # there draws in this mount, and never in the page's chat on the first one.
+    box = page.locator("#tabsbox .aegis #input")
+    box.click()
+    box.fill("typed under the second tab")
+    box.press("Enter")
+    page.wait_for_function(
+        """() => [...document.querySelectorAll(
+          "#tabsbox .aegis #entries .row.user .body")]
+          .some((b) => b.textContent.includes("typed under the second tab"))""",
+        timeout=60_000,
+    )
+    assert not page.evaluate(
+        """() => [...document.querySelectorAll("#chat .aegis #entries .row.user .body")]
+          .some((b) => b.textContent.includes("typed under the second tab"))"""
+    )
+    assert errors == []
+    page.close()
+
+
+def test_the_tabs_new_button_spawns_and_opens_the_new_session(host, browser):  # noqa: F811
+    """The strip's new-chat button starts a session through the policy, opens
+    it as a third tab and reports the change from the one that was shown."""
+    page, errors = open_page(browser, 1280)
+    page.goto(host["url"])
+    mounted(page)
+    mount_tabs(page)
+    page.locator("#tabsbox .aegis-tab-new").click()
+    page.wait_for_function(
+        """() => document.querySelectorAll(
+          '#tabsbox .aegis-tab:not(.aegis-tab-new)').length === 3""",
+        timeout=60_000,
+    )
+    shown = page.evaluate(
+        "document.querySelector('#tabsbox .aegis-tab.on').dataset.key"
+    )
+    assert shown not in (host["session"], host["session2"])
+    change = page.evaluate("window.__tabChanges.at(-1)")
+    assert change["session"] == shown
+    assert change["previous"] == host["session"]
+    assert errors == []
+    page.close()
