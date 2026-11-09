@@ -1768,3 +1768,149 @@ def test_a_chat_mount_never_loads_the_full_layouts_boot(host, browser):  # noqa:
     assert [n for n in loaded if n.endswith("/js/app.js")] == []
     assert errors == []
     page.close()
+
+
+# -- the full layout in a host (m5, #962) -------------------------------------
+# A host's full mount keeps the document: no title, favicon, theme attribute,
+# URL hash, service worker, push or page-wide selector of the host's is used or
+# changed. The page carries its own look-alikes (a .v-session, a .col, a
+# .wfcard and an aegis-build meta) before the mount in document order, so a
+# document-wide lookup would find the host's node first.
+
+
+def mount_full(page) -> None:
+    """A full mount in a box the host owns, with the host's look-alikes."""
+    page.add_style_tag(content="#full { height: 700px; }")
+    page.evaluate(
+        """async (prefix) => {
+          // The host's own nodes, named the way the client names its own, and
+          // first in the document: before #full and before the mount's root.
+          const side = document.createElement("div");
+          side.id = "host-side";
+          side.className = "v-session";
+          side.innerHTML =
+            '<div class="col"><div class="fbar">' +
+            '<button class="native" data-file-id="host" data-name="host">host file</button>' +
+            '</div></div><div class="wfcard" data-run="x">host card</div>';
+          const meta = document.createElement("meta");
+          meta.name = "aegis-build";
+          meta.content = "host";
+          document.head.append(meta);
+          const favicon = document.createElement("link");
+          favicon.id = "favicon";
+          favicon.rel = "icon";
+          favicon.href = "data:image/svg+xml,host";
+          document.head.append(favicon);
+          document.body.append(side);
+          const box = document.createElement("div");
+          box.id = "full";
+          document.body.append(box);
+          location.hash = "#host-route";
+          window.__before = {
+            title: document.title,
+            hash: location.hash,
+            theme: document.documentElement.dataset.theme || "",
+            favicon: document.getElementById("favicon").href,
+          };
+          window.__marker = 1;
+          const { mount } = await import(`${prefix}/aegis.js`);
+          window.__full = mount(box, {
+            token: window.aegisHost.token,
+            session: window.aegisHost.session,
+            layout: "full",
+            theme: "host",
+            page: false,
+          });
+        }""",
+        page.evaluate("window.aegisHost.prefix"),
+    )
+    # composeFull ran: it filled the navigator's side button with its glyph,
+    # and the welcome the mount shares has arrived.
+    page.wait_for_function(
+        """() => document.querySelector('#full .aegis[data-layout=full] #nav-side svg')
+          && window.__wsMsgs.some((m) => m.t === 'welcome')""",
+        timeout=60_000,
+    )
+
+
+@pytest.mark.parametrize("width", [1280, 390])
+def test_the_full_layout_leaves_the_hosts_page_alone(host, browser, width):  # noqa: F811
+    """The full layout fills the host's box, draws its own parts there, and
+    neither reads nor writes the page's title, favicon, theme attribute, hash
+    or build meta; the host's look-alike nodes answer no click meant for the
+    mount, and the mount's own panel still does."""
+    page, errors = open_page(browser, width)
+    page.goto(host["url"])
+    mounted(page)
+    mount_full(page)
+
+    before = page.evaluate("window.__before")
+    assert page.title() == before["title"]
+    assert page.evaluate("location.hash") == before["hash"] == "#host-route"
+    assert (
+        page.evaluate("document.documentElement.dataset.theme || ''") == before["theme"]
+    )
+    assert page.evaluate("document.getElementById('favicon').href") == before["favicon"]
+    # The host's build meta is its own: the mount neither reads nor moves it.
+    assert page.get_attribute('meta[name="aegis-build"]', "content") == "host"
+
+    # The root fills the host's box rather than the viewport, and the full
+    # layout is drawn under it.
+    root = page.evaluate(
+        """() => {
+          const r = document.querySelector("#full > .aegis");
+          return {layout: r.dataset.layout, page: r.dataset.page,
+                  rootH: r.clientHeight,
+                  boxH: document.getElementById("full").clientHeight};
+        }"""
+    )
+    assert root["layout"] == "full"
+    assert root["page"] == "false"
+    assert abs(root["rootH"] - root["boxH"]) <= 1
+    assert page.locator("#full .v-session .col").count() >= 1
+    assert page.locator("#full .composer").count() == 1
+
+    # The host's look-alikes are outside the mount and untouched.
+    assert (
+        page.evaluate("document.getElementById('host-side').closest('.aegis')") is None
+    )
+    assert page.inner_text("#host-side .wfcard") == "host card"
+
+    # The host's meta never became PAGE_BUILD: no reload for a newer build and
+    # no "new version" toast (a reload would drop the marker).
+    page.wait_for_timeout(1000)
+    assert page.evaluate("window.__marker") == 1
+    assert not page.evaluate(
+        "document.body.textContent.includes('A new version of aegis is ready.')"
+    )
+
+    # A click on the host's .v-session reaches nothing; the mount's own panel
+    # answers the same click. The listener is the mount's, not whichever node
+    # the document finds first.
+    page.evaluate(
+        """() => {
+          document.querySelector("#full > .aegis").dataset.side = "open";
+          document.getElementById("host-side").dispatchEvent(
+            new MouseEvent("click", {bubbles: true}));
+        }"""
+    )
+    assert (
+        page.evaluate("document.querySelector('#full > .aegis').dataset.side") == "open"
+    )
+    page.evaluate(
+        """() => document.querySelector("#full .v-session").dispatchEvent(
+          new MouseEvent("click", {bubbles: true}))"""
+    )
+    assert (
+        page.evaluate("document.querySelector('#full > .aegis').dataset.side") != "open"
+    )
+
+    # The host's .col keeps the click handler to itself: its own file button is
+    # never disabled by the mount's file.open listener.
+    page.locator("#host-side .fbar .native").click()
+    assert (
+        page.evaluate("document.querySelector('#host-side .fbar .native').disabled")
+        is False
+    )
+    assert errors == []
+    page.close()
