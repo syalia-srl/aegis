@@ -787,7 +787,7 @@ the version again, so a hand edit is caught too
 (`docs/superpowers/specs/2026-10-15-dynamic-workflows-design.html`).
 
 **Agents change only what they created.** An agent reads and messages any session
-it can see (and, through `peer_read`, the archived session it continues), and changes only its own monitors, its own session's names and the
+it can see (and, through `peer_read`, any archived session it can see), and changes only its own monitors, its own session's names and the
 tasks it enqueued. A session an agent spawns runs with at most the agent's own
 permission, so spawning is never a way to gain power. A session whose
 permission is read calls only the operations marked `read`: its own card and
