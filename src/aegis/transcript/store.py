@@ -5,12 +5,49 @@ aegis did (``src: "aegis"``: spawn, send, interrupt, exit, close). Records
 carry their own index ``i``, so skipping a damaged line on load never shifts
 the ids of the entries after it. Entries are not stored; they are folded from
 these records (``entries.py``), so a better summary applies to old transcripts.
+
+``aegis gc`` packs an old session's store as ``<log_id>.jsonl.gz`` (gc.py).
+Every reader opens it through ``open_text``, so a packed store reads like a
+plain one, and the first append unpacks it.
 """
 
 from __future__ import annotations
 
+import gzip
 import json
+import shutil
 from pathlib import Path
+from typing import TextIO
+
+
+def packed(path: Path) -> Path:
+    """Where ``aegis gc`` keeps the store at ``path`` once it is packed."""
+    return path.with_name(path.name + ".gz")
+
+
+def stored(path: Path) -> bool:
+    """Whether the store at ``path`` exists, plain or packed."""
+    return path.exists() or packed(path).exists()
+
+
+def open_text(path: Path) -> TextIO:
+    """The store at ``path`` for reading, plain or packed."""
+    try:
+        return path.open(encoding="utf-8", errors="replace")
+    except FileNotFoundError:
+        return gzip.open(packed(path), "rt", encoding="utf-8", errors="replace")
+
+
+def unpack(path: Path) -> None:
+    """Restore a packed store at ``path``, so it can be appended to."""
+    gz = packed(path)
+    if path.exists() or not gz.exists():
+        return
+    part = path.with_name(path.name + ".part")
+    with gzip.open(gz, "rb") as src, part.open("wb") as dst:
+        shutil.copyfileobj(src, dst)
+    part.replace(path)
+    gz.unlink()
 
 
 class Store:
@@ -27,6 +64,7 @@ class Store:
         """Write ``record`` with its index and return the stored form."""
         if self._f is None:
             self.path.parent.mkdir(parents=True, exist_ok=True)
+            unpack(self.path)
             if self._next is None:
                 self._next = last_index(self.path) + 1
             self._f = self.path.open("a", encoding="utf-8")
@@ -85,7 +123,7 @@ def read_store(path: Path) -> tuple[list[dict], int]:
     """Every intact record in ``path``, and how many lines were damaged."""
     records: list[dict] = []
     damaged = 0
-    with path.open(encoding="utf-8", errors="replace") as f:
+    with open_text(path) as f:
         for raw in f:
             if not raw.strip():
                 continue
