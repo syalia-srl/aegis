@@ -192,8 +192,8 @@ fallback.
 | Shape and row | `--prose-size`, `--r`, `--r-lg`, `--time`, `--thread`, `--row-cols`, `--fill` |
 
 These classes inside the mount are stable across minor releases, so you may
-select and restyle them. The root also carries `data-layout`, `data-theme` and
-`data-page`. Anything else is private.
+select and restyle them. The root also carries `data-layout` and `data-theme`,
+the values of the options that built it. Anything else is private.
 
 | Group | Classes |
 |---|---|
