@@ -9,6 +9,7 @@ import pytest
 
 from .test_browser import (  # noqa: F401
     PICK,
+    PNG,
     SHOWN,
     _artifact,
     browser,
@@ -202,6 +203,40 @@ def test_a_docked_file_follows_its_new_version(server, page):  # noqa: F811
     new.locator(".stage.markdown").wait_for()
     assert new.locator(".fbar .dock").is_visible()
     assert old.locator(".fbar .dock").is_hidden()
+    assert page.errors == []
+
+
+def _drag(pg, layer: str) -> None:
+    box = pg.locator(layer).bounding_box()
+    pg.mouse.move(box["x"] + box["width"] * 0.2, box["y"] + box["height"] * 0.25)
+    pg.mouse.down()
+    pg.mouse.move(box["x"] + box["width"] * 0.7, box["y"] + box["height"] * 0.75)
+    pg.mouse.up()
+
+
+def test_a_docked_image_can_be_annotated(server, page):  # noqa: F811
+    (server.root / "chart.png").write_bytes(PNG)
+    page.goto(server.url)
+    page.wait_for_selector("#a2[data-view=fleet]")
+    spawn(page)
+    mcp(page, 1, "file_send", {"paths": ["chart.png"]})
+    page.click(".row.file .fbar .dock")
+    pane = page.locator("#canvas .pane.docked")
+    pane.locator("img").evaluate(
+        "img => { img.style.width = '400px'; img.style.height = '300px'; }"
+    )
+    page.wait_for_function(
+        "() => { const r = document.querySelector('#canvas .valayer')?.getBoundingClientRect(); return r && r.width > 100; }"
+    )
+    page.click("#canvas .vatools [data-tool=area]")
+    _drag(page, "#canvas .valayer")
+    page.keyboard.type("docked mark")
+    pane.locator(".ctray [data-act=send]").click()
+    text = page.input_value("#input")
+    assert "Annotations on chart.png:" in text
+    assert '"type":"region"' in text
+    assert "docked mark" in text
+    assert page.locator("#canvas .vpin.region").count() == 0  # Send forgets the marks
     assert page.errors == []
 
 

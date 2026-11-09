@@ -14,6 +14,7 @@ import { cachedColour, colour, isPlain, langName, paint, splitLines } from "./hi
 import { hostIcon, repoUrl, shortLabel, sureRepo } from "./refs.js";
 import { serverNow } from "./clock.js";
 import { labelsFor } from "./labels.js";
+import { pdfViewerSrc } from "./pdfview.js";
 
 // The table a row reads when its caller passes none: the standalone page, until
 // b1/b9 give it a mount of its own. A mount passes its own through render().
@@ -1672,9 +1673,10 @@ export function preview(f, remote, zoom, t = en) {
     view = el("iframe");
     // A linked server's frame is sandboxed unless it is a PDF, which /via
     // serves as application/pdf whatever the far server says.
-    if (pv === "html" || (remote && !/\.pdf$/i.test(f.url))) view.setAttribute("sandbox", "allow-scripts");
+    // The PDF viewer is our own page. Sandboxing it would hide its text from us.
+    if (pv === "html" || (remote && pv !== "pdf")) view.setAttribute("sandbox", "allow-scripts");
     view.loading = "lazy";
-    view.src = f.url;
+    view.src = pv === "pdf" ? pdfViewerSrc(f.url) : f.url;
     view.title = f.name;
   } else if (pv === "markdown") {
     view = markdown(f.excerpt, { t });

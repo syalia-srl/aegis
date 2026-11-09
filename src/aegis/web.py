@@ -79,6 +79,9 @@ log = logging.getLogger("aegis.web")
 
 HELLO_TIMEOUT_S = 5.0
 CLIENT_DIR = Path(__file__).parent / "client"
+# Mozilla's viewer (pdf.js). Kept out of CLIENT_DIR so the service worker does
+# not cache it with the app shell; the preview iframe loads it from /pdfjs.
+PDFJS_DIR = Path(__file__).parent / "vendor" / "pdfjs"
 # The service worker lives outside CLIENT_DIR, so /static never serves it: it is
 # served only from the root, where its scope is the whole client.
 SERVICE_WORKER = Path(__file__).parent / "sw.js"
@@ -1007,6 +1010,7 @@ def build_web(
         Route("/sw.js", service_worker),
         Route("/client-files.json", files_list),
         Mount("/static", ClientFiles(directory=CLIENT_DIR)),
+        Mount("/pdfjs", StaticFiles(directory=PDFJS_DIR)),
         Route("/files/{file_id}/{name}", sent_file),
         Route("/fs/{ticket}/{name}", fs_file),
         Route("/via/{server}/files/{file_id}/{name}", via_file),
