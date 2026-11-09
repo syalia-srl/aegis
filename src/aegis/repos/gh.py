@@ -33,52 +33,69 @@ def _ci(rollup) -> str:
     return "CI running"
 
 
-def prs(top: str, branch: str) -> list[dict] | None:
-    """``[{n, url, title, state, ci}]`` for PRs whose head is ``branch``, newest
-    first; ``None`` when gh could not answer."""
-    key = (top, branch)
+FIELDS = "number,title,state,url,statusCheckRollup"
+
+
+def _row(p: dict) -> dict:
+    return {
+        "n": p["number"],
+        "url": p["url"],
+        "title": p.get("title", ""),
+        "state": p.get("state", "").lower(),
+        "ci": _ci(p.get("statusCheckRollup")),
+    }
+
+
+def _ask(top: str, key: str, args: list[str], parse):
+    """gh's answer to ``args`` run in ``top``, parsed and cached under
+    ``(top, key)``; ``None`` when gh could not answer."""
     with _lock:
-        hit = _cache.get(key)
+        hit = _cache.get((top, key))
     if hit and time.monotonic() - hit[0] < TTL:
         return hit[1]
     found = None
-    if branch and shutil.which("gh"):
+    if shutil.which("gh"):
         try:
             r = launch.run(
-                [
-                    "gh",
-                    "pr",
-                    "list",
-                    "--head",
-                    branch,
-                    "--state",
-                    "all",
-                    "--limit",
-                    "20",
-                    "--json",
-                    "number,title,state,url,statusCheckRollup",
-                ],
+                ["gh", *args],
                 cwd=top,
                 text=True,
                 errors="replace",
                 timeout=TIMEOUT,
             )
             if r.returncode == 0:
-                found = [
-                    {
-                        "n": p["number"],
-                        "url": p["url"],
-                        "title": p.get("title", ""),
-                        "state": p.get("state", "").lower(),
-                        "ci": _ci(p.get("statusCheckRollup")),
-                    }
-                    for p in json.loads(r.stdout or "[]")
-                ]
+                found = parse(r.stdout)
         except (OSError, subprocess.TimeoutExpired, ValueError, KeyError):
             found = None
     with _lock:
-        _cache[key] = (time.monotonic(), found)
+        _cache[(top, key)] = (time.monotonic(), found)
     return found
+
+
+def prs(top: str, branch: str) -> list[dict] | None:
+    """``[{n, url, title, state, ci}]`` for PRs whose head is ``branch``, newest
+    first; ``None`` when gh could not answer."""
+    if not branch:
+        return None
+    return _ask(
+        top,
+        branch,
+        ["pr", "list", "--head", branch, "--state", "all", "--limit", "20"]
+        + ["--json", FIELDS],
+        lambda out: [_row(p) for p in json.loads(out or "[]")],
+    )
+
+
+def pr(top: str, n: int) -> dict | None:
+    """``{n, url, title, state, ci}`` of PR ``n`` in the repo of ``top``, read
+    now: a PR seen opened may have merged anywhere since; ``None`` when gh
+    could not answer."""
+    return _ask(
+        top,
+        f"#{n}",
+        ["pr", "view", str(n), "--json", FIELDS],
+        lambda out: _row(json.loads(out)),
+    )
 
 
 def forget(top: str) -> None:
