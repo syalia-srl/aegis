@@ -405,6 +405,7 @@ export class ComposerPart {
   // with an `agent` and no session starts one on this first message.
   async send(text) {
     if (typeof text === "string") {
+      if (!text.trim()) return; // nothing to send: start no session
       const key = await this.mount.ensureSession?.();
       if (!key) return;
       return this.sendLine(text, false, [], this.meta() || { key });
@@ -414,13 +415,17 @@ export class ComposerPart {
 
   async submit() {
     await this.dictation?.finish(this.input);
+    // The text and the files as they were at Enter, so a send that waits on
+    // uploads still goes where and as it was typed.
+    const text = this.input.value.trim();
+    const files = this.key ? this.atts.list(this.key) : [];
+    // An empty box sends nothing, and with an agent set it must not start a
+    // session on its own.
+    if (!text && !files.length) return;
     // A host gave this mount an agent: its first message starts the session.
     await this.mount.ensureSession?.();
     const s = this.meta() || (this.key ? { key: this.key } : null);
     if (!s || this.waiting.has(s.key) || this.sending.has(s.key)) return;
-    // The text and the session as they were at Enter, so a send that waits on
-    // uploads still goes where and as it was typed.
-    const text = this.input.value.trim();
     if (this.atts.list(s.key).length) {
       // Enter during an upload sends when it finishes, never without the files.
       this.waiting.add(s.key);

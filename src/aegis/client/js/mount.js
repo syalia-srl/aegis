@@ -86,6 +86,7 @@ export class Mount {
     this._costAt = new Map(); // key -> the cumulative cost_usd when it did
     this._dead = false;
     this._handle = null;
+    this._spawning = null; // the spawn a send is waiting on, shared by its peers
     this.outbox = options.outbox || null;
     this.composer = null;
   }
@@ -238,12 +239,19 @@ export class Mount {
   }
 
   // The session a send writes to: the one shown, or one the host's agent starts
-  // first (spec 06: an agent starts one on the first message).
+  // first (spec 06: an agent starts one on the first message). Two sends that
+  // race before the spawn answers share the one promise: one session, never two.
   async ensureSession() {
     if (this.state.shown) return this.state.shown;
     if (!this.opts.agent) return null;
-    const { session } = await this.spawn(this.opts.agent);
-    return session;
+    if (!this._spawning) {
+      this._spawning = this.spawn(this.opts.agent)
+        .then(({ session }) => session)
+        .finally(() => {
+          this._spawning = null;
+        });
+    }
+    return this._spawning;
   }
 
   // Put the caret in this mount's box, or focus the transcript when it has
