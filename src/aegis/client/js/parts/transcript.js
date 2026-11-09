@@ -106,6 +106,9 @@ export class TranscriptPart {
     this.navFrame = 0;
     this.navDrawn = {};
     this.fold = 0;
+    // The file entries this mount has announced for the session it shows, so
+    // an upsert that changes only a peek or a status does not announce twice.
+    this.sentFiles = new Set();
 
     this.pane = el("section", "tr-pane col");
     this.pane.dataset.pane = "transcript";
@@ -253,6 +256,8 @@ export class TranscriptPart {
     this.saveTimer = null;
     if (this.key) this.mount.state.kept.set(this.key, this.transcript.stash());
     this.transcript.clear();
+    // The announced files belong to the session that was shown.
+    this.sentFiles.clear();
     this.find.close(false);
     this.key = key;
     this.placed = false;
@@ -296,9 +301,10 @@ export class TranscriptPart {
         if (gen !== this.gen) return;
         if (data.since !== undefined) {
           this.transcript.resume(data);
-          for (const entry of data.entries || []) this.report(entry);
+          for (const entry of data.entries || []) this.report(entry, true);
         } else {
           this.transcript.snapshot(data);
+          // A full snapshot is history: entry replays, fileSent does not.
           for (const entry of data.entries || []) this.report(entry);
           if (!this.placed) this.transcript.setSince(this.sinceText());
           this.placed = true;
@@ -310,7 +316,7 @@ export class TranscriptPart {
       (ops) => {
         if (gen !== this.gen) return;
         this.transcript.apply(ops);
-        for (const op of ops) if (op.upsert) this.report(op.upsert);
+        for (const op of ops) if (op.upsert) this.report(op.upsert, true);
         this.keep();
         this.drawOfflineNotice();
         this.drawNav();
@@ -324,11 +330,18 @@ export class TranscriptPart {
   }
 
   // What the host hears for one upsert: the generic entry, and the narrow
-  // fileSent for a file card (spec 06: a host's own file board).
-  report(entry) {
+  // fileSent for a file card (spec 06: a host's own file board). History a
+  // full snapshot replays emits entry only, and an entry already announced
+  // (a peek or status upsert) is never announced twice.
+  report(entry, live = false) {
     this.mount.emit("entry", { session: this.key, entry });
-    if (entry.kind === "file")
-      this.mount.emit("fileSent", { session: this.key, entry, files: entryFiles(entry) });
+    if (!live || entry.kind !== "file") return;
+    const id = entry.id;
+    if (id != null) {
+      if (this.sentFiles.has(id)) return;
+      this.sentFiles.add(id);
+    }
+    this.mount.emit("fileSent", { session: this.key, entry, files: entryFiles(entry) });
   }
 
   // The divider's words: how long since this session was last read.
