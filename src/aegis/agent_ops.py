@@ -1255,15 +1255,21 @@ def register_agent_ops(app: App) -> None:
         }
 
     def readable(handle: str, caller) -> list[dict]:
-        """A transcript peer_read may read: an open session's, or the archived
-        one the caller continues after a handoff (#354), and no other archived
-        one."""
+        """A transcript peer_read may read: an open session's, else the newest
+        archived one by that handle or id, packed by ``aegis gc`` or not
+        (#1009). An archived session the caller's policy hides answers as
+        one that does not exist."""
         h = here(handle)
         if reg.by_handle(h) is None and h not in reg.sessions:
-            me = reg.sessions.get(caller.log_id or "")
-            old = me.spec.continues if me else None
-            if old in reg.archived and h in (old, reg.archived[old].get("handle")):
-                return reg.archived_entries(old)
+            found = [
+                m
+                for i, m in reg.archived.items()
+                if h in (i, m.get("handle")) and app.sees(app.who(caller), i, "read")
+            ]
+            if found:
+                newest = max(found, key=lambda m: m.get("last_activity") or 0)
+                return reg.archived_entries(newest["log_id"])
+            raise OpError("no_session", f"no session {h!r}")
         return target(handle).entries()
 
     @r.op(

@@ -219,7 +219,7 @@ async def test_a_linked_servers_error_text_reaches_the_agent(linked):
     out = await turn(here, mcp("peer_handoff", target="nosuch-one@beta", context="x"))
     assert out.startswith("mcp error:") and "beta: no open session 'nosuch-one'" in out
     out = await turn(here, mcp("peer_read", target="nosuch-one@beta"))
-    assert "beta: no open session 'nosuch-one'" in out, out
+    assert "beta: no session 'nosuch-one'" in out, out
 
 
 # -- acting across ----------------------------------------------------------------------
