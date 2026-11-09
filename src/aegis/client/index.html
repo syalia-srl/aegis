@@ -39,6 +39,10 @@ document.documentElement.dataset.theme = localStorage.getItem("aegis.theme") || 
   // The page's outbox is outbox.js's singleton (the queued row and the browser
   // suite call it by that name), handed to the mount that owns its flush.
   import { outbox } from "__AEGIS_PREFIX__/static/js/outbox.js";
+  // The full layout's behaviour. The mount loads it by itself; naming it here
+  // too makes this page wait for it, so its load event still means a composed
+  // client, as it did when this page was that module's own entry.
+  import "__AEGIS_PREFIX__/static/js/app.js";
   mount(document.getElementById("a2"), {
     adopt: true, // the div above is the root, not a host element to fill
     layout: "full",
