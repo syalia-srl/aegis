@@ -1922,6 +1922,20 @@ const RENDERERS = {
   },
 
   tool(e, opts = {}) {
+    // A host's renderer draws the finished call: the key is exactly the title
+    // the server folded ("file_send" for aegis's own tool, the harness's full
+    // name for another MCP server's). It runs again on every upsert of this
+    // row, so a renderer draws from the entry it is given and keeps no state;
+    // a throw is the host's bug and leaves aegis's own row in place.
+    const draw = opts.renderers?.[e.title];
+    if (draw && e.status !== "running") {
+      const body = el("div", "body");
+      try {
+        if (draw(e, body) === true) return row(e, `tool ${e.status}`, body);
+      } catch (err) {
+        console.error("aegis: renderer", e.title, err);
+      }
+    }
     const t = opts.t || en;
     const det = e.detail || {};
     const d = el("details");

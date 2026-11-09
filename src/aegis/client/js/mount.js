@@ -54,6 +54,12 @@ export class Mount {
       dictation: false,
       commands: false,
       attachments: true,
+      // A host's own tool cards: tool name -> (entry, el) => boolean. The
+      // transcript part hands them to entries.js, which calls one when the
+      // call is no longer running and keeps its body only when it says true.
+      renderers: {},
+      // A host's own speech service, in place of the browser's Whistle workers.
+      transcribe: null,
       session: null,
       agent: null,
       token: "",
