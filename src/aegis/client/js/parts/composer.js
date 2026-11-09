@@ -401,15 +401,22 @@ export class ComposerPart {
 
   // -- sending ---------------------------------------------------------------
   // The host's call: send(text) sends that text; send() sends what the box
-  // holds, with its attachments. Resolves when the send has an answer.
-  send(text) {
-    if (typeof text === "string") return this.sendLine(text, false, [], this.meta());
+  // holds, with its attachments. Resolves when the send has an answer. A mount
+  // with an `agent` and no session starts one on this first message.
+  async send(text) {
+    if (typeof text === "string") {
+      const key = await this.mount.ensureSession?.();
+      if (!key) return;
+      return this.sendLine(text, false, [], this.meta() || { key });
+    }
     return this.submit();
   }
 
   async submit() {
     await this.dictation?.finish(this.input);
-    const s = this.meta();
+    // A host gave this mount an agent: its first message starts the session.
+    await this.mount.ensureSession?.();
+    const s = this.meta() || (this.key ? { key: this.key } : null);
     if (!s || this.waiting.has(s.key) || this.sending.has(s.key)) return;
     // The text and the session as they were at Enter, so a send that waits on
     // uploads still goes where and as it was typed.
