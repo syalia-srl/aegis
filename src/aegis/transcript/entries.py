@@ -810,6 +810,22 @@ class Fold:
             return self._upsert(
                 _entry(f"e{i}", "system", "ok", ts, d.SYSTEM_GLYPH, summary=line)
             )
+        if kind in ("handoff_to", "handoff_from", "autohandoff"):
+            # A handoff seen from each tab, and autohandoff firing (#1022).
+            if kind == "autohandoff":
+                line = (
+                    f"autohandoff at {d.tokens_k(rec.get('tokens') or 0)} tokens"
+                    f" (from {d.tokens_k(rec.get('at') or 0)})"
+                )
+            else:
+                way = "in" if kind == "handoff_to" else "from"
+                what = ", ".join(rec.get("carried") or [])
+                line = f"continued {way} {rec.get('handle')}, " + (
+                    f"carrying {what}" if what else "nothing to carry"
+                )
+            return self._upsert(
+                _entry(f"e{i}", "system", "ok", ts, d.SYSTEM_GLYPH, summary=line)
+            )
         if kind == "server_paused":
             # The person paused every session (app.pause_all); the stop's
             # own record follows.
