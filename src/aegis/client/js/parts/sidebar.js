@@ -127,7 +127,7 @@ const SIDEBAR_HTML = `
   <button class="act stop needs-net" id="stop-session" data-t-title="sidebar.sleepTitle"><span data-t="sidebar.sleep"></span></button>
   <button class="act" id="quiet-session" data-t-title="sidebar.quietTitle"><span data-t="sidebar.quiet"></span></button>
   <button class="act needs-net" id="autoclose-session" aria-pressed="false" data-t-title="sidebar.autocloseTitle"><span data-t="sidebar.autoclose"></span></button>
-  <button class="act needs-net" id="autohandoff-session" aria-pressed="false" data-t-title="sidebar.autohandoffTitle"><span data-t="sidebar.autohandoff"></span><span class="autohandoff-at"></span></button>
+  <button class="act needs-net" id="autohandoff-session" aria-pressed="false" data-t-title="sidebar.autohandoffTitle"><span data-t="sidebar.autohandoff"></span></button>
   <button class="act needs-net" id="continue" data-t-title="sidebar.continueTitle"><span data-t="sidebar.continue"></span></button>
   <button class="act needs-net" id="restart" data-t-title="sidebar.restartTitle"><span data-t="sidebar.restart"></span></button>
   <button class="act needs-net" id="close" data-t-title="sidebar.archiveTitle"><span data-t="sidebar.archive"></span></button>
@@ -303,8 +303,8 @@ export class SidebarPart {
   icons() {
     this.stop.prepend(icon("sleep"));
     this.quietBtn.prepend(icon("quiet"));
-    this.autoclose.prepend(icon("archive"));
-    this.autohandoff.prepend(icon("play"));
+    this.autoclose.prepend(icon("done"));
+    this.autohandoff.prepend(icon("handoff"));
     this.continueBtn.prepend(icon("play"));
     this.restart.prepend(icon("restart"));
     this.closeBtn.prepend(icon("archive"));
@@ -462,9 +462,9 @@ export class SidebarPart {
     this.autohandoff.hidden = !!s.worker;
     this.autohandoff.disabled = held;
     this.autohandoff.setAttribute("aria-pressed", String(!!s.autohandoff));
-    this.autohandoff.querySelector(".autohandoff-at").textContent = s.autohandoff
-      ? ` ${Math.round(s.autohandoff / 1000)}k`
-      : "";
+    // The button shows no text (#1022), so its size goes in the tooltip.
+    const at = s.autohandoff ? ` (${Math.round(s.autohandoff / 1000)}k)` : "";
+    this.autohandoff.title = this.t("sidebar.autohandoffTitle") + at;
     this.closeBtn.disabled = held;
   }
 

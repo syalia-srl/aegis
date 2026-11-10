@@ -168,6 +168,7 @@ from .browser_ops import register_browser_ops
 from .terminals import Terminals
 from .browsers import Browsers
 from .version import Versions
+from .transcript.describe import tokens_k
 
 log = logging.getLogger("aegis.app")
 # How often every principal's memories are checked for expiry and staleness.
@@ -2411,6 +2412,23 @@ class App:
         # What would wake the old session wakes the new one (#1019); moved
         # back if it does not take over (Registry._call_off_handoff).
         carried = reg.carry(old.log_id, s.log_id)
+        # The person's settings on the session follow it too (#1022).
+        settings = []
+        if old.autohandoff:
+            reg.set_autohandoff(s.log_id, old.autohandoff)
+            settings.append(f"autohandoff from {tokens_k(old.autohandoff)}")
+        if old.autoclose:
+            reg.set_autoclose(s.log_id, True)
+            settings.append("autoclose")
+        if old.quiet:
+            # Its first turn is running, and its end brings the tab back.
+            s._set(quiet=True)
+            reg.metas.write(s.meta())
+            settings.append("quiet")
+        # A line in each tab, so the person sees the handoff happen (#1022).
+        what = carried + settings
+        old.report({"kind": "handoff_to", "handle": s.handle, "carried": what})
+        s.report({"kind": "handoff_from", "handle": old.handle, "carried": what})
         prompt = handoff_opening(
             old.handle,
             report.get("handoff"),
