@@ -2125,8 +2125,8 @@ class App:
         if name == "sleep":
             await s.stop()
             return s.wire()
-        if name == "quiet":
-            return reg.set_quiet(s.log_id, True)
+        if name == "quiet":  # a toggle, as Alt+Q (#1025)
+            return reg.set_quiet(s.log_id, not s.stay_quiet)
         if name == "autoclose":
             if arg not in ("", "on", "off"):
                 raise OpError("bad_params", "usage: /autoclose [on|off]")

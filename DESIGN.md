@@ -52,7 +52,9 @@ harness ended on its own; mid-turn or with a non-zero code it is an error,
 between turns with code 0 it is not) or `server` (the server restarted under it). A meta
 written before that state says `stopped` or `parked`, and loads through
 `session.asleep_from`, so nothing on disk is migrated. Quiet is the other axis:
-it hides the tab and never touches the process. A prompt to an asleep session starts the harness again on the same
+it hides the tab and never touches the process. `quiet` says the tab is hidden
+now; `stay_quiet` makes it a mode, so a turn's end shows the tab and the next
+turn's start hides it again (#1025), while a quiet spawn has `quiet` alone. A prompt to an asleep session starts the harness again on the same
 conversation (`claude --resume`, `opencode serve` and the same session id,
 `thread/resume` on the same Codex thread, or `session/load` on the same Cursor
 session id),

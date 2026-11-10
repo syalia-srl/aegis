@@ -1542,11 +1542,11 @@ def register_agent_ops(app: App) -> None:
         ),
     )
     async def session_quiet(p: Quiet, caller):
-        """Hide a session's tab while it works: it stays in the Fleet, dimmed,
-        and its tab comes back by itself when its turn ends done, review,
-        needs_you or error. Only a working or waiting session can be quiet.
-        Use it for a session doing background work the person need not
-        watch, your own included."""
+        """Put a session in the background, in any state: its tab hides and it
+        stays in the Fleet, dimmed. Its tab comes back by itself when a turn
+        ends done, review, needs_you or error, and hides again when the next
+        turn starts, until the person unquiets it. Use it for a session doing
+        background work the person need not watch, your own included."""
         if not caller.is_agent:
             if p.log_id is None:
                 raise OpError("bad_params", "log_id is required")
@@ -1556,7 +1556,10 @@ def register_agent_ops(app: App) -> None:
             raise OpError("bad_params", "handle is required")
         s = target(p.handle)
         reg.set_quiet(s.log_id, True)
-        return f"{s.handle} is quiet: its tab is hidden until its turn ends"
+        return (
+            f"{s.handle} is quiet: its tab shows when a turn ends with something "
+            "for the person, and hides again when the next turn starts"
+        )
 
     @r.op("file.send", FileSend, agent=True, read=True)
     async def file_send(p: FileSend, caller):

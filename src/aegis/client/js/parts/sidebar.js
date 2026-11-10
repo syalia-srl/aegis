@@ -319,7 +319,7 @@ export class SidebarPart {
     });
     this.quietBtn.addEventListener("click", () => {
       const s = this.act.focused?.();
-      if (s) this.act.quiet?.(s.key, true);
+      if (s) this.act.quiet?.(s.key, !(s.quiet || s.stay_quiet));
     });
     this.autoclose.addEventListener("click", () => {
       const s = this.act.focused?.();
@@ -455,7 +455,8 @@ export class SidebarPart {
     this.continueBtn.disabled = s.state === "working" || held;
     this.restart.disabled = held || !!s.old;
     this.stop.disabled = s.state === "asleep" || held;
-    this.quietBtn.disabled = !["working", "waiting"].includes(s.attention) || held;
+    this.quietBtn.disabled = held;
+    this.quietBtn.setAttribute("aria-pressed", String(!!(s.quiet || s.stay_quiet)));
     this.autoclose.disabled = held;
     this.autoclose.setAttribute("aria-pressed", String(!!s.autoclose));
     // A queue worker's task owns it, so it never hands itself off.

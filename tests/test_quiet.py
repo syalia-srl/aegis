@@ -1,4 +1,5 @@
-"""Quiet sessions: no tab until the turn ends (#386)."""
+"""Quiet sessions: no tab until the turn ends (#386), as a mode that hides it
+again each time a turn starts (#1025)."""
 
 import json
 
@@ -6,7 +7,6 @@ import pytest
 
 from aegis import restarts
 from aegis.commands import parse_spawn
-from aegis.ops import OpError
 from aegis.queues import queues_from
 
 from .conftest import until
@@ -35,12 +35,37 @@ async def test_an_agent_quiets_a_waiting_session(world):
     assert meta_of(world, b.log_id)["quiet"] is True
 
 
-async def test_an_idle_session_cannot_be_quieted(world):
+@pytest.mark.parametrize("attention", ["done", "needs_you"])
+async def test_a_session_that_waits_for_the_person_can_be_quieted(world, attention):
     a, b = await world.spawn(), await world.spawn()
-    await turn(b, mcp("turn_end", attention="done", line="Done."))
+    await turn(b, mcp("turn_end", attention=attention, line="Over to you."))
     said = await turn(a, mcp("session_quiet", handle=b.handle))
-    assert said.startswith("mcp error: not_running"), said
-    assert not b.quiet
+    assert not said.startswith("mcp error"), said
+    assert b.quiet and b.stay_quiet
+    assert meta_of(world, b.log_id)["stay_quiet"] is True
+
+
+async def test_quiet_hides_the_tab_again_when_the_next_turn_starts(world):
+    """The person answers a quiet session's question: the turn that answer
+    starts runs without a tab, as does one a monitor or a task starts."""
+    b = await world.spawn()
+    await turn(b, mcp("turn_end", attention="needs_you", line="Which one?"))
+    await world.app.registry.call("session.quiet", {"log_id": b.log_id})
+    await turn(b, mcp("turn_end", attention="needs_you", line="And now?"))
+    assert not b.quiet and b.stay_quiet, "back for the question"
+    await hold(b)  # the answer starts a turn, which ends on a live monitor
+    assert b.quiet and b.stay_quiet
+    assert meta_of(world, b.log_id)["quiet"] is True
+
+
+async def test_unquiet_ends_the_mode(world):
+    b = await world.spawn()
+    await hold(b)
+    await world.app.registry.call("session.quiet", {"log_id": b.log_id})
+    await world.app.registry.call("session.unquiet", {"log_id": b.log_id})
+    assert not b.quiet and not b.stay_quiet
+    await hold(b)
+    assert not b.quiet, "a turn after unquiet keeps its tab"
 
 
 async def test_the_person_quiets_and_unquiets_by_log_id(world):
@@ -61,14 +86,14 @@ async def test_slash_quiet_quiets_the_session_it_is_typed_in(world):
     assert meta_of(world, b.log_id)["quiet"] is True
 
 
-async def test_slash_quiet_is_refused_on_an_idle_session(world):
+async def test_slash_quiet_toggles_on_an_idle_session(world):
     b = await world.spawn()
     await turn(b, mcp("turn_end", attention="done", line="Done."))
-    with pytest.raises(OpError, match="only a working or waiting session"):
-        await world.app.registry.call(
-            "session.send", {"log_id": b.log_id, "text": "/quiet"}
-        )
-    assert not b.quiet
+    send = {"log_id": b.log_id, "text": "/quiet"}
+    r = await world.app.registry.call("session.send", send)
+    assert r["quiet"] is True and r["stay_quiet"] is True
+    r = await world.app.registry.call("session.send", send)
+    assert r["quiet"] is False and r["stay_quiet"] is False
 
 
 @pytest.mark.slow  # a restart
@@ -78,6 +103,7 @@ async def test_quiet_survives_a_restart(world):
     await world.app.registry.call("session.quiet", {"log_id": b.log_id})
     await world.restart()
     assert world.session(b.log_id).quiet is True
+    assert world.session(b.log_id).stay_quiet is True
 
 
 @pytest.mark.parametrize("attention", ["done", "review", "needs_you"])
@@ -103,6 +129,18 @@ async def test_a_session_that_quiets_itself_is_back_when_that_turn_ends(world):
     b = await world.spawn()
     await turn(b, mcp("session_quiet", handle=b.handle))
     await until(lambda: not b.quiet, timeout=5, what="back after its own turn")
+    assert b.stay_quiet
+
+
+async def test_a_quiet_spawn_is_quiet_for_one_turn(world):
+    """--quiet on a spawn hides only its first turn, as before #1025."""
+    b = await world.spawn()
+    world.app.sessions.set_quiet(b.log_id, True)
+    b._set(stay_quiet=False)  # what a quiet spawn's meta holds
+    await turn(b, mcp("turn_end", attention="done", line="Done."))
+    await until(lambda: not b.quiet, timeout=5, what="back")
+    await hold(b)
+    assert not b.quiet
 
 
 async def test_a_session_whose_process_dies_comes_back(world):

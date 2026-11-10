@@ -301,7 +301,7 @@ export default {
   "sidebar.liveSessions": "sesiones vivas",
   "sidebar.avgContext": "contexto medio",
   "sidebar.sleepTitle": "Dormir: termina el proceso y conserva la conversación; el próximo mensaje la despierta",
-  "sidebar.quietTitle": "Silencio: oculta la pestaña hasta que acabe el turno; su tarjeta sigue en la Flota",
+  "sidebar.quietTitle": "Silencio: la pestaña aparece solo al acabar un turno y se oculta al empezar el siguiente; pulsa otra vez para quitarlo",
   "sidebar.autocloseTitle": "Autocierre: una vez activo, el agente debe terminar en done con close, y la sesión se cierra al acabar",
   "sidebar.autohandoffTitle": "Autotraspaso: pasado este tamaño de contexto, el agente escribe un resumen y la sesión sigue en una nueva, con sus monitores, feeds, tareas de cola y programaciones",
   "sidebar.continueTitle": "Continuar: envía “Continue” al agente",

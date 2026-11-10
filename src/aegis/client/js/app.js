@@ -1339,7 +1339,7 @@ async function openCard(key) {
       // Read again: a patch the server sent before the unquiet may have
       // replaced the meta meanwhile, still quiet, and the page would leave it.
       const m = app.state.sessions.get(key);
-      if (m) Object.assign(m, back, { quiet: false });
+      if (m) Object.assign(m, back, { quiet: false, stay_quiet: false });
     } catch (e) {
       toast(e.message, { kind: "error" });
       return;
@@ -3096,9 +3096,8 @@ function sessionMenu(key) {
   const group = blocksOf(tabbed(), header.tabActions.here).find((b) => b.head.key === key && b.members.length > 1);
   if (group) close.push({ id: "archivegroup", label: "Archive group…", icon: "archive", danger: true, disabled: why, run: () => archiveGroup(group.members) });
   if (isTool(s)) return { title, groups: [opening, close] };
-  if (s.quiet) opening.push({ id: "unquiet", label: "Unquiet", icon: "unquiet", disabled: why, run: () => quietKey(key, false) });
-  else if (["working", "waiting"].includes(s.attention))
-    opening.push({ id: "quiet", label: "Quiet", icon: "quiet", disabled: why, run: () => quietKey(key, true) });
+  if (s.quiet || s.stay_quiet) opening.push({ id: "unquiet", label: "Unquiet", icon: "unquiet", disabled: why, run: () => quietKey(key, false) });
+  else opening.push({ id: "quiet", label: "Quiet", icon: "quiet", disabled: why, run: () => quietKey(key, true) });
   const life = [];
   if (s.state === "working") life.push({ id: "interrupt", label: "Interrupt", icon: "interrupt", disabled: why, run: () => interruptKey(key) });
   // A server older than #479 wakes only a parked session.

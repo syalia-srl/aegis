@@ -63,7 +63,7 @@ AEGIS: dict[str, Command] = {
             "sleep", "", "End the process and keep the session; a message wakes it"
         ),
         Command("stop", "", "Alias of /sleep"),
-        Command("quiet", "", "Hide this tab until the turn ends, as Alt+Q"),
+        Command("quiet", "", "Quiet this session or end its quiet, as Alt+Q"),
         Command(
             "autoclose",
             "[on|off]",
