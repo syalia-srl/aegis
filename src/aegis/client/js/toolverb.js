@@ -1,9 +1,9 @@
 // The working row's title while a tool call runs (#1012). With no call live
 // the row shows its star and the general verbs; while one runs, and until
 // SETTLE after it started so even a quick call is seen, the title becomes
-// that call's glyph, pulsing, a verb of what it does typing out, and the
-// call's name. The row sits below the transcript, so it shows the call even
-// when its run is folded. The fold names the activity (usage/kinds.py, plus
+// that call's glyph, pulsing, and a verb of what it does typing out; the
+// call's own row names it (#1017). The row sits below the transcript, so it
+// shows the call even when its run is folded. The fold names the activity (usage/kinds.py, plus
 // debugging after a failed shell command), and entries.js marks a tool row
 // with it only while the row runs or is that young.
 
@@ -58,9 +58,6 @@ export class CallTitle {
       if (this.id === null) this.star = g.firstChild?.cloneNode(true) || null;
       const glyph = call.querySelector(".g")?.firstChild;
       if (glyph) g.replaceChildren(glyph.cloneNode(true));
-      row.querySelector(".wcall").textContent = [call.querySelector(".tn")?.textContent, call.querySelector(".ta")?.firstChild?.textContent]
-        .filter(Boolean)
-        .join(": ");
       this.id = call.dataset.id;
     }
     const verbs = t(ACTIVITY[call.dataset.activity]).split(", ");

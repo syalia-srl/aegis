@@ -9718,8 +9718,9 @@ def test_the_working_row_types_its_verb_and_counts_the_turns_tokens(server, page
 
 
 def test_the_working_row_takes_the_running_calls_glyph_and_verb(server, page):
-    """#1012: while a call runs, the working row's title is that call's glyph,
-    a verb of what it does and the call's name, with the counters kept; a
+    """#1012: while a call runs, the working row's title is that call's glyph
+    and a verb of what it does, with the counters kept and no call name nor
+    parentheses (#1017); a
     call that ends at once keeps the title about two pulses, then the star
     and the general verbs come back."""
     page.goto(server.url)
@@ -9727,7 +9728,9 @@ def test_the_working_row_takes_the_running_calls_glyph_and_verb(server, page):
     page.fill("#input", "/busy 4")
     page.press("#input", "Enter")
     page.wait_for_selector("#working.calling", timeout=5000)
-    assert page.text_content("#working .wcall") == "Bash: Wait"
+    assert page.query_selector("#working .wcall") is None
+    meta = page.text_content("#working .meta")
+    assert "(" not in meta and ")" not in meta, meta
     assert page.is_visible("#working-s")
     seen = set()
     for _ in range(25):
@@ -9748,10 +9751,7 @@ def test_the_working_row_takes_the_running_calls_glyph_and_verb(server, page):
 
     page.fill("#input", '/script [["toast", {"line": "hi"}], ["sleep", 5]]')
     page.press("#input", "Enter")
-    page.wait_for_function(
-        "document.querySelector('#working.calling .wcall')?.textContent.includes('toast')",
-        timeout=5000,
-    )
+    page.wait_for_selector("#working.calling", timeout=5000)
     t0 = time.monotonic()
     page.wait_for_selector("#working:not(.calling)", timeout=6000)
     held = time.monotonic() - t0
