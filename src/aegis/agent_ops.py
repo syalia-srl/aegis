@@ -1762,6 +1762,7 @@ def register_agent_ops(app: App) -> None:
                 )
             if reg.successor(s) is None and reg.workflow_lock(s) is None:
                 s.mark_handoff_pending({})
+                s.report({"kind": "autohandoff", "tokens": n, "at": auto})
                 return AUTO_GOING + seen_line(s.fold().shown()) + left
         if p.handoff or not at or n < at:
             said = f"noted. {seen_line(s.fold().shown())}{left}"
