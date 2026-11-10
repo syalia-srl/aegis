@@ -3108,8 +3108,8 @@ function sessionMenu(key) {
   if (!s.old) life.push({ id: "restart", label: "Restart", icon: "restart", disabled: why, run: () => restartKey(key) });
   if (!s.worker) life.push({ id: "handoff", label: "Hand off", icon: "handoff", disabled: why, run: () => handOff(s) });
   const rename = [{ id: "rename", label: "Rename…", icon: "pencil", disabled: why, run: () => renameKey(key) }];
-  rename.push({ id: "autoclose", label: s.autoclose ? "Autoclose off" : "Autoclose on", icon: "archive", disabled: why, run: () => autocloseKey(key, !s.autoclose) });
-  if (!s.worker) rename.push({ id: "autohandoff", label: s.autohandoff ? "Autohandoff off" : "Autohandoff on", icon: "play", disabled: why, run: () => autohandoffKey(key, !s.autohandoff) });
+  rename.push({ id: "autoclose", label: s.autoclose ? "Autoclose off" : "Autoclose on", icon: "done", disabled: why, run: () => autocloseKey(key, !s.autoclose) });
+  if (!s.worker) rename.push({ id: "autohandoff", label: s.autohandoff ? "Autohandoff off" : "Autohandoff on", icon: "handoff", disabled: why, run: () => autohandoffKey(key, !s.autohandoff) });
   return { title, groups: [opening, life, rename, close] };
 }
 // The menu of a card or tab pressed; none on the space around them.

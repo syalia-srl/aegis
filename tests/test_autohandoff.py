@@ -162,3 +162,63 @@ async def test_a_background_task_holds_the_autohandoff(world):
     said = await end(world, a, attention="review", handoff="Brief.")
     assert said.startswith("noted. Autohandoff waits: 1 background task")
     assert a.continued_by is None
+
+
+def lines(s) -> list[str]:
+    return [e.get("summary") or "" for e in s.entries() if e["kind"] == "system"]
+
+
+async def test_both_transcripts_say_what_the_handoff_carried(world):
+    # #1022: the person sees the handoff in each tab, not only in the prompt.
+    a = await world.spawn()
+    await turn(a, "earlier work")
+    await monitor(world, a)
+    r = await send(world, a, "/handoff go on")
+    b = world.session(r["log_id"])
+    assert f"continued in {b.handle}, carrying 1 monitor" in lines(a)
+    assert f"continued from {a.handle}, carrying 1 monitor" in lines(b)
+
+
+async def test_a_handoff_with_nothing_to_carry_says_so(world):
+    a = await world.spawn()
+    await turn(a, "earlier work")
+    r = await send(world, a, "/handoff go on")
+    b = world.session(r["log_id"])
+    assert f"continued in {b.handle}, nothing to carry" in lines(a)
+
+
+async def test_autohandoff_and_autoclose_carry_over(world):
+    a = await world.spawn()
+    await turn(a, "earlier work")
+    await send(world, a, "/autohandoff 200000")
+    await send(world, a, "/autoclose on")
+    r = await send(world, a, "/handoff go on")
+    b = world.session(r["log_id"])
+    assert b.autohandoff == 200000 and b.autoclose
+    said = f"continued from {a.handle}, carrying autohandoff from 200k, autoclose"
+    assert said in lines(b)
+
+
+async def test_the_autohandoff_shows_when_it_fires(world):
+    a = await world.spawn()
+    world.app.sessions.rename(a.log_id, a.handle, "A named session")
+    await send(world, a, "/autohandoff 500")
+    brief = mcp("turn_end", attention="review", line="x", handoff="Done: X.")
+    await turn(a, brief)
+    await until(lambda: successor(world, a) is not None, 8, "the new session")
+    assert any(
+        x.startswith("autohandoff at ") and x.endswith("(from 500)") for x in lines(a)
+    ), lines(a)
+
+
+async def test_a_quiet_session_hands_its_quiet_on(world):
+    a = await world.spawn()
+    world.app.sessions.rename(a.log_id, a.handle, "A named session")
+    await send(world, a, "/autohandoff 500")
+    a._set(quiet=True)
+    brief = mcp("turn_end", attention="review", line="x", handoff="Done: X.")
+    await turn(a, brief)
+    await until(lambda: successor(world, a) is not None, 8, "the new session")
+    b = successor(world, a)
+    await until(lambda: "continued from" in " ".join(lines(b)), 8, "its line")
+    assert any(x.endswith("autohandoff from 500, quiet") for x in lines(b)), lines(b)

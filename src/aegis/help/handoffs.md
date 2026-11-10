@@ -116,6 +116,12 @@ first message lists them. If the new session fails before it answers, or you
 close it, they go back to the old one. A handoff across a link carries none of
 them and is refused while any is live.
 
+Each tab shows the handoff as a line. The old one reads "continued in" and the
+new session's handle, and the new one reads "continued from" and the old
+session's handle. Both lines list what moved, such as "carrying 1 monitor", or
+say "nothing to carry". The person's `/autohandoff`, `/autoclose` and quiet
+settings follow the new session too, and the lines list them.
+
 The new session takes the old one's place in its group of tabs: it joins the
 group, and heads it when the old one did. Its first message names the sessions
 the old one started that are still open, and asks it to tell each one with
@@ -128,14 +134,16 @@ waits on them as their parent.
 `/autohandoff` makes the continuation happen on its own. Alone it uses the
 configured `handoff_at:` (`context:` in `.aegis.yaml`); `/autohandoff 200000`
 sets the size for this session; `/autohandoff off` turns it off. The
-Autohandoff button in the sidebar toggles it and shows the size.
+Autohandoff button in the sidebar toggles it, and its tooltip shows the size.
 
 Past that size, every `turn_end` of the agent asks it for a brief. The
 `turn_end` that carries one locks the session, and when that turn ends a fresh
 session starts with the brief, the last turns and everything the old one
 waited on, as in [Continue in a fresh session](#continue-in-a-fresh-session).
 While a background task of the harness is live, `turn_end` says the handoff
-waits for it, and the next `turn_end` with a brief tries again. A queue
+waits for it, and the next `turn_end` with a brief tries again. When it
+fires, the old tab shows a line such as "autohandoff at 213k tokens (from
+200k)". The new session keeps the setting, so a long task goes on handing off. A queue
 worker cannot turn it on: its task owns it.
 
 ## Peers on a linked server
