@@ -2,8 +2,9 @@
 
 The Server builds what ``aegis serve`` builds (an App, then build_web) and runs
 uvicorn as a task on a socket it bound first, so the port is known before the
-App needs it in ``base_url``. Starlette's lifespan still calls ``boot()`` and
-``shutdown()``, in the CLI's order. It always listens, on loopback by default:
+App needs it in ``base_url``, and that already listens (``listening``).
+Starlette's lifespan still calls ``boot()`` and ``shutdown()``, in the CLI's
+order. It always listens, on loopback by default:
 harness children reach aegis's tools at ``<base_url>/mcp``, so a server without
 a listener would spawn agents with no aegis tools. It installs no signal
 handlers; the host program stops it by leaving the block.
@@ -115,6 +116,17 @@ def allowed_hosts(host: str, port: int) -> set[str]:
 _running: Server | None = None
 
 
+def listening(host: str, port: int) -> socket.socket:
+    """A socket that listens before uvicorn's lifespan runs ``boot()``. Boot
+    resumes the turns a restart cut, and each resumed harness connects to
+    ``/mcp`` at once: on a socket uvicorn binds only after the lifespan, that
+    connection is refused and Claude Code drops aegis's tools for the rest of
+    the process (#1024). Listening first, it waits in the backlog until boot
+    ends and uvicorn serves it."""
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET
+    return socket.create_server((host, port), family=family, backlog=2048)
+
+
 class Server:
     """An aegis server in this process. See the help page ``library``."""
 
@@ -185,12 +197,9 @@ class Server:
         from .web import build_web, load_or_create_token, ws_protocol
 
         p = prepare(self._root, self._root)
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
-            sock.bind((self._host, self._port))
+            sock = listening(self._host, self._port)
         except OSError as e:
-            sock.close()
             raise StartError(
                 [f"cannot listen on {self._host}:{self._port}: {e}"]
             ) from e
