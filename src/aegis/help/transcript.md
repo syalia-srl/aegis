@@ -26,8 +26,8 @@ Esc interrupts the turn. With reduced motion set in your system, the row keeps
 one verb and stops moving.
 
 While a tool call runs, the working row shows that call instead of its
-asterisk: the call's icon pulses, the verb says what kind of work it is, and
-the call's name follows it, so you see it even when its run of rows is folded.
+asterisk: the call's icon pulses and the verb says what kind of work it is,
+so you see it even when its run of rows is folded.
 The verbs come from the call itself, with no model involved: reading for
 reads, searches and shell commands that change nothing; editing; testing for
 test runners, linters and CI checks; debugging for a test or a read while the
