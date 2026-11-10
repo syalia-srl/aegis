@@ -166,6 +166,7 @@ const sidebar = app.opts.sidebar === false ? null : new SidebarPart(app, root.qu
   sleep: (key) => sleepKey(key),
   quiet: (key, on) => quietKey(key, on),
   autoclose: (key, on) => autocloseKey(key, on),
+  autohandoff: (key, on) => autohandoffKey(key, on),
   continueKey: (key) => continueKey(key),
   restart: (key) => restartKey(key),
   keyOf: (server, id) => app.keyOf(server, id),
@@ -2932,6 +2933,17 @@ async function autocloseKey(key, on) {
   }
 }
 
+// Autohandoff (#1019): past its context size, the agent's turn_end with a
+// brief continues the session in a fresh one, with what it waits on.
+async function autohandoffKey(key, on) {
+  if (offline() || !app.state.sessions.has(key)) return;
+  try {
+    await app.callFor(key, "session.autohandoff", { on });
+  } catch (e) {
+    failed(key, e);
+  }
+}
+
 // Sleep ends the process and keeps the conversation. What would die with it
 // (session.kills: background tasks, timers, processes it left running)
 // is asked about first. A server older than #479 has no such op.
@@ -3097,6 +3109,7 @@ function sessionMenu(key) {
   if (!s.worker) life.push({ id: "handoff", label: "Hand off", icon: "handoff", disabled: why, run: () => handOff(s) });
   const rename = [{ id: "rename", label: "Rename…", icon: "pencil", disabled: why, run: () => renameKey(key) }];
   rename.push({ id: "autoclose", label: s.autoclose ? "Autoclose off" : "Autoclose on", icon: "archive", disabled: why, run: () => autocloseKey(key, !s.autoclose) });
+  if (!s.worker) rename.push({ id: "autohandoff", label: s.autohandoff ? "Autohandoff off" : "Autohandoff on", icon: "play", disabled: why, run: () => autohandoffKey(key, !s.autohandoff) });
   return { title, groups: [opening, life, rename, close] };
 }
 // The menu of a card or tab pressed; none on the space around them.
