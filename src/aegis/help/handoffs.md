@@ -119,8 +119,8 @@ them and is refused while any is live.
 Each tab shows the handoff as a line. The old one reads "continued in" and the
 new session's handle, and the new one reads "continued from" and the old
 session's handle. Both lines list what moved, such as "carrying 1 monitor", or
-say "nothing to carry". The person's `/autohandoff` and `/autoclose` settings
-follow the new session too, and the lines list them.
+say "nothing to carry". The person's `/autohandoff`, `/autoclose` and quiet
+settings follow the new session too, and the lines list them.
 
 The new session takes the old one's place in its group of tabs: it joins the
 group, and heads it when the old one did. Its first message names the sessions
@@ -134,7 +134,7 @@ waits on them as their parent.
 `/autohandoff` makes the continuation happen on its own. Alone it uses the
 configured `handoff_at:` (`context:` in `.aegis.yaml`); `/autohandoff 200000`
 sets the size for this session; `/autohandoff off` turns it off. The
-Autohandoff button in the sidebar toggles it and shows the size.
+Autohandoff button in the sidebar toggles it, and its tooltip shows the size.
 
 Past that size, every `turn_end` of the agent asks it for a brief. The
 `turn_end` that carries one locks the session, and when that turn ends a fresh
