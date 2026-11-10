@@ -430,6 +430,25 @@ BRIEF_IF = (
     "files, the decisions, what not to retry)."
 )
 
+# /autohandoff (#1019): past the session's threshold every turn_end asks for
+# the brief, and the turn_end that carries one continues the session.
+AUTO_BRIEF = (
+    "This session is in autohandoff from {at} tokens: call turn_end again now, "
+    "before your final message, with the same arguments plus handoff: a brief for "
+    "the fresh session that continues this work (what is done, what is next, the "
+    "files, the decisions, what not to retry). aegis starts it when this turn ends."
+)
+AUTO_GOING = (
+    "noted. Autohandoff: this session takes no more messages, and a fresh one "
+    "continues it with your brief when this turn ends, carrying your monitors, "
+    "feeds, queue tasks, schedules and workflow. End your turn now with a short "
+    "final message. "
+)
+AUTO_WAITS = (
+    "noted. Autohandoff waits: {why} would be lost with this session's process. "
+    "Let it finish or stop it; the next turn_end with a brief hands off. "
+)
+
 
 class NoArgs(_Strict):
     pass
@@ -491,6 +510,10 @@ HANDOFF_KIDS = (
     "report to you from now on, and coordinate them as {handle} did."
 )
 HANDOFF_LEADS = " {handle} headed their group of tabs; you head it now."
+HANDOFF_CARRIED = (
+    "What {handle} was waiting on is yours now and wakes you as it ends: "
+    "{carried}. monitor_list, feed_list, task_status and schedule_list show them."
+)
 
 
 def handoff_opening(
@@ -501,15 +524,19 @@ def handoff_opening(
     leads: bool = False,
     instruction: str | None = None,
     far: bool = False,
+    carried: list[str] | None = None,
 ) -> str:
     """A handoff's first message: who it continues, the sessions it started
-    that the new one adopts (#641), the brief when the agent wrote one, the
+    that the new one adopts (#641), what it was waiting on, which wakes the new
+    one now (#1019), the brief when the agent wrote one, the
     last turns as /spawn carries them (#354), and last, so it is what the agent
     reads last, the instruction it was handed off with (#874)."""
     parts = [(HANDOFF_HEAD_FAR if far else HANDOFF_HEAD).format(handle=handle)]
     if kids:
         line = HANDOFF_KIDS.format(handle=handle, kids=", ".join(kids))
         parts.append(line + (HANDOFF_LEADS.format(handle=handle) if leads else ""))
+    if carried:
+        parts.append(HANDOFF_CARRIED.format(handle=handle, carried=", ".join(carried)))
     if brief:
         parts.append("Its brief for you:\n\n" + brief)
     if tail:
@@ -1715,6 +1742,27 @@ def register_agent_ops(app: App) -> None:
             # A worker's final message is its task's result, read by the
             # enqueuer, not a reply to the person.
             return "noted" + left
+        auto = s.autohandoff
+        if auto and n >= auto:
+            if not p.handoff:
+                line = (
+                    CONTEXT_LINE.format(k=f"{round(n / 1000)}k")
+                    + AUTO_BRIEF.format(at=f"{round(auto / 1000)}k")
+                    + left
+                )
+                return f"{line}\n{RENAME_LINE}" if unnamed else line
+            # What a handoff here cannot carry: the harness's own background
+            # tasks, held messages, a workflow's lock, a handoff under way.
+            waits = reg.wakers(s, run=False, carried=False)
+            if s.held:
+                waits.append(f"{len(s.held)} held messages")
+            if waits:
+                return AUTO_WAITS.format(why=", ".join(waits)) + seen_line(
+                    s.fold().shown()
+                )
+            if reg.successor(s) is None and reg.workflow_lock(s) is None:
+                s.mark_handoff_pending({})
+                return AUTO_GOING + seen_line(s.fold().shown()) + left
         if p.handoff or not at or n < at:
             said = f"noted. {seen_line(s.fold().shown())}{left}"
             return f"{said}\n{RENAME_LINE}" if unnamed else said

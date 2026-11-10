@@ -675,6 +675,17 @@ class Schedules:
         self._wake.set()
         return s
 
+    def move(self, old: str, new: str) -> None:
+        """A handoff (#1019): a schedule that fires into ``old`` fires into
+        its successor ``new`` from now on."""
+        for name, s in self.items.items():
+            f = s.d.fire
+            if f.target == "existing" and f.session == old:
+                f = f.model_copy(update={"session": new})
+                s.d = s.d.model_copy(update={"fire": f})
+                self._publish(name)
+        self._save()
+
     def awaiting(self, name: str) -> bool:
         """Whether a person has yet to approve ``name``."""
         p = self._get(name).paused

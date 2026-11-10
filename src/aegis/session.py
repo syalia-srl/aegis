@@ -90,6 +90,7 @@ _NOW = (
     "handoff_pending",
     "quiet",
     "autoclose",
+    "autohandoff",
     "workflow",
     "skills",
     "skill_runs",
@@ -432,6 +433,7 @@ class Session:
         handoff_pending: dict | None = None,
         quiet: bool = False,
         autoclose: bool = False,
+        autohandoff: int | None = None,
         checked_version: str | None = None,
         cascade_exhausted: bool = False,
     ) -> None:
@@ -498,6 +500,9 @@ class Session:
         # The person's word, ahead of time, to close once the agent ends done
         # (#691): turn_end refuses done without close while it is on.
         self.autoclose = autoclose
+        # /autohandoff (#1019): the context size, in tokens, from which a
+        # turn_end with a brief continues this session in a fresh one.
+        self.autohandoff = autohandoff
         # A schedule's run: {"name", "run", "spawn"}, inherited by its children
         # (schedules.py); None for any other session.
         self.schedule = schedule
@@ -648,6 +653,7 @@ class Session:
             "handoff_pending": self.handoff_pending,
             "quiet": self.quiet,
             "autoclose": self.autoclose,
+            "autohandoff": self.autohandoff,
             "checked_version": self.checked_version,
             "cascade": self._cascade_meta(),
         }

@@ -347,6 +347,18 @@ class Monitors:
         for m in self.of(owner):
             self.cancel(m.id)
 
+    def move(self, old: str, new: str) -> None:
+        """A handoff (#1019): the monitors of ``old`` wake its successor
+        ``new``. The watch reads its owner when it wakes, so it keeps running."""
+        moved = self.of(old)
+        for m in moved:
+            m.owner = new
+        if moved:
+            self._save()
+        for owner in (old, new):
+            self._registry.refresh_card(owner)
+            self._status(owner)
+
     async def shutdown(self) -> None:
         for t in self._tasks.values():
             t.cancel()

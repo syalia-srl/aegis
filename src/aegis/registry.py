@@ -324,6 +324,7 @@ class Registry(Host):
         clears the name the guard reads."""
         if old.continued_by == new.log_id:
             old.mark_continued(None)
+            self.carry(new.log_id, old.log_id)
             old.report({"kind": "handoff_off", "handle": new.handle, "why": why})
 
     async def _archive(self, s: Session) -> None:
@@ -342,28 +343,54 @@ class Registry(Host):
             frontier = {s.log_id for s in kids}
         return out[::-1]
 
-    def wakers(self, s: Session, *, run: bool = True, feeds: bool = True) -> list[str]:
+    def wakers(
+        self, s: Session, *, run: bool = True, carried: bool = True
+    ) -> list[str]:
         """What will still wake ``s`` with a new turn, one phrase each: its
         approved run, monitors, live feeds, background tasks and callback
-        queue tasks. ``feeds=False`` leaves the feeds out, for a handoff: they
-        follow its successor.
+        queue tasks. ``carried=False`` leaves out what a handoff here carries
+        to the successor (#1019): monitors, feeds and queue tasks. Background
+        tasks stay: they belong to the harness's process, which ends.
         turn_end refuses done while any is live (#608): the task is not over.
         Its children are not here; they do not wake it, and one spawned for the
         person may outlive the task that started it. ``run=False`` leaves the
         run out, for a handoff: a run follows its owner's successor."""
         n_mon = len(self.monitors.of(s.log_id)) if self.monitors is not None else 0
         n_tasks = sum(1 for w in self._waiting_for(s) if w["kind"] == "task")
-        n_feeds = len(self.feeds.live(s.log_id)) if feeds and self.feeds else 0
+        n_feeds = len(self.feeds.live(s.log_id)) if self.feeds else 0
         counts = (
-            (n_mon, "monitor"),
-            (n_feeds, "feed"),
+            (n_mon if carried else 0, "monitor"),
+            (n_feeds if carried else 0, "feed"),
             (len(s.open_tasks), "background task"),
-            (n_tasks, "queue task"),
+            (n_tasks if carried else 0, "queue task"),
         )
         live = self._running(s) if run else None
         out = [f"workflow {live.run}"] if live is not None else []
         out += [f"{n} {noun}{'' if n == 1 else 's'}" for n, noun in counts if n]
         return out
+
+    def carry(self, old: str, new: str) -> list[str]:
+        """A handoff here (#1019): what would wake ``old`` wakes ``new`` from
+        now on, its monitors, feeds, queue tasks and the schedules that fire
+        into it. Called back with the two swapped when the new session does
+        not take over. Returns what moved, one phrase each, for its first
+        message."""
+        s = self.sessions.get(old)
+        moved = self.wakers(s, run=False) if s is not None else []
+        # A schedule does not wake a session by itself, but it fires into it.
+        if self.schedules is not None:
+            n = sum(
+                1
+                for x in self.schedules.items.values()
+                if x.d.fire.target == "existing" and x.d.fire.session == old
+            )
+            if n:
+                moved.append(f"{n} schedule{'' if n == 1 else 's'}")
+            self.schedules.move(old, new)
+        for engine in (self.monitors, self.feeds, self.queues):
+            if engine is not None:
+                engine.move(old, new)
+        return [m for m in moved if "background task" not in m]
 
     def close_blockers(self, s: Session) -> list[str]:
         """What keeps ``s`` and the sessions it started from closing once its
@@ -792,6 +819,7 @@ class Registry(Host):
             handoff_pending=meta.get("handoff_pending"),
             quiet=bool(meta.get("quiet")),
             autoclose=bool(meta.get("autoclose")),
+            autohandoff=meta.get("autohandoff"),
             checked_version=meta.get("checked_version"),
             # The meta's {"models", "at", "exhausted"}; a spawn record's list
             # has no exhausted.
@@ -1027,6 +1055,10 @@ class Registry(Host):
 
     async def close(self, log_id: str) -> None:
         s = self.open(log_id)
+        # A successor closed before it took over gives back what it carried
+        # (#1019), before its own monitors and feeds are dropped.
+        if (old := self.sessions.get(s.spec.continues or "")) is not None:
+            self._call_off_handoff(old, s, "it was closed")
         if self.monitors is not None:
             self.monitors.drop_owner(log_id)
         if self.feeds is not None:
@@ -1043,8 +1075,6 @@ class Registry(Host):
             except Exception:
                 log.exception("aegis: %s's skill servers did not stop", log_id)
         await s.stop()
-        if (old := self.sessions.get(s.spec.continues or "")) is not None:
-            self._call_off_handoff(old, s, "it was closed")
         if self.secrets is not None:
             # Pads and open requests die with the session, and so do the
             # files people provided to it, unless the agent moved them.
@@ -1155,6 +1185,14 @@ class Registry(Host):
                 "can be quiet, since only its turn's end brings it back",
             )
         s._set(quiet=quiet)
+        self.metas.write(s.meta())
+        return s.wire()
+
+    def set_autohandoff(self, log_id: str, at: int | None) -> dict:
+        """Set the context size from which a session continues itself in a
+        fresh one at a turn_end with a brief (#1019); None turns it off."""
+        s = self.open(log_id)
+        s._set(autohandoff=at)
         self.metas.write(s.meta())
         return s.wire()
 

@@ -127,6 +127,7 @@ const SIDEBAR_HTML = `
   <button class="act stop needs-net" id="stop-session" data-t-title="sidebar.sleepTitle"><span data-t="sidebar.sleep"></span></button>
   <button class="act" id="quiet-session" data-t-title="sidebar.quietTitle"><span data-t="sidebar.quiet"></span></button>
   <button class="act needs-net" id="autoclose-session" aria-pressed="false" data-t-title="sidebar.autocloseTitle"><span data-t="sidebar.autoclose"></span></button>
+  <button class="act needs-net" id="autohandoff-session" aria-pressed="false" data-t-title="sidebar.autohandoffTitle"><span data-t="sidebar.autohandoff"></span><span class="autohandoff-at"></span></button>
   <button class="act needs-net" id="continue" data-t-title="sidebar.continueTitle"><span data-t="sidebar.continue"></span></button>
   <button class="act needs-net" id="restart" data-t-title="sidebar.restartTitle"><span data-t="sidebar.restart"></span></button>
   <button class="act needs-net" id="close" data-t-title="sidebar.archiveTitle"><span data-t="sidebar.archive"></span></button>
@@ -252,6 +253,7 @@ export class SidebarPart {
     this.stop = n("stop-session");
     this.quietBtn = n("quiet-session");
     this.autoclose = n("autoclose-session");
+    this.autohandoff = n("autohandoff-session");
     this.continueBtn = n("continue");
     this.restart = n("restart");
     this.closeBtn = n("close");
@@ -302,6 +304,7 @@ export class SidebarPart {
     this.stop.prepend(icon("sleep"));
     this.quietBtn.prepend(icon("quiet"));
     this.autoclose.prepend(icon("archive"));
+    this.autohandoff.prepend(icon("play"));
     this.continueBtn.prepend(icon("play"));
     this.restart.prepend(icon("restart"));
     this.closeBtn.prepend(icon("archive"));
@@ -321,6 +324,10 @@ export class SidebarPart {
     this.autoclose.addEventListener("click", () => {
       const s = this.act.focused?.();
       if (s) this.act.autoclose?.(s.key, !s.autoclose);
+    });
+    this.autohandoff.addEventListener("click", () => {
+      const s = this.act.focused?.();
+      if (s) this.act.autohandoff?.(s.key, !s.autohandoff);
     });
     this.continueBtn.addEventListener("click", () => {
       const s = this.act.focused?.();
@@ -451,6 +458,13 @@ export class SidebarPart {
     this.quietBtn.disabled = !["working", "waiting"].includes(s.attention) || held;
     this.autoclose.disabled = held;
     this.autoclose.setAttribute("aria-pressed", String(!!s.autoclose));
+    // A queue worker's task owns it, so it never hands itself off.
+    this.autohandoff.hidden = !!s.worker;
+    this.autohandoff.disabled = held;
+    this.autohandoff.setAttribute("aria-pressed", String(!!s.autohandoff));
+    this.autohandoff.querySelector(".autohandoff-at").textContent = s.autohandoff
+      ? ` ${Math.round(s.autohandoff / 1000)}k`
+      : "";
     this.closeBtn.disabled = held;
   }
 
