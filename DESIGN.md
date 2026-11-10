@@ -189,7 +189,10 @@ dead server left running is ended first, recognised by its pid and its start tim
 in `/proc`, so two processes never resume one session. Under systemd's default
 `KillMode=control-group` the harnesses die a moment before aegis does; an exit by
 SIGTERM that cut a turn within 30 s of a clean stop counts as that stop's, and a
-worker's task waits out those 30 s before such an exit fails it (restarts.py).
+worker's task waits out those 30 s before such an exit fails it (restarts.py). The
+port listens before boot (`server.listening`), so a harness a continue
+starts reaches `/mcp` once boot ends instead of a refused connection, after which
+Claude Code never asks again (#1024).
 
 **An update restarts in place.** `server.update` (admin only) upgrades aegis with the
 installer that owns the running install, read from `sys.prefix` and the dist-info's
