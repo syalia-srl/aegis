@@ -317,6 +317,7 @@ class Registry(Host):
         """A handoff an agent asked for will not start."""
         s.mark_continued(None)
         s.report({"kind": "handoff_off", "handle": "the new session", "why": why})
+        self._maybe_unquiet(s)
 
     def _call_off_handoff(self, old: Session, new: Session, why: str) -> None:
         """The new session will not take over: the old one opens again and its
@@ -326,6 +327,7 @@ class Registry(Host):
             old.mark_continued(None)
             self.carry(new.log_id, old.log_id)
             old.report({"kind": "handoff_off", "handle": new.handle, "why": why})
+            self._maybe_unquiet(old)
 
     async def _archive(self, s: Session) -> None:
         try:
@@ -602,7 +604,8 @@ class Registry(Host):
     BACK = frozenset({"done", "review", "needs_you", "error"})
 
     def _maybe_unquiet(self, s: Session) -> None:
-        if not s.quiet:
+        # A handoff under way carries the quiet to the new session (#1022).
+        if not s.quiet or s.continued_by == "pending":
             return
         kind = self._attention(s)["attention"]
         # A worker done with its task is archived at once: its error goes to
