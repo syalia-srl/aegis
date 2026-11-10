@@ -37,7 +37,7 @@ that is free, such as a prompt, completes nothing.
 | `/title <text>` | set this session's title |
 | `/sleep` | end the process and keep the session, asleep; your next message wakes it |
 | `/stop` | alias of `/sleep` |
-| `/quiet` | hide this session's tab until its turn ends, as Alt+Q does; only a working or waiting session can be quiet |
+| `/quiet` | quiet this session, or unquiet it when it is quiet, as Alt+Q does: its tab shows when a turn ends and hides when the next starts |
 | `/autoclose [on\|off]` | close this session once its agent ends done: `turn_end` done without `close` is refused while it is on; alone, it toggles. See sessions#autoclose |
 | `/autohandoff [N\|off]` | past `N` tokens of context, the agent writes a brief and the session continues in a fresh one on its own, with its monitors, feeds, queue tasks and schedules; alone, `N` is the configured `handoff_at:`. See handoffs#autohandoff |
 | `/restart` | end the process and start a fresh one on the same conversation; nothing is sent. Use it after a change to the agent's MCP config or when the harness hangs |

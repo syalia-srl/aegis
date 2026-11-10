@@ -89,6 +89,7 @@ _NOW = (
     "continued_by",
     "handoff_pending",
     "quiet",
+    "stay_quiet",
     "autoclose",
     "autohandoff",
     "workflow",
@@ -432,6 +433,7 @@ class Session:
         continued_by: str | None = None,
         handoff_pending: dict | None = None,
         quiet: bool = False,
+        stay_quiet: bool = False,
         autoclose: bool = False,
         autohandoff: int | None = None,
         checked_version: str | None = None,
@@ -497,6 +499,9 @@ class Session:
         self.worker = worker
         # No tab until its turn ends (#386); a card in the Fleet meanwhile.
         self.quiet = quiet
+        # Quiet as a mode, not for one turn (#1025): the tab comes back when a
+        # turn ends, and goes again when the next one starts.
+        self.stay_quiet = stay_quiet
         # The person's word, ahead of time, to close once the agent ends done
         # (#691): turn_end refuses done without close while it is on.
         self.autoclose = autoclose
@@ -652,6 +657,7 @@ class Session:
             "continued_by": self.continued_by,
             "handoff_pending": self.handoff_pending,
             "quiet": self.quiet,
+            "stay_quiet": self.stay_quiet,
             "autoclose": self.autoclose,
             "autohandoff": self.autohandoff,
             "checked_version": self.checked_version,
