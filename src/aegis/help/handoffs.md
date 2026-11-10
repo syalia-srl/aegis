@@ -104,10 +104,17 @@ An agent does the same with `session_handoff`, passing `msg` and optionally
 that call on, and the new session starts when its turn ends. An agent that asks
 in a turn that then fails, or whose process dies, keeps its session.
 
-Every way in is refused while the session works, and while a monitor, a
-background task or a queue task would wake it. An agent's call may come during
-its turn, and is refused while messages wait for its next one. The refusal lists them, so you
-can cancel them or wait. A workflow the session owns follows the new session.
+Every way in is refused while the session works, and while a background task
+of the harness would wake it: the task dies with the old process. An agent's
+call may come during its turn, and is refused while messages wait for its next
+one. The refusal lists them, so you can cancel them or wait.
+
+What else would wake the old session follows the new one: its monitors, its
+feeds with their cursor, the queue tasks it enqueued, the schedules that fire
+into it and a workflow it owns. They wake the new session from then on, and its
+first message lists them. If the new session fails before it answers, or you
+close it, they go back to the old one. A handoff across a link carries none of
+them and is refused while any is live.
 
 The new session takes the old one's place in its group of tabs: it joins the
 group, and heads it when the old one did. Its first message names the sessions
@@ -115,6 +122,21 @@ the old one started that are still open, and asks it to tell each one with
 `peer_handoff` that it continues the work. Once the old session is archived,
 those sessions count as started by the new one: its card lists them, and it
 waits on them as their parent.
+
+## Autohandoff
+
+`/autohandoff` makes the continuation happen on its own. Alone it uses the
+configured `handoff_at:` (`context:` in `.aegis.yaml`); `/autohandoff 200000`
+sets the size for this session; `/autohandoff off` turns it off. The
+Autohandoff button in the sidebar toggles it and shows the size.
+
+Past that size, every `turn_end` of the agent asks it for a brief. The
+`turn_end` that carries one locks the session, and when that turn ends a fresh
+session starts with the brief, the last turns and everything the old one
+waited on, as in [Continue in a fresh session](#continue-in-a-fresh-session).
+While a background task of the harness is live, `turn_end` says the handoff
+waits for it, and the next `turn_end` with a brief tries again. A queue
+worker cannot turn it on: its task owns it.
 
 ## Peers on a linked server
 

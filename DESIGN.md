@@ -173,7 +173,11 @@ message. Boot starts a pending handoff whose turn already ended. A handoff acros
 a link goes through `_spawn_far` and archives the old session once the far side
 takes the first message, since the near server does not follow the far turn; its
 `continued_by` holds `handle@server`. Children and a run cannot follow across a
-link, so they refuse it.
+link, so they refuse it. A handoff here carries what would wake the old
+session (#1019): `Registry.carry` moves its monitors, feeds and queue tasks to
+the new log id and retargets the schedules that fire into it, each engine
+persisting the move, and `_call_off_handoff` carries them back. The harness's
+own background tasks cannot move, so they refuse a handoff.
 
 **A restart gives back what it cut.** aegis writes `<state>/server.json` at both ends
 of a clean shutdown, so boot tells a restart from a crash. A turn the server's own
@@ -317,7 +321,10 @@ tool call is prose too and only the agent can tell it from its answer (#679).
 A queue worker hears `noted`, since its final message is its task's result. The brief rides in the report, and
 `session.handoff`, through the chip, the menu, `/handoff` with an instruction or
 an agent's `session_handoff`, starts the fresh session from it, and refuses
-while `Registry.wakers` lists anything but a run, which follows its owner. The fold also
+while `Registry.wakers` lists what a handoff cannot carry (a background task).
+A session in `/autohandoff` (its meta's `autohandoff`, a token count) is asked
+for the brief at every `turn_end` past that count, and the `turn_end` that
+carries one marks the handoff pending, as `session_handoff` does. The fold also
 times the plan from the records' `ts`: work is time inside a turn and after a
 turn that did not hand back to the person, idle is the rest, and each item gets
 the work done while it was `doing`. It accrues only at a plan record and at turn
