@@ -477,7 +477,7 @@ class Registry(Host):
         # person should see it (#386). A SIGTERM is most likely the server's
         # own stop under systemd, and the next boot continues the session.
         if session.quiet and code not in restarts.SIGTERM_CODES:
-            self.set_quiet(session.log_id, False)
+            self._show(session)
         if self.workflows is not None:
             self.workflows.exited(session, code)
 
@@ -617,7 +617,13 @@ class Registry(Host):
             self.workflows is not None and self.workflows.live(s.workflow["run"])
         )
         if kind == "error" or (not s.worker and not held and kind in self.BACK):
-            self.set_quiet(s.log_id, False)
+            self._show(s)
+
+    def _show(self, s: Session) -> None:
+        """Give a quiet session its tab back for now; a quiet mode stays
+        (#1025), so the next turn hides it again."""
+        s._set(quiet=False)
+        self.metas.write(s.meta())
 
     def _running(self, s: Session):
         """The approved run ``s`` is the main agent of, until it ends."""
@@ -697,6 +703,11 @@ class Registry(Host):
         return flow + names + waits + ([f"quota ({quota})"] if quota else [])
 
     def status_changed(self, session: Session) -> None:
+        # A turn starts: a session quiet as a mode loses its tab again (#1025),
+        # whether the person answered or a monitor, task or schedule woke it.
+        if session.stay_quiet and session.status == "working" and not session.quiet:
+            session._set(quiet=True)
+            self.metas.write(session.meta())
         parent = session.spec.spawned_by
         if parent and parent in self.sessions:
             self.refresh_card(parent)
@@ -821,6 +832,7 @@ class Registry(Host):
             else meta.get("continued_by"),
             handoff_pending=meta.get("handoff_pending"),
             quiet=bool(meta.get("quiet")),
+            stay_quiet=bool(meta.get("stay_quiet")),
             autoclose=bool(meta.get("autoclose")),
             autohandoff=meta.get("autohandoff"),
             checked_version=meta.get("checked_version"),
@@ -1120,6 +1132,7 @@ class Registry(Host):
             "last_status": "asleep",
             "asleep_why": "slept",
             "quiet": False,  # a person reopening it wants to see it (#386)
+            "stay_quiet": False,
         }
         # An open session may have taken its handle meanwhile (#673).
         handle = free_handle(str(meta["handle"]), self._open_handles())
@@ -1178,16 +1191,11 @@ class Registry(Host):
         return _public(meta)
 
     def set_quiet(self, log_id: str, quiet: bool) -> dict:
-        """Hide a session's tab until its turn ends, or show it again (#386)."""
+        """Quiet a session, in any state, or end its quiet (#386, #1025). Quiet
+        is a mode: the tab hides now and each time a turn starts, and comes
+        back each time a turn ends with something for the person."""
         s = self.open(log_id)
-        attention = s.wire()["attention"]
-        if quiet and attention not in ("working", "waiting"):
-            raise OpError(
-                "not_running",
-                f"{s.handle} is {attention}; only a working or waiting session "
-                "can be quiet, since only its turn's end brings it back",
-            )
-        s._set(quiet=quiet)
+        s._set(quiet=quiet, stay_quiet=quiet)
         self.metas.write(s.meta())
         return s.wire()
 

@@ -795,7 +795,7 @@ class _session:
     async def list(self) -> Any:
         """The open sessions on this server, each with its state, what it needs (attention and its line, what it waits on), its plan and what it is doing now, its model (`model` as configured, `model_id` as the harness resolved it, null until it has), spend, and `load`: the CPU in cores over the last minute and the RAM in GB of it and everything it started, null while it has no process; then each linked server's sessions in full, with `server`: reach one as `handle@server`."""
     async def quiet(self, *, handle: str | None = ...) -> Any:
-        """Hide a session's tab while it works: it stays in the Fleet, dimmed, and its tab comes back by itself when its turn ends done, review, needs_you or error. Only a working or waiting session can be quiet. Use it for a session doing background work the person need not watch, your own included."""
+        """Put a session in the background, in any state: its tab hides and it stays in the Fleet, dimmed. Its tab comes back by itself when a turn ends done, review, needs_you or error, and hides again when the next turn starts, until the person unquiets it. Use it for a session doing background work the person need not watch, your own included."""
     async def read(self, *, log_id: str, ids: builtins.list[str]) -> Any:
         """A person read these agent messages, on any browser."""
     async def rename(
