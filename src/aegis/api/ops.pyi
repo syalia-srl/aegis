@@ -763,6 +763,8 @@ class _server:
 class _session:
     async def autoclose(self, *, log_id: str, on: bool) -> Any:
         """session.autoclose"""
+    async def autohandoff(self, *, log_id: str, on: bool, at: int | None = ...) -> Any:
+        """Turn a session's autohandoff on or off (#1019): past ``at`` tokens of context, its turn_end with a brief continues it fresh."""
     async def close(self, *, handle: str | None = ..., token: str | None = ...) -> Any:
         """Close a session: its tab goes away and it stays in the archive. A session you spawned, or whose queue task you enqueued, closes at once when its attention is done; any other, your own included, is refused with a one-time token and what to weigh first, and closes on a second call that passes the token."""
     async def configure(
@@ -785,7 +787,7 @@ class _session:
         permission: Literal["read", "write", "full", "auto"] | None = ...,
         cwd: str | None = ...,
     ) -> Any:
-        """Continue your work in a new session and end this one: from this call nobody can write to it. The new session starts when your turn ends, with `msg`, your turn_end brief and your last turns, so end your turn right after this call. Pass `agent` to continue on another agent, with at most your permission, and `host` to continue on a linked server. Refused while a monitor, a background task, a queue task or a held message waits for you. A workflow you own follows the new session, except across a link, where it and any open session you started refuse the call."""
+        """Continue your work in a new session and end this one: from this call nobody can write to it. The new session starts when your turn ends, with `msg`, your turn_end brief and your last turns, so end your turn right after this call. Pass `agent` to continue on another agent, with at most your permission, and `host` to continue on a linked server. Your monitors, feeds, queue tasks, the schedules that fire into you and a workflow you own follow the new session, which they wake from then on. Refused while a background task or a held message waits for you, and across a link while any of those, or an open session you started, does."""
     async def interrupt(self, *, log_id: str) -> Any:
         """session.interrupt"""
     async def kills(self, *, log_id: str) -> Any:

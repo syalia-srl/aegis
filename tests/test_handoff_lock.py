@@ -123,16 +123,6 @@ async def test_a_restart_keeps_the_lock_and_the_archive_happens(world):
     await until(lambda: log_a in reg.archived, 8, "archived after the restart")
 
 
-async def monitor(world, a):
-    params = {
-        "description": "a long build",
-        "done": "false",
-        "progress": None,
-        "source": None,
-    }
-    await world.app.registry.call("monitor.start", params, Caller("agent", a.log_id))
-
-
 async def typed(world, a, line):
     r = await send(world, a, line)
     return world.session(r["log_id"])
@@ -214,20 +204,20 @@ async def test_handoff_is_refused_while_it_works(world):
     assert e.value.code == "busy"
 
 
-async def test_a_monitor_refuses_the_handoff_by_name(world):
+async def test_a_background_task_refuses_the_handoff_by_name(world):
     a = await world.spawn()
     await turn(a, "earlier work")
-    await monitor(world, a)
+    a.open_tasks.add("bg-1")  # a monitor follows the new session (#1019)
     with pytest.raises(OpError) as e:
         await send(world, a, "/handoff go on")
-    assert e.value.code == "has_wakers" and "1 monitor" in e.value.message
+    assert e.value.code == "has_wakers" and "1 background task" in e.value.message
     assert a.continued_by is None
 
 
 async def test_the_chip_is_refused_by_a_waker_too(world):
     a = await world.spawn()
     await turn(a, "earlier work")
-    await monitor(world, a)
+    a.open_tasks.add("bg-1")
     with pytest.raises(OpError) as e:
         await handoff(world, a)
     assert e.value.code == "has_wakers"

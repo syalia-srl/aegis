@@ -268,6 +268,17 @@ class Queues:
             None,
         )
 
+    def move(self, old: str, new: str) -> None:
+        """A handoff (#1019): the tasks ``old`` enqueued and still waits on
+        report to its successor ``new``, which can also cancel them."""
+        for t in self.tasks.values():
+            if t.enqueuer == old and t.status in ("pending", "running"):
+                t.enqueuer = new
+                self._log(t, "moved")
+        self._status(old)
+        self._registry.refresh_card(old)
+        self._registry.refresh_card(new)
+
     # -- operations ------------------------------------------------------------------
     async def enqueue(
         self,
