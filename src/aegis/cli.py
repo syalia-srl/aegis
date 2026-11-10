@@ -285,7 +285,7 @@ def serve(
     )
 
     from .app import App
-    from .server import StartError, allowed_hosts, prepare
+    from .server import StartError, allowed_hosts, listening, prepare
     from .web import build_web, load_or_create_token, ws_protocol
 
     try:
@@ -355,7 +355,9 @@ def serve(
         uvicorn.Config(web, host=host, port=port, log_level="warning", ws=ws_protocol())
     )
     self_update.on_stop(lambda: setattr(server, "should_exit", True))
-    server.run()
+    # Listening before the lifespan boots, so the harnesses boot resumes reach
+    # /mcp (server.listening, #1024); uvicorn would bind after it.
+    server.run(sockets=[listening(host, port)])
     if (argv := self_update.pending()) is not None:
         typer.echo("aegis restarting on the updated build")
         sys.stdout.flush()
