@@ -2420,6 +2420,11 @@ class App:
         if old.autoclose:
             reg.set_autoclose(s.log_id, True)
             settings.append("autoclose")
+        if old.quiet:
+            # Its first turn is running, and its end brings the tab back.
+            s._set(quiet=True)
+            reg.metas.write(s.meta())
+            settings.append("quiet")
         # A line in each tab, so the person sees the handoff happen (#1022).
         what = carried + settings
         old.report({"kind": "handoff_to", "handle": s.handle, "carried": what})

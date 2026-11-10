@@ -209,3 +209,16 @@ async def test_the_autohandoff_shows_when_it_fires(world):
     assert any(
         x.startswith("autohandoff at ") and x.endswith("(from 500)") for x in lines(a)
     ), lines(a)
+
+
+async def test_a_quiet_session_hands_its_quiet_on(world):
+    a = await world.spawn()
+    world.app.sessions.rename(a.log_id, a.handle, "A named session")
+    await send(world, a, "/autohandoff 500")
+    a._set(quiet=True)
+    brief = mcp("turn_end", attention="review", line="x", handoff="Done: X.")
+    await turn(a, brief)
+    await until(lambda: successor(world, a) is not None, 8, "the new session")
+    b = successor(world, a)
+    await until(lambda: "continued from" in " ".join(lines(b)), 8, "its line")
+    assert any(x.endswith("autohandoff from 500, quiet") for x in lines(b)), lines(b)
