@@ -141,7 +141,7 @@ async def test_commands_list_puts_aegis_first_and_hides_what_it_shadows(app):
     lid = await spawn(app)
     r = await app.registry.call("commands.list", {"log_id": lid})
     names = [c["name"] for c in r["commands"]]
-    assert names[:24] == [
+    assert names[:25] == [
         "model",
         "effort",
         "permission",
@@ -151,6 +151,7 @@ async def test_commands_list_puts_aegis_first_and_hides_what_it_shadows(app):
         "stop",
         "quiet",
         "autoclose",
+        "autohandoff",
         "restart",
         "btw",
         "feedback",

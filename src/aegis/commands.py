@@ -69,6 +69,12 @@ AEGIS: dict[str, Command] = {
             "[on|off]",
             "Close this session when its agent ends done; alone, toggle it",
         ),
+        Command(
+            "autohandoff",
+            "[N|off]",
+            "Continue in a fresh session on its own past N tokens of context, "
+            "carrying what it waits on; alone, the configured handoff_at",
+        ),
         Command("restart", "", "A fresh process on the same conversation"),
         Command("btw", "<question>", "Ask a side question; the agent never sees it"),
         Command(

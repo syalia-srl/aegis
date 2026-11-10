@@ -88,7 +88,7 @@ from .cascade import Cooling, Fall, classify, pick
 from .cgroups import SessionCgroups
 from .channels import Channels, Throttle
 from .claude.process import PERMISSION_MODE, ControlError
-from .config import Config, Snapshot, accept_version, write_host
+from .config import CONTEXT_DEFAULTS, Config, Snapshot, accept_version, write_host
 from .harness import harness_for
 from .config_ops import register_config_ops
 from .doctor_watch import DoctorWatch
@@ -349,6 +349,12 @@ def _held(owner: str, why: str) -> str:
 
 class AutocloseParams(LogParams):
     on: bool
+
+
+class AutohandoffParams(LogParams):
+    # The context size in tokens; omitted, the configured handoff_at.
+    on: bool
+    at: int | None = Field(None, gt=0)
 
 
 class RestartParams(LogParams):
@@ -2127,6 +2133,17 @@ class App:
             return reg.set_autoclose(
                 s.log_id, not s.autoclose if not arg else arg == "on"
             )
+        if name == "autohandoff":
+            if s.worker:
+                raise OpError(
+                    "worker", f"{s.handle} is a queue worker; its task owns it"
+                )
+            if arg == "off":
+                return reg.set_autohandoff(s.log_id, None)
+            if arg and not (arg.isdigit() and int(arg) > 0):
+                raise OpError("bad_params", "usage: /autohandoff [N|off]")
+            at = int(arg) if arg else self.config.current().context["handoff_at"]
+            return reg.set_autohandoff(s.log_id, at or CONTEXT_DEFAULTS["handoff_at"])
         if name == "restart":
             return await self._launch(s, caller, untested, s.restart)
         if name == "spawn":
@@ -2367,14 +2384,6 @@ class App:
         kids = tuple(
             k.handle for k in reg.sessions.values() if k.spec.spawned_by == old.log_id
         )
-        prompt = handoff_opening(
-            old.handle,
-            report.get("handoff"),
-            spawn_tail(old.entries()),
-            kids=kids,
-            leads=leads and bool(kids),
-            instruction=p.msg,
-        )
         spec = dataclasses.replace(
             self._handoff_spec(old, p, capped),
             continues=old.log_id,
@@ -2399,11 +2408,23 @@ class App:
             old.mark_continued(None)
             raise
         old.mark_continued(s.log_id)
-        self.feeds.move(old.log_id, s.log_id)
+        # What would wake the old session wakes the new one (#1019); moved
+        # back if it does not take over (Registry._call_off_handoff).
+        carried = reg.carry(old.log_id, s.log_id)
+        prompt = handoff_opening(
+            old.handle,
+            report.get("handoff"),
+            spawn_tail(old.entries()),
+            kids=kids,
+            leads=leads and bool(kids),
+            instruction=p.msg,
+            carried=carried,
+        )
         try:
             await s.send(prompt)
         except (BrokenPipeError, ConnectionResetError, FileNotFoundError) as e:
             old.mark_continued(None)
+            reg.carry(s.log_id, old.log_id)
             raise OpError(
                 "harness_failed", f"{s.handle} did not take its first message: {e}"
             ) from e
@@ -2831,10 +2852,11 @@ class App:
             ends, with `msg`, your turn_end brief and your last turns, so end
             your turn right after this call. Pass `agent` to continue on another
             agent, with at most your permission, and `host` to continue on a
-            linked server. Refused while a monitor, a background task, a queue
-            task or a held message waits for you. A workflow you own follows the
-            new session, except across a link, where it and any open session you
-            started refuse the call."""
+            linked server. Your monitors, feeds, queue tasks, the schedules that
+            fire into you and a workflow you own follow the new session, which
+            they wake from then on. Refused while a background task or a held
+            message waits for you, and across a link while any of those, or an
+            open session you started, does."""
             if caller.is_agent:
                 if p.log_id not in (None, caller.log_id):
                     raise OpError(
@@ -2854,9 +2876,9 @@ class App:
                 raise OpError("handed_off", f"{old.handle} is already being continued")
             far = self._far_of(p)
             # What would wake a session nobody can write to, or lose its result.
-            # A run follows its owner's successor only on this server.
-            # A run and feeds follow their owner's successor only on this server.
-            if wakers := reg.wakers(old, run=far is not None, feeds=far is not None):
+            # A run, monitors, feeds and queue tasks follow their owner's
+            # successor only on this server (#1019).
+            if wakers := reg.wakers(old, run=far is not None, carried=far is not None):
                 raise OpError(
                     "has_wakers",
                     f"{old.handle} still waits on {', '.join(wakers)}; "
@@ -3167,6 +3189,17 @@ class App:
             return reg.set_quiet(p.log_id, False)
 
         # The person's, never an agent's: autoclose is their word to close (#691).
+        @r.op("session.autohandoff", AutohandoffParams, names=(("log_id", "session"),))
+        async def autohandoff(p: AutohandoffParams, caller):
+            """Turn a session's autohandoff on or off (#1019): past ``at``
+            tokens of context, its turn_end with a brief continues it fresh."""
+            if reg.open(p.log_id).worker:
+                raise OpError("worker", "a queue worker's task owns it")
+            at = p.at or self.config.current().context["handoff_at"]
+            return reg.set_autohandoff(
+                p.log_id, (at or CONTEXT_DEFAULTS["handoff_at"]) if p.on else None
+            )
+
         @r.op("session.autoclose", AutocloseParams, names=(("log_id", "session"),))
         async def autoclose(p: AutocloseParams, caller):
             return reg.set_autoclose(p.log_id, p.on)
