@@ -514,8 +514,6 @@
    of the star turning, and its name follows the verb (toolverb.js). */
 .aegis #working.calling #working-g svg{animation:a2gpulse 1.4s ease-in-out infinite}
 @keyframes a2gpulse{50%{opacity:.35;transform:scale(.85)}}
-.aegis #working .wcall{display:none;color:var(--muted);margin-left:1ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60ch;vertical-align:bottom}
-.aegis #working.calling .wcall{display:inline-block}
 .aegis .more{margin:6px 0 2px;display:grid;gap:6px}
 .aegis .more pre,.aegis pre.out{margin:0;padding:7px 10px;font-size:11.5px;white-space:pre-wrap;overflow-wrap:anywhere;font-family:var(--font-mono);background:var(--surface);border-left:2px solid var(--rule);color:var(--muted);max-height:420px;overflow:auto}
 .aegis .row.tool.err pre.out,.aegis .row.error pre.out{background:var(--err-bg);color:var(--err);border-left-color:var(--err)}
