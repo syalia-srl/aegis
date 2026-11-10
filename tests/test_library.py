@@ -70,6 +70,33 @@ async def test_it_listens_on_a_free_port_and_serves_the_client(srv: Server):
     assert r.status_code == 200
 
 
+async def test_the_port_accepts_while_boot_resumes_sessions(
+    tmp_path: Path, fake_claude: str, monkeypatch
+):
+    # A harness boot resumes connects to /mcp at once; a refusal there costs
+    # a Claude session aegis's tools until its process ends (#1024).
+    from aegis.app import App
+
+    seen: list[str] = []
+    boot = App.boot
+
+    async def probing(self):
+        port = int(self.sessions.mcp_url.split(":")[2].split("/")[0])
+        try:
+            _, w = await asyncio.open_connection("127.0.0.1", port)
+            w.close()
+            seen.append("accepted")
+        except OSError as e:
+            seen.append(type(e).__name__)
+        await boot(self)
+
+    monkeypatch.setattr(App, "boot", probing)
+    (tmp_path / ".aegis.yaml").write_text(CONFIG)
+    async with Server(tmp_path, claude=fake_claude):
+        pass
+    assert seen == ["accepted"]
+
+
 async def test_a_spawned_turn_ends_with_its_text(srv: Server):
     s = await srv.sessions.spawn("/md hello")
     turn = await s.wait(timeout=20)
