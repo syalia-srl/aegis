@@ -1219,15 +1219,21 @@ def test_quiet_hides_the_tab_and_a_click_on_its_card_brings_it_back(server, page
     assert page.errors == []
 
 
-def test_quiet_is_disabled_on_an_idle_session(server, page):
-    # The panel draws a session's change on the next frame, the transcript's
-    # "done in" at once: slow frames make the test wait for the panel.
-    page.add_init_script(SLOW_FRAMES)
+def test_quiet_takes_an_idle_session_and_a_click_on_its_card_ends_it(server, page):
+    """#1025: quiet works in any state; the card's click ends the mode."""
     page.goto(server.url)
     page.wait_for_selector("#a2[data-view=fleet]")
-    spawn(page, "hello")
+    b = spawn(page, "hello")
     page.wait_for_selector("#s-status.at-done")
-    assert page.is_disabled("#quiet-session")
+    page.wait_for_selector("#quiet-session[aria-pressed=false]:not([disabled])")
+    page.click("#quiet-session")
+    page.wait_for_selector(f".card.quiet[data-id='{b}']")
+    assert tab_ids(page) == []
+    page.click(f".card.quiet[data-id='{b}']")
+    page.wait_for_function("id => location.hash === '#s=' + id", arg=b)
+    page.wait_for_selector("#quiet-session[aria-pressed=false]")
+    assert tab_ids(page) == [b]
+    assert page.errors == []
 
 
 def test_the_autoclose_button_toggles_and_the_agent_must_then_close(server, page):
@@ -1247,20 +1253,22 @@ def test_the_autoclose_button_toggles_and_the_agent_must_then_close(server, page
     assert page.errors == []
 
 
-def test_alt_q_quiets_a_working_session_and_leaves_an_idle_one(server, page):
+def test_alt_q_quiets_an_idle_session_and_a_working_one(server, page):
     page.goto(server.url)
     page.wait_for_selector("#a2[data-view=fleet]")
     a = spawn(page, "stays")
     page.wait_for_selector("#s-status.at-done")
-    page.keyboard.press("Alt+q")
-    assert tab_ids(page) == [a]
     b = spawn(page, HOLD)
     page.wait_for_function("!document.querySelector('#quiet-session').disabled")
     page.focus("#input")
     page.keyboard.press("Alt+q")
     page.wait_for_function("id => location.hash === '#s=' + id", arg=a)
     assert tab_ids(page) == [a]
+    page.keyboard.press("Alt+q")
+    page.wait_for_function("() => !location.hash.startsWith('#s=')")
+    assert tab_ids(page) == []
     page.click("#tab-fleet")
+    page.wait_for_selector(f".card.quiet[data-id='{a}']")
     page.wait_for_selector(f".card.quiet[data-id='{b}']")
     assert page.errors == []
 

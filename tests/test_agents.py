@@ -699,8 +699,14 @@ async def test_a_watched_session_is_followed_through_a_rename_and_a_close(world)
         what="the new handle on the card",
     )
     await world.app.registry.call("session.close", {"log_id": b.log_id})
-    await until(lambda: inbox(a), timeout=5, what="the wake")
-    (wake,) = inbox(a)
+
+    # An idle nudge can reach a loaded runner's inbox first (#972).
+    def wakes():
+        return [m for m in inbox(a) if not m["title"].startswith("aegis:nudge")]
+
+    await until(wakes, timeout=5, what="the wake")
+    assert len(wakes()) == 1, [m["title"] for m in inbox(a)]
+    (wake,) = wakes()
     assert " · ok · " in wake["title"] and "renamed-peer closed" in wake["md"]
 
 

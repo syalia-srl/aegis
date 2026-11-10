@@ -356,19 +356,27 @@ plan item, or what it is doing.
 
 ## Quiet sessions
 
-A quiet session has no tab. Its card stays in the Fleet, dimmed and marked
-quiet with a crossed-out eye, in the last group of "Needs you first". It comes back to the tab bar by
-itself when its turn ends done, review, needs_you or error, and stays there
-until it is quieted again; a queue worker comes back only on an error.
+A quiet session runs in the background, with no tab. Its card stays in the
+Fleet, dimmed and marked quiet with a crossed-out eye, in the last group of
+"Needs you first". Its tab comes back by itself when a turn ends done, review,
+needs_you or error, so you see what it has for you. Quiet is a mode, not one
+turn: when the next turn starts, because you answered or because a monitor, a
+task or a schedule woke it, the tab goes away again. It stays quiet until you
+unquiet it. A queue worker comes back only on an error.
 
-- The Quiet button in the session panel, beside Sleep, quiets a session that
-  is working or waiting. Alt+Q does the same for the session in front, from
-  the message box too.
-- `/quiet` in a session's box quiets that session, as Alt+Q does.
+- The Quiet button in the session panel, beside Sleep, quiets a session in
+  any state, and pressed again unquiets it. Alt+Q does the same for the
+  session in front, from the message box too.
+- `/quiet` in a session's box quiets that session or unquiets it, as Alt+Q
+  does.
 - An agent calls `session_quiet` with a handle, its own included.
-- Clicking a quiet card in the Fleet brings the session back at once.
+- The tab menu offers Quiet, or Unquiet on a quiet session.
+- Clicking a quiet card in the Fleet unquiets the session and opens it.
 - Opening it from the Alt+P list does the same (see
   [Switch between sessions](#switch-between-sessions)).
+
+A session spawned with `--quiet`, or `quiet` on `session_spawn`, is quiet for
+its first turn only.
 
 Quiet is about the tab, not the process: a quiet session keeps working, and
 sleeping one keeps it quiet. Wake, Continue and Restart leave it quiet too;

@@ -300,7 +300,7 @@ export default {
   "sidebar.liveSessions": "live sessions",
   "sidebar.avgContext": "average context",
   "sidebar.sleepTitle": "Sleep: end the process and keep the conversation; the next message wakes it",
-  "sidebar.quietTitle": "Quiet: hide the tab until the turn ends; its card stays in the Fleet",
+  "sidebar.quietTitle": "Quiet: the tab shows only when a turn ends, and hides when the next starts; press again to end it",
   "sidebar.autocloseTitle": "Autoclose: once on, the agent must end done with close, so the session closes when it finishes",
   "sidebar.autohandoffTitle": "Autohandoff: past this context size, the agent writes a brief and the session continues in a fresh one, with its monitors, feeds, queue tasks and schedules",
   "sidebar.continueTitle": "Continue: send “Continue” to the agent",
