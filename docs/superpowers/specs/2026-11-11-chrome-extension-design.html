@@ -232,7 +232,7 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)} pre .s{color:var(--ok)}
 <div class="chrome">
   <span>aegis</span>
   <span class="tab">spec · the person's Chrome</span>
-  <span class="st"><span class="pill acc">draft, not started</span><span class="pill">2026-11-11</span><span class="pill">#1034</span></span>
+  <span class="st"><span class="pill acc">approved, not started</span><span class="pill">2026-11-11</span><span class="pill">#1034</span></span>
 </div>
 
 <div class="wrap">
@@ -260,7 +260,7 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)} pre .s{color:var(--ok)}
 
 <main>
 <h1>Agents in the person's own Chrome, one shared tab at a time</h1>
-<div class="meta"><span>docs/superpowers/specs/2026-11-11-chrome-extension-design.html</span><span>·</span><span>draft</span></div>
+<div class="meta"><span>docs/superpowers/specs/2026-11-11-chrome-extension-design.html</span><span>·</span><span>approved, not started</span></div>
 <p class="lede">A Chromium extension pairs the person's own browser with aegis. The person shares a tab with one or more agents, or approves an agent's request for one, and those agents read and drive it with the same tools they use on the server's browsers. Sign-ins, captchas and sites that block headless browsers then work, because the browser is the person's own, and the server's browsers go back to tests, screenshots and unattended work.</p>
 
 <h2 id="delivers"><span class="n">01</span>What this delivers</h2>
@@ -285,7 +285,7 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)} pre .s{color:var(--ok)}
 </div>
 
 <h2 id="decisions"><span class="n">02</span>Decisions</h2>
-<p><span class="who">maintainer</span> marks a decision the maintainer made. <span class="who q">proposed</span> marks one this spec proposes and nobody has ruled on yet.</p>
+<p><span class="who">maintainer</span> marks a decision the maintainer made; every decision here has been ruled on.</p>
 <table class="tbl">
 <thead><tr><th>Question</th><th>Decision</th><th>Why</th></tr></thead>
 <tbody>
@@ -296,12 +296,15 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)} pre .s{color:var(--ok)}
 <tr><td>Seeing and revoking</td><td>Shared tabs show in the session panel in aegis and in the popup. Either side disconnects an agent or stops sharing a tab</td><td class="why"><span class="who">maintainer</span> The person should not need to go back to the browser to cut an agent off.</td></tr>
 <tr><td>Several agents on a tab</td><td>Allowed when the person grants it to each</td><td class="why"><span class="who">maintainer</span> A tab where one agent asks a chat site and another reads the answer is a use case.</td></tr>
 <tr><td>Look</td><td>aegis's animated mark (the Gorgoneion from <code>glyphs.js</code>) and the theme the person picked in aegis</td><td class="why"><span class="who">maintainer</span> The extension is part of aegis and should look it.</td></tr>
-<tr><td>Agent tools</td><td>The existing <code>browser_*</code> tools, with <code>chrome:&lt;name&gt;</code> ids, plus <code>browser_list</code>, <code>browser_request</code> and a <code>where</code> on <code>browser_open</code></td><td class="why"><span class="who q">proposed</span> Two new entry points instead of a parallel tool family.</td></tr>
-<tr><td>A new tab an agent asked for</td><td>Needs the person's approval every time</td><td class="why"><span class="who q">proposed</span> Start strict; relax it per site later if approvals become noise.</td></tr>
-<tr><td>Two agents acting at once</td><td>Reads at any time. Actions on one tab run one at a time, in order of arrival</td><td class="why"><span class="who q">proposed</span> Interleaved typing from two agents would corrupt a field.</td></tr>
-<tr><td>The person acting in a shared tab</td><td>Pause in the tab's ribbon makes the person the holder, as Take over does in a server browser</td><td class="why"><span class="who q">proposed</span> The extension cannot stop the person's clicks, and should not. Pause stops the agents' instead, with the same <code>person_has_control</code> error they know.</td></tr>
+<tr><td>Agent tools</td><td>The existing <code>browser_*</code> tools, with <code>chrome:&lt;name&gt;</code> ids, plus <code>browser_list</code>, <code>browser_request</code> and a <code>where</code> on <code>browser_open</code></td><td class="why"><span class="who">maintainer</span> Two new entry points instead of a parallel tool family.</td></tr>
+<tr><td>A new tab an agent asked for</td><td>Needs the person's approval every time</td><td class="why"><span class="who">maintainer</span> Start strict; relax it per site later if approvals become noise.</td></tr>
+<tr><td>Two agents acting at once</td><td>Reads at any time. Actions on one tab run one at a time, in order of arrival</td><td class="why"><span class="who">maintainer</span> Interleaved typing from two agents would corrupt a field.</td></tr>
+<tr><td>The person acting in a shared tab</td><td>Pause in the tab's ribbon makes the person the holder, as Take over does in a server browser</td><td class="why"><span class="who">maintainer</span> The extension cannot stop the person's clicks, and should not. Pause stops the agents' instead, with the same <code>person_has_control</code> error they know.</td></tr>
 <tr><td>A site's network route</td><td>A shared site can exit through a linked server, chosen per site in the popup</td><td class="why"><span class="who">maintainer</span> Reaching a site from another country without a VPN, as <code>exit_via</code> already does for what the server starts. Per site because Chrome sets a proxy per browser profile, not per tab.</td></tr>
-<tr><td>Copying a session to a server browser</td><td>Out of scope</td><td class="why"><span class="who q">proposed</span> It would move credentials off the person's machine. Revisit with a use case.</td></tr>
+<tr><td>A session handed off</td><td>Its grants pass to the session that continues it</td><td class="why"><span class="who">maintainer</span> A handoff continues the same work; a long-lived chat tab should not need sharing again.</td></tr>
+<tr><td>Sites never shared</td><td>A list the person keeps in the extension's settings, empty by default. A listed site cannot be shared and never matches a request</td><td class="why"><span class="who">maintainer</span> A bank or a password manager should be out of reach even by mistake. The extension enforces it like a grant.</td></tr>
+<tr><td>On a phone</td><td>Requests can be approved and grants revoked from aegis; tabs are hosted only by a desktop browser</td><td class="why"><span class="who">maintainer</span> Chrome on Android has no extensions. Approving from the phone covers the case of being away from the desk.</td></tr>
+<tr><td>Copying a session to a server browser</td><td>Out of scope</td><td class="why"><span class="who">maintainer</span> It would move credentials off the person's machine. Revisit with a use case.</td></tr>
 </tbody>
 </table>
 
@@ -379,7 +382,7 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)} pre .s{color:var(--ok)}
 </tbody>
 </table>
 <p>A request names what the agent wants in words (<code>match="qwen.ai"</code> or <code>"the pull request I have open"</code>) and why. The extension shows the person the tabs that match by title or URL, and the person picks one or refuses. The agent learns only the tab it was given. Closing a tab ends every grant on it. Agents never learn about a refusal other than through <code>denied</code>; they cannot probe which tabs exist.</p>
-<p>Grants live as long as the tab and the session. When the agent's session is archived, its grants end. When the extension disconnects, grants survive in the extension's storage and resume when it reconnects, so a laptop that sleeps does not need every tab shared again.</p>
+<p>Grants live as long as the tab and the session. A session handed off to a successor passes its grants to it, and the request card and the panel name the new handle. When a session is archived without a successor, its grants end. When the extension disconnects, grants survive in the extension's storage and resume when it reconnects, so a laptop that sleeps does not need every tab shared again.</p>
 
 <h2 id="walk"><span class="n">06</span>The interaction</h2>
 <p>Seven moments, from pairing to disconnecting. The text of each is here, and the mock below plays it.</p>
@@ -531,9 +534,7 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)} pre .s{color:var(--ok)}
 <h2 id="nongoals"><span class="n">15</span>Non-goals and open questions</h2>
 <ul>
   <li>Not in scope: Firefox and Safari; several people per server; copying a session from the person's browser into a server browser; any view of tabs the person did not share.</li>
-  <li>Open: should some sites never be shareable, such as a bank, with a list the person keeps in the extension?</li>
-  <li>Open: should a grant for a new tab the agent opened survive the session's archive, so a long-lived chat tab can be handed to the next session?</li>
-  <li>Open: Chrome on Android has no extensions, so on a phone the person can approve requests in aegis but cannot host tabs. Is that enough?</li>
+  <li>Open: none at the time of writing.</li>
 </ul>
 </main>
 </div>
