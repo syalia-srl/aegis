@@ -210,9 +210,10 @@ def register_chrome_ops(app: App) -> Chrome:
             raise OpError(e.code, e.message) from None
         if op == "snapshot":
             tree = value.get("tree", "")
+            holder = chrome.tabs.get(name, {}).get("holder", "agent")
             if len(tree) > SNAPSHOT_MAX:
                 tree = tree[:SNAPSHOT_MAX] + "\n… (cut)"
-            return f"{value.get('url', '')}  {value.get('title', '')}\nholder: agent\n\n{tree}"
+            return f"{value.get('url', '')}  {value.get('title', '')}\nholder: {holder}\n\n{tree}"
         if op == "screenshot":
             shots = chrome.shots_dir(name)
             shots.mkdir(parents=True, exist_ok=True)

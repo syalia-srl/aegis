@@ -317,7 +317,7 @@ async function ribbon(tabId, extra = {}) {
   const [row, { theme }] = await Promise.all([shared().then((a) => a[tabId]), get("theme")]);
   const t = theme || {};
   const state = row
-    ? { who: row.grants.map((g) => g.handle), holder: row.holder || "agent", ask: row.ask || "", by: row.by || "", accent: t["--accent"], surface: t["--surface"], ink: t["--ink"], warn: t["--warn"], ...extra }
+    ? { who: row.grants.map((g) => g.handle), holder: row.holder || "agent", ask: row.ask || "", by: row.by || "", accent: t["--accent"], surface: t["--surface"], ink: t["--ink"], err: t["--err"], ...extra }
     : null;
   try {
     await chrome.scripting.executeScript({ target: { tabId }, files: ["ribbon.js"] });

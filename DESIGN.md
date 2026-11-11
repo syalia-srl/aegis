@@ -158,8 +158,13 @@ one fixture, which is how a target means the same in both kinds of browser.
 The page's events come back as `event` messages into the tab's log, kept
 with the agents' actions as a server browser's are. The ribbon
 (`extension/ribbon.js`) is injected into shared tabs only, in a closed shadow
-root. Handover, pausing and the queue of actions per tab (the spec
-`2026-11-11-chrome-extension-design.html`) build on these calls.
+root. A tab's holder (the agents, or the person after Pause or a handover)
+lives with its grants in the extension and is mirrored by `Chrome.hold`,
+which refuses agents' actions while the person holds the tab and wakes the
+one that handed it over, and any whose action was refused, when it comes
+back. Actions on one tab take `Chrome.lock`, so they run in order of arrival;
+reads do not. Linked servers and the exit per site (the spec
+`2026-11-11-chrome-extension-design.html`) come next.
 
 **A browser is a Chromium the server holds, shared by an agent and a person.**
 A browser (`browsers.py`, #564) is a headless Chromium driven through
