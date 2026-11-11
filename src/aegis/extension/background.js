@@ -125,27 +125,37 @@ async function dropRequest(id) {
   await setRequests((await requests()).filter((r) => r.id !== id));
 }
 
-// The tabs a request may mean: those whose title or address hold a word of
-// it, best first; every tab when none does, so the person can still pick.
-async function candidates(req) {
+// The tabs whose title or address hold a word of a request, best first.
+async function matches(req) {
   const tabs = (await chrome.tabs.query({})).filter((t) => /^https?:/.test(t.url || ""));
   const words = req.match.toLowerCase().split(/[^\p{L}\p{N}.]+/u).filter((w) => w.length > 2);
   const score = (t) => words.filter((w) => `${t.title} ${t.url}`.toLowerCase().includes(w)).length;
-  const hits = tabs.map((t) => [score(t), t]).filter(([n]) => n > 0).sort((a, b) => b[0] - a[0]).map(([, t]) => t);
+  return { tabs, hits: tabs.map((t) => [score(t), t]).filter(([n]) => n > 0).sort((a, b) => b[0] - a[0]).map(([, t]) => t) };
+}
+
+// What the popup offers for a request: the matches, or every tab when none
+// matches, since there the person sees and picks the one they give.
+async function candidates(req) {
+  const { tabs, hits } = await matches(req);
   return (hits.length ? hits : tabs).map((t) => ({ id: t.id, title: t.title, url: t.url, favIconUrl: t.favIconUrl }));
 }
 
+// Give a request: the tab the person picked in the popup, or, for a Give
+// pressed in aegis (tabId null), the best match only. With no match nothing
+// is given: a tab the person never saw named is never handed over, and the
+// request waits in the popup for them to pick one.
 async function give(id, tabId = null) {
   const req = (await requests()).find((r) => r.id === id);
   if (!req) return;
-  await dropRequest(id);
   const who = [{ log_id: req.log_id, handle: req.handle }];
   if (req.kind === "open") {
+    await dropRequest(id);
     const tab = await chrome.tabs.create({ url: req.url });
     return share(tab.id, who, id);
   }
-  tabId ??= (await candidates(req))[0]?.id;
-  if (tabId == null) return send({ t: "deny", request: id });
+  tabId ??= (await matches(req)).hits[0]?.id ?? null;
+  if (tabId == null) return send({ t: "nomatch", request: id });
+  await dropRequest(id);
   return share(tabId, who, id);
 }
 

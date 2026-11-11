@@ -173,3 +173,33 @@ async def test_an_agent_cannot_answer_or_revoke(world):
     Ext(world.app.chrome)
     out = await turn(a, mcp("chrome_answer", request="rq-x", give=True))
     assert "mcp ok" not in out
+
+
+async def test_give_in_aegis_reaches_one_browser_and_a_grant_cancels_it_elsewhere(
+    world,
+):
+    a = await world.spawn()
+    old, new = Ext(world.app.chrome, "c-old"), Ext(world.app.chrome, "c-new")
+    world.app.chrome.devices["c-new"]["last_seen"] = 10**10
+    rid = said(await turn(a, mcp("browser_request", match="qwen", why="")))["request"]
+    assert old.last("request") and new.last("request")
+    await world.app.registry.call("chrome.answer", {"request": rid, "give": True})
+    assert [m for m in old.got if m["t"] == "answer"] == []
+    assert new.last("answer")["request"] == rid
+    await new.say(t="grant", tab=TAB, log_id=a.log_id, request=rid)
+    assert old.last("cancel") == {"t": "cancel", "request": rid}
+
+
+async def test_no_matching_tab_gives_nothing_and_tells_the_person(world, monkeypatch):
+    a = await world.spawn()
+    ext = Ext(world.app.chrome)
+    said_ = []
+    monkeypatch.setattr(
+        world.app, "toast", lambda text, *a, **k: said_.append(text) or 1
+    )
+    rid = said(await turn(a, mcp("browser_request", match="example domain", why="")))[
+        "request"
+    ]
+    await ext.say(t="nomatch", request=rid)
+    assert said_ and "example domain" in said_[0]
+    assert rid in world.app.chrome.requests and card(a, rid)["status"] == "asked"

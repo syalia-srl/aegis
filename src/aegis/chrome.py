@@ -93,6 +93,7 @@ class Chrome:
         self.list_sessions: Callable[[], list[dict]] = lambda: []
         self.on_answer: Callable[[dict, str, dict | None], None] = lambda *_: None
         self.on_grants: Callable[[], None] = lambda: None
+        self.on_nomatch: Callable[[dict], None] = lambda _: None
         # An agent's request, with its card (chrome_ops): browser_open's too.
         self.ask_for: Callable[..., Awaitable[dict]]
         self._load()
@@ -234,9 +235,11 @@ class Chrome:
         name = tab.get("name")
         if not isinstance(name, str) or not name:
             return None
-        row = self.tabs.setdefault(
-            name, {"name": name, "title": "", "url": "", "grants": []}
-        )
+        row = self.tabs.get(name)
+        if row is None or row.get("device") != device_id:
+            # A name is one browser's: another paired browser's tab of the
+            # same name is a different tab, and its grants do not carry over.
+            row = self.tabs[name] = {"name": name, "title": "", "url": "", "grants": []}
         row["device"] = device_id
         row["title"] = str(tab.get("title") or "")[:200]
         row["url"] = str(tab.get("url") or "")[:2000]
@@ -309,9 +312,12 @@ class Chrome:
         if rid not in self.requests:
             raise PairError("gone", "that request was already answered")
         if give:
-            if not self.sockets:
+            # One browser gives, never all of them: the one seen last.
+            live = [d for d in self.devices.values() if d["id"] in self.sockets]
+            if not live:
                 raise PairError("chrome_unavailable", "your browser is not connected")
-            await self._send(None, {"t": "answer", "request": rid, "give": True})
+            last = max(live, key=lambda d: d["last_seen"])
+            await self._send(last["id"], {"t": "answer", "request": rid, "give": True})
             return
         self.resolve(rid, "denied")
         await self._send(None, {"t": "cancel", "request": rid})
@@ -348,8 +354,9 @@ class Chrome:
             if log_id not in row["grants"]:
                 row["grants"].append(log_id)
             rid = msg.get("request")
-            if isinstance(rid, str):
-                self.resolve(rid, "granted", row)
+            if isinstance(rid, str) and self.resolve(rid, "granted", row):
+                # Another paired browser drops the request it still shows.
+                await self._send(None, {"t": "cancel", "request": rid})
             self._grants_changed()
             return None
         if kind == "revoke":
@@ -366,6 +373,14 @@ class Chrome:
             if isinstance(t, dict) and t.get("name") in self.tabs:
                 self._tab(device_id, t)
                 self.changed()
+            return None
+        if kind == "nomatch":
+            # Give from aegis, and no tab's title or address holds the words:
+            # the extension gives nothing it was not shown, and the request
+            # waits in its popup for the person to pick a tab.
+            req = self.requests.get(str(msg.get("request")))
+            if req is not None:
+                self.on_nomatch(req)
             return None
         if kind == "deny":
             self.resolve(str(msg.get("request")), "denied")

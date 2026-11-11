@@ -66,8 +66,10 @@ An agent asks for one of your tabs with `browser_request`, or to open a page
 in a new tab with `browser_open` and `where="person"`. A card with Give and
 Refuse appears under the agent's call, and the extension's icon gets a badge; the
 popup shows the same request with the tabs that match it. Answer in either
-place: the other one follows. Give on the card in aegis gives the tab that
-matches best, or opens the page; pick another tab in the popup. The agent is
+place: the other one follows. Give on the card in aegis gives the tab whose
+title or address matches best, or opens the page. When no tab matches,
+nothing is given: aegis says so, and you pick the tab in the popup. Pick a
+tab in the popup to choose it yourself. The agent is
 woken with granted, naming the tab, or denied, and never learns which other
 tabs you have.
 
@@ -75,7 +77,9 @@ tabs you have.
 
 Each chip's × in the popup disconnects one agent, and turning the switch off
 stops sharing the tab. In aegis, the session's side panel lists its tabs
-under Your browser, each with Disconnect. Closing the tab ends every grant on
+under Your browser; click it for each tab's title, address and the other
+agents on it, with Disconnect and Stop sharing, and for the requests still
+waiting, with Give and Refuse. Closing the tab ends every grant on
 it. Grants last as long as the tab: a browser that goes offline keeps them
 and gives them back when it reconnects.
 

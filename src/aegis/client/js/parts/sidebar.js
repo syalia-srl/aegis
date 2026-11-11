@@ -95,7 +95,15 @@ const SIDEBAR_HTML = `
 <div class="sec" id="s-wait-sec" hidden><h4 data-t="sidebar.waiting"></h4><div id="s-waiting"></div></div>
 <div class="sec" id="s-mon-sec" hidden><h4 data-t="sidebar.monitors"></h4><div id="s-monitors"></div></div>
 <div class="sec" id="s-feed-sec" hidden><h4 data-t="sidebar.feeds"></h4><div id="s-feeds"></div></div>
-<div class="sec" id="s-chrome-sec" hidden><h4 data-t="sidebar.chrome"></h4><div id="s-chrome"></div></div>
+<div class="sec" id="s-chrome-sec" hidden><h4><span data-t="sidebar.chrome"></span><span class="aside" id="s-chrome-n"></span></h4>
+  <div class="prow" id="p-chrome" tabindex="0">
+    <div id="s-chrome"></div>
+    <div class="pcard">
+      <div class="chd"><div class="t" data-t="sidebar.chromeTitle"></div><div class="sub" id="s-chrome-sub"></div></div>
+      <div id="s-chrome-all"></div>
+    </div>
+  </div>
+</div>
 <div class="sec"><h4 data-t="sidebar.usage"></h4>
   <div class="prow" id="p-usage" tabindex="0">
     <div class="tiles" id="s-tiles"></div>
@@ -229,6 +237,9 @@ export class SidebarPart {
     this.feedSec = n("s-feed-sec");
     this.chromeSec = n("s-chrome-sec");
     this.chromeBox = n("s-chrome");
+    this.chromeN = n("s-chrome-n");
+    this.chromeSub = n("s-chrome-sub");
+    this.chromeAll = n("s-chrome-all");
     this.feeds = n("s-feeds");
     this.tiles = n("s-tiles");
     this.foot = n("s-foot");
@@ -395,14 +406,18 @@ export class SidebarPart {
     byId(this.el, field === "title" ? "s-title" : "s-handle").click();
   }
 
-  // The tabs of the person's own browser this session may use (chrome.py),
-  // each with Disconnect, and its requests still waiting, dashed.
+  // The tabs of the person's own browser this session may use (chrome.py):
+  // a line each in the panel, and in its card each tab in full (its title,
+  // address and the other agents on it) with Disconnect and Stop sharing,
+  // and the requests still waiting with Give and Refuse.
   drawChrome(s = this.session) {
     if (!s) return;
-    const st = this.mount.state.chrome || { tabs: [], requests: [] };
+    const st = this.mount.state.chrome || { devices: [], tabs: [], requests: [] };
     const mine = s.server ? [] : (st.tabs || []).filter((tab) => tab.grants.includes(s.log_id));
     const asked = s.server ? [] : (st.requests || []).filter((r) => r.log_id === s.log_id);
     this.chromeSec.hidden = !mine.length && !asked.length;
+    if (this.chromeSec.hidden) return;
+    const mk = (tag, cls, text) => Object.assign(document.createElement(tag), { className: cls, textContent: text ?? "" });
     const host = (u) => {
       try {
         return new URL(u).host;
@@ -410,22 +425,54 @@ export class SidebarPart {
         return u;
       }
     };
+    const handleOf = (id) => [...this.mount.state.sessions.values()].find((m) => m.log_id === id && !m.server)?.handle || id;
+    const call = (op, params) => this.mount.conn.call(op, params).catch((e) => this.fail(e.message));
+    const btn = (text, cls, onclick) => Object.assign(mk("button", cls, text), { type: "button", onclick });
+    this.chromeN.textContent = mine.length ? String(mine.length) : "";
+    const devs = st.devices || [];
+    const dev = devs.find((d) => d.connected) || devs.toSorted((x, y) => y.last_seen - x.last_seen)[0];
+    this.chromeSub.textContent = dev ? `${dev.name} · ${this.t(dev.connected ? "fleet.chromeConnected" : "fleet.chromeOffline")}` : "";
     this.chromeBox.replaceChildren(
       ...mine.map((tab) => {
-        const row = document.createElement("div");
-        row.className = "chrome-tab";
-        const name = Object.assign(document.createElement("span"), { className: "nm", textContent: `chrome:${tab.name}`, title: tab.title });
-        const site = Object.assign(document.createElement("span"), { className: "site", textContent: host(tab.url) });
-        const cut = Object.assign(document.createElement("button"), { className: "lnk", type: "button", textContent: this.t("sidebar.chromeDisconnect") });
-        cut.onclick = () => this.mount.conn.call("chrome.revoke", { tab: tab.name, log_id: s.log_id }).catch((e) => this.fail(e.message));
-        row.append(name, site, cut);
+        const row = mk("div", "chrome-tab");
+        row.append(mk("span", "nm", `chrome:${tab.name}`), mk("span", "site", host(tab.url)));
         return row;
       }),
+      ...asked.map((r) => mk("div", "chrome-tab asked", this.t("sidebar.chromeAsked", { what: r.kind === "open" ? host(r.url) : r.match }))),
+    );
+    this.chromeAll.replaceChildren(
+      ...mine.map((tab) => {
+        const sec = mk("div", "csec ch-tab");
+        const h = mk("h5", "ch-h");
+        h.append(mk("span", "", `chrome:${tab.name}`), mk("span", "p", host(tab.url)));
+        const others = tab.grants.filter((g) => g !== s.log_id).map(handleOf);
+        sec.append(
+          h,
+          mk("div", "ch-title", tab.title || this.t("sidebar.chromeUntitled")),
+          mk("div", "ch-url", tab.url),
+          mk("div", "ch-who", others.length ? this.t("sidebar.chromeAlso", { handles: others.join(", ") }) : this.t("sidebar.chromeOnly")),
+        );
+        const acts = mk("div", "ch-acts");
+        acts.append(
+          btn(this.t("sidebar.chromeDisconnect"), "btn", () => call("chrome.revoke", { tab: tab.name, log_id: s.log_id })),
+          btn(this.t("sidebar.chromeStop"), "btn", () => call("chrome.revoke", { tab: tab.name })),
+        );
+        sec.append(acts);
+        return sec;
+      }),
       ...asked.map((r) => {
-        const row = document.createElement("div");
-        row.className = "chrome-tab asked";
-        row.textContent = this.t("sidebar.chromeAsked", { what: r.kind === "open" ? host(r.url) : r.match });
-        return row;
+        const sec = mk("div", "csec ch-tab asked");
+        const h = mk("h5", "ch-h");
+        h.append(mk("span", "", this.t("sidebar.chromeWaiting")), mk("span", "p", r.kind === "open" ? host(r.url) : ""));
+        sec.append(h, mk("div", "ch-title", r.kind === "open" ? r.url : r.match));
+        if (r.why) sec.append(mk("div", "ch-who", r.why));
+        const acts = mk("div", "ch-acts");
+        acts.append(
+          btn(this.t("entries.chrome.refuse"), "btn", () => call("chrome.answer", { request: r.id, give: false })),
+          btn(this.t("entries.chrome.give"), "btn primary", () => call("chrome.answer", { request: r.id, give: true })),
+        );
+        sec.append(acts);
+        return sec;
       }),
     );
   }
