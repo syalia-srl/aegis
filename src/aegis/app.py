@@ -1902,15 +1902,16 @@ class App:
     def _group_for(
         self, parent, from_session: str | None, caller: Caller
     ) -> str | None:
-        """The group a new session joins (#586): its agent parent's, else the
-        group of the session a person spawned it from, when that session is
-        theirs to change."""
+        """The group a new session joins (#1039): its agent parent's, else the
+        group of the session a person spawned it from, making one when that
+        session has none. A session in no group that starts its first child
+        takes a new record and joins it with the child."""
         if parent is not None:
-            return parent.group_key()
+            return self.sessions.ensure_group(parent)
         src = self.sessions.sessions.get(from_session or "")
         if src is None or caller.is_agent:
             return None
-        return src.group_key()
+        return self.sessions.ensure_group(src)
 
     def _resolve_cwd(self, raw: str | None, base: Path | None = None) -> Path:
         base = base or self.roots.harness_cwd
@@ -2404,10 +2405,8 @@ class App:
             return await self._start_far_handoff(old, p, far, caller)
         reg = self.sessions
         report = old.standing.get("report") or {}
-        # The new session takes the old one's place in its group (#641):
-        # it joins it, heads it when the old one did, and adopts the old
-        # one's children once the old one is archived (_retire_predecessor).
-        leads = old.spec.group is None or old.spec.leads
+        # The new session takes the old one's place in its group (#1039); no
+        # session heads a group, and the children are members already.
         kids = tuple(
             k.handle for k in reg.sessions.values() if k.spec.spawned_by == old.log_id
         )
@@ -2415,8 +2414,7 @@ class App:
             self._handoff_spec(old, p, capped),
             continues=old.log_id,
             spawned_from=None,
-            group=old.group_key(),
-            leads=leads,
+            group=old.spec.group,
         )
         spec, g = self.start_spec(spec)
         if not g.may_start:
@@ -2460,7 +2458,6 @@ class App:
             report.get("handoff"),
             spawn_tail(old.entries()),
             kids=kids,
-            leads=leads and bool(kids),
             instruction=p.msg,
             carried=carried,
         )
@@ -2530,7 +2527,11 @@ class App:
             "permission": permission,
             "spawned_from": {"handle": parent.handle, "server": self.server_name}
             | (
-                {"group": far_group(parent.group_key(), self.server_name, far)}
+                {
+                    "group": far_group(
+                        self.sessions.ensure_group(parent), self.server_name, far
+                    )
+                }
                 if (link.remote or {}).get("groups")
                 else {}
             ),

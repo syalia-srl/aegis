@@ -276,13 +276,14 @@ async def child(world, parent):
 async def test_a_handoff_takes_the_old_sessions_place_in_its_group(world):
     a = await world.spawn()
     k = await child(world, a)
+    key = a.spec.group
     await turn(a, "/ctx 342000")
     await end(world, a, handoff="Brief.")
     b = world.session((await handoff(world, a))["log_id"])
-    assert b.spec.group == a.log_id and b.spec.leads
+    assert b.spec.group == key  # no session heads the group (#1039)
     await until(lambda: any(e["kind"] == "user" for e in b.entries()), 8, "b's prompt")
     said = first_message(b)
-    assert k.handle in said and "peer_handoff" in said and "you head it now" in said
+    assert k.handle in said and "peer_handoff" in said
     reg = world.app.sessions
     await until(lambda: a.log_id in reg.archived, 8, "the old session archived")
     assert k.spec.spawned_by == b.log_id
@@ -293,10 +294,11 @@ async def test_a_handoff_takes_the_old_sessions_place_in_its_group(world):
 async def test_a_handoff_of_a_member_stays_in_its_group_without_heading_it(world):
     a = await world.spawn()
     k = await child(world, a)
+    assert k.spec.group == a.spec.group
     await turn(k, "/ctx 342000")
     await end(world, k, handoff="Brief.")
     b = world.session((await handoff(world, k))["log_id"])
-    assert b.spec.group == a.log_id and not b.spec.leads
+    assert b.spec.group == a.spec.group
     assert b.spec.spawned_by == a.log_id
     await until(lambda: any(e["kind"] == "user" for e in b.entries()), 8, "b's prompt")
     assert "peer_handoff" not in first_message(b)  # k started nobody

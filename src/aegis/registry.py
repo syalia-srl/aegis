@@ -28,6 +28,7 @@ from .archive import Position, count_workers, page as archive_page
 from . import attention, cache, restarts, secret_store
 from .cgroups import SessionCgroups
 from .config import CONTEXT_DEFAULTS
+from .group_store import GroupStore
 from .harness import harness_for
 from .meta import MetaStore, rebuild
 from .names import TITLE_MAX, free_handle, mint_handle, valid_handle
@@ -124,6 +125,8 @@ class Registry(Host):
         self._cursor_bin = cursor_bin
         self._interrupt_timeout = interrupt_timeout
         self.metas = MetaStore(roots.state_root / "sessions")
+        # The records of named groups (#1039), beside the metas store.
+        self.groups = GroupStore(roots.state_root / "groups.json")
         self.sessions: dict[str, Session] = {}
         self.archived: dict[str, dict] = {}
         # Set by the app when it wires the MCP endpoint, monitors and queues.
@@ -571,8 +574,28 @@ class Registry(Host):
             return why
         return session.quota_paused or None
 
+    def ensure_group(self, parent: Session) -> str:
+        """The group a child of ``parent`` joins (#1039): the parent's own, or a
+        new record with a generated name that the parent joins first, rewriting
+        its spec and meta and republishing its card. A key of a linked server
+        stays as it is: that server holds the record."""
+        key = parent.spec.group
+        if key is not None and ("@" in key or self.groups.get(key) is not None):
+            return key
+        g = self.groups.create(parent.spec.owner)
+        parent.spec = dataclasses.replace(parent.spec, group=g.key)
+        self.metas.write(parent.meta())
+        self._publish("sessions", [{"upsert": parent.wire()}])
+        return g.key
+
+    def group_name(self, key: str | None) -> str | None:
+        """The name of the group ``key``, or None when the record is not here
+        (a session in no group, or one whose group began on a linked server)."""
+        g = self.groups.get(key) if key is not None else None
+        return g.name if g is not None else None
+
     def card(self, session: Session) -> dict:
-        return {
+        out = {
             "monitors": self.monitors.card(session.log_id)
             if self.monitors is not None
             else [],
@@ -589,6 +612,10 @@ class Registry(Host):
             if session.archived or self.successor(session) is not None
             else None,
         }
+        # The bar and the Fleet name a group from any member's card (#1039).
+        if (name := self.group_name(session.spec.group)) is not None:
+            out["group_name"] = name
+        return out
 
     def _worker(self, s: Session) -> dict:
         """A worker's wire field with its task's status, so the Fleet can set a
@@ -1098,6 +1125,11 @@ class Registry(Host):
         s.report({"kind": "close"})
         self.event("close", log_id, {})
         del self.sessions[log_id]
+        # The record outlives its members only while one is open (#1039).
+        if s.spec.group is not None and not any(
+            x.spec.group == s.spec.group for x in self.sessions.values()
+        ):
+            self.groups.delete(s.spec.group)
         s.archived = True
         s.artifacts.flush_all()  # a page's last coalesced write, before the store shuts
         s.store.close()
@@ -1134,6 +1166,11 @@ class Registry(Host):
             "quiet": False,  # a person reopening it wants to see it (#386)
             "stay_quiet": False,
         }
+        # Its group's record went with its last open member: it stands alone
+        # (#1039). A linked server's key stays: that server holds the record.
+        if (key := meta.get("group")) and "@" not in key:
+            if self.groups.get(key) is None:
+                meta["group"] = None
         # An open session may have taken its handle meanwhile (#673).
         handle = free_handle(str(meta["handle"]), self._open_handles())
         renamed = handle != meta["handle"]

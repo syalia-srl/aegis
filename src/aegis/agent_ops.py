@@ -509,7 +509,6 @@ HANDOFF_KIDS = (
     "Tell each one with peer_handoff that you continue {handle}'s work, so they "
     "report to you from now on, and coordinate them as {handle} did."
 )
-HANDOFF_LEADS = " {handle} headed their group of tabs; you head it now."
 HANDOFF_CARRIED = (
     "What {handle} was waiting on is yours now and wakes you as it ends: "
     "{carried}. monitor_list, feed_list, task_status and schedule_list show them."
@@ -521,7 +520,6 @@ def handoff_opening(
     brief: str | None,
     tail: str,
     kids: tuple[str, ...] = (),
-    leads: bool = False,
     instruction: str | None = None,
     far: bool = False,
     carried: list[str] | None = None,
@@ -533,8 +531,7 @@ def handoff_opening(
     reads last, the instruction it was handed off with (#874)."""
     parts = [(HANDOFF_HEAD_FAR if far else HANDOFF_HEAD).format(handle=handle)]
     if kids:
-        line = HANDOFF_KIDS.format(handle=handle, kids=", ".join(kids))
-        parts.append(line + (HANDOFF_LEADS.format(handle=handle) if leads else ""))
+        parts.append(HANDOFF_KIDS.format(handle=handle, kids=", ".join(kids)))
     if carried:
         parts.append(HANDOFF_CARRIED.format(handle=handle, carried=", ".join(carried)))
     if brief:
