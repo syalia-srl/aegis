@@ -131,6 +131,8 @@ const header = new HeaderPart(app, root, {
     onSessions();
   },
   here: () => app.conn.server || localStorage.getItem("aegis.server") || "",
+  onGroup: (key) => go(`#g=${key}`),
+  groupKey: () => (route().view === "group" ? route().id : null),
   focusId: () => tabFocus(route()),
   go: (hash) => go(hash),
   hashOf: (key) => hashOf(key),
@@ -551,7 +553,7 @@ $("entries").addEventListener("click", (ev) => {
 // Terminals and browsers are tools, not agents: the "terminals" kind shows both.
 const isTool = (m) => m.kind === "term" || m.kind === "browser";
 
-// -- routing: #fleet, #new[?<fill>], #settings, #journal, #usage, #knowledge[=<name>], #files[=<path>[:line]], #schedules, #help[=<page>], #s=<key>, #t=<key>, #read=<key>, #w=<n>:<key> --
+// -- routing: #fleet, #new[?<fill>], #settings, #journal, #usage, #knowledge[=<name>], #files[=<path>[:line]], #schedules, #help[=<page>], #s=<key>, #t=<key>, #read=<key>, #w=<n>:<key>, #g=<group key> --
 // A help ref is URI-encoded; a hand-typed malformed one is a page name nobody has.
 const unhash = (s) => {
   try {
@@ -570,6 +572,8 @@ function route(hash = hashNow()) {
   if (h.startsWith("t=")) return { view: "term", id: h.slice(2) };
   if (h.startsWith("b=")) return { view: "browser", id: h.slice(2) };
   if (h.startsWith("read=")) return { view: "read", id: h.slice(5) };
+  // A group's page (#1039): the Fleet's cards over its members only.
+  if (h.startsWith("g=")) return { view: "group", id: h.slice(2) };
   // Window n of a session's canvas, a browser tab of its own (js/canvas.js).
   const w = /^w=(\d+):(.+)$/.exec(h);
   if (w) return { view: "window", id: w[2], n: Number(w[1]) };
@@ -1237,9 +1241,11 @@ function flushSessions() {
   const r = route();
   let whole = false; // a grouped tab redraws the bar (tabs.js patchTab)
   for (const id of ids) if (app.state.sessions.has(id) && !header.patch(app.state.sessions.get(id), tabFocus(r))) whole = true;
-  if (whole) header.render(tabbed(), tabFocus(r), r.view);
+  if (whole) header.render(tabbed(), tabFocus(r), headerView(r));
   if (r.view === "fleet") {
     fleet.patch(ids);
+  } else if (r.view === "group" && fleet.groupKey === r.id) {
+    fleet.patchGroup(ids);
   } else if (r.view === "session" && ids.has(r.id)) renderMeta(app.state.sessions.get(r.id));
   else if (r.view === "term" && ids.has(r.id)) terminal.draw(termCard(r.id));
   else if (r.view === "window" && ids.has(r.id)) drawWindow(r);
@@ -1282,6 +1288,8 @@ const openSession = (id) => route().view === "window" || go(hashOf(id));
 // A tab's hash: a terminal's view, or a session's.
 const hashOf = (key) => ({ term: `#t=${key}`, browser: `#b=${key}` })[app.state.sessions.get(key)?.kind] || `#s=${key}`;
 const tabFocus = (r) => (r.view === "session" || r.view === "term" || r.view === "browser" ? r.id : null);
+// A group's page is the Fleet's: its button stays on while one shows.
+const headerView = (r) => (r.view === "group" ? "fleet" : r.view);
 // The open terminal's card, with the log id and server it is reached by.
 function termCard(key) {
   const m = app.state.sessions.get(key);
@@ -1436,7 +1444,7 @@ function render() {
     go("#fleet"); // a link to a session no tab held: gone before this page drew it
     return;
   }
-  header.render(tabbed(), tabFocus(r), r.view);
+  header.render(tabbed(), tabFocus(r), headerView(r));
   if (r.view !== "usage") usage.close();
   if (r.view !== "schedules") schedules.close();
   root.dataset.mode = r.view === "read" ? "read" : "live";
@@ -1452,6 +1460,13 @@ function render() {
     watchHost("all");
     if (newView) drawQuota();
     setTitle("Fleet · aegis");
+  } else if (r.view === "group") {
+    // A group's page is the Fleet over its members only (#1039): the same
+    // view, so a card opens its session and every key works as it does there.
+    follow(null);
+    show("fleet");
+    watchHost(null);
+    setTitle(`${fleet.renderGroup(r.id)} · aegis`);
   } else if (r.view === "spawn") {
     watchHost(null);
     follow(null);
@@ -3114,8 +3129,10 @@ function sessionMenu(key) {
       ? "No connection to its server"
       : undefined;
   const close = [{ id: "archive", label: "Archive", icon: "archive", danger: true, disabled: why, run: () => closeSession(s) }];
-  // A group's head archives the whole group, after one question (#586).
-  const group = blocksOf(tabbed(), header.tabActions.here).find((b) => b.head.key === key && b.members.length > 1);
+  // A member archives its whole group, after one question (#586, #1039).
+  const group = blocksOf(tabbed(), header.tabActions.here).find(
+    (b) => b.head.kind === "group" && b.members.some((m) => m.key === key),
+  );
   if (group) close.push({ id: "archivegroup", label: "Archive group…", icon: "archive", danger: true, disabled: why, run: () => archiveGroup(group.members) });
   if (isTool(s)) return { title, groups: [opening, close] };
   if (s.quiet || s.stay_quiet) opening.push({ id: "unquiet", label: "Unquiet", icon: "unquiet", disabled: why, run: () => quietKey(key, false) });

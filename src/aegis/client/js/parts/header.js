@@ -103,8 +103,12 @@ export class HeaderPart {
       onFocus: (key) => part.act.open?.(key),
       onClose: (key) => part.act.close?.(key),
       onMove: (keys, before) => part.act.move?.(keys, before),
+      onGroup: (key) => part.act.onGroup?.(key),
       get here() {
         return part.act.here?.() || "";
+      },
+      get group() {
+        return part.act.groupKey?.() || null;
       },
       folds: this.tabFolds,
       saveFolds: () => localStorage.setItem("aegis.tab-folds", JSON.stringify([...part.tabFolds])),

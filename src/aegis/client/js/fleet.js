@@ -81,33 +81,30 @@ export function byNeed(metas) {
 }
 
 // `stacks` ({here, open, onToggle}) draws a group of several sessions as one
-// stack of cards, or unfolded across the grid when its key is in `open` (#586).
-// A unit is a lone session or a group; the attention order ranks a group by
-// its most urgent member.
+// stack of cards, or unfolded across the grid when its key is in `open`
+// (#1039). A unit is a lone session or a group; the attention order ranks a
+// group by its most urgent member. Quiet sessions and queue workers are
+// members like any other: they sit in their group's stack.
 export function renderCards(box, metas, onOpen, order = "attention", onClose = () => {}, stacks = null, t = en) {
   if (!metas.length) {
     box.replaceChildren(el("div", "empty", t("fleet.empty")));
     return;
   }
-  // A quiet session has no tab and belongs to no group (#386, #586), and a
-  // queue worker's card carries its task's life, fading and sinking when it
-  // ends (#249): both stay cards of their own.
   const lone = (m) => ({ key: m.key, head: m, members: [m] });
-  const apart = (m) => m.quiet || m.worker;
-  const units = stacks
-    ? [...blocksOf(metas.filter((m) => !apart(m)), stacks.here), ...metas.filter(apart).map(lone)]
-    : metas.map(lone);
+  const units = stacks ? blocksOf(metas, stacks.here) : metas.map(lone);
+  // The sessions a unit stands for: a group's members, or the lone one.
+  const every = (u) => (u.head.kind === "group" ? u.members : [u.head]);
   const draw = (u) => unit(u, metas, onOpen, onClose, stacks, t);
   if (order !== "attention") {
     box.replaceChildren(...units.map(draw));
     return;
   }
   const out = [];
-  const best = (u) => u.members.filter((m) => group(m) === "needs").sort(byWait)[0];
-  const kind = (u) => (best(u) ? "needs" : u.members.every((m) => group(m) === "quiet") ? "quiet" : "rest");
+  const best = (u) => every(u).filter((m) => group(m) === "needs").sort(byWait)[0];
+  const kind = (u) => (best(u) ? "needs" : every(u).every((m) => group(m) === "quiet") ? "quiet" : "rest");
   const needs = units.filter((u) => kind(u) === "needs").sort((a, b) => byWait(best(a), best(b)));
   // Finished workers sink below the live cards; the sort is stable.
-  const done = (u) => u.members.every(finished);
+  const done = (u) => every(u).every(finished);
   const rest = units.filter((u) => kind(u) === "rest").sort((a, b) => done(a) - done(b));
   if (needs.length) out.push(el("div", "grp-h", t("fleet.needsYou")), ...needs.map(draw));
   // With nobody needing you, the order bar's "Sessions" heading names the list.
@@ -119,21 +116,21 @@ export function renderCards(box, metas, onOpen, order = "attention", onClose = (
 }
 
 function unit(u, metas, onOpen, onClose, stacks, t) {
-  if (u.members.length < 2) return card(u.head, onOpen, onClose, t);
-  const rest = u.members.slice(1);
+  if (u.head.kind !== "group") return card(u.head, onOpen, onClose, t);
+  const members = u.members;
   const hue = `var(--group-${hueOf(u.key)})`;
   if (stacks.open.has(u.key)) {
     const g = el("div", "gopen");
     g.dataset.group = u.key;
     g.style.setProperty("--g", hue);
     const gh = el("div", "gh");
-    const working = u.members.filter((m) => m.attention === "working").length;
+    const working = members.filter((m) => m.attention === "working").length;
     const fold = el("button", null, t("fleet.stack"));
     fold.type = "button";
     fold.addEventListener("click", () => stacks.onToggle(u.key));
-    gh.append(markNode(u.head), el("b", null, u.head.handle), el("span", "n", t("fleet.stackCount", { n: u.members.length, working })), fold);
+    gh.append(markNode(u.head), el("b", null, u.head.name), el("span", "n", t("fleet.stackCount", { n: members.length, working })), fold);
     const handles = new Map(metas.map((m) => [m.log_id, m.handle]));
-    const cards = u.members.map((m) => {
+    const cards = members.map((m) => {
       const c = card(m, onOpen, onClose, t);
       const by = handles.get(m.spawned_by);
       if (by) c.append(el("div", "by", t("fleet.startedBy", { handle: by })));
@@ -143,16 +140,16 @@ function unit(u, metas, onOpen, onClose, stacks, t) {
     g.lastChild.append(...cards);
     return g;
   }
-  const needy = rest.filter((m) => m.mark === "needs_you");
+  const needy = members.filter((m) => m.mark === "needs_you");
   const s = el("div", `stack${needy.length ? " need" : ""}`);
   s.dataset.group = u.key;
-  s.dataset.members = u.members.map((m) => m.key).join(" ");
+  s.dataset.members = members.map((m) => m.key).join(" ");
   s.style.setProperty("--g", hue);
-  const c = card(u.head, onOpen, onClose, t);
+  const c = groupCard(u, t);
   const row = el("div", "mrow");
-  row.append(...rest.map(markNode), el("span", null, `+${rest.length}`), ...needy.map((m) => el("span", "alert", t("fleet.needsHandle", { handle: m.handle }))));
+  row.append(...members.map(markNode), el("span", null, `+${members.length}`), ...needy.map((m) => el("span", "alert", t("fleet.needsHandle", { handle: m.handle }))));
   c.append(row);
-  s.append(el("div", "ghost g2"), el("div", "ghost g1"), el("span", "badge", String(u.members.length)), c);
+  s.append(el("div", "ghost g2"), el("div", "ghost g1"), el("span", "badge", String(members.length)), c);
   // A click on the stack unfolds it; the card's own buttons still act.
   s.addEventListener(
     "click",
@@ -164,6 +161,18 @@ function unit(u, metas, onOpen, onClose, stacks, t) {
     true,
   );
   return s;
+}
+
+// The card at a folded stack's front: the group itself, named by the group,
+// with how many sessions it holds and how many are working.
+function groupCard(u, t) {
+  const c = el("div", "card group");
+  c.dataset.group = u.key;
+  const hd = el("div", "hd");
+  hd.append(markNode(u.head), el("span", "h", u.head.name));
+  const working = u.members.filter((m) => m.attention === "working").length;
+  c.append(hd, el("div", "ttl", t("fleet.stackCount", { n: u.members.length, working })));
+  return c;
 }
 
 // One session's card redrawn where it stands. False when its group, or its place

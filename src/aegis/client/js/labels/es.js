@@ -423,6 +423,7 @@ export default {
   "tabs.said": "{handle}: {title} ({state})",
   "tabs.fold": "Plegar el grupo",
   "tabs.unfold": "Desplegar el grupo",
+  "tabs.groupTitle": "Grupo {name}",
 
   "header.menu": "Menú",
   "header.fleet": "Flota",

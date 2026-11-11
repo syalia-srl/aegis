@@ -99,7 +99,10 @@
 .aegis .tblock{display:flex;gap:2px;flex:none}
 .aegis .tblock.grp{gap:1px;padding:0 2px;margin:0 3px;border-radius:var(--r) var(--r) 0 0;background:color-mix(in srgb,var(--g) 9%,transparent);box-shadow:inset 0 -2px 0 var(--g)}
 .aegis .tblock.dragging{opacity:.35}
-.aegis .tab.head .hn{font-weight:600}
+.aegis .tab.named .hn{font-weight:600;color:var(--strong);max-width:18ch;overflow:hidden;text-overflow:ellipsis}
+.aegis .tblock.out{box-shadow:inset 0 -2px 0 var(--g)}
+.aegis .tab.out{box-shadow:inset 0 -2px 0 var(--g),0 0 0 1px color-mix(in srgb,var(--g) 50%,transparent)}
+.aegis .tab.out.on{box-shadow:inset 0 2px 0 var(--accent),inset 0 -2px 0 var(--g)}
 .aegis .tab .cnt{flex:none;font:10.5px/1 var(--font-mono);padding:3px 6px;border-radius:9px;background:color-mix(in srgb,var(--g) 30%,transparent);color:var(--strong);cursor:pointer}
 .aegis .tab .cnt.alert{box-shadow:0 0 0 1.5px var(--accent);animation:a2blink 1.2s steps(2,start) infinite}
 .aegis .tab.nodrop{cursor:not-allowed}
@@ -282,6 +285,10 @@
 .aegis .canvas>.wempty{display:none}
 .aegis[data-view=window] .canvas[data-docked="0"]>.wempty{display:block;margin:48px auto}
 .aegis[data-view=fleet] .v-fleet{display:block;overflow:auto}
+/* A group's page (#1039): the Fleet's cards over one group's members, without
+   the band, the order's segments, the linked servers or the archive. */
+.aegis .v-fleet.groupview :is(.install-offer,#band,.order .seg,.chrome-cards,#remotes,.archive){display:none}
+.aegis .v-fleet.groupview .order{padding-top:10px}
 .aegis[data-mode=read] .composer,.aegis[data-mode=read] .side .live-only{display:none}
 .aegis:not([data-mode=read]) .read-only{display:none}
 .aegis .notice{color:var(--muted);font-size:14px;max-width:520px;text-align:center;line-height:1.5}

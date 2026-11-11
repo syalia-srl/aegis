@@ -1,5 +1,5 @@
-"""The Fleet as stacks (#586): a group of sessions is one stack of cards that
-unfolds across the grid on a click."""
+"""The Fleet as stacks (#1039): a group of sessions is one stack of cards,
+named by the group, that unfolds across the grid on a click."""
 
 import pytest
 
@@ -29,21 +29,46 @@ def fleet(pg):
     pg.wait_for_selector("#a2[data-view=fleet]")
 
 
+def test_a_stack_is_named_by_its_group(server, page):  # noqa: F811
+    a, b, c, d = three_and_one(page, server)
+    name = page.inner_text("#tablist .tab.named .hn")
+    fleet(page)
+    page.wait_for_selector("#cards .stack")
+    # The stack's own card is the group's, named by the group, not a member.
+    assert page.inner_text("#cards .stack .card.group .h") == name
+    # A quiet member stays inside its group's stack (#1039).
+    page.goto(page.url.split("#")[0] + f"#s={c}")
+    page.wait_for_selector("#quiet-session[aria-pressed=false]:not([disabled])")
+    page.click("#quiet-session")
+    fleet(page)
+    page.wait_for_selector("#cards .stack")
+    assert page.inner_text("#cards .stack .badge") == "3"
+    page.click("#cards .stack")
+    page.wait_for_selector("#cards .gopen")
+    ids = page.eval_on_selector_all(
+        "#cards .gopen .card", "cs => cs.map((c) => c.dataset.id)"
+    )
+    assert ids == [a, b, c]
+    assert page.errors == []
+
+
 def test_a_group_is_one_stack_with_a_badge(server, page):  # noqa: F811
     a, b, c, d = three_and_one(page, server)
+    name = page.inner_text("#tablist .tab.named .hn")
     fleet(page)
     page.wait_for_selector("#cards .stack")
     assert page.locator("#cards .stack").count() == 1
     assert page.inner_text("#cards .stack .badge") == "3"
-    assert page.is_visible(f"#cards .stack .card[data-id='{a}']")
+    assert page.inner_text("#cards .stack .card.group .h") == name
     assert (
         page.locator(
-            f"#cards .card[data-id='{b}'], #cards .card[data-id='{c}']"
+            f"#cards .card[data-id='{a}'], #cards .card[data-id='{b}'], "
+            f"#cards .card[data-id='{c}']"
         ).count()
         == 0
     )
     assert (
-        page.locator("#cards .stack .mrow .ic, #cards .stack .mrow .dot").count() == 2
+        page.locator("#cards .stack .mrow .ic, #cards .stack .mrow .dot").count() == 3
     )
     assert page.is_visible(f"#cards > .card[data-id='{d}']")
     assert page.errors == []
@@ -88,7 +113,7 @@ def test_a_member_that_needs_you_marks_the_stack_and_ranks_it_first(server, page
 def test_the_fleets_unfolding_is_apart_from_the_bars_fold(server, page):  # noqa: F811
     a, b, c, d = three_and_one(page, server)
     fleet(page)
-    page.click(f".tab.head[data-id='{a}'] .cnt")  # fold in the bar
+    page.click("#tablist .tab.named .cnt")  # fold in the bar
     page.wait_for_function("document.querySelectorAll('.tblock.grp .tab').length === 1")
     assert page.locator("#cards .stack").count() == 1
     page.click("#cards .stack")
@@ -97,10 +122,12 @@ def test_the_fleets_unfolding_is_apart_from_the_bars_fold(server, page):  # noqa
     assert page.errors == []
 
 
-def test_a_stacks_head_menu_archives_the_group(server, page):  # noqa: F811
+def test_a_members_menu_archives_the_group(server, page):  # noqa: F811
     a, b, c, d = three_and_one(page, server)
     fleet(page)
-    page.click(f"#cards .stack .card[data-id='{a}']", button="right")
+    page.click("#cards .stack")
+    page.wait_for_selector("#cards .gopen")
+    page.click(f"#cards .gopen .card[data-id='{a}']", button="right")
     page.wait_for_selector(".cmenu [data-id=archivegroup]")
     assert page.errors == []
 
