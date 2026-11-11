@@ -129,6 +129,10 @@ async function tabRow(tab, row) {
     };
     chips.append(more);
     el.append(chips);
+    // Off by default: a script runs with the tab's sign-ins (browser_eval).
+    const cb = h("input", { type: "checkbox", checked: !!row.eval });
+    cb.onchange = () => ask({ t: "scripts", tabId: tab.id, on: cb.checked }).then(draw);
+    el.append(h("label", { className: "scripts", title: "Let these agents run JavaScript in this tab" }, cb, " Scripts"));
   }
   if (picking === tab.id) el.append(await picker(tab));
   return el;

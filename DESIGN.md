@@ -147,8 +147,26 @@ and the panels. A request (`browser_request`, `browser_open(where="person")`)
 is answered in the popup or on its transcript card, whichever is first;
 `Chrome.resolve` answers it once, records the card's outcome and wakes the
 agent. Either side revokes and tells the other, which never echoes it.
-Driving a granted tab (the spec `2026-11-11-chrome-extension-design.html`)
-builds on this socket.
+The `browser_*` tools on a `chrome:<name>` id go to `Chrome.drive`: the
+server checks the grant (`Chrome.tab_for`, which tells revoked from
+not_granted), sends a `call` to the tab's browser and waits for its `result`.
+The extension checks the grant again, holds `chrome.debugger` on every tab
+with a grant, and runs the same CDP calls Playwright would, so its input is
+trusted. It finds targets with `extension/target.js` in an isolated world;
+`tests/test_chrome_target.py` holds that file to Playwright's own engine on
+one fixture, which is how a target means the same in both kinds of browser.
+The page's events come back as `event` messages into the tab's log, kept
+with the agents' actions as a server browser's are. The ribbon
+(`extension/ribbon.js`) is injected into shared tabs only, in a closed shadow
+root. A tab's holder (the agents, or the person after Pause or a handover)
+lives with its grants in the extension and is mirrored by `Chrome.hold`,
+which refuses agents' actions while the person holds the tab and wakes the
+one that handed it over, and any whose action was refused, when it comes
+back. Actions on one tab take `Chrome.lock`, so they run in order of arrival;
+reads do not. `browser_eval` runs only on a tab whose Scripts switch is on;
+the extension keeps the switch with the grants and checks it on each call,
+and `Chrome.scripts` turns it from aegis. Linked servers and the exit per site, slices 5 and 6 of the spec
+`2026-11-11-chrome-extension-design.html`, were dropped.
 
 **A browser is a Chromium the server holds, shared by an agent and a person.**
 A browser (`browsers.py`, #564) is a headless Chromium driven through

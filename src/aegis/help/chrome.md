@@ -1,11 +1,11 @@
 ---
 title: Your own Chrome
 kind: howto
-when: pair your own Chrome, Edge or Brave with aegis, share a tab of your browser with an agent, an agent asks for a tab of the person's browser, browser_request
+when: pair your own Chrome, Edge or Brave with aegis, share a tab of your browser with an agent, an agent asks for a tab of the person's browser, an agent drives a tab of the person's browser, browser_request
 hints:
-  - Pair your own Chrome with aegis from Settings → Chrome. #pairing
-  - Share a tab of your own browser with an agent, from the extension's popup. #sharing-a-tab
+  - Pair your Chrome in Settings → Chrome, then share a tab from the extension's popup. #sharing-a-tab
   - An agent can ask for one of your tabs; you give it or refuse. #when-an-agent-asks
+  - An agent drives a tab you gave it, and hands it to you when it needs you. #an-agent-at-work
 ---
 
 aegis's extension pairs your own Chromium browser (Chrome, Edge, Brave or
@@ -13,8 +13,8 @@ Vivaldi) with your aegis server. Once paired, agents will use the tabs you
 share with them, with your sign-ins, cookies and network; the server's own
 browsers stay for tests, screenshots and unattended work (browsers). An
 agent sees only the tabs you gave it; every other tab, its title and its
-address stay in your browser. This version shares tabs; agents driving them
-(clicks, typing, snapshots) comes next.
+address stay in your browser. An agent reads a tab you gave it, clicks,
+types and navigates in it with the same tools it uses on a server browser.
 
 ## Installing the extension
 
@@ -83,6 +83,48 @@ waiting, with Give and Refuse. Closing the tab ends every grant on
 it. Grants last as long as the tab: a browser that goes offline keeps them
 and gives them back when it reconnects.
 
+## An agent at work
+
+While a tab has a grant, the extension holds Chrome's debugger on it, and
+Chrome shows its bar saying the extension is debugging the browser. That
+is how the agent's clicks and keys reach the page as yours would. The bar
+goes when the last grant on the tab ends.
+
+A thin ribbon at the top of the page names the agents that have the tab.
+While one acts, the ribbon says what it does, such as "clicks Send", and a
+ring in the accent marks the element it touches. The ribbon takes no
+clicks, and the page cannot see or change it.
+
+The session's side panel shows each tab's last action under Your browser.
+Typing into a password field is logged as its length, never its text.
+
+When several agents share a tab, their actions on it run one at a time, in
+the order they arrive; reading the page never waits.
+
+## Letting agents run scripts
+
+An agent can run JavaScript in a tab you shared with `browser_eval`, but only
+while that tab's Scripts switch is on. It is off for every new tab. Turn it
+on with Scripts under the tab's chips in the popup, or with Scripts on the
+tab in the session's side panel; either one turns it off again, and it ends
+with the tab's last grant. A script runs with your sign-ins and can read or
+change anything the site lets you, not only what the page shows, so turn it
+on for a tab and a task, and off after.
+
+## Pausing and handing over
+
+Pause in the ribbon makes the tab yours: agents can still read it, but any
+click, typing or navigation they try is refused until you press Resume, and
+the ones that tried are woken then.
+
+An agent that needs you on the page (a captcha, a sign-in, a step to
+confirm) hands it over with a reason. The ribbon turns red with the reason
+and a Done button, the browser shows a notification with the aegis mark,
+and aegis shows a toast. A click on the notification brings the tab to the
+front. Do what it asks, then press Done in the ribbon, or Done on the tab
+in the session's side panel. The agent is woken with what the page did
+meanwhile.
+
 ## For agents
 
 `browser_list` returns every browser you may use: the server's, kind
@@ -95,3 +137,20 @@ with `> from chrome:<name> · granted` or `> from chrome · denied`.
 of the person's browser, with the same answer. Both fail with
 the error chrome_unavailable when no browser is connected: wait, or use a server
 browser if the task allows it.
+
+On a tab you were given, pass its id as `browser`: `browser_snapshot`,
+`browser_click`, `browser_type`, `browser_press`, `browser_goto`,
+`browser_screenshot` and `browser_events` work as on a server browser, and
+targets are written the same way (`role=button[name="Send"]`, `text=Sign
+in`, `label=Email`, or CSS). `browser_goto` loads only http and https
+addresses there. `browser_handover(browser, reason)` gives the tab to the
+person with your reason; end your turn, and you are woken with
+`> from chrome:<name> · back` when they press Done. While the person holds
+a tab, after a handover or a pause, reads work and actions fail with
+person_has_control: end your turn, and you are woken when it comes back.
+`browser_eval(browser, expression)` runs JavaScript in the page and returns
+its JSON value, only while the person has turned Scripts on for that tab;
+otherwise it fails with scripts_off, and you ask them to turn it on.
+`browser_resize` and `browser_close` do not work on the person's tabs yet. A call on a tab that
+was never yours fails with not_granted; on one whose grant ended (the person
+stopped sharing it, closed it or disconnected you) with revoked.
