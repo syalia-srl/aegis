@@ -102,3 +102,10 @@ def test_a_label_names_the_same_field_as_get_by_label(page, label):
 def test_a_bad_target_says_why(page):
     with pytest.raises(Exception, match="cannot read"):
         ours(page, "role=button[[")
+
+
+def test_the_outline_reads_the_page_by_roles(page):
+    text = page.evaluate(f"() => {{ {TARGET}; return aegisTarget().outline(); }}")
+    assert '- heading "Sign up" [level=1]' in text
+    assert '- textbox "Email"' in text and '- button "Send"' in text
+    assert "Hidden send" not in text

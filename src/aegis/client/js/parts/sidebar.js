@@ -455,6 +455,14 @@ export class SidebarPart {
           ...(tab.holder === "person" ? [mk("div", "ch-who ch-held", tab.ask ? this.t("sidebar.chromeAsk", { why: tab.ask }) : this.t("sidebar.chromePaused"))] : []),
         );
         const acts = mk("div", "ch-acts");
+        // Off by default: a script runs with the person's sign-ins.
+        const cb = mk("input");
+        cb.type = "checkbox";
+        cb.checked = !!tab.eval;
+        cb.onchange = () => call("chrome.scripts", { tab: tab.name, on: cb.checked });
+        const lab = mk("label", "ch-scripts");
+        lab.append(cb, " ", this.t("sidebar.chromeScripts"));
+        sec.append(lab);
         if (tab.holder === "person") acts.append(btn(this.t(tab.ask ? "sidebar.chromeDone" : "sidebar.chromeResume"), "btn primary", () => call("chrome.release", { tab: tab.name })));
         acts.append(
           btn(this.t("sidebar.chromeDisconnect"), "btn", () => call("chrome.revoke", { tab: tab.name, log_id: s.log_id })),

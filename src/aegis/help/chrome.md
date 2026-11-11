@@ -101,6 +101,16 @@ Typing into a password field is logged as its length, never its text.
 When several agents share a tab, their actions on it run one at a time, in
 the order they arrive; reading the page never waits.
 
+## Letting agents run scripts
+
+An agent can run JavaScript in a tab you shared with `browser_eval`, but only
+while that tab's Scripts switch is on. It is off for every new tab. Turn it
+on with Scripts under the tab's chips in the popup, or with Scripts on the
+tab in the session's side panel; either one turns it off again, and it ends
+with the tab's last grant. A script runs with your sign-ins and can read or
+change anything the site lets you, not only what the page shows, so turn it
+on for a tab and a task, and off after.
+
 ## Pausing and handing over
 
 Pause in the ribbon makes the tab yours: agents can still read it, but any
@@ -138,7 +148,9 @@ person with your reason; end your turn, and you are woken with
 `> from chrome:<name> · back` when they press Done. While the person holds
 a tab, after a handover or a pause, reads work and actions fail with
 person_has_control: end your turn, and you are woken when it comes back.
-`browser_eval`, `browser_resize` and `browser_close` do not work on the
-person's tabs yet. A call on a tab that
+`browser_eval(browser, expression)` runs JavaScript in the page and returns
+its JSON value, only while the person has turned Scripts on for that tab;
+otherwise it fails with scripts_off, and you ask them to turn it on.
+`browser_resize` and `browser_close` do not work on the person's tabs yet. A call on a tab that
 was never yours fails with not_granted; on one whose grant ended (the person
 stopped sharing it, closed it or disconnected you) with revoked.
