@@ -9,6 +9,9 @@
 // code and only its noun comes from here.
 export default {
   "sidebar.feeds": "Feeds",
+  "sidebar.chrome": "Your browser",
+  "sidebar.chromeDisconnect": "Disconnect",
+  "sidebar.chromeAsked": "asked: {what}",
   "fleet.feeds.one": "{n} feed",
   "fleet.feeds.other": "{n} feeds",
   "fleet.feeds.waiting": "{n} waiting",
@@ -711,6 +714,15 @@ export default {
   "entries.approval.nothingToApprove": "nothing to approve until the prompt names another",
 
   "entries.secret.title": "secret",
+  "entries.chrome.title": "Tab of your browser",
+  "entries.chrome.tab": "asks for a tab: {match}",
+  "entries.chrome.open": "asks to open {url} in your browser",
+  "entries.chrome.why": "Why: {why}",
+  "entries.chrome.give": "Give",
+  "entries.chrome.refuse": "Refuse",
+  "entries.chrome.waiting": "Waiting for your browser to give the tab…",
+  "entries.chrome.granted": "gave {tab} · {title}",
+  "entries.chrome.denied": "refused · {what}",
   "entries.secret.size": "{bytes} B",
   "entries.secret.revealed": "{size} · revealed",
   "entries.secret.state": "{size} · {state}",

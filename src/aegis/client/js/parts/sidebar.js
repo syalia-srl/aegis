@@ -95,6 +95,7 @@ const SIDEBAR_HTML = `
 <div class="sec" id="s-wait-sec" hidden><h4 data-t="sidebar.waiting"></h4><div id="s-waiting"></div></div>
 <div class="sec" id="s-mon-sec" hidden><h4 data-t="sidebar.monitors"></h4><div id="s-monitors"></div></div>
 <div class="sec" id="s-feed-sec" hidden><h4 data-t="sidebar.feeds"></h4><div id="s-feeds"></div></div>
+<div class="sec" id="s-chrome-sec" hidden><h4 data-t="sidebar.chrome"></h4><div id="s-chrome"></div></div>
 <div class="sec"><h4 data-t="sidebar.usage"></h4>
   <div class="prow" id="p-usage" tabindex="0">
     <div class="tiles" id="s-tiles"></div>
@@ -226,6 +227,8 @@ export class SidebarPart {
     this.monSec = n("s-mon-sec");
     this.monitors = n("s-monitors");
     this.feedSec = n("s-feed-sec");
+    this.chromeSec = n("s-chrome-sec");
+    this.chromeBox = n("s-chrome");
     this.feeds = n("s-feeds");
     this.tiles = n("s-tiles");
     this.foot = n("s-foot");
@@ -392,6 +395,41 @@ export class SidebarPart {
     byId(this.el, field === "title" ? "s-title" : "s-handle").click();
   }
 
+  // The tabs of the person's own browser this session may use (chrome.py),
+  // each with Disconnect, and its requests still waiting, dashed.
+  drawChrome(s = this.session) {
+    if (!s) return;
+    const st = this.mount.state.chrome || { tabs: [], requests: [] };
+    const mine = s.server ? [] : (st.tabs || []).filter((tab) => tab.grants.includes(s.log_id));
+    const asked = s.server ? [] : (st.requests || []).filter((r) => r.log_id === s.log_id);
+    this.chromeSec.hidden = !mine.length && !asked.length;
+    const host = (u) => {
+      try {
+        return new URL(u).host;
+      } catch {
+        return u;
+      }
+    };
+    this.chromeBox.replaceChildren(
+      ...mine.map((tab) => {
+        const row = document.createElement("div");
+        row.className = "chrome-tab";
+        const name = Object.assign(document.createElement("span"), { className: "nm", textContent: `chrome:${tab.name}`, title: tab.title });
+        const site = Object.assign(document.createElement("span"), { className: "site", textContent: host(tab.url) });
+        const cut = Object.assign(document.createElement("button"), { className: "lnk", type: "button", textContent: this.t("sidebar.chromeDisconnect") });
+        cut.onclick = () => this.mount.conn.call("chrome.revoke", { tab: tab.name, log_id: s.log_id }).catch((e) => this.fail(e.message));
+        row.append(name, site, cut);
+        return row;
+      }),
+      ...asked.map((r) => {
+        const row = document.createElement("div");
+        row.className = "chrome-tab asked";
+        row.textContent = this.t("sidebar.chromeAsked", { what: r.kind === "open" ? host(r.url) : r.match });
+        return row;
+      }),
+    );
+  }
+
   // The shown session's error, in the panel under its actions.
   fail(message) {
     this.error.textContent = message || "";
@@ -433,6 +471,7 @@ export class SidebarPart {
     this.ask.textContent = s.attention_line || "";
     this.ask.className = `askbox at-${s.attention}`;
     this.drawPlan(s);
+    this.drawChrome(s);
     this.drawSkills(s);
     this.drawJournal(s.key);
     this.followRepos(s.key);

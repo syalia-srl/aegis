@@ -658,6 +658,45 @@ const CONFIG_DONE = {
   stale: "entries.config.stale",
 };
 
+// An agent's ask for a tab of the person's own browser (chrome_ops.py):
+// Give and Refuse while it waits, one line once answered. Its answer runs on
+// the shown session's server, as a secret's reveal does (setSecrets).
+function fillChrome(card, e, t = card._t || en) {
+  const d = e.detail || {};
+  const what = d.kind === "open" ? t("entries.chrome.open", { url: d.url }) : t("entries.chrome.tab", { match: d.match });
+  const bar = el("div", "fbar");
+  const acts = el("span", "acts");
+  bar.append(entryIcon(e.glyph), el("span", "fn", t("entries.chrome.title")), el("span", "fs", e.status === "asked" ? what : ""), acts);
+  card.classList.toggle("gone", e.status !== "asked");
+  if (e.status === "granted") {
+    bar.querySelector(".fs").textContent = t("entries.chrome.granted", { tab: `chrome:${d.tab_tab || "?"}`, title: d.tab_title || d.tab_url || "" });
+    return card.replaceChildren(bar);
+  }
+  if (e.status !== "asked") {
+    bar.querySelector(".fs").textContent = t("entries.chrome.denied", { what });
+    return card.replaceChildren(bar);
+  }
+  const note = el("div", "sbody dim", d.why ? t("entries.chrome.why", { why: d.why }) : "");
+  const answer = async (give) => {
+    for (const b of acts.querySelectorAll("button")) b.disabled = true;
+    note.textContent = give ? t("entries.chrome.waiting") : "";
+    try {
+      await secretCall("chrome.answer", { request: d.request, give });
+    } catch (err) {
+      note.textContent = err.message;
+      for (const b of acts.querySelectorAll("button")) b.disabled = false;
+    }
+  };
+  const give = el("button", "btn primary", t("entries.chrome.give"));
+  give.type = "button";
+  give.onclick = () => answer(true);
+  const refuse = el("button", "btn", t("entries.chrome.refuse"));
+  refuse.type = "button";
+  refuse.onclick = () => answer(false);
+  acts.append(refuse, give);
+  card.replaceChildren(bar, note);
+}
+
 function fillConfig(card, e, t = card._t || en) {
   const d = e.detail || {};
   card.classList.toggle("gone", e.status !== "pending");
@@ -2068,6 +2107,17 @@ const RENDERERS = {
     fillSecret(card, e, t);
     body.append(card);
     return row(e, "secret", body);
+  },
+
+  chrome_request(e, opts = {}) {
+    // An agent's ask for one of the person's tabs (fillChrome). Never folded.
+    const t = opts.t || en;
+    const body = el("div", "body");
+    const card = el("div", "fcard scard crcard");
+    card._t = t;
+    fillChrome(card, e, t);
+    body.append(card);
+    return row(e, "chrome_request", body);
   },
 
   config(e, opts = {}) {
