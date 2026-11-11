@@ -399,7 +399,7 @@ const DRIVE = {
 // The accessibility tree as text, in the shape a server browser's snapshot
 // has: one "- role "name"" line per node, nested by two spaces. Nodes that
 // only group others (generic, none) give their children to their parent.
-const FLAT = new Set(["none", "generic", "presentation", "RootWebArea", "WebArea", "InlineTextBox", "LineBreak", "LayoutTable", "LayoutTableRow", "LayoutTableCell"]);
+const FLAT = new Set(["none", "generic", "presentation", "RootWebArea", "WebArea", "InlineTextBox", "LineBreak", "LabelText", "LayoutTable", "LayoutTableRow", "LayoutTableCell"]);
 const VALUED = new Set(["textbox", "searchbox", "combobox", "spinbutton", "slider"]);
 
 function aria(nodes) {

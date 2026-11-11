@@ -126,8 +126,10 @@ function aegisTarget() {
       if (a[1] === "name") {
         const v = (a[2] || "").trim();
         const quoted = /^(["']).*\1$/.test(v) ? v.slice(1, -1) : v;
-        // As Playwright does: a name matches as part of the text, in any case.
-        out.name = matcher(quoted);
+        // As Playwright does: a name matches whole and with its case, or in
+        // any case with the i flag.
+        const want = norm(quoted.replace(/\\(.)/g, "$1"));
+        out.name = a[3] ? (s) => norm(s).toLowerCase() === want.toLowerCase() : (s) => norm(s) === want;
       } else if (a[1] === "level") out.level = +a[2];
       else throw new Error(`the role selector does not take [${a[1]}]`);
     }

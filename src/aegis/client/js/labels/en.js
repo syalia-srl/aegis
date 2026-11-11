@@ -14,6 +14,7 @@ export default {
   "sidebar.chromeAsked": "asked: {what}",
   "sidebar.chromeTitle": "Tabs of your browser",
   "sidebar.chromeUntitled": "(no title)",
+  "sidebar.chromeLast": "last: {what}",
   "sidebar.chromeAlso": "also shared with {handles}",
   "sidebar.chromeOnly": "shared with this agent only",
   "sidebar.chromeStop": "Stop sharing",

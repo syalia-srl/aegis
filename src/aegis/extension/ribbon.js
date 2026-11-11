@@ -8,6 +8,8 @@
 
 if (!globalThis.aegisRibbon) {
   const host = document.createElement("aegis-ribbon");
+  // Not part of the page: agents' snapshots and the page's own tree skip it.
+  host.setAttribute("aria-hidden", "true");
   const root = host.attachShadow({ mode: "closed" });
   root.innerHTML = `<style>
 :host{all:initial}

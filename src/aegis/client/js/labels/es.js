@@ -15,6 +15,7 @@ export default {
   "sidebar.chromeAsked": "pedida: {what}",
   "sidebar.chromeTitle": "Pestañas de tu navegador",
   "sidebar.chromeUntitled": "(sin título)",
+  "sidebar.chromeLast": "lo último: {what}",
   "sidebar.chromeAlso": "también compartida con {handles}",
   "sidebar.chromeOnly": "compartida solo con este agente",
   "sidebar.chromeStop": "Dejar de compartir",
