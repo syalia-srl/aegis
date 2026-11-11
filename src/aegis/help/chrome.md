@@ -5,7 +5,7 @@ when: pair your own Chrome, Edge or Brave with aegis, share a tab of your browse
 hints:
   - Pair your Chrome in Settings → Chrome, then share a tab from the extension's popup. #sharing-a-tab
   - An agent can ask for one of your tabs; you give it or refuse. #when-an-agent-asks
-  - An agent drives a tab you gave it with the same browser tools as a server browser. #an-agent-at-work
+  - An agent drives a tab you gave it, and hands it to you when it needs you. #an-agent-at-work
 ---
 
 aegis's extension pairs your own Chromium browser (Chrome, Edge, Brave or
@@ -98,6 +98,23 @@ clicks, and the page cannot see or change it.
 The session's side panel shows each tab's last action under Your browser.
 Typing into a password field is logged as its length, never its text.
 
+When several agents share a tab, their actions on it run one at a time, in
+the order they arrive; reading the page never waits.
+
+## Pausing and handing over
+
+Pause in the ribbon makes the tab yours: agents can still read it, but any
+click, typing or navigation they try is refused until you press Resume, and
+the ones that tried are woken then.
+
+An agent that needs you on the page (a captcha, a sign-in, a step to
+confirm) hands it over with a reason. The ribbon turns red with the reason
+and a Done button, the browser shows a notification with the aegis mark,
+and aegis shows a toast. A click on the notification brings the tab to the
+front. Do what it asks, then press Done in the ribbon, or Done on the tab
+in the session's side panel. The agent is woken with what the page did
+meanwhile.
+
 ## For agents
 
 `browser_list` returns every browser you may use: the server's, kind
@@ -116,7 +133,12 @@ On a tab you were given, pass its id as `browser`: `browser_snapshot`,
 `browser_screenshot` and `browser_events` work as on a server browser, and
 targets are written the same way (`role=button[name="Send"]`, `text=Sign
 in`, `label=Email`, or CSS). `browser_goto` loads only http and https
-addresses there. `browser_eval`, `browser_resize`, `browser_handover` and
-`browser_close` do not work on the person's tabs yet. A call on a tab that
+addresses there. `browser_handover(browser, reason)` gives the tab to the
+person with your reason; end your turn, and you are woken with
+`> from chrome:<name> · back` when they press Done. While the person holds
+a tab, after a handover or a pause, reads work and actions fail with
+person_has_control: end your turn, and you are woken when it comes back.
+`browser_eval`, `browser_resize` and `browser_close` do not work on the
+person's tabs yet. A call on a tab that
 was never yours fails with not_granted; on one whose grant ended (the person
 stopped sharing it, closed it or disconnected you) with revoked.

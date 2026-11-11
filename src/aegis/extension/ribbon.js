@@ -18,16 +18,16 @@ if (!globalThis.aegisRibbon) {
   max-width:80vw;padding:2px 4px 3px 10px;border:1px solid var(--accent);border-top:0;border-radius:0 0 7px 7px;
   background:var(--surface);color:var(--ink);font:12px/1.4 system-ui,sans-serif;box-shadow:0 2px 8px #0004;
   white-space:nowrap;pointer-events:none;opacity:.94}
-.bar.held{border-color:var(--warn);opacity:1}
-.bar.held .dot{background:var(--warn)}
+.bar.held{border-color:var(--err);opacity:1}
+.bar.held .dot{background:var(--err)}
 .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);flex:none}
 .txt{overflow:hidden;text-overflow:ellipsis}
 .act{color:var(--accent)}
-.ask{color:var(--warn);font-weight:600}
+.ask{color:var(--err);font-weight:600}
 .act:empty,.ask:empty{display:none}
 button{pointer-events:auto;font:inherit;font-size:11px;padding:0 8px;border-radius:5px;cursor:pointer;
   border:1px solid var(--accent);background:transparent;color:var(--ink)}
-.held button{border-color:var(--warn);background:var(--warn);color:var(--surface);font-weight:600}
+.held button{border-color:var(--err);background:var(--err);color:var(--surface);font-weight:600}
 .ring{position:fixed;z-index:2147483647;border:2px solid var(--accent);border-radius:5px;box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 30%,transparent);
   pointer-events:none;opacity:0;transition:opacity .25s}
 .ring.on{opacity:1}
@@ -52,8 +52,8 @@ button{pointer-events:auto;font:inherit;font-size:11px;padding:0 8px;border-radi
       host.remove();
       return;
     }
-    for (const k of ["accent", "surface", "ink", "warn"]) if (s[k]) host.style.setProperty(`--${k}`, s[k]);
-    if (!s.warn) host.style.setProperty("--warn", "#d9806f");
+    for (const k of ["accent", "surface", "ink", "err"]) if (s[k]) host.style.setProperty(`--${k}`, s[k]);
+    if (!s.err) host.style.setProperty("--err", "#d9806f");
     host.style.setProperty("all", "initial", "important");
     if (!host.isConnected) document.documentElement.append(host);
     const held = s.holder === "person";
