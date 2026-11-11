@@ -39,6 +39,10 @@ class ChromeAnswer(BaseModel):
     give: bool
 
 
+class ChromeTab(BaseModel):
+    tab: str
+
+
 class ChromeRevoke(BaseModel):
     tab: str
     log_id: str | None = None
@@ -102,6 +106,24 @@ def register_chrome_ops(app: App) -> Chrome:
                 f"The person refused your request for {asked}.",
             )
 
+    def back(woken: list[str], tab: dict, evs: list[dict]) -> None:
+        lines = [
+            f"The person gave chrome:{tab['name']} back.",
+            f"Page: {tab['url']}  {tab['title']}".rstrip(),
+        ]
+        if evs := [e for e in evs if e["kind"] != "control"]:
+            lines += ["What happened meanwhile:"] + [event_line(e) for e in evs[-60:]]
+        lines.append(
+            "Read it with browser_snapshot; browser_events gives the full log."
+        )
+        for log_id in woken:
+            wake(
+                log_id,
+                f"> from chrome:{tab['name']} · back · {iso_now()}",
+                "\n".join(lines),
+            )
+
+    chrome.on_back = back
     chrome.list_sessions = sessions
     chrome.on_answer = answered
     chrome.on_nomatch = lambda req: app.toast(
@@ -135,7 +157,8 @@ def register_chrome_ops(app: App) -> Chrome:
     chrome.ask_for = ask
 
     # What the extension does on a person's tab; the rest wait for later slices.
-    driven = ("snapshot", "click", "type", "press", "goto", "screenshot", "events")
+    reads = ("snapshot", "screenshot", "events")
+    acts = ("click", "type", "press", "goto", "handover")
 
     async def drive(caller: Caller, op: str, p) -> object:
         """A browser_* tool on chrome:<name>, run by the person's browser."""
@@ -143,7 +166,7 @@ def register_chrome_ops(app: App) -> Chrome:
         s = app.sessions.sessions.get(caller.log_id or "")
         if s is None:
             raise OpError("agents_only", "only an agent's session drives a tab")
-        if op not in driven:
+        if op not in reads + acts:
             raise OpError(
                 "not_supported",
                 f"browser_{op} does not work on the person's tabs yet",
@@ -156,15 +179,41 @@ def register_chrome_ops(app: App) -> Chrome:
                     evs = [e for e in evs if e.get("who") == p.who]
                 return {"rev": rev, "events": [event_line(e) for e in evs[-200:]]}
             args = p.model_dump(exclude={"browser"})
-            rev, _ = chrome.events(name)
-            value = await chrome.call(s.log_id, name, op, args)
+            if op in reads:
+                rev, _ = chrome.events(name)
+                value = await chrome.call(s.log_id, name, op, args)
+            else:
+                # Actions on one tab wait for each other, in order of arrival.
+                async with chrome.lock(name):
+                    tab = chrome.tab_for(s.log_id, name)
+                    if tab.get("holder") == "person":
+                        chrome.refused(name, s.log_id)
+                        ask = f" ({tab['ask']})" if tab.get("ask") else ""
+                        raise OpError(
+                            "person_has_control",
+                            f"the person holds chrome:{name}{ask}; end your turn,"
+                            " you are woken when they give it back",
+                        )
+                    if op == "handover":
+                        await chrome.hold(name, "person", p.reason, s.log_id, s.handle)
+                        app.toast(
+                            f"{s.handle} needs you in your browser, on"
+                            f" {tab['title'] or name}: {p.reason}"
+                        )
+                        return (
+                            f"The person holds chrome:{name} now and sees: {p.reason}."
+                            " End your turn; you are woken when they give it back."
+                        )
+                    rev, _ = chrome.events(name)
+                    value = await chrome.call(s.log_id, name, op, args)
         except CallError as e:
             raise OpError(e.code, e.message) from None
         if op == "snapshot":
             tree = value.get("tree", "")
+            holder = chrome.tabs.get(name, {}).get("holder", "agent")
             if len(tree) > SNAPSHOT_MAX:
                 tree = tree[:SNAPSHOT_MAX] + "\n… (cut)"
-            return f"{value.get('url', '')}  {value.get('title', '')}\nholder: agent\n\n{tree}"
+            return f"{value.get('url', '')}  {value.get('title', '')}\nholder: {holder}\n\n{tree}"
         if op == "screenshot":
             shots = chrome.shots_dir(name)
             shots.mkdir(parents=True, exist_ok=True)
@@ -226,6 +275,14 @@ def register_chrome_ops(app: App) -> Chrome:
             await chrome.answer(p.request, p.give)
         except PairError as e:
             raise OpError(e.code, e.message) from e
+
+    @r.op("chrome.release", ChromeTab)
+    async def release(p: ChromeTab, caller):
+        """Give a tab the person holds back to its agents: Done after a
+        handover, Resume after a pause."""
+        if caller.is_agent:
+            raise OpError("people_only", "only the person gives a tab back")
+        await chrome.hold(p.tab, "agent")
 
     @r.op("chrome.revoke", ChromeRevoke, names=(("log_id", "session"),))
     async def revoke(p: ChromeRevoke, caller):

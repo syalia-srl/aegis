@@ -292,6 +292,8 @@ class _chrome:
         """Give or refuse an agent's request for a tab, from its card."""
     async def code(self) -> Any:
         """A one-time code the extension's popup trades for its device token, valid ten minutes."""
+    async def release(self, *, tab: str) -> Any:
+        """Give a tab the person holds back to its agents: Done after a handover, Resume after a pause."""
     async def revoke(self, *, tab: str, log_id: str | None = ...) -> Any:
         """Disconnect an agent from a shared tab, or with no log_id stop sharing the tab."""
     async def theme(self, *, vars: dict[str, str]) -> Any:
