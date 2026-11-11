@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>aegis</title>
+<link rel="stylesheet" href="aegis/css/fonts.css">
+<link rel="stylesheet" href="aegis/themes/ink.css">
+<link rel="stylesheet" href="aegis/css/gorgon.css">
+<link rel="stylesheet" href="popup.css">
+</head>
+<body class="aegis" data-theme="ink">
+<header>
+  <div class="mark" id="mark"></div>
+  <div class="who"><b>aegis</b><span id="where"></span></div>
+</header>
+<section id="paired" hidden>
+  <p class="status"><span class="dot" id="dot"></span><span id="state"></span></p>
+  <p class="note" id="shared">Nothing is shared. Agents see no tab of this browser.</p>
+  <p class="err" id="perr"></p>
+  <div class="row"><button class="btn" id="unpair" type="button">Unpair</button></div>
+</section>
+<form id="pair" hidden>
+  <p class="note">In aegis, open Settings → Chrome and get a code.</p>
+  <label>Server<input id="server" placeholder="https://aegis.example" spellcheck="false" required></label>
+  <label>Code<input id="code" placeholder="XXXX-XXXX" spellcheck="false" autocomplete="off" required></label>
+  <p class="err" id="err"></p>
+  <div class="row"><button class="btn primary" id="go" type="submit">Pair</button></div>
+</form>
+<script type="module" src="popup.js"></script>
+</body>
+</html>
