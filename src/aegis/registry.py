@@ -594,6 +594,58 @@ class Registry(Host):
         g = self.groups.get(key) if key is not None else None
         return g.name if g is not None else None
 
+    def set_group(
+        self, log_ids: list[str], key: str | None, owner: str | None
+    ) -> str | None:
+        """Move sessions into the group ``key``, into a fresh one with a
+        generated name when ``key`` is "new", or out of their group with None.
+        A group left with no open member is deleted. Returns the key, None when
+        they left. A hand edit reaches this server's sessions only, and only
+        the owner's."""
+        members: list[Session] = []
+        for log_id in log_ids:
+            if "@" in log_id:
+                raise OpError(
+                    "far_session",
+                    f"{log_id} is on another server; groups are changed here only",
+                )
+            s = self.sessions.get(log_id)
+            if s is None:
+                raise OpError("no_session", f"no open session {log_id!r}")
+            if (s.spec.owner or owner) != owner:
+                raise OpError("not_yours", f"{s.handle} is not yours to group")
+            members.append(s)
+        if key == "new":
+            key = self.groups.create(owner).key
+        elif key is not None and self.groups.get(key) is None:
+            raise OpError("no_group", f"no group {key!r}")
+        changed, emptied = [], set()
+        for s in members:
+            old = s.spec.group
+            if old == key:
+                continue
+            if old is not None:
+                emptied.add(old)
+            s.spec = dataclasses.replace(s.spec, group=key)
+            self.metas.write(s.meta())
+            changed.append(s)
+        for old in emptied - {key}:
+            if not any(x.spec.group == old for x in self.sessions.values()):
+                self.groups.delete(old)
+        if changed:
+            self._publish("sessions", [{"upsert": s.wire()} for s in changed])
+        return key
+
+    def rename_group(self, key: str, name: str) -> dict:
+        """Rename a group and re-publish every member's card, so each browser
+        draws the new name (#1039). ``bad_name`` for an empty, multi-line or
+        too long name; a name the owner uses takes a suffix."""
+        g = self.groups.rename(key, name)
+        members = [s for s in self.sessions.values() if s.spec.group == key]
+        if members:
+            self._publish("sessions", [{"upsert": s.wire()} for s in members])
+        return {"key": g.key, "name": g.name}
+
     def card(self, session: Session) -> dict:
         out = {
             "monitors": self.monitors.card(session.log_id)

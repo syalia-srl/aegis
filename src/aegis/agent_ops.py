@@ -289,6 +289,24 @@ class Quiet(_Strict):
     log_id: SkipJsonSchema[str | None] = None
 
 
+class GroupTool(_Strict):
+    handles: list[str] | None = Field(
+        None,
+        description="The sessions to move, by handle. Omit them to rename a "
+        "group with group and name.",
+    )
+    name: str | None = Field(
+        None,
+        description="A group's name: join the group of that name, make one "
+        "with it, or the new name when renaming. With handles and no name, "
+        "they leave their group.",
+    )
+    group: str | None = Field(
+        None,
+        description="The group to rename, by its name, with name and no handles.",
+    )
+
+
 class FileSend(_Strict):
     paths: list[Annotated[str, Field(min_length=1)]] = Field(
         min_length=1,
@@ -1557,6 +1575,37 @@ def register_agent_ops(app: App) -> None:
             f"{s.handle} is quiet: its tab shows when a turn ends with something "
             "for the person, and hides again when the next turn starts"
         )
+
+    @r.op("session.group", GroupTool, agent=True)
+    async def session_group(p: GroupTool, caller):
+        """Put sessions in one group of the tab bar, or give a group a new name.
+        A group holds any number of your sessions and has no head: what a
+        member spawns joins it by itself. With handles and a new name they get
+        a group called that; with the name of one you have, they join it; with
+        no name they leave theirs. With group and name and no handles, rename
+        that group. Groups are flat, and a session is in at most one."""
+        own(caller)
+        owner = app.who(caller).name
+        if p.handles:
+            picked = [target(h) for h in p.handles]
+            ids = [s.log_id for s in picked]
+            who = ", ".join(s.handle for s in picked)
+            if p.name is None:
+                reg.set_group(ids, None, owner)
+                return f"{who} left their group"
+            g = reg.groups.by_name(owner, p.name)
+            made = g is None
+            if g is None:
+                g = reg.groups.create(owner, p.name)
+            reg.set_group(ids, g.key, owner)
+            return f"{'made' if made else 'joined'} the group {g.name} ({g.key}): {who}"
+        if p.group is None or p.name is None:
+            raise OpError("bad_params", "handles, or group and name, are required")
+        g = reg.groups.by_name(owner, p.group)
+        if g is None:
+            raise OpError("no_group", f"no group named {p.group!r}")
+        renamed = reg.rename_group(g.key, p.name)
+        return f"the group {g.name} is now {renamed['name']} ({g.key})"
 
     @r.op("file.send", FileSend, agent=True, read=True)
     async def file_send(p: FileSend, caller):

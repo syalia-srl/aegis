@@ -390,6 +390,19 @@ class RenameParams(_Strict):
     title: str | None = None
 
 
+class GroupSetParams(_Strict):
+    log_ids: list[str]
+    # A group key, "new" for a fresh group with a generated name, or None to
+    # leave the group the sessions are in.
+    group: str | None = None
+
+
+class GroupRenameParams(_Strict):
+    # The group's key, as its card carries it.
+    group: str
+    name: str
+
+
 class FileRef(_Strict):
     file_id: str
     name: str
@@ -3280,6 +3293,19 @@ class App:
             if (s := reg.sessions.get(log_id)) is not None:
                 s.check_lock()
             return reg.rename(log_id, p.handle, p.title)
+
+        @r.op("group.set", GroupSetParams)
+        async def group_set(p: GroupSetParams, caller):
+            """Move sessions into a group, into a fresh one with group "new",
+            or out of their group with null. This server's sessions only, and
+            only your own. Returns the group's key, null when they left."""
+            return {"group": reg.set_group(p.log_ids, p.group, self.who(caller).name)}
+
+        @r.op("group.rename", GroupRenameParams)
+        async def group_rename(p: GroupRenameParams, caller):
+            """Rename a group: every browser draws its members under the new
+            name. An empty, multi-line or 61-character name is refused."""
+            return reg.rename_group(p.group, p.name)
 
         @r.op("archive.list", ArchiveParams, access="read")
         async def archive_list(p: ArchiveParams, caller):
