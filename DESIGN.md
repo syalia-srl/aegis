@@ -147,8 +147,19 @@ and the panels. A request (`browser_request`, `browser_open(where="person")`)
 is answered in the popup or on its transcript card, whichever is first;
 `Chrome.resolve` answers it once, records the card's outcome and wakes the
 agent. Either side revokes and tells the other, which never echoes it.
-Driving a granted tab (the spec `2026-11-11-chrome-extension-design.html`)
-builds on this socket.
+The `browser_*` tools on a `chrome:<name>` id go to `Chrome.drive`: the
+server checks the grant (`Chrome.tab_for`, which tells revoked from
+not_granted), sends a `call` to the tab's browser and waits for its `result`.
+The extension checks the grant again, holds `chrome.debugger` on every tab
+with a grant, and runs the same CDP calls Playwright would, so its input is
+trusted. It finds targets with `extension/target.js` in an isolated world;
+`tests/test_chrome_target.py` holds that file to Playwright's own engine on
+one fixture, which is how a target means the same in both kinds of browser.
+The page's events come back as `event` messages into the tab's log, kept
+with the agents' actions as a server browser's are. The ribbon
+(`extension/ribbon.js`) is injected into shared tabs only, in a closed shadow
+root. Handover, pausing and the queue of actions per tab (the spec
+`2026-11-11-chrome-extension-design.html`) build on these calls.
 
 **A browser is a Chromium the server holds, shared by an agent and a person.**
 A browser (`browsers.py`, #564) is a headless Chromium driven through
