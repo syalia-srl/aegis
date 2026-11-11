@@ -550,6 +550,29 @@ async def test_a_sent_file_is_streamed_through_via(pair, tmp_path):
     del s
 
 
+async def test_a_browser_on_alpha_peeks_a_file_a_beta_row_used(pair, tmp_path):
+    # The Show button of a linked server's Read row (#1044): beta copies its
+    # own file, and alpha's browser fetches it under /via/beta.
+    alpha, beta = pair
+    s = await beta.spawn()
+    notes = tmp_path / "far-notes.md"
+    notes.write_text("# Far notes\n")
+    await turn(s, f"/read {notes}")
+    (read,) = [e for e in s.entries() if e["kind"] == "tool"]
+    notes.write_text("# Far notes, edited\n")
+    async with Browser(alpha) as b:
+        r = await b.call(
+            "file.peek", server="beta", log_id=s.log_id, entry_id=read["id"]
+        )
+    (f,) = r["result"]
+    assert f["name"] == "far-notes.md"
+    (kept,) = s.fold().entry(read["id"])["detail"]["peek"]["files"]
+    assert kept["url"] == f["url"], "the peek is recorded on beta's row"
+    async with httpx.AsyncClient() as c:
+        got = await c.get(f"{alpha.base}/via/beta{f['url']}?download=1")
+    assert got.content == b"# Far notes, edited\n"
+
+
 async def test_aegis_link_add_reads_the_token_from_stdin_and_checks_the_name(
     pair, tmp_path
 ):

@@ -1470,6 +1470,9 @@ root (`files.store_all`).
 A Read, Write or Edit row carries the path its tool used, and the person can
 ask for that file (`file.peek`): it is copied the same way, as it is at that
 moment, and its card opens inside the row. The agent never sees it.
+On a linked server's row the browser sends `file.peek` through the link:
+the far server copies its own file and the card fetches it under
+`/via/<server>`, so no server reads another's disk.
 Open natively runs the desktop's opener on the server, so it is a person's
 operation only, and only for a socket on loopback to a server with a desktop: a
 proxy's public name is a browser elsewhere, and an SSH tunnel to a headless box

@@ -8,7 +8,7 @@
 
 import { byId } from "./dom.js";
 import { Transcript } from "./transcript.js";
-import { artifactStage, btwFolds, entryFiles, fadeTables, fileUrl, refreshApprovals, refreshWorkflows, setApprovals, setDocker, setFileBase, setOpener, setSecrets, setSpeaker, setWorkflows, syncDock, tickWorkflows, workflowLocked, workflowTitle } from "./entries.js";
+import { artifactStage, btwFolds, entryFiles, fadeTables, fileUrl, paneFile, refreshApprovals, refreshWorkflows, setApprovals, setDocker, setFileBase, setOpener, setSecrets, setSpeaker, setWorkflows, syncDock, tickWorkflows, workflowLocked, workflowTitle } from "./entries.js";
 import { setScroller } from "./highlight.js";
 import { Viewer, peekRoots } from "./viewer.js";
 import { Canvas } from "./canvas.js";
@@ -2038,8 +2038,10 @@ $("entries").addEventListener("click", async (ev) => {
   try {
     // The row comes back with the card in it; this node is replaced. Only
     // the answer says where the file sits under the root (viewer.js).
-    const files = await app.conn.call("file.peek", { log_id: app.forKey(app.state.shown).log_id, entry_id: b.dataset.entry });
-    for (const f of files) if (f.root_path) peekRoots.set(f.url, f.root_path);
+    // A linked server's row asks that server, which copies its own file (#1044).
+    const { log_id, server } = app.forKey(app.state.shown);
+    const files = await app.conn.call("file.peek", { log_id, entry_id: b.dataset.entry }, server);
+    if (!server) for (const f of files) if (f.root_path) peekRoots.set(f.url, f.root_path);
   } catch (e) {
     b.nextElementSibling.textContent = e.message;
     b.disabled = false;
@@ -3341,7 +3343,7 @@ function rowMenu(t, ev) {
     const edit = { id: "edit", label: "Edit and resend", icon: "pencil", run: () => insertIntoComposer(e.md || "") };
     groups = [[edit, fresh], [copy, link]];
   } else if (e.kind === "tool") {
-    const open = e.detail?.path && !s.server && { id: "open", label: "Open file", icon: "file", run: () => openToolFile(id) };
+    const open = e.detail?.path && { id: "open", label: "Open file", icon: "file", run: () => openToolFile(id) };
     const out = { id: "copyout", label: "Copy output", icon: "copy", key: "c", run: copy.run };
     groups = [[open, out], [reply, link]];
   } else if (e.kind === "file" || e.kind === "artifact") {
@@ -3372,7 +3374,10 @@ function sentItems(row) {
 // A Read, Write or Edit row's file, in the viewer (file.peek, as its Show button).
 async function openToolFile(id) {
   try {
-    const files = await app.conn.call("file.peek", { log_id: app.forKey(app.state.shown).log_id, entry_id: id });
+    // A linked server's file is fetched under /via and opens remote (#1044).
+    const { log_id, server } = app.forKey(app.state.shown);
+    const files = await app.conn.call("file.peek", { log_id, entry_id: id }, server);
+    if (server) return viewer.open({ files: files.map((f) => paneFile(f).file), at: 0, remote: true, glyph: "file" });
     for (const f of files) if (f.root_path) peekRoots.set(f.url, f.root_path);
     viewer.open({ files, at: 0, remote: false, glyph: "file" });
   } catch (err) {

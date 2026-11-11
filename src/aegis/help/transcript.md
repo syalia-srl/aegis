@@ -46,7 +46,9 @@ way an editor does:
 - A file the agent read shows its last 40 lines, numbered and coloured by the
   file's language. A file it wrote shows the same way. Show the file, on a
   row that read, wrote or edited a file, adds a card with the whole file as it
-  is now; Open on the card shows it.
+  is now; Open on the card shows it. On a session of a linked server the
+  button reads Fetch the file from <server>: that server copies its own file
+  and the card shows it through the link.
 - A shell command is coloured.
 - An edit shows the old and new lines side by side when the transcript is at
   least 680 px wide, and as one compact column when it is narrower, with the
