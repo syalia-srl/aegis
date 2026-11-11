@@ -140,15 +140,8 @@ a device token (`chrome.py`). The token is not a principal: it opens
 server keeps its SHA-256 in `<state>/chrome.json`. The `chrome` channel
 carries the paired browsers and whether each socket is open. The page sends
 its theme's variables with `chrome.theme`, and the server forwards them to
-the extension. A grant is one tab and one session, and the extension is
-its authority: it names to the server only tabs with a grant, and resends
-them in every hello, so the server's `tabs` is a mirror for `browser_list`
-and the panels. A request (`browser_request`, `browser_open(where="person")`)
-is answered in the popup or on its transcript card, whichever is first;
-`Chrome.resolve` answers it once, records the card's outcome and wakes the
-agent. Either side revokes and tells the other, which never echoes it.
-Driving a granted tab (the spec `2026-11-11-chrome-extension-design.html`)
-builds on this socket.
+the extension. Sharing tabs and driving them (the spec
+`2026-11-11-chrome-extension-design.html`) build on this socket.
 
 **A browser is a Chromium the server holds, shared by an agent and a person.**
 A browser (`browsers.py`, #564) is a headless Chromium driven through

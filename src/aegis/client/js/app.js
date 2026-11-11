@@ -256,7 +256,6 @@ function onChrome(snap) {
   app.state.chrome = snap || { devices: [] };
   settings.onChrome(app.state.chrome);
   fleet.renderChrome();
-  sidebar?.drawChrome();
   if (app.state.chrome.devices.length > before) pushChromeTheme();
 }
 

@@ -35,9 +35,6 @@ async def monitor(world, a) -> str:
 
 def task(world, a) -> Task:
     t = Task("t-1", "small", "do it", True, a.log_id, str(world.root))
-    # Running, not pending: "small" is not a configured queue, and any
-    # dispatch before the handoff would fail a pending task on it (#1038).
-    t.status = "running"
     world.app.queues.tasks[t.id] = t
     return t
 

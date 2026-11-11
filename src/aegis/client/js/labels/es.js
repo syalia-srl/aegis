@@ -10,9 +10,6 @@
 // conteo se elige en el código y aquí solo vive el sustantivo.
 export default {
   "sidebar.feeds": "Feeds",
-  "sidebar.chrome": "Tu navegador",
-  "sidebar.chromeDisconnect": "Desconectar",
-  "sidebar.chromeAsked": "pedida: {what}",
   "fleet.feeds.one": "{n} feed",
   "fleet.feeds.other": "{n} feeds",
   "fleet.feeds.waiting": "{n} en espera",
@@ -715,15 +712,6 @@ export default {
   "entries.approval.nothingToApprove": "nada que aprobar hasta que el prompt nombre otro",
 
   "entries.secret.title": "secreto",
-  "entries.chrome.title": "Pestaña de tu navegador",
-  "entries.chrome.tab": "pide una pestaña: {match}",
-  "entries.chrome.open": "pide abrir {url} en tu navegador",
-  "entries.chrome.why": "Por qué: {why}",
-  "entries.chrome.give": "Dar",
-  "entries.chrome.refuse": "Rechazar",
-  "entries.chrome.waiting": "Esperando a que tu navegador dé la pestaña…",
-  "entries.chrome.granted": "diste {tab} · {title}",
-  "entries.chrome.denied": "rechazada · {what}",
   "entries.secret.size": "{bytes} B",
   "entries.secret.revealed": "{size} · revelado",
   "entries.secret.state": "{size} · {state}",
