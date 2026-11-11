@@ -5,7 +5,11 @@ child makes a group holding both, and the group outlives every member."""
 import json
 import re
 
+from aegis import restarts
+from aegis.meta import MetaStore
 from aegis.ops import Caller
+from aegis.registry import Registry
+from aegis.roots import make_roots
 
 from .conftest import until
 from .test_agents import mcp, turn, world  # noqa: F401
@@ -129,3 +133,62 @@ def test_a_far_spawn_names_the_group_once_across_servers():
     assert far_group("grp-3fa9c210@alpha", "beta", "gamma") == "grp-3fa9c210@alpha"
     # Back on the server it began on, it is a plain key again.
     assert far_group("grp-3fa9c210@alpha", "beta", "alpha") == "grp-3fa9c210"
+
+
+# -- migrating groups from before #1039 -------------------------------------------
+A = "20261101-000000-aaaaaa"
+B = "20261101-000000-bbbbbb"
+C = "20261101-000000-cccccc"
+D = "20261101-000000-dddddd"
+
+
+def seed_meta(roots, log_id, handle, **kw):
+    MetaStore(roots.state_root / "sessions").write(
+        {
+            "log_id": log_id,
+            "handle": handle,
+            "archived": False,
+            "agent": "opus",
+            "model": "opus",
+            "effort": "high",
+            "permission": "full",
+            "cwd": str(roots.harness_cwd),
+            "created_at": 1.0,
+            **kw,
+        }
+    )
+
+
+def test_log_id_groups_migrate_once(tmp_path):
+    (tmp_path / ".aegis.yaml").write_text("agents: {}\n")
+    roots = make_roots(tmp_path, None)
+    # a headed the chain; b and c were spawned from it, b as its lead.
+    seed_meta(roots, A, "alpha-one")
+    seed_meta(roots, B, "bravo-two", group=A, leads=True)
+    seed_meta(roots, C, "charlie-three", group=A)
+    seed_meta(roots, D, "delta-four")
+    reg = Registry(roots, lambda ch, ops: None)
+    reg.boot(restarts.CLEAN)
+    key = reg.sessions[B].spec.group
+    assert re.match(r"^grp-[0-9a-f]{8}$", key)
+    assert reg.sessions[A].spec.group == reg.sessions[C].spec.group == key
+    assert reg.sessions[D].spec.group is None
+    g = reg.groups.get(key)
+    assert g is not None and re.match(r"^[a-z]+-[a-z]+$", g.name)
+    meta = json.loads(reg.metas.path(B).read_text())
+    assert meta["group"] == key and "leads" not in meta
+    # A second load changes nothing: the same key and one record.
+    again = Registry(roots, lambda ch, ops: None)
+    again.boot(restarts.CLEAN)
+    assert again.sessions[B].spec.group == key
+    assert again.groups.keys() == {key}
+
+
+def test_a_far_log_id_key_stays_until_its_server_migrates(tmp_path):
+    (tmp_path / ".aegis.yaml").write_text("agents: {}\n")
+    roots = make_roots(tmp_path, None)
+    seed_meta(roots, B, "bravo-two", group=f"{A}@beta")
+    reg = Registry(roots, lambda ch, ops: None)
+    reg.boot(restarts.CLEAN)
+    assert reg.sessions[B].spec.group == f"{A}@beta"
+    assert reg.groups.keys() == set()

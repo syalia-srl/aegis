@@ -893,6 +893,28 @@ class Registry(Host):
             m["handle"] = mint_handle(self._handles())
             self.metas.write(m)
             self._admit(m)
+        self._migrate_groups()
+
+    def _migrate_groups(self) -> None:
+        """Groups from before #1039 were keyed by the log id of the session that
+        headed the chain. Give each local key with an open member a record, and
+        rewrite its members' specs; the session the old key names joins it too
+        when it is open. A key naming a linked server waits for that server to
+        migrate, and an archived member keeps its old key until it is reopened."""
+        remap: dict[str, str] = {}
+        for s in self.sessions.values():
+            old = s.spec.group
+            if old is None or old.startswith("grp-") or "@" in old:
+                continue
+            if old not in remap:
+                remap[old] = self.groups.create(s.spec.owner).key
+            s.spec = dataclasses.replace(s.spec, group=remap[old])
+            self.metas.write(s.meta())
+        for old, key in remap.items():
+            head = self.sessions.get(old)
+            if head is not None and head.spec.group is None:
+                head.spec = dataclasses.replace(head.spec, group=key)
+                self.metas.write(head.meta())
 
     def _admit(self, meta: dict) -> None:
         if meta.get("linux_user") and not meta.get("archived"):
