@@ -3305,7 +3305,7 @@ class App:
         async def group_rename(p: GroupRenameParams, caller):
             """Rename a group: every browser draws its members under the new
             name. An empty, multi-line or 61-character name is refused."""
-            return reg.rename_group(p.group, p.name)
+            return reg.rename_group(p.group, p.name, self.who(caller).name)
 
         @r.op("archive.list", ArchiveParams, access="read")
         async def archive_list(p: ArchiveParams, caller):

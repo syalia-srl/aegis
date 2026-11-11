@@ -1604,7 +1604,7 @@ def register_agent_ops(app: App) -> None:
         g = reg.groups.by_name(owner, p.group)
         if g is None:
             raise OpError("no_group", f"no group named {p.group!r}")
-        renamed = reg.rename_group(g.key, p.name)
+        renamed = reg.rename_group(g.key, p.name, owner)
         return f"the group {g.name} is now {renamed['name']} ({g.key})"
 
     @r.op("file.send", FileSend, agent=True, read=True)

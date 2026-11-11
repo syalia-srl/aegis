@@ -58,7 +58,7 @@ async def test_rename_reaches_every_members_wire(world):  # noqa: F811
     reg = world.app.sessions
     a, b = await world.spawn(), await world.spawn()
     key = reg.set_group([a.log_id, b.log_id], "new", world.app.user)
-    assert reg.rename_group(key, "the-bots")["name"] == "the-bots"
+    assert reg.rename_group(key, "the-bots", world.app.user)["name"] == "the-bots"
     assert a.wire()["group_name"] == b.wire()["group_name"] == "the-bots"
     assert a.wire()["group"] == key
 
@@ -79,6 +79,19 @@ async def test_another_owners_session_is_refused(world):  # noqa: F811
         reg.set_group([a.log_id], "new", "someone-else")
     assert e.value.code == "not_yours"
     assert a.spec.group is None
+
+
+async def test_another_owners_group_cannot_be_joined_or_renamed(world):  # noqa: F811
+    reg = world.app.sessions
+    a = await world.spawn()
+    theirs = reg.groups.create("someone-else").key
+    with pytest.raises(OpError) as e:
+        reg.set_group([a.log_id], theirs, world.app.user)
+    assert e.value.code == "not_yours"
+    assert a.spec.group is None
+    with pytest.raises(OpError) as e:
+        reg.rename_group(theirs, "mine-now", world.app.user)
+    assert e.value.code == "not_yours"
 
 
 async def test_session_group_creates_joins_leaves_and_renames(world):  # noqa: F811

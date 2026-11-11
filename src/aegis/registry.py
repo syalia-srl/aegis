@@ -617,8 +617,12 @@ class Registry(Host):
             members.append(s)
         if key == "new":
             key = self.groups.create(owner).key
-        elif key is not None and self.groups.get(key) is None:
-            raise OpError("no_group", f"no group {key!r}")
+        elif key is not None:
+            g = self.groups.get(key)
+            if g is None:
+                raise OpError("no_group", f"no group {key!r}")
+            if (g.owner or owner) != owner:
+                raise OpError("not_yours", f"the group {g.name} is not yours")
         changed, emptied = [], set()
         for s in members:
             old = s.spec.group
@@ -636,10 +640,15 @@ class Registry(Host):
             self._publish("sessions", [{"upsert": s.wire()} for s in changed])
         return key
 
-    def rename_group(self, key: str, name: str) -> dict:
+    def rename_group(self, key: str, name: str, owner: str | None) -> dict:
         """Rename a group and re-publish every member's card, so each browser
         draws the new name (#1039). ``bad_name`` for an empty, multi-line or
-        too long name; a name the owner uses takes a suffix."""
+        too long name; a name the owner uses takes a suffix. Only the owner's."""
+        g = self.groups.get(key)
+        if g is None:
+            raise OpError("no_group", f"no group {key!r}")
+        if (g.owner or owner) != owner:
+            raise OpError("not_yours", f"the group {g.name} is not yours")
         g = self.groups.rename(key, name)
         members = [s for s in self.sessions.values() if s.spec.group == key]
         if members:
