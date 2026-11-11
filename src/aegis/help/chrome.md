@@ -64,7 +64,7 @@ tab is shared. Add an agent adds another session to the same tab.
 
 An agent asks for one of your tabs with `browser_request`, or to open a page
 in a new tab with `browser_open` and `where="person"`. A card with Give and
-Refuse appears in its transcript, and the extension's icon gets a badge; the
+Refuse appears under the agent's call, and the extension's icon gets a badge; the
 popup shows the same request with the tabs that match it. Answer in either
 place: the other one follows. Give on the card in aegis gives the tab that
 matches best, or opens the page; pick another tab in the popup. The agent is
