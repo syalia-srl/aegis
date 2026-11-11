@@ -38,6 +38,8 @@ class Ops:
     @property
     def fs(self) -> _fs: ...
     @property
+    def group(self) -> _group: ...
+    @property
     def harness(self) -> _harness: ...
     @property
     def help(self) -> _help: ...
@@ -403,6 +405,12 @@ class _fs:
         """A ticket URL for one file, such as an image a Markdown file links to."""
     async def write(self, *, path: str, content: str, base: str | None) -> Any:
         """Save a text file, only if it still has the hash ``base``; a null base creates it and refuses a file that exists."""
+
+class _group:
+    async def rename(self, *, group: str, name: str) -> Any:
+        """Rename a group: every browser draws its members under the new name. An empty, multi-line or 61-character name is refused."""
+    async def set(self, *, log_ids: builtins.list[str], group: str | None = ...) -> Any:
+        """Move sessions into a group, into a fresh one with group "new", or out of their group with null. This server's sessions only, and only your own. Returns the group's key, null when they left."""
 
 class _harness:
     async def status(self) -> Any:
@@ -804,6 +812,14 @@ class _session:
         permission: Literal["read", "write", "full", "auto"] | None = ...,
     ) -> Any:
         """session.configure"""
+    async def group(
+        self,
+        *,
+        handles: builtins.list[str] | None = ...,
+        name: str | None = ...,
+        group: str | None = ...,
+    ) -> Any:
+        """Put sessions in one group of the tab bar, or give a group a new name. A group holds any number of your sessions and has no head: what a member spawns joins it by itself. With handles and a new name they get a group called that; with the name of one you have, they join it; with no name they leave theirs. With group and name and no handles, rename that group. Groups are flat, and a session is in at most one."""
     async def handoff(
         self,
         *,

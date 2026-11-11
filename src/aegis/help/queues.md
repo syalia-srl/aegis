@@ -54,8 +54,10 @@ keeps the harness it needs closed.
 ## What a worker is
 
 A worker is an ordinary session, marked as a worker of its queue on its card,
-started in the enqueuer's working directory. It starts quiet: no tab, only a
-card in the Fleet's last group, unless its queue sets `quiet: false`. Its task is its first
+started in the enqueuer's working directory and in its group of tabs. It
+starts quiet: no tab, only a card inside its group's stack in the Fleet
+(dimmed, at the end of "Needs you first" when it has no group), unless its
+queue sets `quiet: false`. Its task is its first
 prompt and its final message is the result, so it should end on the answer
 the enqueuer needs.
 
