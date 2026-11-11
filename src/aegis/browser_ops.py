@@ -39,6 +39,15 @@ class BrowserOpen(_Strict):
         "right",
         description=canvas.DOCK_DOC + " Defaults to right; null leaves it a tab only.",
     )
+    where: Literal["server", "person"] = Field(
+        "server",
+        description="server: a Chromium on the server. person: ask the person to"
+        " open it in a new tab of their own browser; you are woken with granted"
+        " or denied.",
+    )
+    why: str = Field(
+        "", description="With where=person: why you need it, shown to the person."
+    )
 
 
 class BrowserRef(_Strict):
@@ -182,9 +191,12 @@ def register_browser_ops(app: App) -> None:
         """Start a browser on the server and load a URL. It docks beside your
         transcript (dock=) and shows as a tab, where the person watches and
         clicks in it; you hold the page until you hand it over. Its profile
-        keeps sign-ins between opens."""
+        keeps sign-ins between opens. With where="person", ask the person to
+        open the URL in a new tab of their own browser instead (chrome)."""
         if not caller.is_agent:
             raise OpError("bad_caller", "a person opens a browser with browser.spawn")
+        if p.where == "person":
+            return await app.chrome.ask_for(caller, "open", "", p.url, p.why)
         s = app.sessions.sessions.get(caller.log_id or "")
         profile = p.profile or (s.handle if s is not None else None)
         b = await br.open_(
