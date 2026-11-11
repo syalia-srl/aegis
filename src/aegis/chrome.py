@@ -93,7 +93,7 @@ class Chrome:
         self.list_sessions: Callable[[], list[dict]] = lambda: []
         self.on_answer: Callable[[dict, str, dict | None], None] = lambda *_: None
         self.on_grants: Callable[[], None] = lambda: None
-        self.on_nomatch: Callable[[dict], None] = lambda _: None
+        self.on_nomatch: Callable[[dict], object] = lambda _: None
         # An agent's request, with its card (chrome_ops): browser_open's too.
         self.ask_for: Callable[..., Awaitable[dict]]
         self._load()
