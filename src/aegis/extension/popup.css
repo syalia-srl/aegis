@@ -1,7 +1,7 @@
 /* The popup, in the theme the person picked in aegis (chrome.py sends its
    variables; ink until the first set arrives). */
 html,body{margin:0}
-body{width:320px;padding:14px 16px 16px;background:var(--bg);color:var(--ink);font:13px/1.45 var(--font-ui);box-sizing:border-box}
+body{width:380px;padding:14px 16px 16px;background:var(--bg);color:var(--ink);font:13px/1.45 var(--font-ui);box-sizing:border-box}
 header{display:flex;align-items:center;gap:12px;margin-bottom:12px}
 .mark .gorgon{width:44px;height:44px;display:block}
 .who{display:flex;flex-direction:column;min-width:0}
@@ -22,3 +22,26 @@ input:focus{outline:none;border-color:var(--accent)}
 .btn:hover{border-color:var(--accent)}
 .btn.primary{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
 .btn:disabled{opacity:.6;cursor:default}
+h4{margin:14px 0 6px;font:600 11px var(--font-chrome);text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.tab{display:grid;grid-template-columns:16px 1fr auto;gap:8px;align-items:center;padding:6px 0;border-top:1px solid var(--rule)}
+.tab img,.tab .fav{width:16px;height:16px}
+.tab .t{min-width:0}
+.tab .t b{display:block;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tab .t span{display:block;color:var(--muted);font:11px var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tab.on .t b{color:var(--accent)}
+.switch{appearance:none;width:30px;height:17px;border-radius:9px;background:var(--rule);position:relative;cursor:pointer;margin:0}
+.switch::after{content:"";position:absolute;top:2px;left:2px;width:13px;height:13px;border-radius:50%;background:var(--ink);transition:left .15s}
+.switch:checked{background:var(--accent)}
+.switch:checked::after{left:15px;background:var(--on-accent)}
+.chips{grid-column:2/4;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.chip{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--accent);color:var(--accent);border-radius:999px;padding:1px 4px 1px 9px;font:12px var(--font-mono)}
+.chip button,.lnk{background:none;border:0;color:inherit;cursor:pointer;font:inherit;padding:0 4px}
+.lnk{color:var(--muted);font-size:12px;text-decoration:underline}
+.pick{grid-column:2/4;background:var(--surface);border:1px solid var(--rule);border-radius:var(--r);padding:8px 10px;margin-top:2px}
+.pick label{flex-direction:row;align-items:center;gap:8px;margin:0 0 6px;color:var(--ink);font:12px var(--font-mono)}
+.pick label span{color:var(--muted);font-family:var(--font-ui);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.req{border:1px solid var(--accent);border-radius:var(--r-lg,10px);padding:10px 12px;margin:0 0 10px;background:var(--accent-soft)}
+.req p{margin:0 0 6px}
+.req .why{color:var(--muted)}
+.req label{flex-direction:row;align-items:center;gap:8px;margin:0 0 4px;color:var(--ink);font-size:12px}
+.req label span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

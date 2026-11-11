@@ -228,6 +228,8 @@ class _browser:
         """Give the page to the person, with what they should do (pass a captcha, sign in, try a step), then end your turn. You are woken with > from browser:<id> · back, and what they did, when they give it back."""
     async def input(self, *, id: str, events: builtins.list[dict[str, Any]]) -> Any:
         """browser.input"""
+    async def list(self) -> Any:
+        """Every browser you may use: the server's (kind server) and the tabs of the person's own browser they gave you (kind person, id chrome:<name>)."""
     async def nav(
         self,
         *,
@@ -237,15 +239,23 @@ class _browser:
     ) -> Any:
         """browser.nav"""
     async def open(
-        self, *, url: str, profile: str | None = ..., dock: str | None = ...
+        self,
+        *,
+        url: str,
+        profile: str | None = ...,
+        dock: str | None = ...,
+        where: Literal["server", "person"] = ...,
+        why: str = ...,
     ) -> Any:
-        """Start a browser on the server and load a URL. It docks beside your transcript (dock=) and shows as a tab, where the person watches and clicks in it; you hold the page until you hand it over. Its profile keeps sign-ins between opens."""
+        """Start a browser on the server and load a URL. It docks beside your transcript (dock=) and shows as a tab, where the person watches and clicks in it; you hold the page until you hand it over. Its profile keeps sign-ins between opens. With where="person", ask the person to open the URL in a new tab of their own browser instead (chrome)."""
     async def press(
         self, *, browser: str | None = ..., key: str, target: str | None = ...
     ) -> Any:
         """Press a key or chord on an element, or on whatever has focus."""
     async def reopen(self, *, id: str) -> Any:
         """browser.reopen"""
+    async def request(self, *, match: str, why: str = ...) -> Any:
+        """Ask the person for one of the tabs open in their own browser, with their sign-ins. Say what you want in match and why. End your turn: you are woken with granted, naming the tab's id, or denied. You never learn which other tabs exist."""
     async def resize(
         self, *, browser: str | None = ..., width: int, height: int
     ) -> Any:
@@ -278,8 +288,12 @@ class _btw:
         """Cancel a running side note; its block keeps the question, folded."""
 
 class _chrome:
+    async def answer(self, *, request: str, give: bool) -> Any:
+        """Give or refuse an agent's request for a tab, from its card."""
     async def code(self) -> Any:
         """A one-time code the extension's popup trades for its device token, valid ten minutes."""
+    async def revoke(self, *, tab: str, log_id: str | None = ...) -> Any:
+        """Disconnect an agent from a shared tab, or with no log_id stop sharing the tab."""
     async def theme(self, *, vars: dict[str, str]) -> Any:
         """The CSS variables of the theme the person picked, for the extension's popup."""
     async def unpair(self, *, id: str) -> Any:
