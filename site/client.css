@@ -2361,6 +2361,8 @@
 .a2 .set-pill.ok{color:var(--ok)}
 .a2 .set-pill.bad{color:var(--err)}
 .a2 .set-linkrow{display:flex;gap:8px;margin-top:10px}
+.a2 .set-chrome-pair b{font-family:var(--font-mono);color:var(--accent);font-size:1.2em;letter-spacing:.06em}
+.a2 a#set-chrome-download{text-decoration:none}
 /* Whose a session is, when it is not this browser's (tokens.py). */
 .a2 .tab .who,.a2 .card .who{font-family:var(--font-mono);font-size:10.5px;color:var(--comms);border:1px solid var(--rule);border-radius:999px;padding:0 7px;margin-left:6px;white-space:nowrap}
 .a2 .set-once{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px}
