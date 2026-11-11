@@ -1991,14 +1991,16 @@ const RENDERERS = {
     if (e.status !== "running") line.append(copyButton("output", t));
     d.append(line);
     const more = el("div", "more");
-    if (det.path && fileBase === "") {
+    if (det.path) {
       // A file tool's row: the person can see its file without the agent
-      // sending it (file.peek). Not on a linked server's row: the op is local.
+      // sending it (file.peek). On a linked server's row the far server
+      // copies it, and the button says so (#1044).
       const bar = el("div", "peekbar");
       bar.dataset.chrome = "";
+      const far = fileBase.replace(/^\/via\//, "");
       const b = det.peek
-        ? withIcon(el("button", "btn peek"), "again", t("entries.tool.peekAgain"))
-        : withIcon(el("button", "btn peek"), "file", t("entries.tool.peek"));
+        ? withIcon(el("button", "btn peek"), "again", far ? t("entries.tool.peekFarAgain", { server: far }) : t("entries.tool.peekAgain"))
+        : withIcon(el("button", "btn peek"), "file", far ? t("entries.tool.peekFar", { server: far }) : t("entries.tool.peek"));
       b.dataset.entry = e.id;
       bar.append(b, el("span", "peekerr"));
       more.append(bar);

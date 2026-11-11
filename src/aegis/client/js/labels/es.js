@@ -151,6 +151,8 @@ export default {
   "entries.path.missing": "El archivo no existía; haz clic para volver a mirar",
   "entries.tool.peek": "Mostrar el archivo",
   "entries.tool.peekAgain": "Mostrar el archivo de nuevo",
+  "entries.tool.peekFar": "Traer el archivo de {server}",
+  "entries.tool.peekFarAgain": "Traer el archivo de {server} de nuevo",
   "entries.tool.steps": "{n} pasos",
   "entries.tool.asOf": "a las {time}",
   "entries.tool.loading": "cargando…",
