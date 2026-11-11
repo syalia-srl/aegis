@@ -131,7 +131,13 @@
 .a2 .tblock{display:flex;gap:2px;flex:none}
 .a2 .tblock.grp{gap:1px;padding:0 2px;margin:0 3px;border-radius:var(--r) var(--r) 0 0;background:color-mix(in srgb,var(--g) 9%,transparent);box-shadow:inset 0 -2px 0 var(--g)}
 .a2 .tblock.dragging{opacity:.35}
-.a2 .tab.head .hn{font-weight:600}
+.a2 .tab.named .hn{font-weight:600;color:var(--strong);max-width:18ch;overflow:hidden;text-overflow:ellipsis}
+/* Rename in place on the group's head (#1039): an input where its name was. */
+.a2 .tab.named input.ren{width:16ch;min-width:8ch;font:inherit;font-weight:600;color:var(--strong);background:var(--bg);border:1px solid var(--accent);border-radius:4px;padding:1px 4px}
+.a2 .tablist.drop-gap{box-shadow:inset 0 -2px 0 var(--accent)}
+.a2 .tblock.out{box-shadow:inset 0 -2px 0 var(--g)}
+.a2 .tab.out{box-shadow:inset 0 -2px 0 var(--g),0 0 0 1px color-mix(in srgb,var(--g) 50%,transparent)}
+.a2 .tab.out.on{box-shadow:inset 0 2px 0 var(--accent),inset 0 -2px 0 var(--g)}
 .a2 .tab .cnt{flex:none;font:10.5px/1 var(--font-mono);padding:3px 6px;border-radius:9px;background:color-mix(in srgb,var(--g) 30%,transparent);color:var(--strong);cursor:pointer}
 .a2 .tab .cnt.alert{box-shadow:0 0 0 1.5px var(--accent);animation:a2blink 1.2s steps(2,start) infinite}
 .a2 .tab.nodrop{cursor:not-allowed}
@@ -314,6 +320,10 @@
 .a2 .canvas>.wempty{display:none}
 .a2[data-view=window] .canvas[data-docked="0"]>.wempty{display:block;margin:48px auto}
 .a2[data-view=fleet] .v-fleet{display:block;overflow:auto}
+/* A group's page (#1039): the Fleet's cards over one group's members, without
+   the band, the order's segments, the linked servers or the archive. */
+.a2 .v-fleet.groupview :is(.install-offer,#band,.order .seg,.chrome-cards,#remotes,.archive){display:none}
+.a2 .v-fleet.groupview .order{padding-top:10px}
 .a2[data-mode=read] .composer,.a2[data-mode=read] .side .live-only{display:none}
 .a2:not([data-mode=read]) .read-only{display:none}
 .a2 .notice{color:var(--muted);font-size:14px;max-width:520px;text-align:center;line-height:1.5}
