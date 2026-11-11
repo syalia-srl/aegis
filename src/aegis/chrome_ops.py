@@ -43,6 +43,11 @@ class ChromeTab(BaseModel):
     tab: str
 
 
+class ChromeScripts(BaseModel):
+    tab: str
+    on: bool
+
+
 class ChromeRevoke(BaseModel):
     tab: str
     log_id: str | None = None
@@ -158,7 +163,7 @@ def register_chrome_ops(app: App) -> Chrome:
 
     # What the extension does on a person's tab; the rest wait for later slices.
     reads = ("snapshot", "screenshot", "events")
-    acts = ("click", "type", "press", "goto", "handover")
+    acts = ("click", "type", "press", "goto", "handover", "eval")
 
     async def drive(caller: Caller, op: str, p) -> object:
         """A browser_* tool on chrome:<name>, run by the person's browser."""
@@ -220,6 +225,10 @@ def register_chrome_ops(app: App) -> Chrome:
             path = shots / f"{time.strftime('%Y%m%d-%H%M%S')}-{rev}.png"
             path.write_bytes(base64.b64decode(value.get("png", "")))
             return {"path": str(path)}
+        if op == "eval":
+            chrome.acted(name, s.handle, "eval")
+            text = json.dumps(value.get("value"), ensure_ascii=False, default=str)
+            return text if len(text) <= 20_000 else text[:20_000] + "… (cut)"
         if op == "goto":
             line = f"goto {p.url or p.action}"
         elif op == "type":
@@ -283,6 +292,14 @@ def register_chrome_ops(app: App) -> Chrome:
         if caller.is_agent:
             raise OpError("people_only", "only the person gives a tab back")
         await chrome.hold(p.tab, "agent")
+
+    @r.op("chrome.scripts", ChromeScripts)
+    async def scripts(p: ChromeScripts, caller):
+        """Let the agents on a shared tab run scripts in it (browser_eval),
+        or stop them."""
+        if caller.is_agent:
+            raise OpError("people_only", "only the person allows scripts")
+        await chrome.scripts(p.tab, p.on)
 
     @r.op("chrome.revoke", ChromeRevoke, names=(("log_id", "session"),))
     async def revoke(p: ChromeRevoke, caller):

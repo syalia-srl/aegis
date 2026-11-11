@@ -20,6 +20,7 @@ export default {
   "sidebar.chromePaused": "en pausa por ti",
   "sidebar.chromeDone": "Listo",
   "sidebar.chromeResume": "Reanudar",
+  "sidebar.chromeScripts": "Scripts: los agentes pueden ejecutar JavaScript en esta pestaña",
   "sidebar.chromeAlso": "también compartida con {handles}",
   "sidebar.chromeOnly": "compartida solo con este agente",
   "sidebar.chromeStop": "Dejar de compartir",

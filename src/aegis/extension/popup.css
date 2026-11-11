@@ -45,3 +45,4 @@ h4{margin:14px 0 6px;font:600 11px var(--font-chrome);text-transform:uppercase;l
 .req .why{color:var(--muted)}
 .req label{flex-direction:row;align-items:center;gap:8px;margin:0 0 4px;color:var(--ink);font-size:12px}
 .req label span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tab .scripts{grid-column:2/4;display:flex;gap:6px;align-items:center;font-size:12px;color:var(--muted)}

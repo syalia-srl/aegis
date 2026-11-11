@@ -43,6 +43,11 @@ extension keeps the holder with the grants and the server mirrors it. While
 the person holds a tab, agents may read it but not act on it, and the ones
 that tried, with the one that handed it over, are woken when it comes back.
 Actions on one tab run one at a time, in order of arrival.
+
+Scripts: browser_eval runs JavaScript with the person's sign-ins, so it works
+only on a tab whose Scripts switch the person turned on, in the popup or on
+the tab's card in aegis. The extension keeps the switch with the grants and
+checks it on every call; the server mirrors it.
 """
 
 from __future__ import annotations
@@ -305,6 +310,7 @@ class Chrome:
                 ]
                 row["holder"] = "person" if tab.get("holder") == "person" else "agent"
                 row["ask"] = str(tab.get("ask") or "")[:300]
+                row["eval"] = tab.get("eval") is True
         self._grants_changed()
 
     def _grants_changed(self) -> None:
@@ -441,6 +447,12 @@ class Chrome:
         if kind == "deny":
             self.resolve(str(msg.get("request")), "denied")
             return None
+        if kind == "eval":
+            tab = self.tabs.get(str(msg.get("tab")))
+            if tab is not None and tab.get("device") == device_id:
+                tab["eval"] = msg.get("on") is True
+                self.changed()
+            return None
         if kind == "hold":
             tab = self.tabs.get(str(msg.get("tab")))
             if tab is not None and tab.get("device") == device_id:
@@ -565,6 +577,16 @@ class Chrome:
                  "by": handle},
             )  # fmt: skip
 
+    async def scripts(self, name: str, on: bool) -> None:
+        """Let a tab's agents run scripts in it (browser_eval), or stop them,
+        from aegis; the extension, which checks it on every call, follows."""
+        tab = self.tabs.get(name)
+        if tab is None:
+            return
+        tab["eval"] = on
+        self.changed()
+        await self._send(tab.get("device"), {"t": "eval", "tab": name, "on": on})
+
     def refused(self, name: str, log_id: str) -> None:
         """An agent's action met the person holding the tab: wake it later."""
         if name in self.holds:
@@ -638,6 +660,7 @@ class Chrome:
                     k: t.get(k, "")
                     for k in ("name", "title", "url", "grants", "last", "holder", "ask")
                 }
+                | {"eval": t.get("eval") is True}
                 for t in self.tabs.values()
             ],
             "requests": list(self.requests.values()),
