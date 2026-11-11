@@ -451,6 +451,7 @@ export class SidebarPart {
           mk("div", "ch-title", tab.title || this.t("sidebar.chromeUntitled")),
           mk("div", "ch-url", tab.url),
           mk("div", "ch-who", others.length ? this.t("sidebar.chromeAlso", { handles: others.join(", ") }) : this.t("sidebar.chromeOnly")),
+          ...(tab.last ? [mk("div", "ch-who", this.t("sidebar.chromeLast", { what: tab.last }))] : []),
         );
         const acts = mk("div", "ch-acts");
         acts.append(

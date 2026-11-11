@@ -290,6 +290,8 @@ class Chrome:
 
     def _grants_changed(self) -> None:
         self.tabs = {n: t for n, t in self.tabs.items() if t["grants"]}
+        # A later tab of the same name is another tab: it starts a clean log.
+        self.logs = {n: book for n, book in self.logs.items() if n in self.tabs}
         for name, t in self.tabs.items():
             for g in t["grants"]:
                 self.had.setdefault(g, set()).add(name)
