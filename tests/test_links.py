@@ -1167,7 +1167,9 @@ async def test_an_agents_far_spawn_joins_its_group(pair):
     out = await turn(here, mcp("session_spawn", agent="opus@beta", prompt="hi"))
     assert out.startswith("mcp ok:"), out
     (far,) = beta.app.sessions.sessions.values()
-    assert far.meta()["group"] == f"{here.log_id}@alpha"
+    # The parent takes a record here (#1039) and the far key names this server.
+    assert here.spec.group.startswith("grp-")
+    assert far.meta()["group"] == f"{here.spec.group}@alpha"
 
 
 async def test_a_far_server_without_groups_still_takes_the_spawn(pair):

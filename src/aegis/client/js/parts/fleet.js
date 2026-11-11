@@ -25,6 +25,7 @@ import {
   tickPlan,
 } from "../fleet.js";
 import { gorgoneion, iconText } from "../glyphs.js";
+import { groupKey } from "../groups.js";
 import { startInstall } from "../install.js";
 import { markNeedsNet } from "../net.js";
 
@@ -106,6 +107,8 @@ export class FleetPart {
     this.termsLoaded = false;
     // A card or an archive row, by log id, re-marked after every redraw.
     this.sel = null;
+    // The group whose page this is (#1039), or null for the whole Fleet.
+    this.groupKey = null;
 
     this.el = document.createElement("main");
     this.el.className = "view v-fleet";
@@ -117,6 +120,7 @@ export class FleetPart {
     this.install = n("install-offer");
     this.bandBox = n("band");
     this.orderBox = n("fleet-order");
+    this.orderTitle = this.el.querySelector(".order h3");
     this.kindsBox = this.el.querySelector(".kinds");
     this.cards = n("cards");
     this.chromeBox = n("chrome-cards");
@@ -209,6 +213,7 @@ export class FleetPart {
   // -- what the router draws through the part --------------------------------
   // The whole view, as the router shows it.
   render() {
+    this.setGroup(null);
     renderCards(this.cards, this.local().filter((m) => this.kindShown(m)), this.act.open, this.order, this.act.close, this.stacks, this.t);
     this.renderRemotes();
     this.renderChrome();
@@ -216,6 +221,48 @@ export class FleetPart {
     this.band();
     markNeedsNet(this.el);
     if (!this.loaded) this.loadArchive();
+  }
+
+  // A group's page (#1039): the Fleet's own cards, over that group's members
+  // only, quiet sessions and workers included, ranked as the Fleet ranks. A
+  // group whose last member left keeps an empty page (its record is gone).
+  renderGroup(key) {
+    const members = this.groupMembers(key);
+    const name = members.find((m) => m.group_name)?.group_name || key;
+    this.setGroup(key, name);
+    renderCards(this.cards, members, this.act.open, "attention", this.act.close, null, this.t);
+    this.mark(false);
+    markNeedsNet(this.el);
+    return name;
+  }
+
+  // This group's sessions, on every server: a member of a group here keeps
+  // the key it joined with, `grp-…@server` when it came from a spawn across a
+  // link.
+  groupMembers(key) {
+    return this.mount.state.ordered.filter((m) => groupKey(m, this.stacks.here) === key);
+  }
+
+  // The view is a group's page while `key` is set: the band, the order's
+  // segments and the archive belong to the whole Fleet and go (client.css).
+  setGroup(key, name = "") {
+    this.groupKey = key || null;
+    this.el.classList.toggle("groupview", !!key);
+    this.orderTitle.textContent = key ? name : this.t("fleet.sessions");
+  }
+
+  // A member of the group on its page changed: patch its card, or draw the
+  // page again when its place in the ranking or the group itself moved.
+  patchGroup(ids) {
+    if (!this.groupKey) return;
+    const members = this.groupMembers(this.groupKey);
+    if (![...ids].some((id) => members.some((m) => m.key === id))) return;
+    const redraw = [...ids].some((id) => {
+      const m = this.mount.state.sessions.get(id);
+      return !m || !patchCard(this.cards, m, this.act.open, "attention", this.act.close, this.t);
+    });
+    if (redraw) this.renderGroup(this.groupKey);
+    markNeedsNet(this.el);
   }
 
   // The person's paired browsers (chrome.py), a card each: its dot, whether
@@ -264,7 +311,7 @@ export class FleetPart {
 
   // The band over the cards: this server's sessions by attention and its host.
   band() {
-    if (this.root.dataset.view !== "fleet") return;
+    if (this.root.dataset.view !== "fleet" || this.groupKey) return;
     // Saved cards say how old they are while the socket is not open. Once it
     // opens the live snapshot is on its way, and the band is no longer offline.
     const saved = !this.mount.conn.open && this.local().some((m) => m.stale);
@@ -297,7 +344,7 @@ export class FleetPart {
   // four times a second per working agent and quota about once a minute, and a
   // rebuilt row loses the hover tooltip that spells its reading out.
   quota() {
-    if (this.root.dataset.view !== "fleet") return;
+    if (this.root.dataset.view !== "fleet" || this.groupKey) return;
     renderBandQuota(this.bandBox, { quota: this.mount.state.quota, now: serverNow(), t: this.t });
     for (const box of this.remotes.children) {
       const r = this.mount.state.remote.get(box.dataset.server);
@@ -359,7 +406,7 @@ export class FleetPart {
 
   // Countdowns and the tick move with the clock; their unit is minutes.
   tick() {
-    if (this.root.dataset.view !== "fleet") return;
+    if (this.root.dataset.view !== "fleet" || this.groupKey) return;
     if (this.local().some((m) => m.stale)) this.band();
     for (const c of this.el.querySelectorAll(".card")) {
       const m = this.mount.state.sessions.get(c.dataset.id);

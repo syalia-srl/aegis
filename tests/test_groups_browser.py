@@ -1,10 +1,15 @@
-"""Groups in the client (#586): groups.js's blocks, and the bar that draws them."""
+"""Groups in the client (#1039): groups.js's blocks, and the bar that draws them."""
+
+import re
 
 import pytest
 
 from .test_agents import mcp
 from .test_browser import (  # noqa: F401
+    beta_session,
     browser,
+    linked,
+    playwright,
     report,
     server,
     spawn,
@@ -23,7 +28,7 @@ def page(browser):  # noqa: F811
     pg.close()
 
 
-def m(key, created, group=None, at=None, **kw):
+def m(key, created, group=None, at=None, handle=None, **kw):
     lid = key.split("/")[-1]
     return {
         "key": key,
@@ -31,48 +36,129 @@ def m(key, created, group=None, at=None, **kw):
         "created_at": created,
         "group": group,
         "server": at,
+        "handle": handle or lid,
         **kw,
     }
 
 
 def blocks(pg, metas) -> list:
-    """[[head key, [member keys]], ...] from groups.js's blocksOf."""
+    """[{key, head, members}] from groups.js's blocksOf, the head flattened."""
     return pg.evaluate(
         """async ([metas]) => {
           const g = await import('/static/js/groups.js');
-          return g.blocksOf(metas, 'alpha').map(b => [b.head.key, b.members.map(x => x.key)]);
+          return g.blocksOf(metas, 'alpha').map((b) => ({
+            key: b.key,
+            head: {kind: b.head.kind || 'session', key: b.head.key,
+                   name: b.head.name ?? null, mark: b.head.mark ?? null},
+            members: b.members.map((x) => x.key),
+          }));
         }""",
-        [metas, None],
+        [metas],
     )
 
 
-def test_blocks_of_a_chain_a_root_gone_and_a_link(server, page):  # noqa: F811
+def popped(pg, metas, key, folded=True, focus=None) -> list:
+    """The member keys poppedOut() draws beside the block of `key`."""
+    return pg.evaluate(
+        """async ([metas, key, folded, focus]) => {
+          const g = await import('/static/js/groups.js');
+          const b = g.blocksOf(metas, 'alpha').find((x) => x.key === key);
+          return g.poppedOut(b, folded, focus).map((m) => m.key);
+        }""",
+        [metas, key, folded, focus],
+    )
+
+
+def test_blocks_of_named_groups(server, page):  # noqa: F811
     page.goto(server.url)
     page.wait_for_selector("#a2[data-view=fleet]")
-    a, b, c = m("a", 1), m("b", 2, "a"), m("c", 3, "a")
+    g = "grp-3fa9c210"
+    a = m("a", 1, g, group_name="brisk-backus", mark="working")
+    b = m("b", 2, g, group_name="brisk-backus", mark="needs_you")
+    one = m("c", 3, "grp-77777777", group_name="lonely-ones")
     lone = m("d", 4)
-    far = m("beta/e", 5, "a@alpha", at="beta")
-    term = m("t", 6, "a", kind="term")
-    assert blocks(page, [a, b, lone, c, far, term]) == [
-        ["a", ["a", "b", "c", "beta/e"]],
-        ["d", ["d"]],
-        ["t", ["t"]],
+    term = m("t", 5, g, kind="term")
+    web = m("x", 6, g, kind="browser")
+    assert blocks(page, [a, b, one, lone, term, web]) == [
+        {
+            "key": f"{g}@alpha",
+            "head": {
+                "kind": "group",
+                "key": f"{g}@alpha",
+                "name": "brisk-backus",
+                "mark": "needs_you",
+            },
+            "members": ["a", "b"],
+        },
+        {
+            "key": "grp-77777777@alpha",
+            "head": {"kind": "session", "key": "c", "name": None, "mark": None},
+            "members": [],
+        },
+        {
+            "key": "d@alpha",
+            "head": {"kind": "session", "key": "d", "name": None, "mark": None},
+            "members": [],
+        },
+        {
+            "key": "t@alpha",
+            "head": {"kind": "term", "key": "t", "name": None, "mark": None},
+            "members": [],
+        },
+        {
+            "key": "x@alpha",
+            "head": {"kind": "browser", "key": "x", "name": None, "mark": None},
+            "members": [],
+        },
     ]
-    # The root archived: the next oldest heads the group, which keeps its place.
-    assert blocks(page, [b, lone, c]) == [["b", ["b", "c"]], ["d", ["d"]]]
-    # An offline head yields to an online member.
-    assert blocks(page, [dict(a, off=True), b]) == [["b", ["b", "a"]]]
+    # An offline member leaves the group a lone open tab, the group keeping
+    # its place and its record.
+    assert blocks(page, [dict(a, off=True), b, lone])[0] == {
+        "key": f"{g}@alpha",
+        "head": {"kind": "session", "key": "b", "name": None, "mark": "needs_you"},
+        "members": ["a"],
+    }
     assert page.errors == []
 
 
-def test_a_handoff_of_the_root_heads_its_group(server, page):  # noqa: F811
+def test_a_far_log_id_key_is_named_by_its_session(server, page):  # noqa: F811
     page.goto(server.url)
     page.wait_for_selector("#a2[data-view=fleet]")
-    a, b = m("a", 1), m("b", 2, "a")
-    h = m("h", 3, "a", leads=True)  # a's handoff (#641)
-    # While a is open it heads; once archived, its handoff does, though newer.
-    assert blocks(page, [a, b, h]) == [["a", ["a", "b", "h"]]]
-    assert blocks(page, [b, h]) == [["h", ["h", "b"]]]
+    boss = m("20261101-0f0a", 1, handle="tab-groups")
+    kid = m("beta/e", 2, "20261101-0f0a", at="beta")
+    kid2 = m("beta/f", 3, "20261101-0f0a", at="beta")
+    got = blocks(page, [boss, kid, kid2])
+    far = next(b for b in got if b["key"] == "20261101-0f0a@beta")
+    assert far["head"]["kind"] == "group"
+    assert far["head"]["name"] == "tab-groups"
+    # Its server archived the session the key names: the key is the name.
+    far = next(b for b in blocks(page, [kid, kid2]) if b["key"] == "20261101-0f0a@beta")
+    assert far["head"]["name"] == "20261101-0f0a@beta"
+    assert page.errors == []
+
+
+def test_popped_out_members_per_mark(server, page):  # noqa: F811
+    page.goto(server.url)
+    page.wait_for_selector("#a2[data-view=fleet]")
+    g = "grp-3fa9c210"
+
+    def meta(key, mark):
+        return m(key, 1, g, group_name="brisk-backus", mark=mark)
+
+    for mark in ("needs_you", "review", "done", "error"):
+        metas = [meta("a", "working"), meta("b", mark)]
+        assert popped(page, metas, f"{g}@alpha") == ["b"], mark
+    for mark in ("working", "waiting"):
+        metas = [meta("a", "working"), meta("b", mark)]
+        assert popped(page, metas, f"{g}@alpha") == [], mark
+    # An unfolded block pops nothing, and a lone tab never does.
+    metas = [meta("a", "working"), meta("b", "needs_you")]
+    assert popped(page, metas, f"{g}@alpha", folded=False) == []
+    assert popped(page, [m("d", 4)], "d@alpha") == []
+    # The member in view pops out whatever its mark.
+    metas = [meta("a", "working"), meta("b", "needs_you"), meta("c", "working")]
+    assert popped(page, metas, f"{g}@alpha", focus="c") == ["b", "c"]
+    assert popped(page, metas, f"{g}@alpha", focus="b") == ["b"]
     assert page.errors == []
 
 
@@ -81,145 +167,434 @@ def slash_spawn(pg, key: str) -> str:
     pg.goto(pg.url.split("#")[0] + f"#s={key}")
     pg.wait_for_selector(f".tab.on[data-id='{key}']")
     before = set(
-        pg.eval_on_selector_all("#tablist .tab", "ts => ts.map(t => t.dataset.id)")
+        pg.eval_on_selector_all(
+            "#tablist .tab[data-id]", "ts => ts.map(t => t.dataset.id)"
+        )
     )
     pg.fill("#input", "/spawn opus")
     pg.press("#input", "Enter")
     pg.wait_for_function(
-        f"document.querySelectorAll('#tablist .tab').length === {len(before) + 1}"
+        f"document.querySelectorAll('#tablist .tab[data-id]').length === {len(before) + 1}"
     )
-    after = pg.eval_on_selector_all("#tablist .tab", "ts => ts.map(t => t.dataset.id)")
+    after = pg.eval_on_selector_all(
+        "#tablist .tab[data-id]", "ts => ts.map(t => t.dataset.id)"
+    )
     return next(k for k in after if k not in before)
 
 
 def bar(pg) -> list:
-    """The bar as [[tab keys of a block], ...]."""
+    """The bar as [[head, [member keys]], ...]: a group's head is its key, and
+    a popped-out member is a block of its own, `["out", [key]]`."""
     return pg.eval_on_selector_all(
         "#tablist .tblock",
-        "bs => bs.map(b => [...b.querySelectorAll('.tab')].map(t => t.dataset.id))",
+        """bs => bs.map((b) => {
+             const ts = [...b.querySelectorAll('.tab')];
+             if (b.classList.contains('out')) return ['out', ts.map((t) => t.dataset.id)];
+             const head = ts.find((t) => t.classList.contains('named'));
+             const ids = ts.filter((t) => t.dataset.id).map((t) => t.dataset.id);
+             return [head ? head.dataset.group : ids[0] ?? null, head ? ids : []];
+           })""",
     )
+
+
+def group_key(pg) -> str:
+    """The key of the group the bar draws as one block."""
+    return pg.get_attribute("#tablist .tab.named", "data-group")
+
+
+def group_name(pg) -> str:
+    return pg.inner_text("#tablist .tab.named .hn")
 
 
 def three_and_one(pg, srv):
     pg.goto(srv.url)
     pg.wait_for_selector("#a2[data-view=fleet]")
-    a = spawn(pg, "hello")
-    b = slash_spawn(pg, a)
-    c = slash_spawn(pg, a)
+    parent = spawn(pg, "hello")
+    slash_spawn(pg, parent)
+    slash_spawn(pg, parent)
     d = spawn(pg)
+    # Two spawns in the same second share created_at, so the bar's order of
+    # them is the server's: take it rather than the order they were asked for.
+    pg.wait_for_selector(".tblock.grp .tab[data-id]")
+    a, b, c = pg.eval_on_selector_all(
+        "#tablist .tblock.grp .tab[data-id]",
+        "ts => ts.slice(0, 3).map((t) => t.dataset.id)",
+    )
+    assert a == parent
     return a, b, c, d
+
+
+def test_a_spawn_draws_a_named_block_that_folds(server, page):  # noqa: F811
+    page.goto(server.url)
+    page.wait_for_selector("#a2[data-view=fleet]")
+    a = spawn(page, "hello")
+    child = slash_spawn(page, a)
+    assert page.locator(".tblock.grp").count() == 1
+    assert page.locator(".tab.named").count() == 1
+    # The head is the group, not a session: it carries the group's name.
+    assert page.get_attribute(".tab.named", "data-id") is None
+    name = group_name(page)
+    assert re.fullmatch(r"[a-z]+-[a-z]+(-\d+)?", name), name
+    key = group_key(page)
+    assert bar(page) == [[key, [a, child]]]
+    page.click(".tab.named .cnt")
+    page.wait_for_function("document.querySelectorAll('.tblock.grp .tab').length === 1")
+    assert page.inner_text(".tab.named .cnt") == "+2"
+    page.click(".tab.named .cnt")
+    page.wait_for_function("document.querySelectorAll('.tblock.grp .tab').length === 3")
+    assert page.errors == []
 
 
 def test_a_session_spawned_from_another_joins_its_block(server, page):  # noqa: F811
     a, b, c, d = three_and_one(page, server)
-    assert bar(page) == [[a, b, c], [d]]
-    assert page.is_visible(f".tblock.grp .tab.head[data-id='{a}']")
+    key = group_key(page)
+    assert bar(page) == [[key, [a, b, c]], [d, []]]
+    assert page.is_visible(".tblock.grp .tab.named")
     assert page.locator(".tblock.grp").count() == 1
     assert page.errors == []
 
 
 def test_folding_hides_members_and_survives_a_reload(server, page):  # noqa: F811
     a, b, c, d = three_and_one(page, server)
-    page.click(f".tab.head[data-id='{a}'] .cnt")
+    key = group_key(page)
+    page.click(".tab.named .cnt")
     page.wait_for_function("document.querySelectorAll('.tblock.grp .tab').length === 1")
-    assert page.inner_text(f".tab.head[data-id='{a}'] .cnt") == "+2"
+    assert page.inner_text(".tab.named .cnt") == "+3"
     page.reload()
-    page.wait_for_selector(f".tab.head[data-id='{a}']")
-    assert bar(page) == [[a], [d]]
-    page.click(f".tab.head[data-id='{a}'] .cnt")
-    page.wait_for_function("document.querySelectorAll('.tblock.grp .tab').length === 3")
+    page.wait_for_selector(".tab.named")
+    assert bar(page)[0] == [key, []]
+    assert [d, []] in bar(page)
+    page.click(".tab.named .cnt")
+    page.wait_for_function("document.querySelectorAll('.tblock.grp .tab').length === 4")
     assert page.errors == []
 
 
+BAR_JS = """want => JSON.stringify([...document.querySelectorAll('#tablist .tblock')]
+  .map((b) => {
+    const ts = [...b.querySelectorAll('.tab')];
+    const named = ts.find((t) => t.classList.contains('named'));
+    const ids = ts.filter((t) => t.dataset.id).map((t) => t.dataset.id);
+    return [named ? named.dataset.group : (ids[0] ?? null), named ? ids : []];
+  })) === JSON.stringify(want)"""
+
+
 def drop(pg, src: str, dst: str, side: str) -> None:
-    box = pg.locator(f"#tablist .tab[data-id='{dst}']").bounding_box()
-    x = 3 if side == "left" else box["width"] - 3
-    pg.drag_and_drop(
-        f"#tablist .tab[data-id='{src}']",
-        f"#tablist .tab[data-id='{dst}']",
-        target_position={"x": x, "y": box["height"] / 2},
+    """Drag the tab at selector `src` onto the tab at selector `dst`, through
+    the app's own dragstart, dragover and drop handlers. A mouse drag is what
+    a person does, but Chromium's synthetic one is swallowed whenever a
+    session patch rebuilds the strip mid-gesture."""
+    pg.evaluate(
+        """([src, dst, side]) => {
+          const from = document.querySelector(src), to = document.querySelector(dst);
+          const dt = new DataTransfer();
+          const at = () => {
+            const r = to.getBoundingClientRect();
+            return {bubbles: true, dataTransfer: dt,
+                    clientX: side === 'left' ? r.left + 3 : r.right - 3,
+                    clientY: r.top + r.height / 2};
+          };
+          from.dispatchEvent(new DragEvent('dragstart', {bubbles: true, dataTransfer: dt}));
+          to.dispatchEvent(new DragEvent('dragover', at()));
+          to.dispatchEvent(new DragEvent('drop', at()));
+          from.dispatchEvent(new DragEvent('dragend', {bubbles: true, dataTransfer: dt}));
+        }""",
+        [src, dst, side],
     )
 
 
-def test_a_head_drags_its_group_and_a_member_stays_inside(server, page):  # noqa: F811
+def dropped(pg, src: str, dst: str, side: str, want: list) -> None:
+    """A drop whose outcome `want` the bar must show. A session patch can
+    redraw the bar mid-drag and swallow the drop; a second try is harmless
+    because these drops are idempotent."""
+    for _ in range(2):
+        drop(pg, src, dst, side)
+        try:
+            pg.wait_for_function(BAR_JS, arg=want, timeout=2500)
+            return
+        except playwright.TimeoutError:
+            continue
+    assert bar(pg) == want
+
+
+def drop_until(pg, src: str, dst: str, side: str, want: str) -> None:
+    """A drop whose outcome `want` (a JS expression) is not known before it
+    lands, such as the key of a fresh group. Retried once, as `dropped` is."""
+    for _ in range(2):
+        drop(pg, src, dst, side)
+        try:
+            pg.wait_for_function(want, timeout=2500)
+            return
+        except playwright.TimeoutError:
+            continue
+    assert pg.evaluate(want), bar(pg)
+
+
+def drag_over(pg, src: str, dst: str, side: str) -> str:
+    """The classes a drag leaves on `dst` after a dragstart and a dragover,
+    without dropping: `.nodrop` is a target that refuses the tab."""
+    return pg.evaluate(
+        """([src, dst, side]) => {
+          const from = document.querySelector(src), to = document.querySelector(dst);
+          const dt = new DataTransfer();
+          const r = to.getBoundingClientRect();
+          from.dispatchEvent(new DragEvent('dragstart', {bubbles: true, dataTransfer: dt}));
+          to.dispatchEvent(new DragEvent('dragover', {bubbles: true, dataTransfer: dt,
+            clientX: side === 'left' ? r.left + 3 : r.right - 3, clientY: r.top + r.height / 2}));
+          return to.className;
+        }""",
+        [src, dst, side],
+    )
+
+
+def test_dropping_a_tab_on_a_lone_tab_makes_a_group(server, page):  # noqa: F811
+    page.goto(server.url)
+    page.wait_for_selector("#a2[data-view=fleet]")
+    a = spawn(page)
+    b = spawn(page)
+    drop_until(
+        page,
+        f"#tablist .tab[data-id='{b}']",
+        f"#tablist .tab[data-id='{a}']",
+        "left",
+        "() => document.querySelectorAll('#tablist .tab.named').length === 1",
+    )
+    key = group_key(page)
+    assert key.startswith("grp-")
+    assert re.fullmatch(r"[a-z]+-[a-z]+(-\d+)?", group_name(page))
+    assert bar(page) == [[key, [a, b]]]
+    assert page.errors == []
+
+
+def test_dropping_a_tab_on_a_block_joins_it(server, page):  # noqa: F811
     a, b, c, d = three_and_one(page, server)
-    drop(page, d, a, "left")
-    page.wait_for_function(
-        f"document.querySelector('#tablist .tab').dataset.id === {d!r}"
+    key = group_key(page)
+    dropped(
+        page,
+        f"#tablist .tab[data-id='{d}']",
+        f"#tablist .tab[data-id='{a}']",
+        "left",
+        [[key, [a, b, c, d]]],
     )
-    assert bar(page) == [[d], [a, b, c]]
-    drop(page, b, d, "left")  # out of its group: refused
-    assert bar(page) == [[d], [a, b, c]]
-    drop(page, b, b, "left")  # on itself: it stays
-    assert bar(page) == [[d], [a, b, c]]
-    drop(page, c, b, "left")
-    page.wait_for_function(
-        f"document.querySelectorAll('.tblock.grp .tab')[1].dataset.id === {c!r}"
+    assert page.errors == []
+
+
+def test_dragging_a_member_to_the_gap_leaves(server, page):  # noqa: F811
+    a, b, c, d = three_and_one(page, server)
+    key = group_key(page)
+    dropped(
+        page,
+        f"#tablist .tab[data-id='{b}']",
+        "#tablist",
+        "left",
+        [[key, [a, c]], [b, []], [d, []]],
     )
-    assert bar(page) == [[d], [a, c, b]]
-    drop(page, a, d, "left")
+    assert page.errors == []
+
+
+def test_far_tab_cannot_drop_into_a_group(linked, browser, page):  # noqa: F811
+    page.goto(linked.alpha.url)
+    page.wait_for_selector("#a2[data-view=fleet]")
+    a = spawn(page, "hello")
+    slash_spawn(page, a)
+    lid = beta_session(linked, browser)
+    far = f"#tablist .tab[data-id='beta/{lid}']"
+    page.wait_for_selector(far)
+    before = bar(page)
+    classes = drag_over(page, far, "#tablist .tab.named", "left")
+    assert "nodrop" in classes.split(), classes
+    assert "drop" not in classes.split(), classes
+    drop(page, far, "#tablist .tab.named", "left")
+    page.wait_for_timeout(400)
+    assert bar(page) == before
+    assert page.locator(far).count() == 1
+    assert page.errors == []
+
+
+def test_double_click_renames_the_group(server, page):  # noqa: F811
+    a, b, c, d = three_and_one(page, server)
+    before = group_name(page)
+    page.dblclick("#tablist .tab.named .hn")
+    field = page.wait_for_selector("#tablist .tab.named input")
+    assert field.input_value() == before
+    page.fill("#tablist .tab.named input", "night shift")
+    page.press("#tablist .tab.named input", "Escape")
+    page.wait_for_function("!document.querySelector('#tablist .tab.named input')")
+    assert group_name(page) == before
+    page.dblclick("#tablist .tab.named .hn")
+    page.wait_for_selector("#tablist .tab.named input")
+    page.fill("#tablist .tab.named input", "night shift")
+    page.press("#tablist .tab.named input", "Enter")
     page.wait_for_function(
-        f"document.querySelector('#tablist .tab').dataset.id === {a!r}"
+        "() => document.querySelector('#tablist .tab.named .hn')?.textContent === 'night shift'"
     )
-    assert bar(page) == [[a, c, b], [d]]
+    # A reload reads the name from the server, not from this browser.
+    page.reload()
+    page.wait_for_selector("#tablist .tab.named")
+    assert group_name(page) == "night shift"
+    assert page.errors == []
+
+
+def test_the_tab_menu_moves_to_a_group_and_leaves(server, page):  # noqa: F811
+    a, b, c, d = three_and_one(page, server)
+    key = group_key(page)
+    name = group_name(page)
+    page.click(f"#tablist .tab[data-id='{d}']", button="right")
+    page.wait_for_selector(".cmenu")
+    labels = page.eval_on_selector_all(
+        ".cmenu button", "bs => bs.map((b) => b.innerText)"
+    )
+    assert any(name in label for label in labels), labels
+    assert any("New group" in label for label in labels), labels
+    page.click(f".cmenu button:has-text('{name}')")
+    page.wait_for_function(BAR_JS, arg=[[key, [a, b, c, d]]])
+    page.click(f"#tablist .tab[data-id='{d}']", button="right")
+    page.wait_for_selector(".cmenu [data-id=leavegroup]")
+    page.click(".cmenu [data-id=leavegroup]")
+    page.wait_for_function(BAR_JS, arg=[[key, [a, b, c]], [d, []]])
+    assert page.errors == []
+
+
+def test_ungroup_from_the_group_menu(server, page):  # noqa: F811
+    a, b, c, d = three_and_one(page, server)
+    page.click("#tablist .tab.named", button="right")
+    page.wait_for_selector(".cmenu [data-id=ungroup]")
+    page.click(".cmenu [data-id=ungroup]")
+    page.wait_for_function("!document.querySelector('#tablist .tab.named')")
+    assert bar(page) == [[a, []], [b, []], [c, []], [d, []]]
+    assert page.errors == []
+
+
+def test_the_named_head_drags_its_group_and_a_member_stays_inside(server, page):  # noqa: F811
+    a, b, c, d = three_and_one(page, server)
+    # A session patch mid-drag redraws the whole bar and swallows the drop:
+    # drag once every tab is idle.
+    page.wait_for_function(
+        "() => !document.querySelector(\"#tablist .tab use[href='#g-work']\")"
+    )
+    key = group_key(page)
+    # A lone tab dropped on a member joins the block (#1039).
+    dropped(
+        page,
+        f"#tablist .tab[data-id='{d}']",
+        f"#tablist .tab[data-id='{a}']",
+        "left",
+        [[key, [a, b, c, d]]],
+    )
+    # The group's own tab carries the whole block around a lone tab.
+    e = spawn(page)
+    page.wait_for_selector(f"#tablist .tab[data-id='{e}']")
+    dropped(
+        page,
+        "#tablist .tab.named",
+        f"#tablist .tab[data-id='{e}']",
+        "right",
+        [[e, []], [key, [a, b, c, d]]],
+    )
+    dropped(
+        page,
+        "#tablist .tab.named",
+        f"#tablist .tab[data-id='{e}']",
+        "left",
+        [[key, [a, b, c, d]], [e, []]],
+    )
+    dropped(
+        page,
+        f"#tablist .tab[data-id='{c}']",
+        f"#tablist .tab[data-id='{b}']",
+        "left",
+        [[key, [a, c, b, d]], [e, []]],
+    )
+    # A member may not be dropped on its own head: nothing changes.
+    drop(page, f"#tablist .tab[data-id='{b}']", "#tablist .tab.named", "left")
+    page.wait_for_timeout(400)
+    assert bar(page) == [[key, [a, c, b, d]], [e, []]]
     assert page.errors == []
 
 
 def test_alt_shift_brackets_move_the_tab_in_front_as_a_drag_does(server, page):  # noqa: F811
     a, b, c, d = three_and_one(page, server)
+    key = group_key(page)
 
-    def press(key: str, at: str, want: list, box: bool = False) -> None:
+    def press(arrow: str, at: str, want: list) -> None:
         page.click(f"#tablist .tab[data-id='{at}']")
         page.wait_for_selector(f"#tablist .tab.on[data-id='{at}']")
-        if box:
-            page.focus("#input")
-        page.keyboard.press(f"Alt+Shift+{key}")
-        page.wait_for_function(
-            """want => JSON.stringify([...document.querySelectorAll('#tablist .tblock')]
-                 .map(b => [...b.querySelectorAll('.tab')].map(t => t.dataset.id)))
-               === JSON.stringify(want)""",
-            arg=want,
-        )
+        page.keyboard.press(f"Alt+Shift+{arrow}")
+        page.wait_for_function(BAR_JS, arg=want)
 
-    press("BracketLeft", d, [[d], [a, b, c]])  # a lone tab passes a whole group
-    press("BracketLeft", d, [[d], [a, b, c]])  # the first stays
-    press("BracketLeft", c, [[d], [a, c, b]])  # a member, within its group
-    press("BracketLeft", c, [[d], [a, c, b]])  # never past its head
-    press("BracketRight", c, [[d], [a, b, c]])
-    press("BracketRight", c, [[d], [a, b, c]])  # nor out of its group
-    press("BracketRight", a, [[d], [a, b, c]])  # the last block stays
-    press("BracketLeft", a, [[a, b, c], [d]], box=True)  # a head, its group along
+    press(
+        "BracketLeft", d, [[d, []], [key, [a, b, c]]]
+    )  # a lone tab passes a whole group
+    press("BracketLeft", d, [[d, []], [key, [a, b, c]]])  # the first stays
+    press("BracketLeft", c, [[d, []], [key, [a, c, b]]])  # a member, within its group
+    press("BracketLeft", c, [[d, []], [key, [c, a, b]]])
+    press("BracketLeft", c, [[d, []], [key, [c, a, b]]])  # never past the group's tab
+    press("BracketRight", c, [[d, []], [key, [a, c, b]]])
+    press("BracketRight", c, [[d, []], [key, [a, b, c]]])
+    press("BracketRight", c, [[d, []], [key, [a, b, c]]])  # nor out of its group
     assert page.input_value("#input") == ""  # the chord typed nothing
     page.reload()
     page.wait_for_selector("#tablist .tblock")
-    assert bar(page) == [[a, b, c], [d]]
+    assert bar(page) == [[d, []], [key, [a, b, c]]]
     assert page.errors == []
 
 
-def test_alt_j_unfolds_a_group_to_reach_a_hidden_member(server, page):  # noqa: F811
+def test_the_member_in_view_stays_popped_out_and_the_group_folded(server, page):  # noqa: F811
     a, b, c, d = three_and_one(page, server)
+    key = group_key(page)
     page.click(f"#tablist .tab[data-id='{c}']")
     page.evaluate("document.hasFocus = () => false")
     report(page, attention="needs_you", line="Which build?", replies=[])
     turns_done(page, 1)
-    page.click(f"#tablist .tab[data-id='{d}']")
     page.evaluate("delete document.hasFocus")
-    page.click(f".tab.head[data-id='{a}'] .cnt")
+    page.click(".tab.named .cnt")
     page.wait_for_function("document.querySelectorAll('.tblock.grp .tab').length === 1")
-    page.keyboard.press("Alt+j")
-    page.wait_for_function(f"location.hash === '#s={c}'")
-    page.wait_for_selector(f"#tablist .tab.on[data-id='{c}']")
-    assert bar(page)[0] == [a, b, c]  # the group unfolded to show it
+    page.wait_for_selector(f".tab.out[data-id='{c}']")
+    # Back to the member that needs you: it stays drawn beside the folded
+    # block, the block itself stays folded.
+    page.goto(page.url.split("#")[0] + f"#s={c}")
+    page.wait_for_selector(f"#tablist .tab.out.on[data-id='{c}']")
+    assert page.locator(".tblock.grp .tab").count() == 1
+    assert bar(page)[0] == [key, []]
+    assert ["out", [c]] in bar(page)
     assert page.errors == []
 
 
-def test_a_heads_menu_archives_its_group(server, page):  # noqa: F811
+def test_a_folded_member_that_needs_you_pops_out_and_goes_back(server, page):  # noqa: F811
+    page.goto(server.url)
+    page.wait_for_selector("#a2[data-view=fleet]")
+    a = spawn(page, "hello")
+    b = slash_spawn(page, a)
+    key = group_key(page)
+    page.goto(page.url.split("#")[0] + f"#s={b}")
+    page.wait_for_selector(f"#tablist .tab.on[data-id='{b}']")
+    page.evaluate("document.hasFocus = () => false")
+    report(page, attention="needs_you", line="Which build?", replies=[])
+    turns_done(page, 1)
+    page.evaluate("delete document.hasFocus")
+    page.click(".tab.named .cnt")
+    page.wait_for_function("document.querySelectorAll('.tblock.grp .tab').length === 1")
+    page.wait_for_selector(f".tab.out[data-id='{b}']")
+    [[head, hidden], *outs] = bar(page)
+    assert head == key and hidden == []
+    assert ["out", [b]] in outs
+    # Its next turn starts and the person looks elsewhere: the popped-out tab
+    # goes back inside (while in view it stays out, whatever its mark).
+    page.fill("#input", '/script [["sleep", 3]]')
+    page.press("#input", "Enter")
+    page.goto(page.url.split("#")[0] + "#fleet")
+    page.wait_for_function(f"!document.querySelector(\".tab.out[data-id='{b}']\")")
+    assert ["out", [b]] not in bar(page)
+    assert page.errors == []
+
+
+def test_a_members_menu_archives_its_group(server, page):  # noqa: F811
     a, b, c, d = three_and_one(page, server)
-    page.click(f"#tablist .tab[data-id='{b}']", button="right")
+    # Archive group lives on the group's own tab, not on a member's (#1039).
+    page.click(f"#tablist .tab[data-id='{a}']", button="right")
     page.wait_for_selector(".cmenu")
     assert page.locator(".cmenu [data-id=archivegroup]").count() == 0
     page.keyboard.press("Escape")
-    page.click(f"#tablist .tab[data-id='{a}']", button="right")
+    page.click("#tablist .tab.named", button="right")
     page.click(".cmenu [data-id=archivegroup]")
     page.wait_for_selector("#dialog:not([hidden])")
     q = page.inner_text("#dialog .q")
@@ -227,8 +602,10 @@ def test_a_heads_menu_archives_its_group(server, page):  # noqa: F811
         page.inner_text(f"#tablist .tab[data-id='{k}'] .hn") in q for k in (a, b, c)
     )
     page.click("#dialog .ok")
-    page.wait_for_function("document.querySelectorAll('#tablist .tab').length === 1")
-    assert bar(page) == [[d]]
+    page.wait_for_function(
+        "document.querySelectorAll('#tablist .tab[data-id]').length === 1"
+    )
+    assert bar(page) == [[d, []]]
     assert page.errors == []
 
 
@@ -242,8 +619,11 @@ def test_a_new_session_from_a_selection_joins_its_sources_block(server, page):  
     page.click(".sbar [data-id=new]")
     page.wait_for_selector("#a2[data-view=spawn]")
     page.click("#sp-go")
-    page.wait_for_function("document.querySelectorAll('#tablist .tab').length === 2")
-    assert len(bar(page)) == 1 and bar(page)[0][0] == key
+    page.wait_for_function(
+        "document.querySelectorAll('#tablist .tab[data-id]').length === 2"
+    )
+    [[head, ids]] = bar(page)
+    assert head.startswith("grp-") and ids[0] == key and len(ids) == 2
     # The + tab afterwards starts a session of its own.
     spawn(page)
     assert len(bar(page)) == 2
@@ -265,18 +645,55 @@ def test_a_form_left_unsent_forgets_its_source(server, page):  # noqa: F811
     page.wait_for_selector("#a2[data-view=spawn]")
     page.fill("#sp-text", "")
     page.click("#sp-go")
-    page.wait_for_function("document.querySelectorAll('#tablist .tab').length === 2")
+    page.wait_for_function(
+        "document.querySelectorAll('#tablist .tab[data-id]').length === 2"
+    )
     assert len(bar(page)) == 2
     assert page.errors == []
 
 
-def test_a_handoff_takes_its_place_at_the_head_of_its_group(server, page):  # noqa: F811
+def test_the_group_tab_opens_its_page(server, page):  # noqa: F811
+    a, b, c, d = three_and_one(page, server)
+    key = group_key(page)
+    name = group_name(page)
+    # A quiet member leaves the bar and stays on the group's page.
+    page.goto(page.url.split("#")[0] + f"#s={c}")
+    page.wait_for_selector("#quiet-session[aria-pressed=false]:not([disabled])")
+    page.click("#quiet-session")
+    page.wait_for_function(f"!document.querySelector(\".tab[data-id='{c}']\")")
+    page.goto(page.url.split("#")[0] + "#fleet")
+    page.wait_for_selector("#tablist .tab.named")
+    # The quiet member has no tab, but it counts in the group's +N.
+    page.click(".tab.named .cnt")
+    assert page.inner_text(".tab.named .cnt") == "+3"
+    page.click(".tab.named .cnt")
+    page.wait_for_function("document.querySelectorAll('.tblock.grp .tab').length === 3")
+    page.click("#tablist .tab.named .hn")
+    page.wait_for_function(f"location.hash === '#g={key}'")
+    page.wait_for_selector("#a2[data-view=fleet]")
+    page.wait_for_selector("#cards .card")
+    ids = page.eval_on_selector_all(
+        "#cards .card[data-id]", "cs => cs.map((c) => c.dataset.id)"
+    )
+    assert sorted(ids) == sorted([a, b, c])
+    assert page.locator(f"#cards .card[data-id='{d}']").count() == 0
+    assert page.is_visible(f"#cards .card.quiet[data-id='{c}']")
+    assert page.inner_text(".v-fleet .order h3") == name
+    assert not page.is_visible("#band")
+    assert page.errors == []
+
+
+def test_a_handoff_keeps_the_group(server, page):  # noqa: F811
     page.goto(server.url)
     page.wait_for_selector("#a2[data-view=fleet]")
     old = spawn(page, mcp("session_spawn", agent="opus", prompt="hello"))
-    page.wait_for_function("document.querySelectorAll('#tablist .tab').length === 2")
-    [[head, kid]] = bar(page)
-    assert head == old
+    page.wait_for_function(
+        "document.querySelectorAll('#tablist .tab[data-id]').length === 2"
+    )
+    key = group_key(page)
+    [[head, ids]] = bar(page)
+    assert head == key and old in ids
+    kid = next(k for k in ids if k != old)
     page.fill("#input", "/ctx 342000")
     page.press("#input", "Enter")
     turns_done(page, 2)
@@ -285,12 +702,15 @@ def test_a_handoff_takes_its_place_at_the_head_of_its_group(server, page):  # no
     page.click("#replies .rp.hand >> text=continue fresh")
     page.wait_for_function("k => location.hash.slice(3) !== k", arg=old)
     new = page.evaluate("location.hash.slice(3)")
-    page.wait_for_selector(".row >> text=you head it now")
     page.wait_for_function(
         "k => !document.querySelector(`#tablist .tab[data-id='${k}']`)",
         arg=old,
         timeout=8000,
     )
-    # The new tab heads the old group, ahead of the older child.
-    assert bar(page) == [[new, kid]]
+    # The new session joins the old group, its child still inside, nothing
+    # reordered: the block keeps its key and its name.
+    assert group_key(page) == key
+    [[head, ids]] = bar(page)
+    assert head == key
+    assert new in ids and set(ids) - {new} == {kid}
     assert page.errors == []

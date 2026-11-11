@@ -326,12 +326,47 @@ your name as the author; the agent that wrote it is not told its own.
 
 ## Order the tabs
 
-The tab bar's order is this browser's own, and a reload keeps it. A session
-started from another one sits in that one's group, a block headed by the
-session that started it. Drag a tab to move it: a group's head moves the whole
-group, and any other member moves only inside its group. Alt+Shift+[ and
-Alt+Shift+] move the tab in front one place left or right by the same rules,
-from the message box too.
+The tab bar's order is this browser's own, and a reload keeps it. Sessions can
+also sit in a group: one block in the bar, drawn under the group's name, with
+no session at its head. Click the count chip to fold the block to one tab and
+`+N`, and again to unfold it. Click the group's name to open its page: the
+Fleet over just its members, in the same order, quiet sessions and workers
+included, where a card opens that session.
+
+A group fills by itself. What a session spawns or enqueues joins that
+session's group, and a session in no group that starts its first child makes a
+group holding both, with a generated name such as `brisk-backus` (`-2` when
+the name is taken). A person's `/spawn` joins the group of the tab it was
+typed in, making one if that tab has none. A group with one open member is
+drawn as that member's plain tab; its record stays, so a later spawn rejoins
+the same name.
+
+To edit a group by hand:
+
+- Drag a tab onto another lone tab to put both in a new group, or onto a block
+  to join it. Drag a member to the gap between blocks to leave its group; what
+  it spawned stays behind.
+- The tab menu (right-click, or a long press) has Move to group, with New
+  group and this server's groups by name, and Leave group.
+- Double click the group's name, or choose Rename group in its menu, and type
+  the new name in place: Enter saves, Escape cancels.
+- Ungroup, in the group's own menu, leaves every member where it is. Archive
+  group… in the same menu closes them all, after one question.
+- A group on this server holds this server's sessions only: a tab from a
+  linked server cannot be dropped into one, and the menu says why.
+- An agent groups sessions with `session_group`: handles and a name put them
+  in that group, handles alone make them leave, and a group and name with no
+  handles rename it.
+
+While a block is folded, a member whose turn ends needs_you, review, done or
+error shows its own tab beside the block, in the group's colour, so you see
+it without unfolding. Its next turn starts and the tab goes back inside. The
+member you are looking at also stays drawn beside the block, whatever its
+mark, and the block stays folded.
+
+Alt+Shift+[ and Alt+Shift+] move the tab in front one place left or right, by
+the same rules, from the message box too: a member within its group, a lone
+tab around its neighbours. Dragging the group's name carries its whole block.
 
 ## Switch between sessions
 
@@ -357,9 +392,11 @@ plan item, or what it is doing.
 ## Quiet sessions
 
 A quiet session runs in the background, with no tab. Its card stays in the
-Fleet, dimmed and marked quiet with a crossed-out eye, in the last group of
-"Needs you first". Its tab comes back by itself when a turn ends done, review,
-needs_you or error, so you see what it has for you. Quiet is a mode, not one
+Fleet, dimmed and marked quiet with a crossed-out eye, inside its group's
+stack; a quiet session in no group sits in the last group of "Needs you
+first". Its tab comes back by itself when a turn ends done, review,
+needs_you or error, so you see what it has for you. A quiet member counts in
+its group's `+N` and appears on the group's page. Quiet is a mode, not one
 turn: when the next turn starts, because you answered or because a monitor, a
 task or a schedule woke it, the tab goes away again. It stays quiet until you
 unquiet it. A queue worker comes back only on an error.

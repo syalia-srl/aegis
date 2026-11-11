@@ -384,9 +384,12 @@ class Queues:
     async def _start(self, t: Task, q: dict) -> None:
         try:
             agents = list(self._config.current().agents)
-            # A worker joins its enqueuer's group (#586).
+            # A worker joins its enqueuer's group (#1039), making one if the
+            # enqueuer has none yet.
             enqueuer = self._registry.sessions.get(t.enqueuer or "")
-            group = enqueuer.group_key() if enqueuer else None
+            group = (
+                self._registry.ensure_group(enqueuer) if enqueuer is not None else None
+            )
             spec = resolve(
                 agents, None, q["agent"], {}, Path(t.cwd), owner=t.owner, group=group
             )
