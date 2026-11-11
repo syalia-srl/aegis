@@ -1074,19 +1074,21 @@ def build_web(
                 "id": did,
                 "name": dev["name"],
                 "theme": app.chrome.theme,
+                "requests": list(app.chrome.requests.values()),
             }
         )
         app.chrome.connected(did, send, close, str(hello.get("version") or ""))
+        app.chrome.sync_tabs(did, hello.get("tabs"))
         try:
             while True:
                 msg = await websocket.receive_json()
-                kind = msg.get("t") if isinstance(msg, dict) else None
-                if kind == "ping":
-                    app.chrome.seen(did)
-                    await send({"t": "pong"})
-                elif kind == "unpair":
+                if not isinstance(msg, dict):
+                    continue
+                if msg.get("t") == "unpair":
                     await app.chrome.unpair(did)
                     return
+                if (reply := await app.chrome.handle(did, msg)) is not None:
+                    await send(reply)
         except (WebSocketDisconnect, ValueError, RuntimeError):
             pass
         finally:

@@ -2363,6 +2363,11 @@
 .a2 .set-linkrow{display:flex;gap:8px;margin-top:10px}
 .a2 .set-chrome-pair b{font-family:var(--font-mono);color:var(--accent);font-size:1.2em;letter-spacing:.06em}
 .a2 a#set-chrome-download{text-decoration:none}
+.a2 .chrome-tab{display:flex;gap:8px;align-items:baseline;font-size:12px;padding:3px 0}
+.a2 .chrome-tab .nm{font-family:var(--font-mono);color:var(--ink)}
+.a2 .chrome-tab .site{color:var(--muted);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.a2 .chrome-tab .lnk{background:none;border:0;color:var(--accent);cursor:pointer;font:inherit;padding:0}
+.a2 .chrome-tab.asked{border:1px dashed var(--rule);border-radius:var(--r);padding:3px 6px;margin-top:4px;color:var(--muted)}
 /* Whose a session is, when it is not this browser's (tokens.py). */
 .a2 .tab .who,.a2 .card .who{font-family:var(--font-mono);font-size:10.5px;color:var(--comms);border:1px solid var(--rule);border-radius:999px;padding:0 7px;margin-left:6px;white-space:nowrap}
 .a2 .set-once{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px}

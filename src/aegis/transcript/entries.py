@@ -1050,6 +1050,41 @@ class Fold:
                     detail=det,
                 )
             )
+        if kind == "chrome_request":
+            # An agent's ask for a tab of the person's browser (chrome_ops):
+            # Give and Refuse until answered, then one line.
+            rid = str(rec.get("request_id"))
+            det = {
+                "request": rid,
+                "kind": str(rec.get("req_kind")),
+                "match": str(rec.get("match") or ""),
+                "url": str(rec.get("url") or ""),
+                "why": str(rec.get("why") or ""),
+            }
+            return self._upsert(
+                _entry(
+                    f"cr-{rid}",
+                    "chrome_request",
+                    "asked",
+                    ts,
+                    d.SYSTEM_GLYPH,
+                    title=det["url"] or det["match"],
+                    summary="asked",
+                    detail=det,
+                )
+            )
+        if kind == "chrome_answer":
+            e = self._entries.get(f"cr-{rec.get('request_id')}")
+            if e is None:
+                return []
+            det = {**e["detail"]}
+            for k in ("tab", "title", "url"):
+                if rec.get(k):
+                    det["tab_" + k] = str(rec[k])
+            status = str(rec.get("answer"))
+            return self._upsert(
+                {**e, "status": status, "summary": status, "detail": det}
+            )
         if kind == "claude_login":
             # The Claude sign-in card (claude/login.py): a later record with the
             # same id adds the sessions that failed since.
