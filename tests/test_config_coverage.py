@@ -35,6 +35,7 @@ agents:
 queues:
   general: {agent: opus, priority: 3, quiet: false}
 max_workers: 7
+model_ranking: false
 recap: {agent: quick}
 btw: {agent: opus}
 context: {handoff_at: 200000, cold_after: 1800, cold_min: 50000}
@@ -111,6 +112,7 @@ def reader_keys() -> list[str]:
         "session_memory_max",
         "terminal_memory_max",
         "max_workers",
+        "model_ranking",
     }
     out = []
     for top in config.TOP_KEYS:

@@ -69,7 +69,7 @@ TOP_KEYS = (
     "agents", "queues", "default_agent", "recap", "btw", "context", "usage",
     "session_memory_max", "terminals", "terminal_memory_max", "park", "network",
     "host", "workflows", "harness_versions", "notices", "nudges",
-    "knowledge", "exit_via", "max_workers", "hosts", "mcp",
+    "knowledge", "exit_via", "max_workers", "hosts", "mcp", "model_ranking",
 )  # fmt: skip
 # Read once at boot, before the server knows its name (cli.serve), so a host's
 # block cannot set them.
@@ -536,6 +536,12 @@ SECTIONS = {
         "What the Net, Exit and Speed readings reach, and how often, in seconds."
         " A speed_interval of 0 turns the speed test off.",
     ),
+    "models": (
+        "Model ranking",
+        "Download the nightly Artificial Analysis ranking once a day, so new"
+        " models are ranked without a release. Off reads only the ranking"
+        " packaged with this version.",
+    ),
     "embeddings": (
         "Search embeddings",
         "Embeddings: off, or a fastembed model fused with keyword search, such"
@@ -590,6 +596,7 @@ def fields() -> list[dict]:
             add("network", f"network.{k}", "bool" if k == "enabled" else "number", v)
     add("embeddings", "knowledge.embeddings", "text", KNOWLEDGE_DEFAULTS["embeddings"])
     add("embeddings", "knowledge.know_how", "bool", KNOWLEDGE_DEFAULTS["know_how"])
+    add("models", "model_ranking", "bool", True)
     for k, v in host_from(None)[0].items():
         add("host", f"host.{k}", "list", v)
     return out
@@ -995,6 +1002,8 @@ class Snapshot:
     notices: dict = field(default_factory=_notices_defaults)
     nudges: dict = field(default_factory=lambda: dict(NUDGES_DEFAULTS))
     knowledge: dict = field(default_factory=lambda: dict(KNOWLEDGE_DEFAULTS))
+    # Whether the server downloads the nightly model ranking (ranking.py).
+    model_ranking: bool = True
     workflows: dict = field(default_factory=lambda: dict(WORKFLOWS_DEFAULTS))
     park: dict = field(default_factory=dict)
     harness_versions: dict = field(default_factory=_hv_defaults)
@@ -1055,6 +1064,7 @@ class Snapshot:
             notices=notices_from(data.get("notices")),
             nudges=nudges_from(data.get("nudges")),
             knowledge=knowledge_from(data.get("knowledge")),
+            model_ranking=data.get("model_ranking") is not False,
             workflows=workflows_from(data.get("workflows")),
             park=park_from(data.get("park")),
             harness_versions=harness_versions_from(data.get("harness_versions")),
@@ -1264,6 +1274,9 @@ def _validate_settings(doc: ConfigDoc, err: Callable[[str, str, str], None]) -> 
         "network": lambda v: network_from(v)[1],
         "host": lambda v: host_from(v)[1],
         "knowledge": lambda v: knowledge_from(v).get("error"),
+        "model_ranking": lambda v: (
+            None if isinstance(v, bool) else f"model_ranking {v!r} is not true or false"
+        ),
     }
     for block, error_of in readers.items():
         if block in b and (e := error_of(b[block])):
