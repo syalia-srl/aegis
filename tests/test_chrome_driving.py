@@ -11,7 +11,8 @@ import base64
 import json
 from pathlib import Path
 
-from .test_agents import mcp, turn, world  # noqa: F401  (fixture)
+from .conftest import until
+from .test_agents import inbox, mcp, turn, world  # noqa: F401  (fixture)
 from .test_chrome_consent import TAB, Ext, said
 
 
@@ -33,7 +34,15 @@ class Driven(Ext):
         self.send = send
         chrome.sockets[self.did] = send
 
+    delay = 0.0
+    busy = 0
+    most = 0
+
     async def reply(self, msg, answer):
+        self.busy += 1
+        self.most = max(self.most, self.busy)
+        await asyncio.sleep(self.delay)
+        self.busy -= 1
         try:
             value = answer(msg)
             out = {"t": "result", "id": msg["id"], "ok": True, "value": value}
@@ -180,3 +189,78 @@ async def test_a_later_tab_of_the_same_name_starts_a_clean_log(world):
     await ext.say(t="revoke", tab="qwen", log_id=None)
     await ext.say(t="grant", tab=TAB, log_id=a.log_id)
     assert chrome.events("qwen") == (0, [])
+
+
+async def test_a_handover_gives_the_tab_to_the_person_until_done(world):
+    a, b = await world.spawn(), await world.spawn()
+    chrome = world.app.chrome
+    ext = Driven(chrome, page)
+    await ext.say(t="grant", tab=TAB, log_id=a.log_id)
+    await ext.say(t="grant", tab=TAB, log_id=b.log_id)
+    out = (
+        await turn(
+            a,
+            mcp("browser_handover", browser="chrome:qwen", reason="Solve the captcha"),
+        )
+    )
+    assert "holds chrome:qwen" in out
+    told = ext.last("hold")
+    assert (told["holder"], told["ask"], told["by"]) == (
+        "person",
+        "Solve the captcha",
+        a.handle,
+    )
+    assert chrome.wire()["tabs"][0]["holder"] == "person"
+    # Reads go on; actions wait, and never reach the browser.
+    await turn(b, mcp("browser_snapshot", browser="chrome:qwen"))
+    calls = len(ext.calls)
+    out = await turn(b, mcp("browser_click", browser="chrome:qwen", target="text=Go"))
+    assert "person_has_control" in out and "Solve the captcha" in out
+    assert len(ext.calls) == calls
+    await world.app.registry.call("chrome.release", {"tab": "qwen"})
+    assert ext.last("hold")["holder"] == "agent"
+    for s in (a, b):
+        await until(lambda s=s: inbox(s), timeout=8, what="the wake")
+        assert "chrome:qwen · back" in json.dumps(inbox(s), ensure_ascii=False)
+
+
+async def test_pause_in_the_ribbon_refuses_actions_and_resume_wakes_who_tried(world):
+    a = await world.spawn()
+    chrome = world.app.chrome
+    ext = Driven(chrome, page)
+    await ext.say(t="grant", tab=TAB, log_id=a.log_id)
+    await ext.say(t="hold", tab="qwen", holder="person")
+    out = await turn(
+        a, mcp("browser_type", browser="chrome:qwen", target="#q", text="x")
+    )
+    assert "person_has_control" in out
+    sent = len(ext.got)
+    await ext.say(t="hold", tab="qwen", holder="agent")
+    assert len(ext.got) == sent  # the extension said so: no echo
+    await until(lambda: inbox(a), timeout=8, what="the wake")
+    log = said(await turn(a, mcp("browser_events", browser="chrome:qwen")))
+    assert any("pause" in e for e in log["events"])
+
+
+async def test_a_reconnecting_browser_keeps_a_tab_held(world):
+    a = await world.spawn()
+    chrome = world.app.chrome
+    ext = Driven(chrome, page)
+    chrome.sync_tabs(
+        ext.did, [TAB | {"grants": [a.log_id], "holder": "person", "ask": "Sign in"}]
+    )
+    out = await turn(a, mcp("browser_click", browser="chrome:qwen", target="text=Go"))
+    assert "person_has_control" in out and "Sign in" in out
+
+
+async def test_actions_on_one_tab_run_one_at_a_time(world):
+    a, b = await world.spawn(), await world.spawn()
+    ext = Driven(world.app.chrome, page)
+    ext.delay = 0.3
+    await ext.say(t="grant", tab=TAB, log_id=a.log_id)
+    await ext.say(t="grant", tab=TAB, log_id=b.log_id)
+    await asyncio.gather(
+        turn(a, mcp("browser_click", browser="chrome:qwen", target="text=A")),
+        turn(b, mcp("browser_click", browser="chrome:qwen", target="text=B")),
+    )
+    assert len(ext.calls) == 2 and ext.most == 1

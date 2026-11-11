@@ -35,6 +35,14 @@ grant first and the extension checks it again, since it is the authority. The
 extension sends the tab's navigations, console errors and failed requests as
 ``event`` messages, and the server keeps them, with the agents' actions, in
 the tab's log, as it does for its own browsers.
+
+Holding: a tab's holder is the agents or the person. The person takes it
+with Pause in the tab's ribbon, an agent gives it with browser_handover and
+a reason, and Resume or Done in the ribbon or in aegis gives it back. The
+extension keeps the holder with the grants and the server mirrors it. While
+the person holds a tab, agents may read it but not act on it, and the ones
+that tried, with the one that handed it over, are woken when it comes back.
+Actions on one tab run one at a time, in order of arrival.
 """
 
 from __future__ import annotations
@@ -111,12 +119,18 @@ class Chrome:
         # name -> {rev, events}: each tab's log, as a server browser's.
         self.logs: dict[str, dict] = {}
         self.calls: dict[str, tuple[str, asyncio.Future]] = {}  # id -> device, reply
+        # name -> {by, rev, blocked}: who handed a held tab over, the log's
+        # revision then, and the sessions an action of was refused since.
+        self.holds: dict[str, dict] = {}
+        self.locks: dict[str, asyncio.Lock] = {}
         # Set by chrome_ops: the sessions a tab can be shared with, and what
         # happens when a request is answered or a grant starts or ends.
         self.list_sessions: Callable[[], list[dict]] = lambda: []
         self.on_answer: Callable[[dict, str, dict | None], None] = lambda *_: None
         self.on_grants: Callable[[], None] = lambda: None
         self.on_nomatch: Callable[[dict], object] = lambda _: None
+        # A held tab given back: the sessions to wake, the tab, its events since.
+        self.on_back: Callable[[list[str], dict, list[dict]], None] = lambda *_: None
         # An agent's request, with its card (chrome_ops): browser_open's too.
         self.ask_for: Callable[..., Awaitable[dict]]
         # An agent's browser_* tool on one of its tabs (chrome_ops).
@@ -269,7 +283,10 @@ class Chrome:
         if row is None or row.get("device") != device_id:
             # A name is one browser's: another paired browser's tab of the
             # same name is a different tab, and its grants do not carry over.
-            row = self.tabs[name] = {"name": name, "title": "", "url": "", "grants": []}
+            row = self.tabs[name] = {
+                "name": name, "title": "", "url": "", "grants": [], "holder": "agent",
+                "ask": "",
+            }  # fmt: skip
         row["device"] = device_id
         row["title"] = str(tab.get("title") or "")[:200]
         row["url"] = str(tab.get("url") or "")[:2000]
@@ -286,12 +303,16 @@ class Chrome:
                     for g in (given if isinstance(given, list) else [])
                     if isinstance(g, str)
                 ]
+                row["holder"] = "person" if tab.get("holder") == "person" else "agent"
+                row["ask"] = str(tab.get("ask") or "")[:300]
         self._grants_changed()
 
     def _grants_changed(self) -> None:
         self.tabs = {n: t for n, t in self.tabs.items() if t["grants"]}
         # A later tab of the same name is another tab: it starts a clean log.
         self.logs = {n: book for n, book in self.logs.items() if n in self.tabs}
+        self.holds = {n: h for n, h in self.holds.items() if n in self.tabs}
+        self.locks = {n: k for n, k in self.locks.items() if n in self.tabs}
         for name, t in self.tabs.items():
             for g in t["grants"]:
                 self.had.setdefault(g, set()).add(name)
@@ -420,6 +441,11 @@ class Chrome:
         if kind == "deny":
             self.resolve(str(msg.get("request")), "denied")
             return None
+        if kind == "hold":
+            tab = self.tabs.get(str(msg.get("tab")))
+            if tab is not None and tab.get("device") == device_id:
+                await self.hold(tab["name"], str(msg.get("holder")), tell=False)
+            return None
         if kind == "result":
             entry = self.calls.get(str(msg.get("id")))
             if entry is not None and entry[0] == device_id and not entry[1].done():
@@ -496,6 +522,54 @@ class Chrome:
         finally:
             self.calls.pop(cid, None)
 
+    def lock(self, name: str) -> asyncio.Lock:
+        """One action at a time on a tab, in order of arrival."""
+        return self.locks.setdefault(name, asyncio.Lock())
+
+    async def hold(
+        self,
+        name: str,
+        holder: str,
+        ask: str = "",
+        by: str | None = None,
+        handle: str = "",
+        tell: bool = True,
+    ) -> None:
+        """Give a tab to the person (Pause, or a handover with a reason) or
+        back to the agents; `tell` is false when the extension said so."""
+        tab = self.tabs.get(name)
+        if tab is None or holder not in ("person", "agent"):
+            return
+        if holder == tab.get("holder", "agent"):
+            return
+        rev, _ = self.events(name)
+        tab["holder"] = holder
+        tab["ask"] = ask if holder == "person" else ""
+        if holder == "person":
+            self.holds[name] = {"by": by, "rev": rev, "blocked": set()}
+            what = {"what": "handover", "reason": ask} if ask else {"what": "pause"}
+            self.log(name, {"kind": "control"} | what, "agent" if by else "person")
+        else:
+            held = self.holds.pop(name, {"by": None, "rev": rev, "blocked": set()})
+            self.log(name, {"kind": "control", "what": "give back"}, "person")
+            woken = [held["by"]] if held["by"] else []
+            woken += [g for g in sorted(held["blocked"]) if g not in woken]
+            woken = [g for g in woken if g in tab["grants"]]
+            if woken:
+                self.on_back(woken, tab, self.events(name, held["rev"])[1])
+        self.changed()
+        if tell:
+            await self._send(
+                tab.get("device"),
+                {"t": "hold", "tab": name, "holder": holder, "ask": tab["ask"],
+                 "by": handle},
+            )  # fmt: skip
+
+    def refused(self, name: str, log_id: str) -> None:
+        """An agent's action met the person holding the tab: wake it later."""
+        if name in self.holds:
+            self.holds[name]["blocked"].add(log_id)
+
     def log(self, name: str, ev: dict, who: str) -> int:
         """Add an event to a tab's log; its revision."""
         book = self.logs.setdefault(name, {"rev": 0, "events": []})
@@ -560,7 +634,10 @@ class Chrome:
                 for d in self.devices.values()
             ],
             "tabs": [
-                {k: t.get(k, "") for k in ("name", "title", "url", "grants", "last")}
+                {
+                    k: t.get(k, "")
+                    for k in ("name", "title", "url", "grants", "last", "holder", "ask")
+                }
                 for t in self.tabs.values()
             ],
             "requests": list(self.requests.values()),
