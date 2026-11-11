@@ -89,7 +89,7 @@ export function renderTabs(list, metas, focusId, actions) {
       box.append(head, ...(folded ? [] : b.members.map((m) => tab(m, focusId, actions, "member"))));
       // The members that need the person, drawn as their own tabs right after
       // the folded block, in the group's colour (#1039).
-      const out = poppedOut(b, folded).map((m) => {
+      const out = poppedOut(b, folded, focusId).map((m) => {
         const beside = document.createElement("div");
         beside.className = "tblock out";
         beside.dataset.group = b.key;

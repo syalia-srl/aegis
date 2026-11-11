@@ -55,15 +55,15 @@ def blocks(pg, metas) -> list:
     )
 
 
-def popped(pg, metas, key, folded=True) -> list:
+def popped(pg, metas, key, folded=True, focus=None) -> list:
     """The member keys poppedOut() draws beside the block of `key`."""
     return pg.evaluate(
-        """async ([metas, key, folded]) => {
+        """async ([metas, key, folded, focus]) => {
           const g = await import('/static/js/groups.js');
           const b = g.blocksOf(metas, 'alpha').find((x) => x.key === key);
-          return g.poppedOut(b, folded).map((m) => m.key);
+          return g.poppedOut(b, folded, focus).map((m) => m.key);
         }""",
-        [metas, key, folded],
+        [metas, key, folded, focus],
     )
 
 
@@ -153,6 +153,10 @@ def test_popped_out_members_per_mark(server, page):  # noqa: F811
     metas = [meta("a", "working"), meta("b", "needs_you")]
     assert popped(page, metas, f"{g}@alpha", folded=False) == []
     assert popped(page, [m("d", 4)], "d@alpha") == []
+    # The member in view pops out whatever its mark.
+    metas = [meta("a", "working"), meta("b", "needs_you"), meta("c", "working")]
+    assert popped(page, metas, f"{g}@alpha", focus="c") == ["b", "c"]
+    assert popped(page, metas, f"{g}@alpha", focus="b") == ["b"]
     assert page.errors == []
 
 
@@ -417,9 +421,11 @@ def test_a_folded_member_that_needs_you_pops_out_and_goes_back(server, page):  #
     [[head, hidden], *outs] = bar(page)
     assert head == key and hidden == []
     assert ["out", [b]] in outs
-    # Its next turn starts: the popped-out tab goes back inside.
+    # Its next turn starts and the person looks elsewhere: the popped-out tab
+    # goes back inside (while in view it stays out, whatever its mark).
     page.fill("#input", '/script [["sleep", 3]]')
     page.press("#input", "Enter")
+    page.goto(page.url.split("#")[0] + "#fleet")
     page.wait_for_function(f"!document.querySelector(\".tab.out[data-id='{b}']\")")
     assert ["out", [b]] not in bar(page)
     assert page.errors == []

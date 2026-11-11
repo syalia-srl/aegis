@@ -69,8 +69,9 @@ export function blocksOf(metas, here) {
 }
 
 // What a folded block draws beside itself: the members whose turn ended on a
-// mark that needs the person, until their next turn starts (#1039).
-export function poppedOut(block, folded) {
+// mark that needs the person, until their next turn starts, and the member in
+// view (`focusId`), whatever its mark, so the block stays folded (#1039).
+export function poppedOut(block, folded, focusId) {
   if (!folded || block.head.kind !== "group") return [];
-  return block.members.filter((m) => POP.includes(m.mark));
+  return block.members.filter((m) => POP.includes(m.mark) || m.key === focusId);
 }
