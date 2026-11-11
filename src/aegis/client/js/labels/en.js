@@ -19,6 +19,7 @@ export default {
   "sidebar.chromePaused": "paused by you",
   "sidebar.chromeDone": "Done",
   "sidebar.chromeResume": "Resume",
+  "sidebar.chromeScripts": "Scripts: let agents run JavaScript in this tab",
   "sidebar.chromeAlso": "also shared with {handles}",
   "sidebar.chromeOnly": "shared with this agent only",
   "sidebar.chromeStop": "Stop sharing",

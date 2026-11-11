@@ -163,8 +163,10 @@ lives with its grants in the extension and is mirrored by `Chrome.hold`,
 which refuses agents' actions while the person holds the tab and wakes the
 one that handed it over, and any whose action was refused, when it comes
 back. Actions on one tab take `Chrome.lock`, so they run in order of arrival;
-reads do not. Linked servers and the exit per site (the spec
-`2026-11-11-chrome-extension-design.html`) come next.
+reads do not. `browser_eval` runs only on a tab whose Scripts switch is on;
+the extension keeps the switch with the grants and checks it on each call,
+and `Chrome.scripts` turns it from aegis. Linked servers and the exit per site, slices 5 and 6 of the spec
+`2026-11-11-chrome-extension-design.html`, were dropped.
 
 **A browser is a Chromium the server holds, shared by an agent and a person.**
 A browser (`browsers.py`, #564) is a headless Chromium driven through

@@ -176,7 +176,9 @@ async def test_tools_for_later_slices_say_so(world):
     a = await world.spawn()
     ext = Driven(world.app.chrome, page)
     await ext.say(t="grant", tab=TAB, log_id=a.log_id)
-    out = await turn(a, mcp("browser_eval", browser="chrome:qwen", expression="1"))
+    out = await turn(
+        a, mcp("browser_resize", browser="chrome:qwen", width=400, height=800)
+    )
     assert "not_supported" in out and ext.calls == []
 
 
@@ -262,3 +264,33 @@ async def test_actions_on_one_tab_run_one_at_a_time(world):
         turn(b, mcp("browser_click", browser="chrome:qwen", target="text=B")),
     )
     assert len(ext.calls) == 2 and ext.most == 1
+
+
+async def test_eval_runs_in_the_tab_and_returns_its_json(world):
+    a = await world.spawn()
+    ext = Driven(world.app.chrome, lambda m: {"value": {"n": 2}})
+    await ext.say(t="grant", tab=TAB | {"eval": True}, log_id=a.log_id)
+    out = said(
+        await turn(a, mcp("browser_eval", browser="chrome:qwen", expression="1+1"))
+    )
+    assert out == {"n": 2}
+    assert ext.calls[-1]["op"] == "eval" and ext.calls[-1]["args"] == {
+        "expression": "1+1"
+    }
+
+
+async def test_the_scripts_switch_goes_from_aegis_to_the_extension_and_back(world):
+    a = await world.spawn()
+    chrome = world.app.chrome
+    ext = Driven(chrome, page)
+    await ext.say(t="grant", tab=TAB, log_id=a.log_id)
+    assert chrome.wire()["tabs"][0]["eval"] is False
+    await world.app.registry.call("chrome.scripts", {"tab": "qwen", "on": True})
+    assert ext.last("eval") == {"t": "eval", "tab": "qwen", "on": True}
+    assert chrome.wire()["tabs"][0]["eval"] is True
+    sent = len(ext.got)
+    await ext.say(t="eval", tab="qwen", on=False)
+    assert chrome.wire()["tabs"][0]["eval"] is False and len(ext.got) == sent
+    # A reconnecting browser says what it holds.
+    chrome.sync_tabs(ext.did, [TAB | {"grants": [a.log_id], "eval": True}])
+    assert chrome.wire()["tabs"][0]["eval"] is True

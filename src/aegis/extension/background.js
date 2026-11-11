@@ -68,7 +68,7 @@ function nameFor(url, taken) {
 
 async function wire(tabId, row) {
   const tab = await chrome.tabs.get(+tabId).catch(() => null);
-  return tab && { name: row.name, title: tab.title || "", url: tab.url || "", grants: row.grants.map((g) => g.log_id), holder: row.holder || "agent", ask: row.ask || "" };
+  return tab && { name: row.name, title: tab.title || "", url: tab.url || tab.pendingUrl || "", grants: row.grants.map((g) => g.log_id), holder: row.holder || "agent", ask: row.ask || "", eval: !!row.eval };
 }
 
 // The "aegis" tab group, in the accent: every shared tab joins it.
@@ -87,7 +87,8 @@ async function share(tabId, sessions, request = null) {
   const all = await shared();
   const tab = await chrome.tabs.get(tabId);
   const taken = new Set(Object.entries(all).filter(([id]) => +id !== tabId).map(([, r]) => r.name));
-  const row = all[tabId] || { name: nameFor(tab.url, taken), grants: [] };
+  // A tab just opened has only the address it is loading.
+  const row = all[tabId] || { name: nameFor(tab.url || tab.pendingUrl, taken), grants: [] };
   for (const s of sessions) if (!row.grants.some((g) => g.log_id === s.log_id)) row.grants.push({ log_id: s.log_id, handle: s.handle });
   all[tabId] = row;
   await set({ shared: all });
@@ -327,9 +328,21 @@ async function ribbon(tabId, extra = {}) {
 
 const DRIVE = {
   async snapshot(tabId) {
-    const { nodes } = await dbg(tabId, "Accessibility.getFullAXTree");
+    // The tree of the document the tab shows now: a tab whose first grant
+    // started on a blank page keeps the blank page's tree otherwise.
+    await dbg(tabId, "Accessibility.enable").catch(() => {});
+    const { frameTree } = await dbg(tabId, "Page.getFrameTree");
+    const { nodes } = await dbg(tabId, "Accessibility.getFullAXTree", { frameId: frameTree.frame.id });
     const tab = await chrome.tabs.get(tabId);
-    return { url: tab.url || "", title: tab.title || "", tree: aria(nodes) };
+    let tree = aria(nodes);
+    if (!tree.trim()) {
+      // An empty tree on a page that shows content: say what came back, and
+      // read the page from the DOM instead.
+      const run = await world(tabId);
+      const kept = nodes.filter((n) => !n.ignored).length;
+      tree = `(the accessibility tree had ${nodes.length} nodes, ${kept} not ignored; this outline comes from the page's elements)\n${await run("T.outline()")}`;
+    }
+    return { url: tab.url || "", title: tab.title || "", tree };
   },
   async click(tabId, a, who) {
     const { info } = await locate(tabId, a.target);
@@ -375,6 +388,16 @@ const DRIVE = {
       await dbg(tabId, "Page.navigateToHistoryEntry", { entryId: e.id });
     }
     return settle(tabId, 30_000);
+  },
+  // Only on a tab whose Scripts switch is on, in the popup or in aegis: a
+  // script runs with the person's sign-ins and is not limited to what the
+  // page shows.
+  async eval(tabId, a) {
+    const row = (await shared())[tabId];
+    if (!row?.eval) throw new Fail("scripts_off", "the person has not allowed scripts on this tab; ask them to turn on Scripts for it");
+    const r = await dbg(tabId, "Runtime.evaluate", { expression: a.expression, returnByValue: true, awaitPromise: true, userGesture: true });
+    if (r.exceptionDetails) throw new Fail("eval_failed", (r.exceptionDetails.exception?.description || r.exceptionDetails.text || "").split("\n")[0]);
+    return { value: r.result.value ?? null };
   },
   async screenshot(tabId, a) {
     const params = { format: "png" };
@@ -431,7 +454,7 @@ function aria(nodes) {
     lines.push(`${head}:`);
     kids.forEach((k) => walk(k, depth + 1));
   };
-  const root = nodes.find((n) => !n.parentId) || nodes[0];
+  const root = nodes.find((n) => n.role?.value === "RootWebArea") || nodes.find((n) => !n.parentId) || nodes[0];
   if (root) walk(root, 0);
   return lines.join("\n");
 }
@@ -454,6 +477,20 @@ async function onCall(msg) {
   } catch (e) {
     reply({ ok: false, code: e.code || "call_failed", message: String(e.message || e) });
   }
+}
+
+// -- scripts ----------------------------------------------------------------------
+
+// Whether agents may run JavaScript in a shared tab (browser_eval): off until
+// the person turns it on, in the popup or on the tab's card in aegis. It ends
+// with the tab's last grant. `tell` is false when the server said so.
+async function scripts(tabId, on, tell = true) {
+  const all = await shared();
+  const row = all[tabId];
+  if (!row) return;
+  row.eval = on;
+  await set({ shared: all });
+  if (tell) send({ t: "eval", tab: row.name, on });
 }
 
 // -- holding ----------------------------------------------------------------------
@@ -542,6 +579,10 @@ async function connect() {
       const all = await shared();
       const id = Object.keys(all).find((k) => all[k].name === msg.tab);
       if (id) await hold(id, msg.holder, { ask: msg.ask, by: msg.by, tell: false });
+    } else if (msg.t === "eval") {
+      const all = await shared();
+      const id = Object.keys(all).find((k) => all[k].name === msg.tab);
+      if (id) await scripts(id, !!msg.on, false);
     } else if (msg.t === "call") {
       return onCall(msg);
     } else if (msg.t === "revoke") {
@@ -631,6 +672,7 @@ const POPUP = {
   },
   give: (m) => give(m.request, m.tabId ?? null),
   refuse: (m) => refuse(m.request),
+  scripts: (m) => scripts(m.tabId, !!m.on),
   // Pause, Resume and Done in a tab's ribbon, or on its row in the popup.
   hold: (m, sender) => hold(m.tabId ?? sender.tab?.id, m.holder === "person" ? "person" : "agent"),
 };

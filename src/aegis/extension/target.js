@@ -181,5 +181,27 @@ function aegisTarget() {
     };
   }
 
-  return { find, describe, parse };
+  // The page as "- role "name"" lines from the DOM, nested by the elements
+  // that have a role: what a snapshot shows when the accessibility tree
+  // comes back empty.
+  const KEEP = /^(heading|link|button|textbox|searchbox|combobox|listbox|checkbox|radio|slider|spinbutton|img|navigation|main|form|dialog|list|listitem|table|row|cell|columnheader|tab|tablist|menu|menuitem|option|region|banner|contentinfo|complementary|article|switch)$/;
+  function outline(max = 4000) {
+    const lines = [];
+    const walk = (el, depth) => {
+      if (lines.length >= max || hidden(el)) return;
+      const r = role(el);
+      const keep = KEEP.test(r) && !(r === "region" && !name(el));
+      if (keep) {
+        const n = name(el);
+        let head = `${"  ".repeat(depth)}- ${r}${n ? ` ${JSON.stringify(n.slice(0, 120))}` : ""}`;
+        if (r === "heading") head += ` [level=${+el.tagName.slice(1) || +el.getAttribute("aria-level") || 2}]`;
+        lines.push(head);
+      }
+      for (const k of el.children) walk(k, depth + (keep ? 1 : 0));
+    };
+    if (document.body) walk(document.body, 0);
+    return lines.join("\n");
+  }
+
+  return { find, describe, parse, outline };
 }

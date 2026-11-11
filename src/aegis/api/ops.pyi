@@ -296,6 +296,8 @@ class _chrome:
         """Give a tab the person holds back to its agents: Done after a handover, Resume after a pause."""
     async def revoke(self, *, tab: str, log_id: str | None = ...) -> Any:
         """Disconnect an agent from a shared tab, or with no log_id stop sharing the tab."""
+    async def scripts(self, *, tab: str, on: bool) -> Any:
+        """Let the agents on a shared tab run scripts in it (browser_eval), or stop them."""
     async def theme(self, *, vars: dict[str, str]) -> Any:
         """The CSS variables of the theme the person picked, for the extension's popup."""
     async def unpair(self, *, id: str) -> Any:
