@@ -42,6 +42,7 @@ NOT_AN_ID: dict[tuple[str, str], str] = {
             "browser.type",
         )
     },
+    ("chrome.unpair", "id"): "a paired browser (chrome.py), a server op, not a session",
     ("journal.rows", "session"): "a filter on rows; lists are task 5's",
     ("journal.search", "session"): "a filter on rows; lists are task 5's",
     **{

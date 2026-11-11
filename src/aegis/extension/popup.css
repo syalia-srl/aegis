@@ -1,0 +1,24 @@
+/* The popup, in the theme the person picked in aegis (chrome.py sends its
+   variables; ink until the first set arrives). */
+html,body{margin:0}
+body{width:320px;padding:14px 16px 16px;background:var(--bg);color:var(--ink);font:13px/1.45 var(--font-ui);box-sizing:border-box}
+header{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+.mark .gorgon{width:44px;height:44px;display:block}
+.who{display:flex;flex-direction:column;min-width:0}
+.who b{font:600 15px var(--font-head);color:var(--strong,var(--ink))}
+.who span{color:var(--muted);font:12px var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.status{display:flex;align-items:center;gap:8px;margin:0 0 8px;font-weight:500}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--faint);flex:none}
+.dot.on{background:var(--ok)}
+.dot.wait{background:var(--warn)}
+.note{color:var(--muted);margin:0 0 12px}
+.err{color:var(--err);margin:0 0 10px}
+.err:empty{display:none}
+label{display:flex;flex-direction:column;gap:4px;margin-bottom:10px;color:var(--muted);font-size:12px}
+input{background:var(--surface);color:var(--ink);border:1px solid var(--rule);border-radius:var(--r);padding:7px 9px;font:13px var(--font-mono)}
+input:focus{outline:none;border-color:var(--accent)}
+.row{display:flex;justify-content:flex-end;gap:8px}
+.btn{background:var(--raised);color:var(--ink);border:1px solid var(--rule);border-radius:var(--r);padding:6px 14px;font:500 13px var(--font-ui);cursor:pointer}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+.btn:disabled{opacity:.6;cursor:default}

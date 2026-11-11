@@ -22,6 +22,8 @@ class Ops:
     @property
     def btw(self) -> _btw: ...
     @property
+    def chrome(self) -> _chrome: ...
+    @property
     def claude(self) -> _claude: ...
     @property
     def commands(self) -> _commands: ...
@@ -274,6 +276,14 @@ class _browser:
 class _btw:
     async def cancel(self, *, log_id: str, id: str) -> Any:
         """Cancel a running side note; its block keeps the question, folded."""
+
+class _chrome:
+    async def code(self) -> Any:
+        """A one-time code the extension's popup trades for its device token, valid ten minutes."""
+    async def theme(self, *, vars: dict[str, str]) -> Any:
+        """The CSS variables of the theme the person picked, for the extension's popup."""
+    async def unpair(self, *, id: str) -> Any:
+        """Forget a paired browser: its token stops working and its socket closes."""
 
 class _claude:
     async def token(self, *, log_id: str, id: str, secret: str) -> Any:
