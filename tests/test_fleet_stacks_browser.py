@@ -122,12 +122,21 @@ def test_the_fleets_unfolding_is_apart_from_the_bars_fold(server, page):  # noqa
     assert page.errors == []
 
 
-def test_a_members_menu_archives_the_group(server, page):  # noqa: F811
+def test_the_groups_menu_in_the_fleet_archives_the_group(server, page):  # noqa: F811
     a, b, c, d = three_and_one(page, server)
     fleet(page)
+    # The folded stack's front is the group's card: its menu is the group's.
+    page.click("#cards .card.group", button="right")
+    page.wait_for_selector(".cmenu [data-id=archivegroup]")
+    page.keyboard.press("Escape")
     page.click("#cards .stack")
     page.wait_for_selector("#cards .gopen")
+    # A member's card has the session's menu, the open stack's header the group's.
     page.click(f"#cards .gopen .card[data-id='{a}']", button="right")
+    page.wait_for_selector(".cmenu")
+    assert page.locator(".cmenu [data-id=archivegroup]").count() == 0
+    page.keyboard.press("Escape")
+    page.click("#cards .gopen > .gh b", button="right")
     page.wait_for_selector(".cmenu [data-id=archivegroup]")
     assert page.errors == []
 

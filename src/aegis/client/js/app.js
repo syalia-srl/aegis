@@ -3241,11 +3241,15 @@ function sessionMenu(key) {
   return { title, groups: [opening, life, rename, move, close] };
 }
 // The menu of a card or tab pressed; none on the space around them.
+// A group's own card or open stack's header in the Fleet gets the group's
+// menu, as its tab does (#1039).
 function cardMenu(t) {
+  if (t.matches?.(".card.group[data-group]")) return groupMenu(t.dataset.group);
+  if (t.matches?.(".gopen > .gh")) return groupMenu(t.parentElement.dataset.group);
   return t.dataset?.id && t.matches(".card, .tab, .wait") ? sessionMenu(t.dataset.id) : null;
 }
 function attachCardMenu(box, opts = {}) {
-  cmenu.attach(box, cardMenu, { selector: ".card[data-id], .tab[data-id], .wait[data-id]", ...opts });
+  cmenu.attach(box, cardMenu, { selector: ".card[data-id], .tab[data-id], .wait[data-id], .card.group[data-group], .gopen > .gh", ...opts });
 }
 // The tab card (#586) belongs to the header part (b2): a session tab's Fleet
 // card on hover, with the tab menu's items as buttons, and a long press on a
