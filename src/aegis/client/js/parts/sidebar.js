@@ -452,8 +452,10 @@ export class SidebarPart {
           mk("div", "ch-url", tab.url),
           mk("div", "ch-who", others.length ? this.t("sidebar.chromeAlso", { handles: others.join(", ") }) : this.t("sidebar.chromeOnly")),
           ...(tab.last ? [mk("div", "ch-who", this.t("sidebar.chromeLast", { what: tab.last }))] : []),
+          ...(tab.holder === "person" ? [mk("div", "ch-who ch-held", tab.ask ? this.t("sidebar.chromeAsk", { why: tab.ask }) : this.t("sidebar.chromePaused"))] : []),
         );
         const acts = mk("div", "ch-acts");
+        if (tab.holder === "person") acts.append(btn(this.t(tab.ask ? "sidebar.chromeDone" : "sidebar.chromeResume"), "btn primary", () => call("chrome.release", { tab: tab.name })));
         acts.append(
           btn(this.t("sidebar.chromeDisconnect"), "btn", () => call("chrome.revoke", { tab: tab.name, log_id: s.log_id })),
           btn(this.t("sidebar.chromeStop"), "btn", () => call("chrome.revoke", { tab: tab.name })),
