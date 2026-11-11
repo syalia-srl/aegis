@@ -1,0 +1,301 @@
+{
+  "source": "Artificial Analysis",
+  "url": "https://artificialanalysis.ai",
+  "refreshed": "2026-11-11",
+  "models": {
+    "fable": {
+      "aa": "claude-fable-5-2",
+      "coding": null,
+      "intelligence": 64.6,
+      "price_in": 8,
+      "price_out": 40
+    },
+    "default": {
+      "aa": "claude-opus-5-5",
+      "coding": null,
+      "intelligence": 59.1,
+      "price_in": 4,
+      "price_out": 20
+    },
+    "opus": {
+      "aa": "claude-opus-5-5",
+      "coding": null,
+      "intelligence": 59.1,
+      "price_in": 4,
+      "price_out": 20
+    },
+    "sonnet": {
+      "aa": "claude-sonnet-5-5",
+      "coding": null,
+      "intelligence": 54.5,
+      "price_in": 2,
+      "price_out": 10
+    },
+    "opencode-go/gemini-4-argon": {
+      "aa": "gemini-4-argon",
+      "coding": null,
+      "intelligence": 50.4,
+      "price_in": 4,
+      "price_out": 20
+    },
+    "opencode-go/kimi-k3.1-pro": {
+      "aa": "kimi-k3-1-pro",
+      "coding": null,
+      "intelligence": 46.5,
+      "price_in": 2,
+      "price_out": 10
+    },
+    "claude-opus-5": {
+      "aa": "claude-opus-5",
+      "coding": null,
+      "intelligence": 44.2,
+      "price_in": 5,
+      "price_out": 25
+    },
+    "haiku": {
+      "aa": "claude-haiku-5-5",
+      "coding": null,
+      "intelligence": 36.5,
+      "price_in": 0.1,
+      "price_out": 0.5
+    },
+    "opencode-go/claude-haiku-5-5": {
+      "aa": "claude-haiku-5-5",
+      "coding": null,
+      "intelligence": 36.5,
+      "price_in": 0.1,
+      "price_out": 0.5
+    },
+    "opencode-go/grok-4.7": {
+      "aa": "grok-4-7",
+      "coding": null,
+      "intelligence": 35.5,
+      "price_in": 2,
+      "price_out": 6
+    },
+    "opencode-go/qwen3.8-max": {
+      "aa": "qwen3-8-max",
+      "coding": null,
+      "intelligence": 33.7,
+      "price_in": 2,
+      "price_out": 6
+    },
+    "opencode-go/glm-5.3": {
+      "aa": "glm-5-3",
+      "coding": null,
+      "intelligence": 31.7,
+      "price_in": 1.4,
+      "price_out": 4.4
+    },
+    "opencode/inkling-2-small-free": {
+      "aa": "inkling-2-small",
+      "coding": null,
+      "intelligence": 30.6,
+      "price_in": 0.3,
+      "price_out": 1
+    },
+    "opencode-go/mimo-v2.6-pro": {
+      "aa": "mimo-v2-6-pro",
+      "coding": null,
+      "intelligence": 29.9,
+      "price_in": 0.435,
+      "price_out": 0.87
+    },
+    "opencode-go/minimax-m3.1-flash": {
+      "aa": "minimax-m3-1-flash",
+      "coding": null,
+      "intelligence": 29.1,
+      "price_in": 0.15,
+      "price_out": 0.6
+    },
+    "opencode/minimax-m3.1-flash-free": {
+      "aa": "minimax-m3-1-flash",
+      "coding": null,
+      "intelligence": 29.1,
+      "price_in": 0.15,
+      "price_out": 0.6
+    },
+    "opencode-go/gpt-6-luna": {
+      "aa": "gpt-6-luna",
+      "coding": null,
+      "intelligence": 27.9,
+      "price_in": 0.1,
+      "price_out": 0.5
+    },
+    "opencode/glm-5.3-flash-free": {
+      "aa": "glm-5-3-flash",
+      "coding": null,
+      "intelligence": 27.8,
+      "price_in": 0.15,
+      "price_out": 0.5
+    },
+    "opencode-go/glm-5.3-flash": {
+      "aa": "glm-5-3-flash",
+      "coding": null,
+      "intelligence": 27.8,
+      "price_in": 0.15,
+      "price_out": 0.5
+    },
+    "opencode/mimo-v2.6-flash-free": {
+      "aa": "mimo-v2-6-flash",
+      "coding": null,
+      "intelligence": 26.7,
+      "price_in": 0.14,
+      "price_out": 0.28
+    },
+    "opencode-go/mimo-v2.6-flash": {
+      "aa": "mimo-v2-6-flash",
+      "coding": null,
+      "intelligence": 26.7,
+      "price_in": 0.14,
+      "price_out": 0.28
+    },
+    "opencode-go/gpt-5.6-luna": {
+      "aa": "gpt-5-6-luna",
+      "coding": null,
+      "intelligence": 23.8,
+      "price_in": 0.2,
+      "price_out": 1.2
+    },
+    "opencode-go/deepseek-v4-pro": {
+      "aa": "deepseek-v4-pro",
+      "coding": null,
+      "intelligence": 23.1,
+      "price_in": 1.32,
+      "price_out": 3.96
+    },
+    "opencode-go/minimax-m3": {
+      "aa": "minimax-m3",
+      "coding": null,
+      "intelligence": 18.9,
+      "price_in": 0.3,
+      "price_out": 1.2
+    },
+    "opencode/nemotron-3.5-super-vl-free": {
+      "aa": "nemotron-3-5-super-vl",
+      "coding": null,
+      "intelligence": 13.6,
+      "price_in": 0.175,
+      "price_out": 0.5
+    },
+    "opencode/nemotron-3.5-lightning-free": {
+      "aa": "nemotron-3-5-lightning",
+      "coding": null,
+      "intelligence": 5.5,
+      "price_in": 0.06,
+      "price_out": 0.2
+    },
+    "claude-haiku-4-5-20251001": {
+      "aa": "claude-4-5-haiku",
+      "coding": null,
+      "intelligence": null,
+      "price_in": 1,
+      "price_out": 5
+    },
+    "claude-sonnet-5": {
+      "aa": "claude-sonnet-5",
+      "coding": null,
+      "intelligence": null,
+      "price_in": 2,
+      "price_out": 10
+    },
+    "claude-fable-5": {
+      "aa": "claude-fable-5",
+      "coding": null,
+      "intelligence": null,
+      "price_in": 10,
+      "price_out": 50
+    },
+    "claude-opus-4-8": {
+      "aa": "claude-opus-4-8",
+      "coding": null,
+      "intelligence": null,
+      "price_in": 5,
+      "price_out": 25
+    },
+    "claude-opus-4-7": {
+      "aa": "claude-opus-4-7",
+      "coding": null,
+      "intelligence": null,
+      "price_in": 5,
+      "price_out": 25
+    },
+    "claude-opus-4-6": {
+      "aa": "claude-opus-4-6",
+      "coding": null,
+      "intelligence": null,
+      "price_in": 5,
+      "price_out": 25
+    },
+    "claude-sonnet-4-6": {
+      "aa": "claude-sonnet-4-6",
+      "coding": null,
+      "intelligence": null,
+      "price_in": 3,
+      "price_out": 15
+    },
+    "opencode/deepseek-v4.1-flash-free": {
+      "aa": "deepseek-v4-1-flash",
+      "coding": null,
+      "intelligence": null,
+      "price_in": 0.29,
+      "price_out": 1.2
+    },
+    "opencode-go/deepseek-v4.1-flash": {
+      "aa": "deepseek-v4-1-flash",
+      "coding": null,
+      "intelligence": null,
+      "price_in": 0.29,
+      "price_out": 1.2
+    },
+    "opencode-go/kimi-k3": {
+      "aa": "kimi-k3",
+      "coding": null,
+      "intelligence": null,
+      "price_in": 3,
+      "price_out": 15
+    },
+    "opencode-go/hy3": {
+      "aa": "hy3",
+      "coding": null,
+      "intelligence": null,
+      "price_in": 0.136,
+      "price_out": 0.555
+    },
+    "opencode-go/longcat-2.0": {
+      "aa": "longcat-2-0",
+      "coding": null,
+      "intelligence": null,
+      "price_in": 0.75,
+      "price_out": 2.95
+    },
+    "opencode-go/glm-5.2": {
+      "aa": "glm-5-2",
+      "coding": null,
+      "intelligence": null,
+      "price_in": 1.4,
+      "price_out": 4.4
+    },
+    "opencode-go/kimi-k2.7-code": {
+      "aa": "kimi-k2-7-code",
+      "coding": null,
+      "intelligence": null,
+      "price_in": 0.95,
+      "price_out": 4
+    },
+    "opencode-go/qwen3.7-plus": {
+      "aa": "qwen3-7-plus",
+      "coding": null,
+      "intelligence": null,
+      "price_in": 0.4,
+      "price_out": 1.6
+    },
+    "opencode-go/mimo-v2.5-pro": {
+      "aa": "mimo-v2-5-pro",
+      "coding": null,
+      "intelligence": null,
+      "price_in": 0.3915,
+      "price_out": 0.783
+    }
+  }
+}
