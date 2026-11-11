@@ -68,7 +68,7 @@ function nameFor(url, taken) {
 
 async function wire(tabId, row) {
   const tab = await chrome.tabs.get(+tabId).catch(() => null);
-  return tab && { name: row.name, title: tab.title || "", url: tab.url || "", grants: row.grants.map((g) => g.log_id) };
+  return tab && { name: row.name, title: tab.title || "", url: tab.url || "", grants: row.grants.map((g) => g.log_id), holder: row.holder || "agent", ask: row.ask || "" };
 }
 
 // The "aegis" tab group, in the accent: every shared tab joins it.
@@ -316,7 +316,9 @@ async function key(tabId, chord) {
 async function ribbon(tabId, extra = {}) {
   const [row, { theme }] = await Promise.all([shared().then((a) => a[tabId]), get("theme")]);
   const t = theme || {};
-  const state = row ? { who: row.grants.map((g) => g.handle), accent: t["--accent"], surface: t["--surface"], ink: t["--ink"], ...extra } : null;
+  const state = row
+    ? { who: row.grants.map((g) => g.handle), holder: row.holder || "agent", ask: row.ask || "", by: row.by || "", accent: t["--accent"], surface: t["--surface"], ink: t["--ink"], warn: t["--warn"], ...extra }
+    : null;
   try {
     await chrome.scripting.executeScript({ target: { tabId }, files: ["ribbon.js"] });
     await chrome.scripting.executeScript({ target: { tabId }, func: (s) => globalThis.aegisRibbon?.(s), args: [state] });
@@ -445,12 +447,44 @@ async function onCall(msg) {
     if (!grant) throw new Fail("not_granted", `chrome:${msg.tab} is not granted to you`);
     const run = DRIVE[msg.op];
     if (!run) throw new Fail("not_supported", `${msg.op} does not work on the person's tabs yet`);
+    if (all[tabId].holder === "person" && !["snapshot", "screenshot"].includes(msg.op))
+      throw new Fail("person_has_control", `the person holds chrome:${msg.tab}`);
     await attach(+tabId);
     reply({ ok: true, value: await run(+tabId, msg.args || {}, grant.handle) });
   } catch (e) {
     reply({ ok: false, code: e.code || "call_failed", message: String(e.message || e) });
   }
 }
+
+// -- holding ----------------------------------------------------------------------
+
+// Who holds a shared tab: the agents, or the person after Pause in the ribbon
+// or an agent's handover. The server refuses agents' actions while the person
+// holds it, and wakes them when it comes back. `tell` is false when the
+// server said so.
+async function hold(tabId, holder, { ask = "", by = "", tell = true } = {}) {
+  const all = await shared();
+  const row = all[tabId];
+  if (!row) return;
+  row.holder = holder;
+  row.ask = holder === "person" ? ask : "";
+  row.by = holder === "person" ? by : "";
+  await set({ shared: all });
+  if (tell) send({ t: "hold", tab: row.name, holder });
+  ribbon(+tabId);
+  if (holder === "person" && ask) {
+    chrome.notifications.create(`aegis-${tabId}`, { type: "basic", iconUrl: "icons/128.png", title: `${by || "An agent"} needs you`, message: ask, requireInteraction: true });
+  } else chrome.notifications.clear(`aegis-${tabId}`);
+}
+
+// A click on the notification shows the tab it is about.
+chrome.notifications.onClicked.addListener(async (id) => {
+  const tabId = +id.replace(/^aegis-/, "");
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  if (!tab) return;
+  await chrome.tabs.update(tabId, { active: true });
+  await chrome.windows.update(tab.windowId, { focused: true });
+});
 
 // -- the socket -----------------------------------------------------------------
 
@@ -504,6 +538,10 @@ async function connect() {
     } else if (msg.t === "answer") {
       if (msg.give) await give(msg.request);
       else await dropRequest(msg.request);
+    } else if (msg.t === "hold") {
+      const all = await shared();
+      const id = Object.keys(all).find((k) => all[k].name === msg.tab);
+      if (id) await hold(id, msg.holder, { ask: msg.ask, by: msg.by, tell: false });
     } else if (msg.t === "call") {
       return onCall(msg);
     } else if (msg.t === "revoke") {
@@ -593,18 +631,21 @@ const POPUP = {
   },
   give: (m) => give(m.request, m.tabId ?? null),
   refuse: (m) => refuse(m.request),
+  // Pause, Resume and Done in a tab's ribbon, or on its row in the popup.
+  hold: (m, sender) => hold(m.tabId ?? sender.tab?.id, m.holder === "person" ? "person" : "agent"),
 };
 
 chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
   const run = POPUP[msg.t];
   if (!run) return;
-  Promise.resolve(run(msg)).then(reply, (e) => reply({ error: String(e.message || e) }));
+  Promise.resolve(run(msg, _sender)).then(reply, (e) => reply({ error: String(e.message || e) }));
   return true;
 });
 
 // A shared tab that closes ends its grants; one that navigates tells the
 // server its new title and address.
 chrome.tabs.onRemoved.addListener(async (tabId) => {
+  chrome.notifications.clear(`aegis-${tabId}`);
   if ((await shared())[tabId]) await unshare(tabId);
 });
 chrome.tabs.onUpdated.addListener(async (tabId, change) => {
