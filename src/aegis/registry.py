@@ -582,7 +582,7 @@ class Registry(Host):
         key = parent.spec.group
         if key is not None and ("@" in key or self.groups.get(key) is not None):
             return key
-        g = self.groups.create(parent.spec.owner)
+        g = self.groups.create(self.principal_of(parent))
         parent.spec = dataclasses.replace(parent.spec, group=g.key)
         self.metas.write(parent.meta())
         self._publish("sessions", [{"upsert": parent.wire()}])
@@ -968,7 +968,7 @@ class Registry(Host):
             if old is None or old.startswith("grp-") or "@" in old:
                 continue
             if old not in remap:
-                remap[old] = self.groups.create(s.spec.owner).key
+                remap[old] = self.groups.create(self.principal_of(s)).key
             s.spec = dataclasses.replace(s.spec, group=remap[old])
             self.metas.write(s.meta())
         for old, key in remap.items():

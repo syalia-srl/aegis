@@ -100,6 +100,9 @@
 .aegis .tblock.grp{gap:1px;padding:0 2px;margin:0 3px;border-radius:var(--r) var(--r) 0 0;background:color-mix(in srgb,var(--g) 9%,transparent);box-shadow:inset 0 -2px 0 var(--g)}
 .aegis .tblock.dragging{opacity:.35}
 .aegis .tab.named .hn{font-weight:600;color:var(--strong);max-width:18ch;overflow:hidden;text-overflow:ellipsis}
+/* Rename in place on the group's head (#1039): an input where its name was. */
+.aegis .tab.named input.ren{width:16ch;min-width:8ch;font:inherit;font-weight:600;color:var(--strong);background:var(--bg);border:1px solid var(--accent);border-radius:4px;padding:1px 4px}
+.aegis .tablist.drop-gap{box-shadow:inset 0 -2px 0 var(--accent)}
 .aegis .tblock.out{box-shadow:inset 0 -2px 0 var(--g)}
 .aegis .tab.out{box-shadow:inset 0 -2px 0 var(--g),0 0 0 1px color-mix(in srgb,var(--g) 50%,transparent)}
 .aegis .tab.out.on{box-shadow:inset 0 2px 0 var(--accent),inset 0 -2px 0 var(--g)}

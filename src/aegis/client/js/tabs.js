@@ -57,6 +57,21 @@ export class TabOrder {
 // key of the group in view, if one is.
 export function renderTabs(list, metas, focusId, actions) {
   const t = actions.t || labelsFor("en");
+  // The gap between blocks: a member dropped there leaves its group (#1039).
+  // Assigned each draw (not added) so a redraw never stacks handlers.
+  list.ondragover = (ev) => {
+    if (!dragging || ev.target !== list) return;
+    if (!dropAction(list, ev.clientX, actions.here || "")) return;
+    ev.preventDefault();
+    list.classList.add("drop-gap");
+  };
+  list.ondragleave = () => list.classList.remove("drop-gap");
+  list.ondrop = (ev) => {
+    if (!dragging || ev.target !== list) return;
+    ev.preventDefault();
+    list.classList.remove("drop-gap");
+    runDrop(list, ev, actions);
+  };
   list.replaceChildren(
     ...blocksOf(metas, actions.here || "").flatMap((b) => {
       const box = document.createElement("div");
@@ -113,30 +128,95 @@ export function patchTab(list, m, focusId, actions) {
     const key = groupKey(m, actions.here || "");
     return !list.querySelector(`.tblock.grp[data-group="${CSS.escape(key)}"]`);
   }
+  // A tab that joined a group its block did not name changes the bar's shape:
+  // the caller redraws it rather than patching one tab (tabs.js renderTabs).
   if (old.closest(".tblock.grp, .tblock.out")) return false;
+  const box = old.closest(".tblock");
+  if (box && box.dataset.group !== groupKey(m, actions.here || "")) return false;
   old.replaceWith(tab(m, focusId, actions, "solo"));
   return true;
 }
 
 // A group's own tab: its name, and while the block is folded its most urgent
-// mark. It carries the block, not a session, and a click opens the group's page.
-function groupTab(b, folded, { onGroup, onMove, group, t = labelsFor("en") }) {
+// mark. It carries the block, not a session, and a click opens the group's page;
+// a double click, or Rename group, edits the name in place (#1039).
+function groupTab(b, folded, actions) {
+  const { onGroup, onRenameStart, renaming, t = labelsFor("en") } = actions;
   const node = document.createElement("div");
-  node.className = `tab named${group === b.key ? " on" : ""}`;
+  node.className = `tab named${actions.group === b.key ? " on" : ""}`;
   node.dataset.group = b.key;
-  node.draggable = true;
   node.title = t("tabs.groupTitle", { name: b.head.name });
   node.setAttribute("aria-label", node.title);
+  if (renaming === b.key) {
+    const input = document.createElement("input");
+    input.className = "ren";
+    input.type = "text";
+    input.maxLength = 60;
+    input.value = b.head.name;
+    input.setAttribute("aria-label", t("tabs.renameGroup"));
+    let done = false;
+    const save = () => {
+      if (done) return;
+      done = true;
+      const name = input.value.trim();
+      if (name && name !== b.head.name) actions.onRenameSave?.(b.key, name);
+      else actions.onRenameCancel?.();
+    };
+    const cancel = () => {
+      if (done) return;
+      done = true;
+      actions.onRenameCancel?.();
+    };
+    input.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        save();
+      } else if (ev.key === "Escape") {
+        ev.preventDefault();
+        ev.stopPropagation();
+        cancel();
+      }
+    });
+    // A click elsewhere saves, as the menu's own rename does; Escape cancels
+    // before the blur can save.
+    input.addEventListener("blur", save);
+    input.addEventListener("click", (ev) => ev.stopPropagation());
+    node.draggable = false;
+    node.append(input);
+    setTimeout(() => {
+      input.focus();
+      input.select();
+    }, 0);
+    return node;
+  }
+  node.draggable = true;
   const name = document.createElement("span");
   name.className = "hn";
   name.textContent = b.head.name;
   node.append(...(folded ? [markNode({ mark: b.head.mark })] : []), name);
-  node.addEventListener("click", () => onGroup?.(b.key));
+  // Two clicks open the page; a double click is a rename, so the page waits
+  // out the browser's double-click window (#1039).
+  let clickTimer = null;
+  node.addEventListener("click", (ev) => {
+    if (ev.target.closest(".cnt")) return;
+    clearTimeout(clickTimer);
+    clickTimer = setTimeout(() => onGroup?.(b.key), 180);
+  });
+  node.addEventListener("dblclick", (ev) => {
+    ev.preventDefault();
+    clearTimeout(clickTimer);
+    onRenameStart?.(b.key);
+  });
   node.addEventListener("dragstart", (ev) => {
     ev.dataTransfer.setData("text/aegis-tab", b.key);
     ev.dataTransfer.effectAllowed = "move";
     const box = node.closest(".tblock");
-    dragging = { group: b.key, member: false, keys: JSON.parse(box.dataset.keys) };
+    dragging = {
+      group: b.key,
+      block: true,
+      far: !hereKey(b.key, actions.here || ""),
+      keys: JSON.parse(box.dataset.keys),
+    };
     box.classList.add("dragging");
   });
   node.addEventListener("dragend", () => {
@@ -145,7 +225,7 @@ function groupTab(b, folded, { onGroup, onMove, group, t = labelsFor("en") }) {
   });
   node.addEventListener("dragover", (ev) => {
     if (!dragging || !ev.dataTransfer.types.includes("text/aegis-tab")) return;
-    if (dropBefore(node, ev.clientX) === undefined) return node.classList.add("nodrop");
+    if (!dropAction(node, ev.clientX, actions.here || "")) return node.classList.add("nodrop");
     ev.preventDefault();
     node.classList.add("drop");
   });
@@ -153,30 +233,68 @@ function groupTab(b, folded, { onGroup, onMove, group, t = labelsFor("en") }) {
   node.addEventListener("drop", (ev) => {
     ev.preventDefault();
     node.classList.remove("drop", "nodrop");
-    const before = dragging && dropBefore(node, ev.clientX);
-    if (before !== undefined && dragging) onMove(dragging.keys, before);
+    runDrop(node, ev, actions);
   });
   return node;
 }
 
-// What is being dragged: one member inside its group, or a whole block.
+// What is being dragged: a whole named block (`block`), or one tab of a block.
 let dragging = null;
 
-// Where a drop on tab `t` at `x` puts what is dragged: the key it goes before
-// (null: the end), or undefined when it may not go there.
-function dropBefore(t, x) {
-  const after = x > t.getBoundingClientRect().left + t.getBoundingClientRect().width / 2;
-  const box = t.closest(".tblock");
-  if (dragging.member) {
-    if (box.dataset.group !== dragging.group || !t.classList.contains("member")) return undefined;
-    if (dragging.keys.includes(t.dataset.id)) return undefined;
-    if (!after) return t.dataset.id;
-    const next = t.nextElementSibling?.dataset.id;
-    return next ?? firstKey(box.nextElementSibling);
-  }
-  if (box.dataset.group === dragging.group) return undefined;
-  return after ? firstKey(box.nextElementSibling) : firstKey(box);
+// A block's key on this server, or null for one on a linked server.
+function hereKey(key, here) {
+  return here && key.endsWith(`@${here}`) ? key.slice(0, -here.length - 1) : null;
 }
+
+// A block that names a group rather than a lone session.
+const namesGroup = (key) => key.split("@")[0].startsWith("grp-");
+
+// What dropping on element `t` at `x` does (#1039): a move within the block, a
+// join of another block (or of a lone tab, as a new group), a leave on the gap
+// between blocks, or undefined where the tab may not go.
+function dropAction(t, x, here) {
+  if (!dragging) return undefined;
+  const box = t.closest ? t.closest(".tblock") : null;
+  const middle = (n) => n.getBoundingClientRect().left + n.getBoundingClientRect().width / 2;
+  if (!box) {
+    // The gap between blocks: a member of a group leaves it; a whole block or
+    // a lone tab has nowhere to go.
+    if (dragging.block || dragging.far || !namesGroup(dragging.group || "")) return undefined;
+    return hereKey(dragging.group, here) ? { leave: dragging.keys } : undefined;
+  }
+  const key = box.dataset.group;
+  const local = hereKey(key, here);
+  if (dragging.block) {
+    if (key === dragging.group || !local) return undefined;
+    return { move: dragging.keys, before: x > middle(t) ? firstKey(box.nextElementSibling) : firstKey(box) };
+  }
+  if (key === dragging.group) {
+    // Within its own block a tab reorders; the head is not a place to move to.
+    if (!t.classList.contains("member") || dragging.keys.includes(t.dataset.id)) return undefined;
+    const after = x > middle(t);
+    return {
+      move: dragging.keys,
+      before: after ? (t.nextElementSibling?.dataset.id ?? firstKey(box.nextElementSibling)) : t.dataset.id,
+    };
+  }
+  // Another block: both ends must be this server's (links.py, #1039).
+  if (dragging.far || !local) return undefined;
+  const head = box.querySelector(".tab.named");
+  if (head) return { join: dragging.keys, group: hereKey(head.dataset.group, here) };
+  const target = box.querySelector(".tab[data-id]")?.dataset.id;
+  if (!target) return undefined;
+  return { join: [target, ...dragging.keys.filter((k) => k !== target)], group: "new" };
+}
+
+// Run what a drop does, through the page's own actions.
+function runDrop(t, ev, actions) {
+  const a = dropAction(t, ev.clientX, actions.here || "");
+  if (!a) return;
+  if (a.move) actions.onMove?.(a.move, a.before);
+  else if (a.join) actions.onJoin?.(a.join, a.group);
+  else if (a.leave) actions.onLeave?.(a.leave);
+}
+
 const firstKey = (box) => (box ? JSON.parse(box.dataset.keys)[0] : null);
 
 // Where Alt+Shift+[ or ] moves tab `key` one place (`d` is -1 or 1), by the
@@ -198,7 +316,8 @@ export function stepMove(list, key, d) {
   return box.nextElementSibling ? [keys, firstKey(box.nextElementSibling.nextElementSibling)] : null;
 }
 
-function tab(m, focusId, { onFocus, onMove, onClose, t = labelsFor("en") }, role) {
+function tab(m, focusId, actions, role) {
+  const { onFocus, onClose, t = labelsFor("en") } = actions;
   const node = document.createElement("div");
   node.className = `tab ${role}${m.key === focusId ? " on" : ""}${m.state === "asleep" ? " asleep" : ""}${m.off ? " off" : ""}`;
   node.classList.toggle("blink", !!m.blink);
@@ -234,9 +353,15 @@ function tab(m, focusId, { onFocus, onMove, onClose, t = labelsFor("en") }, role
     ev.dataTransfer.setData("text/aegis-tab", m.key);
     ev.dataTransfer.effectAllowed = "move";
     const box = node.closest(".tblock");
-    const member = role === "member";
-    dragging = { group: box.dataset.group, member, keys: member ? [m.key] : JSON.parse(box.dataset.keys) };
-    (member ? node : box).classList.add("dragging");
+    // A tab travels alone and may join another block, leave its own, or
+    // reorder within it; a named head carries its whole block (#1039).
+    dragging = {
+      group: box.dataset.group,
+      block: false,
+      far: !hereKey(box.dataset.group, actions.here || ""),
+      keys: [m.key],
+    };
+    node.classList.add("dragging");
   });
   node.addEventListener("dragend", () => {
     dragging = null;
@@ -245,7 +370,7 @@ function tab(m, focusId, { onFocus, onMove, onClose, t = labelsFor("en") }, role
   });
   node.addEventListener("dragover", (ev) => {
     if (!dragging || !ev.dataTransfer.types.includes("text/aegis-tab")) return;
-    if (dropBefore(node, ev.clientX) === undefined) return node.classList.add("nodrop");
+    if (!dropAction(node, ev.clientX, actions.here || "")) return node.classList.add("nodrop");
     ev.preventDefault();
     node.classList.add("drop");
   });
@@ -253,8 +378,7 @@ function tab(m, focusId, { onFocus, onMove, onClose, t = labelsFor("en") }, role
   node.addEventListener("drop", (ev) => {
     ev.preventDefault();
     node.classList.remove("drop", "nodrop");
-    const before = dragging && dropBefore(node, ev.clientX);
-    if (before !== undefined && dragging) onMove(dragging.keys, before);
+    runDrop(node, ev, actions);
   });
   return node;
 }

@@ -192,3 +192,24 @@ def test_a_far_log_id_key_stays_until_its_server_migrates(tmp_path):
     reg.boot(restarts.CLEAN)
     assert reg.sessions[B].spec.group == f"{A}@beta"
     assert reg.groups.keys() == set()
+
+
+def test_a_group_from_before_owners_belongs_to_the_servers_person(tmp_path):
+    """A meta from before owners has no owner, and its migrated record is the
+    server's person's: the agent tool finds it by name, and a spawn from an
+    ownerless session joins the person's groups (#1039)."""
+    (tmp_path / ".aegis.yaml").write_text("agents: {}\n")
+    roots = make_roots(tmp_path, None)
+    seed_meta(roots, A, "alpha-one")
+    seed_meta(roots, B, "bravo-two", group=A)
+    seed_meta(roots, C, "charlie-three")
+    reg = Registry(roots, lambda ch, ops: None)
+    # As App does when it wires the registry (app.py: principal_of).
+    reg.principal_of = lambda s: s.spec.owner or "apiad"
+    reg.boot(restarts.CLEAN)
+    key = reg.sessions[B].spec.group
+    g = reg.groups.get(key)
+    assert g.owner == "apiad"
+    assert reg.groups.by_name("apiad", g.name) == g
+    made = reg.ensure_group(reg.sessions[C])
+    assert reg.groups.get(made).owner == "apiad"
