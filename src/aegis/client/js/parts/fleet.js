@@ -24,7 +24,7 @@ import {
   renderCards,
   tickPlan,
 } from "../fleet.js";
-import { gorgoneion } from "../glyphs.js";
+import { gorgoneion, iconText } from "../glyphs.js";
 import { startInstall } from "../install.js";
 import { markNeedsNet } from "../net.js";
 
@@ -51,6 +51,7 @@ const FLEET_HTML = `
   </div>
 </div>
 <section class="cards" id="cards" tabindex="-1"></section>
+<section class="cards chrome-cards" id="chrome-cards" hidden></section>
 <div id="remotes"></div>
 <section class="archive">
   <div class="archive-head"><h3 data-t="fleet.archive"></h3><input id="arch-q" data-t-placeholder="fleet.filter" spellcheck="false"><div class="arch-servers" id="arch-servers" hidden></div><button class="arch-workers" id="arch-workers" type="button" aria-pressed="false" data-t-title="fleet.workersTitle" hidden><span data-t="fleet.workers"></span><b></b></button></div>
@@ -118,6 +119,7 @@ export class FleetPart {
     this.orderBox = n("fleet-order");
     this.kindsBox = this.el.querySelector(".kinds");
     this.cards = n("cards");
+    this.chromeBox = n("chrome-cards");
     this.remotes = n("remotes");
     this.archQ = n("arch-q");
     this.archServers = n("arch-servers");
@@ -209,10 +211,39 @@ export class FleetPart {
   render() {
     renderCards(this.cards, this.local().filter((m) => this.kindShown(m)), this.act.open, this.order, this.act.close, this.stacks, this.t);
     this.renderRemotes();
+    this.renderChrome();
     this.mark(false);
     this.band();
     markNeedsNet(this.el);
     if (!this.loaded) this.loadArchive();
+  }
+
+  // The person's paired browsers (chrome.py), a card each: its dot, whether
+  // it is connected, and how many tabs it shares. Opening one goes to
+  // Settings → Chrome.
+  renderChrome() {
+    const devices = this.mount.state.chrome?.devices || [];
+    this.chromeBox.hidden = !devices.length;
+    this.chromeBox.replaceChildren(
+      ...devices.map((d) => {
+        const c = document.createElement("div");
+        c.className = `card term chrome${d.connected ? "" : " off"}`;
+        c.dataset.chrome = d.id;
+        const hd = document.createElement("div");
+        hd.className = "hd";
+        const dot = document.createElement("span");
+        dot.className = `dot ${d.connected ? "ready" : "ghost"}`;
+        const name = document.createElement("span");
+        name.className = "h";
+        name.append(...iconText("globe", d.name));
+        hd.append(dot, name);
+        const line = (cls, text) => Object.assign(document.createElement("div"), { className: cls, textContent: text });
+        const tabs = d.tabs ? this.t(d.tabs > 1 ? "fleet.chromeTabs.other" : "fleet.chromeTabs.one", { n: d.tabs }) : this.t("fleet.chromeTabs.none");
+        c.append(hd, line("ttl", "Chrome"), line("ask", this.t(d.connected ? "fleet.chromeConnected" : "fleet.chromeOffline")), line("ln", tabs));
+        c.addEventListener("click", () => this.act.go("#settings"));
+        return c;
+      }),
+    );
   }
 
   // Patches that only update sessions the page already shows: redraw the cards

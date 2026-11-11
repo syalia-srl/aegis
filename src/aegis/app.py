@@ -166,6 +166,7 @@ from .usage.ops import register_usage_ops
 from .session import PUBLISH_EVERY_S, SpawnSpec
 from .term_ops import register_term_ops
 from .browser_ops import register_browser_ops
+from .chrome_ops import register_chrome_ops
 from .terminals import Terminals
 from .browsers import Browsers
 from .version import Versions
@@ -703,6 +704,7 @@ class App:
         self.fs_index, self.fs_tickets = register_fs_ops(self)
         register_term_ops(self)
         register_browser_ops(self)
+        self.chrome = register_chrome_ops(self)
         self.push = register_push_ops(self)
         register_journal_ops(self)
         register_usage_ops(self)
@@ -1875,6 +1877,8 @@ class App:
             return lambda: self.config.current().wire()
         if name == "links":
             return self.links.wire
+        if name == "chrome":
+            return self.chrome.wire
         if name == "schedules":
             return self.schedules.wire_all
         if name == "workflows":
