@@ -150,6 +150,8 @@ export default {
   "entries.path.missing": "No such file when shown; click to look again",
   "entries.tool.peek": "Show the file",
   "entries.tool.peekAgain": "Show the file again",
+  "entries.tool.peekFar": "Fetch the file from {server}",
+  "entries.tool.peekFarAgain": "Fetch the file from {server} again",
   "entries.tool.steps": "{n} steps",
   "entries.tool.asOf": "as of {time}",
   "entries.tool.loading": "loading…",
