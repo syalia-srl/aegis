@@ -251,6 +251,7 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)} pre .s{color:var(--ok)}
   <a href="#agents">What agents call</a>
   <a href="#panel">What aegis shows</a>
   <a href="#links">Linked servers</a>
+  <a href="#exit">Exit per site</a>
   <a href="#protocol">The wire</a>
   <a href="#delivery">Delivery</a>
   <a href="#testing">Testing</a>
@@ -299,6 +300,7 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)} pre .s{color:var(--ok)}
 <tr><td>A new tab an agent asked for</td><td>Needs the person's approval every time</td><td class="why"><span class="who q">proposed</span> Start strict; relax it per site later if approvals become noise.</td></tr>
 <tr><td>Two agents acting at once</td><td>Reads at any time. Actions on one tab run one at a time, in order of arrival</td><td class="why"><span class="who q">proposed</span> Interleaved typing from two agents would corrupt a field.</td></tr>
 <tr><td>The person acting in a shared tab</td><td>Pause in the tab's ribbon makes the person the holder, as Take over does in a server browser</td><td class="why"><span class="who q">proposed</span> The extension cannot stop the person's clicks, and should not. Pause stops the agents' instead, with the same <code>person_has_control</code> error they know.</td></tr>
+<tr><td>A site's network route</td><td>A shared site can exit through a linked server, chosen per site in the popup</td><td class="why"><span class="who">maintainer</span> Reaching a site from another country without a VPN, as <code>exit_via</code> already does for what the server starts. Per site because Chrome sets a proxy per browser profile, not per tab.</td></tr>
 <tr><td>Copying a session to a server browser</td><td>Out of scope</td><td class="why"><span class="who q">proposed</span> It would move credentials off the person's machine. Revisit with a use case.</td></tr>
 </tbody>
 </table>
@@ -470,7 +472,28 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)} pre .s{color:var(--ok)}
 <h2 id="links"><span class="n">10</span>Linked servers</h2>
 <p>The extension pairs with one server, its home. An agent on a linked server addresses a tab as <code>chrome:qwen@home</code>, as it addresses other remote things today, and its requests travel over the link. The request card in the browser names the agent with its server (<code>review-bot@lab</code>), and the grant is to that remote session. The home server checks the link token's permissions before forwarding any call, and the extension checks the grant as for a local agent. A call is never relayed on to a third server.</p>
 
-<h2 id="protocol"><span class="n">11</span>The wire</h2>
+<h2 id="exit"><span class="n">11</span>Exit through a link, per site</h2>
+<p>A site can reach the internet from a linked server's address instead of the person's, with no VPN, using the relay that <code>exit_via</code> already runs (<code>exit.py</code>). In the popup, a shared site gets a menu "Exit: direct / &lt;link&gt;". The choice is per site, kept in the extension, and applies to every tab on that site, shared or not.</p>
+<h3>Why per site and not per tab</h3>
+<p>Chrome lets an extension set one proxy configuration per browser profile, through <code>chrome.proxy</code>. Its PAC script decides by URL and host and never learns which tab made a request. Routing by host is the finest grain Chrome offers.</p>
+<h3>How a request leaves</h3>
+<ol>
+  <li>The extension writes a PAC script: hosts on an exit's list go to <code>HTTPS &lt;home server&gt;:443</code>, everything else <code>DIRECT</code>.</li>
+  <li>The home server takes the request on a new endpoint, an HTTP <code>CONNECT</code> authenticated with the extension's device token. The extension answers Chrome's proxy auth challenge with <code>webRequest.onAuthRequired</code> (the <code>webRequestAuthProvider</code> permission in MV3).</li>
+  <li>The home server relays the stream through the chosen link's <code>/tunnel</code>, as its own exit does. When the person's machine runs its own aegis linked to the home server, the PAC script points at that aegis's loopback exit listener instead and the home server is not on the path.</li>
+</ol>
+<h3>The site's other hosts</h3>
+<p>A page loads from more hosts than its own: a sign-in domain, a CDN, an API. Only the hosts on the list exit; the rest go direct, from the person's address. While a site has an exit, the extension watches the requests of its tabs (<code>webRequest</code>) and lists the hosts that went direct under the site's menu, each with an Add button. A site starts with its own host and its subdomains.</p>
+<h3>Rules carried over from exit_via</h3>
+<ul>
+  <li>A dead exit fails: the proxy answers 502 with the reason, and Chrome shows an error page. Nothing falls back to the person's address. PAC lists the exit alone, with no <code>DIRECT</code> after it.</li>
+  <li>The relay connects to public addresses only.</li>
+  <li>The far server sees the host and port of each HTTPS connection, and Settings there counts the bytes.</li>
+  <li>The tab's ribbon and the popup row show the exit (<code>via lab</code>), so the person knows which address a site sees.</li>
+</ul>
+<p>A site that sees a known account arrive from a new country may ask for extra verification the first time. An exit changes the address a provider sees, not what its terms allow.</p>
+
+<h2 id="protocol"><span class="n">12</span>The wire</h2>
 <p>One WebSocket, <code>/chrome/socket</code>, authenticated with the device token. JSON messages with an <code>id</code> for replies.</p>
 <table class="tbl">
 <thead><tr><th>Message</th><th>Direction</th><th>Carries</th></tr></thead>
@@ -485,25 +508,27 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)} pre .s{color:var(--ok)}
 </tbody>
 </table>
 
-<h2 id="delivery"><span class="n">12</span>Delivery</h2>
+<h2 id="delivery"><span class="n">13</span>Delivery</h2>
 <div class="steps">
   <div class="step"><div class="n"></div><div><h4>Pairing and presence</h4><p>The extension's skeleton with the mark and the theme, <code>/chrome/pair</code>, the socket, Settings → Chrome, the Fleet card. No tabs yet.</p></div></div>
   <div class="step"><div class="n"></div><div><h4>Consent</h4><p>Sharing from the popup, <code>browser_request</code>, <code>browser_open(where="person")</code>, the request card, the session panel section, revoking from both sides.</p></div></div>
   <div class="step"><div class="n"></div><div><h4>Driving</h4><p><code>chrome.debugger</code>, the shared selector code, snapshot, click, type, press, goto, screenshot, events, and the ribbon with its ring.</p></div></div>
   <div class="step"><div class="n"></div><div><h4>Handover and several agents</h4><p>Pause and Done in the ribbon, browser notifications, the action queue per tab.</p></div></div>
   <div class="step"><div class="n"></div><div><h4>Linked servers</h4><p><code>chrome:…@server</code> through the link, with the remote agent named on every request.</p></div></div>
+  <div class="step"><div class="n"></div><div><h4>Exit per site</h4><p>The PAC script, the authenticated <code>CONNECT</code> endpoint on the home server feeding the existing relay, the exit menu per site with its list of hosts that went direct.</p></div></div>
 </div>
 <p>The extension's source lives in this repo under <code>extension/</code>, built by the same release, and the server serves the built, unpacked extension for download. Publishing to the Chrome Web Store is a separate step after the first slices settle.</p>
 
-<h2 id="testing"><span class="n">13</span>Testing</h2>
+<h2 id="testing"><span class="n">14</span>Testing</h2>
 <ul>
   <li>The consent rules as a pure state machine in the extension, with unit tests for every transition and for a call on a tab without a grant.</li>
   <li>The selector code shared by server and extension, tested once against the same fixtures.</li>
   <li>End to end: Playwright launches Chromium with <code>--load-extension</code> on a persistent context, pairs it with a test server, shares a fixture page and drives it through the tools. The same test denies a request and revokes a grant mid-call.</li>
+  <li>Exit per site: a fixture site through a test link reports the far address; a host off the list reports the near one; a dead link gives 502 and no direct fallback.</li>
   <li>A service-worker restart in the middle of a grant: the test stops the worker through CDP and checks that the grant and the debugger come back.</li>
 </ul>
 
-<h2 id="nongoals"><span class="n">14</span>Non-goals and open questions</h2>
+<h2 id="nongoals"><span class="n">15</span>Non-goals and open questions</h2>
 <ul>
   <li>Not in scope: Firefox and Safari; several people per server; copying a session from the person's browser into a server browser; any view of tabs the person did not share.</li>
   <li>Open: should some sites never be shareable, such as a bank, with a list the person keeps in the extension?</li>
