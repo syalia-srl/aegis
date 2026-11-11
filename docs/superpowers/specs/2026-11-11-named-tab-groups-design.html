@@ -175,7 +175,7 @@ figcaption{font-family:var(--font-mono);font-size:11px;color:var(--faint);margin
 <tr><td>Group page</td><td>The group's tab opens the Fleet filtered to its members, in the Fleet's own ranking. <span class="who">maintainer</span></td><td class="why">The Fleet "grouped as it happens today", not a new view.</td></tr>
 <tr><td>First spawn makes the group</td><td>A session in no group that spawns or enqueues gets a new group, and joins it with the child. <span class="who ag">agent</span></td><td class="why">The same result as today's implicit group keyed by the parent's log id, but as a record that outlives the parent.</td></tr>
 <tr><td>A person's /spawn</td><td>Joins the group of the tab it was typed in, making one if that tab has none. <span class="who ag">agent</span></td><td class="why">What #586 does today, kept under the one rule.</td></tr>
-<tr><td>Generated name</td><td>The last path segment the members' working directories share; else two random words, as handles are made. <span class="who ag">agent</span></td><td class="why">Agents of one project usually share a cwd, so the name says what they are; the person renames otherwise.</td></tr>
+<tr><td>Generated name</td><td>Two random words from the handle word lists, for now. <span class="who">maintainer</span></td><td class="why">Most sessions on a server share one working directory, so a name from the cwd would say nothing. A model-written name comes later (09).</td></tr>
 <tr><td>A group of one</td><td>Drawn as a plain tab; its record stays while it has an open member. <span class="who ag">agent</span></td><td class="why">A block around one tab is clutter; keeping the record means a later spawn rejoins the same name.</td></tr>
 <tr><td>Quiet sessions and workers</td><td>Members of their group like any other; drawn on the group's page, not in the bar. <span class="who ag">agent</span></td><td class="why">Today they are kept out of groups (fleet.js); with a group page, the page is where background members belong.</td></tr>
 <tr><td>Stored on the server</td><td>Membership is the session's <code>spec.group</code>; names live in a small per-server store. <span class="who ag">agent</span></td><td class="why">Every browser and the Fleet see the same groups. Fold state stays per browser, as today.</td></tr>
@@ -243,7 +243,7 @@ figcaption{font-family:var(--font-mono);font-size:11px;color:var(--faint);margin
 </tbody>
 </table>
 <p>Today a member can only be dragged inside its own block (<code>tabs.js</code>). The drag rules become: a drop on another tab or block is a join, a drop on the gap between blocks is a leave, and a drop within its block reorders as now. Moving a session out of a group moves only that session: what it spawned stays in the group.</p>
-<p>A new group takes the generated name: the last path segment shared by the members' working directories, else two random words from the handle word lists. Two groups with the same name get a numeric suffix.</p>
+<p>A new group takes a generated name: two random words from the handle word lists. Two groups with the same name get a numeric suffix. A name the person or an agent set is never replaced by a generated one.</p>
 
 <h2 id="edges"><span class="n">07</span>Edge cases</h2>
 <ul>
@@ -270,6 +270,8 @@ figcaption{font-family:var(--font-mono);font-size:11px;color:var(--faint);margin
 <li>Rules that sort sessions into groups by other criteria (by cwd, by agent). The <code>session_group</code> tool lets an agent do it.</li>
 <li>Colours chosen by the person: the hue stays the hash of the key.</li>
 </ul>
+<h3 id="later">Later: a written name and description</h3>
+<p>Once groups work, each change of membership can ask a model for a name and a one-line description, through the one-shot path the recap and <code>/btw</code> already share (<code>src/aegis/oneshot.py</code>). The input is the members' handles, titles and plans; the output is <code>{name, description}</code>. Like <code>recap:</code> and <code>btw:</code>, it would name its agent under its own key in <code>.aegis.yaml</code> (<code>groups:</code>), and with no key nothing runs and the random name stays. The record gains <code>description</code>, shown on the group's page and as the tab's tooltip, and <code>named_by</code> (<code>generated</code>, <code>model</code> or <code>person</code>), so a model never overwrites a name the person chose. Not part of this slice.</p>
 </main>
 </div>
 
