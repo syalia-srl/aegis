@@ -128,3 +128,70 @@ def test_a_free_model_wires_free_true_and_zero_price():
 def test_annotate_reads_the_packaged_file_by_default():
     (m,) = annotate([bare("no-such/model")])
     assert m.wire()["rank"] is None
+
+
+def _file(path: Path, refreshed: str, intelligence: float | None = 50.0) -> Path:
+    import json
+
+    path.write_text(
+        json.dumps(
+            {
+                "refreshed": refreshed,
+                "models": {"opus": {"aa": "x", "intelligence": intelligence}},
+            }
+        )
+    )
+    return path
+
+
+def test_download_writes_a_valid_newer_file_and_ranking_reads_it(tmp_path):
+    from aegis import ranking as rk
+
+    feed = _file(tmp_path / "feed.json", "2999-01-01", 99.0)
+    got = tmp_path / "state" / "models.json"
+    try:
+        rk.use(got)
+        assert rk.download(got, feed.as_uri())
+        assert rk.ranking().refreshed == "2999-01-01"
+        assert rk.ranking().score("opus").intelligence == 99.0
+    finally:
+        rk.use(None)
+    assert rk.ranking().refreshed != "2999-01-01"
+
+
+def test_download_refuses_a_bad_or_older_file_and_keeps_the_last_good(tmp_path):
+    from aegis import ranking as rk
+
+    got = _file(tmp_path / "models.json", "2999-01-02")
+    bad = tmp_path / "bad.json"
+    bad.write_text("<html>rate limited</html>")
+    unscored = _file(tmp_path / "unscored.json", "2999-01-03", None)
+    older = _file(tmp_path / "older.json", "2999-01-01")
+    for url in (
+        bad.as_uri(),
+        unscored.as_uri(),
+        older.as_uri(),
+        "http://127.0.0.1:9/x",
+    ):
+        assert not rk.download(got, url)
+    assert '"2999-01-02"' in got.read_text()
+    assert not rk.download(got, "")  # AEGIS_MODELS_URL="" turns it off
+
+
+def test_a_download_older_than_the_packaged_file_is_ignored(tmp_path):
+    from aegis import ranking as rk
+
+    packaged = rk.ranking().refreshed
+    try:
+        rk.use(_file(tmp_path / "models.json", "2000-01-01"))
+        assert rk.ranking().refreshed == packaged
+    finally:
+        rk.use(None)
+
+
+def test_model_ranking_config_key():
+    from aegis.config import Snapshot
+
+    assert Snapshot.parse(Path("x"), None, {}).model_ranking is True
+    off = Snapshot.parse(Path("x"), None, {"model_ranking": False})
+    assert off.model_ranking is False

@@ -62,6 +62,7 @@ from . import archive, attachments as att, commands, dictation, files, restarts,
 from . import mcp_servers, pause
 from . import feedback, harness_versions, self_update, setup
 from . import layout as canvas
+from . import ranking
 from . import workflow_store
 from .agent_ops import (
     far_error,
@@ -1604,6 +1605,8 @@ class App:
         self._versions_task = asyncio.create_task(self._startup_versions())
         # The knowledge flags, at boot and then daily, off the loop.
         self._knowledge_task = asyncio.create_task(self._knowledge_checks())
+        # The nightly model ranking, at boot and then daily (ranking.py).
+        self._ranking_task = asyncio.create_task(self._ranking_downloads())
         # In the background too, for the new tab's doctor row (doctor_watch.py).
         self.doctor_watch.start()
 
@@ -1759,6 +1762,22 @@ class App:
                 await self.bounded_check(name, None)
             await asyncio.sleep(KNOWLEDGE_CHECK_S)
 
+    async def _ranking_downloads(self) -> None:
+        """Download the nightly model ranking at boot and then daily, an hour
+        later after a failure, while ``model_ranking`` is on. Never fails
+        the server."""
+        path = self.roots.state_root / "models.json"
+        while True:
+            ok = False
+            on = self.config.current().model_ranking
+            ranking.use(path if on else None)
+            if on:
+                try:
+                    ok = await asyncio.to_thread(ranking.download, path)
+                except Exception:
+                    log.exception("aegis: the model ranking download failed")
+            await asyncio.sleep(ranking.REFRESH_S if ok else ranking.RETRY_S)
+
     def _place(self) -> Place:
         state = self.roots.state_root
         return Place(self.roots.config_root, state, state)
@@ -1767,6 +1786,9 @@ class App:
         """Every change to .aegis.yaml, however it was made: the page and the
         composer follow it, and the queues start what it now allows."""
         self.channels.publish("config", [{"set": snap.wire()}])
+        # Off reads the packaged ranking at once; on waits for the next download.
+        if not snap.model_ranking:
+            ranking.use(None)
         if hasattr(self, "doctor_watch"):
             self.doctor_watch.kick()
         try:

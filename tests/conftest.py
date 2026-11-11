@@ -139,6 +139,8 @@ def _no_real_quota(tmp_path_factory, monkeypatch):
     # The network probes need no credentials, so only a switch keeps a test's
     # `aegis serve` off the network (net/service.py).
     monkeypatch.setenv("AEGIS_NET_PROBES", "offline")
+    # No nightly model ranking download (ranking.py).
+    monkeypatch.setenv("AEGIS_MODELS_URL", "")
 
 
 @pytest.fixture(scope="session", autouse=True)

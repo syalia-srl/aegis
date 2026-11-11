@@ -2,8 +2,14 @@
 
 The scores are Artificial Analysis's Coding and Intelligence Indexes, and the
 price is its list price in USD per million tokens. ``scripts/refresh-model-ranking``
-rebuilds the file before a release; aegis never calls Artificial Analysis at
-run time, so a model released since the last refresh is unranked.
+rebuilds the packaged file before a release, and the ``model-ranking`` workflow
+runs it every night and publishes the result on the ``model-ranking`` branch.
+aegis never calls Artificial Analysis itself: a server downloads that nightly
+file once a day into its state directory (``download``) and reads it in place
+of the packaged one while it is valid and not older, so a new model is ranked
+the day after Artificial Analysis scores it, with no release. A failed or
+refused download keeps the last good one; an offline server reads the packaged
+file. ``model_ranking: false`` in .aegis.yaml turns the download off.
 
 The file is keyed by the model id an agent names (the catalog's ``value``).
 A model is ranked when it has an Intelligence Index. Ranked models order by
@@ -12,15 +18,18 @@ go after every ranked one, in the order they were given. The Intelligence Index
 orders because Artificial Analysis publishes it for every model it lists, while
 many, the newest included, have no Coding Index.
 
-``AEGIS_MODELS_FILE`` names a file read in place of the packaged one, so a
-test can serve sample scores from a real ``aegis serve``.
+``AEGIS_MODELS_FILE`` names a file read in place of both, so a test can serve
+sample scores from a real ``aegis serve``. ``AEGIS_MODELS_URL`` points the
+download elsewhere; empty, it never runs, which keeps the tests off the network.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import urllib.request
 from collections.abc import Sequence
+from typing import Any
 from dataclasses import dataclass, replace
 from functools import cache
 from importlib import resources
@@ -85,15 +94,81 @@ class Ranking:
         return self.order(among).index(model) + 1
 
 
+NIGHTLY_URL = (
+    "https://raw.githubusercontent.com/syalia-srl/aegis/model-ranking/models.json"
+)
+FETCH_TIMEOUT_S = 30.0
+REFRESH_S = 86400.0
+RETRY_S = 3600.0
+
+# The downloaded file, set by the server (``use``); None reads only the
+# packaged one.
+_downloaded: Path | None = None
+
+
+def valid(data: Any) -> bool:
+    """A ranking file aegis can read: a date and at least one scored model."""
+    if not isinstance(data, dict) or not isinstance(data.get("refreshed"), str):
+        return False
+    models = data.get("models")
+    return isinstance(models, dict) and any(
+        isinstance(v, dict) and v.get("intelligence") is not None
+        for v in models.values()
+    )
+
+
+def _read(path: Path) -> dict | None:
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+    return data if valid(data) else None
+
+
+def use(path: Path | None) -> None:
+    """Read ``path``, the last good download, in place of the packaged file
+    whenever it is valid and not older; None goes back to the packaged one."""
+    global _downloaded
+    if path != _downloaded:
+        _downloaded = path
+        ranking.cache_clear()
+
+
+def download(path: Path, url: str | None = None) -> bool:
+    """Fetch the nightly file into ``path`` when it is valid, atomically, and
+    drop the cached ranking. False, and ``path`` untouched, on any failure:
+    the network, a body that is not a ranking, or one older than ``path``."""
+    url = url if url is not None else os.environ.get("AEGIS_MODELS_URL", NIGHTLY_URL)
+    if not url:
+        return False
+    try:
+        with urllib.request.urlopen(url, timeout=FETCH_TIMEOUT_S) as r:
+            data = json.loads(r.read())
+    except (OSError, ValueError):
+        return False
+    if not valid(data):
+        return False
+    have = _read(path)
+    if have is not None and data["refreshed"] < have["refreshed"]:
+        return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, indent=2) + "\n")
+    tmp.replace(path)
+    ranking.cache_clear()
+    return True
+
+
 @cache
 def ranking() -> Ranking:
-    path = os.environ.get("AEGIS_MODELS_FILE")
-    text = (
-        Path(path).read_text()
-        if path
-        else resources.files("aegis").joinpath("data/models.json").read_text()
-    )
-    return Ranking.from_dict(json.loads(text))
+    if path := os.environ.get("AEGIS_MODELS_FILE"):
+        return Ranking.from_dict(json.loads(Path(path).read_text()))
+    data = json.loads(resources.files("aegis").joinpath("data/models.json").read_text())
+    if _downloaded is not None:
+        nightly = _read(_downloaded)
+        if nightly is not None and nightly["refreshed"] >= data.get("refreshed", ""):
+            data = nightly
+    return Ranking.from_dict(data)
 
 
 def annotate(models: Sequence[Model], r: Ranking | None = None) -> tuple[Model, ...]:
