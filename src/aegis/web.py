@@ -65,6 +65,7 @@ from starlette.staticfiles import StaticFiles
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from . import exit as exit_
+from . import chrome as chrome_
 from . import files, fs_paths
 from .app import App
 from .channels import Sub
@@ -997,6 +998,108 @@ def build_web(
             yield
             await app.shutdown()
 
+    def chrome_cors(request, response: Response) -> Response:
+        """The extension's popup fetches from a chrome-extension:// origin."""
+        origin = request.headers.get("origin", "")
+        if origin.startswith("chrome-extension://"):
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Methods"] = "POST"
+            response.headers["Access-Control-Allow-Headers"] = "content-type"
+            response.headers["Vary"] = "Origin"
+        return response
+
+    async def chrome_pair(request):
+        """Trade a pairing code for the extension's device token (chrome.py)."""
+        if request.method == "OPTIONS":
+            return chrome_cors(request, Response(status_code=204))
+        try:
+            body = await request.json()
+        except ValueError:
+            body = None
+        if not isinstance(body, dict) or not isinstance(body.get("code"), str):
+            return chrome_cors(
+                request, JSONResponse({"error": "bad_request"}, status_code=400)
+            )
+        try:
+            token, dev = app.chrome.pair(
+                body["code"],
+                str(body.get("name") or ""),
+                str(body.get("browser") or ""),
+            )
+        except chrome_.PairError as e:
+            return chrome_cors(
+                request,
+                JSONResponse({"error": e.code, "message": e.message}, status_code=403),
+            )
+        return chrome_cors(
+            request,
+            JSONResponse({"token": token, "id": dev["id"], "server": app.server_name}),
+        )
+
+    async def chrome_socket(websocket: WebSocket) -> None:
+        """The paired extension's one socket. Its device token opens this and
+        nothing else."""
+        host = websocket.headers.get("host", "")
+        origin = websocket.headers.get("origin") or ""
+        if not origin.startswith("chrome-extension://") or (
+            host not in allowed_hosts and host not in public
+        ):
+            await websocket.close(code=BAD_ORIGIN)
+            return
+        await websocket.accept()
+        try:
+            hello = await asyncio.wait_for(websocket.receive_json(), HELLO_TIMEOUT_S)
+        except (TimeoutError, ValueError, WebSocketDisconnect):
+            with contextlib.suppress(Exception):
+                await websocket.close(code=NO_HELLO)
+            return
+        given = hello.get("token") if isinstance(hello, dict) else None
+        dev = app.chrome.device_for(given) if isinstance(given, str) else None
+        if dev is None or hello.get("t") != "hello":
+            await websocket.close(code=BAD_TOKEN)
+            return
+        did = dev["id"]
+
+        async def send(msg: dict) -> None:
+            await websocket.send_json(msg)
+
+        async def close() -> None:
+            with contextlib.suppress(Exception):
+                await websocket.close(code=BAD_TOKEN)
+
+        await send(
+            {
+                "t": "welcome",
+                "server": app.server_name,
+                "id": did,
+                "name": dev["name"],
+                "theme": app.chrome.theme,
+            }
+        )
+        app.chrome.connected(did, send, close, str(hello.get("version") or ""))
+        try:
+            while True:
+                msg = await websocket.receive_json()
+                kind = msg.get("t") if isinstance(msg, dict) else None
+                if kind == "ping":
+                    app.chrome.seen(did)
+                    await send({"t": "pong"})
+                elif kind == "unpair":
+                    await app.chrome.unpair(did)
+                    return
+        except (WebSocketDisconnect, ValueError, RuntimeError):
+            pass
+        finally:
+            app.chrome.disconnected(did, send)
+
+    async def chrome_extension(request):
+        """The unpacked extension, zipped, to load in chrome://extensions."""
+        return Response(
+            chrome_.extension_zip(),
+            media_type="application/zip",
+            headers={"Content-Disposition": 'attachment; filename="aegis-chrome.zip"'},
+        )
+
     routes = [
         Route("/", index),
         Route("/login", login, methods=["POST"]),
@@ -1014,6 +1117,9 @@ def build_web(
         Route("/speech/{pin}/{name:path}", speech_file),
         WebSocketRoute("/ws", ws),
         WebSocketRoute("/tunnel", tunnel),
+        Route("/chrome/pair", chrome_pair, methods=["POST", "OPTIONS"]),
+        Route("/chrome/extension.zip", chrome_extension),
+        WebSocketRoute("/chrome/socket", chrome_socket),
     ]
     if mcp:
         # Only the Server's own loopback listener serves these; a host's

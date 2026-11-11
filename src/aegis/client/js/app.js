@@ -243,6 +243,20 @@ function setTheme(name) {
   localStorage.setItem("aegis.theme", name);
   if (page) redrawFavicon();
   artifacts.theme();
+  pushChromeTheme();
+}
+
+// The paired browsers (chrome.py): Settings → Chrome lists them, the Fleet
+// shows each as a card, and their popups draw in this browser's theme.
+function pushChromeTheme() {
+  if (app.state.chrome?.devices?.length) app.conn.call("chrome.theme", { vars: artifacts.themeVars() }).catch(() => {});
+}
+function onChrome(snap) {
+  const before = app.state.chrome?.devices?.length ?? 0;
+  app.state.chrome = snap || { devices: [] };
+  settings.onChrome(app.state.chrome);
+  fleet.renderChrome();
+  if (app.state.chrome.devices.length > before) pushChromeTheme();
 }
 
 // -- state ----------------------------------------------------------------
@@ -1108,6 +1122,13 @@ channel(
     for (const op of ops) if (op.set) onLinks(op.set);
   },
   () => onLinks([]), // a server without links
+);
+channel(
+  "chrome",
+  onChrome,
+  (ops) => {
+    for (const op of ops) if (op.set) onChrome(op.set);
+  },
 );
 channel(
   "quota",

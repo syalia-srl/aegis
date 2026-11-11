@@ -131,6 +131,18 @@ so a token never reaches the pane, a transcript or the disk. aegis runs no
 OAuth itself. The card is a `sign_in` record upserted by its id; the code the
 person types goes to the PTY only, through ops no agent is given.
 
+**The person's own Chrome pairs with the server, and its token opens one socket.**
+The extension (`src/aegis/extension/`, served zipped at
+`/chrome/extension.zip` with the client's mark, glyphs and fonts added under
+`aegis/`) trades a one-time code from `chrome.code` at `POST /chrome/pair` for
+a device token (`chrome.py`). The token is not a principal: it opens
+`/chrome/socket`, from a `chrome-extension://` origin, and nothing else; the
+server keeps its SHA-256 in `<state>/chrome.json`. The `chrome` channel
+carries the paired browsers and whether each socket is open. The page sends
+its theme's variables with `chrome.theme`, and the server forwards them to
+the extension. Sharing tabs and driving them (the spec
+`2026-11-11-chrome-extension-design.html`) build on this socket.
+
 **A browser is a Chromium the server holds, shared by an agent and a person.**
 A browser (`browsers.py`, #564) is a headless Chromium driven through
 Playwright's persistent context, so its profile under

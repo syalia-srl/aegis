@@ -80,6 +80,9 @@ export class Settings {
     this.server = null; // the server whose config the form edits; null: this one
     this.home = ""; // this server's name
     this.links = []; // the `links` channel
+    this.chrome = { devices: [] }; // the `chrome` channel (chrome.py)
+    this.chromeCode = null; // the pairing code shown, from chrome.code
+    this.chromeError = "";
     this.homeWire = null;
     this.unsubFar = null;
     this.linkError = "";
@@ -105,6 +108,13 @@ export class Settings {
     this.incoming = undefined; // a way back opened or went: read it again
     if (this.server && !links.some((l) => l.name === this.server)) this.pick(null);
     else if (this.box.isConnected && this.box.offsetParent !== null && !this.dirty) this.editing() ? this.later() : this.draw();
+  }
+
+  onChrome(snap) {
+    this.chrome = snap;
+    // A browser that paired used the code: stop showing it.
+    if (this.chromeCode && snap.devices.some((d) => d.paired_at >= this.chromeCode.at)) this.chromeCode = null;
+    if (this.box.isConnected && this.box.offsetParent !== null && !this.dirty) this.editing() ? this.later() : this.draw();
   }
 
   // Whether a field of the form has the focus. A chip's typed filter is not
@@ -232,7 +242,7 @@ export class Settings {
     const w = this.wire;
     // The title first, then what this browser keeps, then the servers; the
     // loading and no-config pages keep the same width and order.
-    const page = (...kids) => h("div", { className: "set-page" }, ...kids, this.browser(), this.knowledge(), this.servers());
+    const page = (...kids) => h("div", { className: "set-page" }, ...kids, this.browser(), this.knowledge(), this.servers(), this.chromeView());
     if (!w || !this.doc) return this.box.replaceChildren(page(h("p", { className: "notice", textContent: this.t("settings.loading") })));
     if (!w.exists && !this.dirty) return this.box.replaceChildren(page(this.empty()));
     const full = h(
@@ -242,6 +252,7 @@ export class Settings {
       this.browser(),
       this.knowledge(),
       this.servers(),
+      this.chromeView(),
       this.pauseView(),
       w.error && h("p", { className: "set-alert err", id: "set-error", textContent: `The file on disk does not parse, so aegis is still using the last version that did. ${w.error}` }),
       this.stale && this.staleAlert(),
@@ -587,6 +598,64 @@ export class Settings {
       this.linkError && h("p", { className: "err-text", id: "set-link-error", textContent: this.linkError }),
       picker,
     );
+  }
+
+  // The person's own Chrome (chrome.py): the extension to install, a code to
+  // pair it, and the browsers paired with this server.
+  chromeView() {
+    const ago = (t) => new Date(t * 1000).toLocaleString([], { dateStyle: "short", timeStyle: "short" });
+    const rows = this.chrome.devices.map((d) =>
+      h(
+        "tr",
+        { className: "set-chrome-device" },
+        h("td", {}, h("b", { textContent: d.name })),
+        h("td", { className: "m", textContent: d.version ? `extension ${d.version}` : "" }),
+        h("td", {}, h("span", { className: `set-pill ${d.connected ? "ok" : "bad"}`, textContent: d.connected ? "connected" : `last seen ${ago(d.last_seen)}` })),
+        h("td", {}, button(this.t("settings.unpair"), null, () => this.unpairChrome(d.id))),
+      ),
+    );
+    const code = this.chromeCode;
+    const until = code && new Date(code.expires_at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const get = button(this.t("settings.pairCode"), "set-chrome-code", () => this.pairChrome(), code ? "btn" : "btn primary");
+    const download = h("a", { className: "btn", id: "set-chrome-download", href: "chrome/extension.zip", download: "aegis-chrome.zip", textContent: this.t("settings.downloadExtension") });
+    return h(
+      "section",
+      { className: "set-chrome", id: "set-chrome" },
+      h("h3", { textContent: this.t("settings.chrome") }),
+      h("p", { className: "set-none", textContent: "Pair your own Chrome, Edge or Brave with this server. Agents will use only the tabs you share with them, with your sign-ins. To install: download the extension, unzip it, open chrome://extensions, turn on Developer mode, choose Load unpacked and pick the aegis-chrome folder." }),
+      rows.length ? h("table", { className: "tbl" }, ...rows) : h("p", { className: "set-none", id: "set-chrome-none", textContent: "No browser is paired." }),
+      code &&
+        h(
+          "p",
+          { className: "set-none set-chrome-pair", id: "set-chrome-pair" },
+          document.createTextNode("In the extension's popup, enter the server "),
+          h("code", { textContent: location.origin + location.pathname.replace(/[^/]*$/, "") }),
+          document.createTextNode(" and the code "),
+          h("b", { className: "set-chrome-codeval", textContent: code.code }),
+          document.createTextNode(`, valid until ${until}.`),
+        ),
+      h("div", { className: "set-linkrow" }, download, get),
+      this.chromeError && h("p", { className: "err-text", id: "set-chrome-error", textContent: this.chromeError }),
+    );
+  }
+
+  async pairChrome() {
+    this.chromeError = "";
+    try {
+      this.chromeCode = { ...(await this.conn.call("chrome.code")), at: Date.now() / 1000 - 1 };
+    } catch (e) {
+      this.chromeError = e.message;
+    }
+    this.draw();
+  }
+
+  async unpairChrome(id) {
+    try {
+      await this.conn.call("chrome.unpair", { id });
+    } catch (e) {
+      this.chromeError = e.message;
+    }
+    this.draw();
   }
 
   // Every session paused at once (pause.py): their processes end and nothing
