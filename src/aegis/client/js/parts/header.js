@@ -110,6 +110,11 @@ export class HeaderPart {
       get group() {
         return part.act.groupKey?.() || null;
       },
+      // Every open session, quiet ones too: a quiet member has no tab but
+      // still counts in its group's +N (#1039).
+      get all() {
+        return part.mount.state.ordered;
+      },
       folds: this.tabFolds,
       saveFolds: () => localStorage.setItem("aegis.tab-folds", JSON.stringify([...part.tabFolds])),
       onFold: (key) => {

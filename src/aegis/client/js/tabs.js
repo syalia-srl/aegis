@@ -73,9 +73,12 @@ export function renderTabs(list, metas, focusId, actions) {
       box.style.setProperty("--g", `var(--group-${hueOf(b.key)})`);
       const folded = !!actions.folds?.has(b.key);
       const head = groupTab(b, folded, actions);
+      // A quiet member has no tab but still counts in the group's +N.
+      const here = actions.here || "";
+      const count = (actions.all || []).filter((m) => groupKey(m, here) === b.key).length || b.members.length;
       const cnt = document.createElement("span");
       cnt.className = "cnt";
-      cnt.textContent = folded ? `+${b.members.length}` : "−";
+      cnt.textContent = folded ? `+${count}` : "−";
       cnt.title = t(folded ? "tabs.unfold" : "tabs.fold");
       cnt.classList.toggle("alert", folded && b.members.some((m) => m.mark === "needs_you"));
       cnt.addEventListener("click", (ev) => {
