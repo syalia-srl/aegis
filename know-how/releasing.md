@@ -120,6 +120,11 @@ no user-facing doc.
    Read the diff and the `unmapped:` lines it printed. A catalog model that
    should be ranked and is not needs an entry in the script's `ALIASES`; run
    it again. Commit the file as `chore(ranking): refresh model scores`.
+   Between releases the `model-ranking` workflow does the same every night on
+   a runner and publishes the result on the `model-ranking` branch, which
+   every aegis downloads daily. It keeps every model this file maps, so the
+   release refresh is what adds models only a logged-in catalog lists, such
+   as OpenCode Go's. Run it by hand with `gh workflow run model-ranking.yml`.
 4. Review the landing film against the release (*Keeping the landing film
    current*, below). Commit a re-render, or file an issue for one, before
    the tag; a release does not ship a film of a client it changed.

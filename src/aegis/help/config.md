@@ -98,8 +98,9 @@ higher on [Artificial Analysis](https://artificialanalysis.ai)'s Intelligence In
 breaking ties, naming the first such pair:
 "b (50.1) is above a (54.0) in the ranking", or "x (unranked) is above a
 (54.0) in the ranking" for a model with no Intelligence Index. The scores
-ship with aegis and are refreshed at each release, so a model released since
-is unranked. The order is still yours: the warning changes nothing.
+are refreshed every night (see [Models](#models)), so a model is ranked
+about a day after Artificial Analysis scores it. The order is still yours:
+the warning changes nothing.
 
 Every start from the agent (a new tab, `session_spawn`, a handoff, a queue
 worker, a workflow node, a schedule) runs the first model that is not cooling
@@ -160,6 +161,22 @@ the agent's models, 0 first) and the epoch it stops cooling, or
 `"cooling_until": null` when it is not cooling. Models in use come first, then by Intelligence Index with the Coding Index breaking ties, unranked ones last. The
 answer carries the ranking's date and its source,
 [Artificial Analysis](https://artificialanalysis.ai).
+
+The ranking is rebuilt from Artificial Analysis every night and published on
+the aegis repository's `model-ranking` branch. aegis downloads it when it
+starts and then once a day (an hour later after a failure) into
+`models.json` in its state directory, and reads it while it is newer than
+the ranking packaged with the installed version, so new models are ranked
+without a release. A download that fails, or does not parse as a ranking,
+leaves the last good one in place; an offline server reads the packaged
+ranking. The date under the Models list is the date of whichever it reads.
+To read only the packaged ranking, and make no request, set:
+
+```yaml
+model_ranking: false
+```
+
+or turn off "model_ranking" under Model ranking in Settings.
 
 ## Claude Code tools aegis replaces
 
