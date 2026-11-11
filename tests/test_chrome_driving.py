@@ -197,11 +197,9 @@ async def test_a_handover_gives_the_tab_to_the_person_until_done(world):
     ext = Driven(chrome, page)
     await ext.say(t="grant", tab=TAB, log_id=a.log_id)
     await ext.say(t="grant", tab=TAB, log_id=b.log_id)
-    out = (
-        await turn(
-            a,
-            mcp("browser_handover", browser="chrome:qwen", reason="Solve the captcha"),
-        )
+    out = await turn(
+        a,
+        mcp("browser_handover", browser="chrome:qwen", reason="Solve the captcha"),
     )
     assert "holds chrome:qwen" in out
     told = ext.last("hold")
