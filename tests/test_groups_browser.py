@@ -23,7 +23,7 @@ def page(browser):  # noqa: F811
     pg.close()
 
 
-def m(key, created, group=None, at=None, **kw):
+def m(key, created, group=None, at=None, handle=None, **kw):
     lid = key.split("/")[-1]
     return {
         "key": key,
@@ -31,48 +31,125 @@ def m(key, created, group=None, at=None, **kw):
         "created_at": created,
         "group": group,
         "server": at,
+        "handle": handle or lid,
         **kw,
     }
 
 
 def blocks(pg, metas) -> list:
-    """[[head key, [member keys]], ...] from groups.js's blocksOf."""
+    """[{key, head, members}] from groups.js's blocksOf, the head flattened."""
     return pg.evaluate(
         """async ([metas]) => {
           const g = await import('/static/js/groups.js');
-          return g.blocksOf(metas, 'alpha').map(b => [b.head.key, b.members.map(x => x.key)]);
+          return g.blocksOf(metas, 'alpha').map((b) => ({
+            key: b.key,
+            head: {kind: b.head.kind || 'session', key: b.head.key,
+                   name: b.head.name ?? null, mark: b.head.mark ?? null},
+            members: b.members.map((x) => x.key),
+          }));
         }""",
-        [metas, None],
+        [metas],
     )
 
 
-def test_blocks_of_a_chain_a_root_gone_and_a_link(server, page):  # noqa: F811
+def popped(pg, metas, key, folded=True) -> list:
+    """The member keys poppedOut() draws beside the block of `key`."""
+    return pg.evaluate(
+        """async ([metas, key, folded]) => {
+          const g = await import('/static/js/groups.js');
+          const b = g.blocksOf(metas, 'alpha').find((x) => x.key === key);
+          return g.poppedOut(b, folded).map((m) => m.key);
+        }""",
+        [metas, key, folded],
+    )
+
+
+def test_blocks_of_named_groups(server, page):  # noqa: F811
     page.goto(server.url)
     page.wait_for_selector("#a2[data-view=fleet]")
-    a, b, c = m("a", 1), m("b", 2, "a"), m("c", 3, "a")
+    g = "grp-3fa9c210"
+    a = m("a", 1, g, group_name="brisk-backus", mark="working")
+    b = m("b", 2, g, group_name="brisk-backus", mark="needs_you")
+    one = m("c", 3, "grp-77777777", group_name="lonely-ones")
     lone = m("d", 4)
-    far = m("beta/e", 5, "a@alpha", at="beta")
-    term = m("t", 6, "a", kind="term")
-    assert blocks(page, [a, b, lone, c, far, term]) == [
-        ["a", ["a", "b", "c", "beta/e"]],
-        ["d", ["d"]],
-        ["t", ["t"]],
+    term = m("t", 5, g, kind="term")
+    browser = m("x", 6, g, kind="browser")
+    assert blocks(page, [a, b, one, lone, term, browser]) == [
+        {
+            "key": f"{g}@alpha",
+            "head": {
+                "kind": "group",
+                "key": f"{g}@alpha",
+                "name": "brisk-backus",
+                "mark": "needs_you",
+            },
+            "members": ["a", "b"],
+        },
+        {
+            "key": "grp-77777777@alpha",
+            "head": {"kind": "session", "key": "c", "name": None, "mark": None},
+            "members": [],
+        },
+        {
+            "key": "d@alpha",
+            "head": {"kind": "session", "key": "d", "name": None, "mark": None},
+            "members": [],
+        },
+        {
+            "key": "t@alpha",
+            "head": {"kind": "term", "key": "t", "name": None, "mark": None},
+            "members": [],
+        },
+        {
+            "key": "x@alpha",
+            "head": {"kind": "browser", "key": "x", "name": None, "mark": None},
+            "members": [],
+        },
     ]
-    # The root archived: the next oldest heads the group, which keeps its place.
-    assert blocks(page, [b, lone, c]) == [["b", ["b", "c"]], ["d", ["d"]]]
-    # An offline head yields to an online member.
-    assert blocks(page, [dict(a, off=True), b]) == [["b", ["b", "a"]]]
+    # An offline member leaves the group a lone open tab, the group keeping
+    # its place and its record.
+    assert blocks(page, [dict(a, off=True), b, lone])[0] == {
+        "key": f"{g}@alpha",
+        "head": {"kind": "session", "key": "b", "name": None, "mark": "needs_you"},
+        "members": ["a"],
+    }
     assert page.errors == []
 
 
-def test_a_handoff_of_the_root_heads_its_group(server, page):  # noqa: F811
+def test_a_far_log_id_key_is_named_by_its_session(server, page):  # noqa: F811
     page.goto(server.url)
     page.wait_for_selector("#a2[data-view=fleet]")
-    a, b = m("a", 1), m("b", 2, "a")
-    h = m("h", 3, "a", leads=True)  # a's handoff (#641)
-    # While a is open it heads; once archived, its handoff does, though newer.
-    assert blocks(page, [a, b, h]) == [["a", ["a", "b", "h"]]]
-    assert blocks(page, [b, h]) == [["h", ["h", "b"]]]
+    boss = m("20261101-0f0a", 1, handle="tab-groups")
+    kid = m("beta/e", 2, "20261101-0f0a", at="beta")
+    kid2 = m("beta/f", 3, "20261101-0f0a", at="beta")
+    got = blocks(page, [boss, kid, kid2])
+    far = next(b for b in got if b["key"] == "20261101-0f0a@beta")
+    assert far["head"]["kind"] == "group"
+    assert far["head"]["name"] == "tab-groups"
+    # Its server archived the session the key names: the key is the name.
+    far = next(b for b in blocks(page, [kid, kid2]) if b["key"] == "20261101-0f0a@beta")
+    assert far["head"]["name"] == "20261101-0f0a@beta"
+    assert page.errors == []
+
+
+def test_popped_out_members_per_mark(server, page):  # noqa: F811
+    page.goto(server.url)
+    page.wait_for_selector("#a2[data-view=fleet]")
+    g = "grp-3fa9c210"
+
+    def meta(key, mark):
+        return m(key, 1, g, group_name="brisk-backus", mark=mark)
+
+    for mark in ("needs_you", "review", "done", "error"):
+        metas = [meta("a", "working"), meta("b", mark)]
+        assert popped(page, metas, f"{g}@alpha") == ["b"], mark
+    for mark in ("working", "waiting"):
+        metas = [meta("a", "working"), meta("b", mark)]
+        assert popped(page, metas, f"{g}@alpha") == [], mark
+    # An unfolded block pops nothing, and a lone tab never does.
+    metas = [meta("a", "working"), meta("b", "needs_you")]
+    assert popped(page, metas, f"{g}@alpha", folded=False) == []
+    assert popped(page, [m("d", 4)], "d@alpha") == []
     assert page.errors == []
 
 
