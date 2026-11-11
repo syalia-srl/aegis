@@ -99,6 +99,10 @@ def register_chrome_ops(app: App) -> Chrome:
 
     chrome.list_sessions = sessions
     chrome.on_answer = answered
+    chrome.on_nomatch = lambda req: app.toast(
+        f"No tab of your browser matches \u201c{req['match']}\u201d: pick one in"
+        " the extension's popup, or refuse."
+    )
 
     async def ask(caller: Caller, kind: str, match: str, url: str, why: str) -> dict:
         s = app.sessions.sessions.get(caller.log_id or "")
