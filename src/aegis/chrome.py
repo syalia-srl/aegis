@@ -28,6 +28,13 @@ for (``browser_request``, ``browser_open(where="person")``). A request is
 answered in the popup or on its card in aegis, whichever is first; the server
 resolves it once and tells the other side. Either side revokes, and the side
 that did tells the other; neither echoes what it was told.
+
+Driving: an agent's browser_* call on ``chrome:<name>`` goes to the tab's
+browser as a ``call`` and comes back as its ``result``. The server checks the
+grant first and the extension checks it again, since it is the authority. The
+extension sends the tab's navigations, console errors and failed requests as
+``event`` messages, and the server keeps them, with the agents' actions, in
+the tab's log, as it does for its own browsers.
 """
 
 from __future__ import annotations
@@ -47,8 +54,19 @@ CODE_TTL_S = 600
 # No 0/O or 1/I/L: the person types the code from one screen into another.
 CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 CODE_LEN = 8
+CALL_TIMEOUT_S = 45  # a goto waits up to 30 s for the page to load
+LOG_MAX = 500  # events a tab's log keeps in memory
 
 Send = Callable[[dict], Awaitable[None]]
+
+
+class CallError(Exception):
+    """A call on a person's tab that failed, with the code an agent reads."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(f"{code}: {message}")
+        self.code = code
+        self.message = message
 
 
 class PairError(Exception):
@@ -88,6 +106,11 @@ class Chrome:
         self.tabs: dict[str, dict] = {}
         # id -> {id, log_id, handle, kind: tab|open, match, url, why, ts}
         self.requests: dict[str, dict] = {}
+        # The tabs each session was ever given, to tell revoked from not_granted.
+        self.had: dict[str, set[str]] = {}
+        # name -> {rev, events}: each tab's log, as a server browser's.
+        self.logs: dict[str, dict] = {}
+        self.calls: dict[str, tuple[str, asyncio.Future]] = {}  # id -> device, reply
         # Set by chrome_ops: the sessions a tab can be shared with, and what
         # happens when a request is answered or a grant starts or ends.
         self.list_sessions: Callable[[], list[dict]] = lambda: []
@@ -96,6 +119,8 @@ class Chrome:
         self.on_nomatch: Callable[[dict], object] = lambda _: None
         # An agent's request, with its card (chrome_ops): browser_open's too.
         self.ask_for: Callable[..., Awaitable[dict]]
+        # An agent's browser_* tool on one of its tabs (chrome_ops).
+        self.drive: Callable[..., Awaitable[object]]
         self._load()
 
     # -- the file -----------------------------------------------------------------
@@ -210,6 +235,11 @@ class Chrome:
             return  # a replaced socket closing late
         self.sockets.pop(device_id, None)
         self.closers.pop(device_id, None)
+        for cid, (dev, fut) in list(self.calls.items()):
+            if dev == device_id and not fut.done():
+                fut.set_exception(
+                    CallError("chrome_unavailable", "your browser disconnected")
+                )
         if device_id in self.devices:
             self.seen(device_id, save=True)
 
@@ -260,6 +290,9 @@ class Chrome:
 
     def _grants_changed(self) -> None:
         self.tabs = {n: t for n, t in self.tabs.items() if t["grants"]}
+        for name, t in self.tabs.items():
+            for g in t["grants"]:
+                self.had.setdefault(g, set()).add(name)
         self.changed()
         self.on_grants()
 
@@ -385,7 +418,112 @@ class Chrome:
         if kind == "deny":
             self.resolve(str(msg.get("request")), "denied")
             return None
+        if kind == "result":
+            entry = self.calls.get(str(msg.get("id")))
+            if entry is not None and entry[0] == device_id and not entry[1].done():
+                if msg.get("ok"):
+                    entry[1].set_result(msg.get("value"))
+                else:
+                    entry[1].set_exception(
+                        CallError(
+                            str(msg.get("code") or "call_failed"),
+                            str(msg.get("message") or "the call failed"),
+                        )
+                    )
+            return None
+        if kind == "event":
+            tab = self.tabs.get(str(msg.get("tab")))
+            ev = msg.get("event")
+            if (
+                tab is not None
+                and tab.get("device") == device_id
+                and isinstance(ev, dict)
+            ):
+                self.log(tab["name"], ev, who=str(msg.get("who") or "page"))
+            return None
         return None
+
+    # -- driving ------------------------------------------------------------------
+
+    def tab_for(self, log_id: str, name: str) -> dict:
+        """The tab a session names, if it is granted to it now."""
+        tab = self.tabs.get(name)
+        if tab is not None and log_id in tab["grants"]:
+            if tab.get("device") not in self.sockets:
+                raise CallError(
+                    "chrome_unavailable",
+                    "the person's browser is not connected to aegis; wait for it",
+                )
+            return tab
+        if name in self.had.get(log_id, set()):
+            raise CallError(
+                "revoked",
+                f"chrome:{name} is no longer yours: the person stopped sharing it,"
+                " closed it or disconnected you",
+            )
+        raise CallError(
+            "not_granted",
+            f"chrome:{name} is not a tab the person gave you; see browser_list,"
+            " or ask with browser_request",
+        )
+
+    async def call(
+        self,
+        log_id: str,
+        name: str,
+        op: str,
+        args: dict,
+        timeout: float = CALL_TIMEOUT_S,
+    ) -> Any:
+        """One tool call on a person's tab, answered by its browser."""
+        tab = self.tab_for(log_id, name)
+        cid = "k-" + secrets.token_hex(6)
+        fut: asyncio.Future = asyncio.get_running_loop().create_future()
+        self.calls[cid] = (tab["device"], fut)
+        try:
+            await self._send(
+                tab["device"],
+                {"t": "call", "id": cid, "tab": name, "log_id": log_id, "op": op,
+                 "args": args},
+            )  # fmt: skip
+            return await asyncio.wait_for(fut, timeout)
+        except TimeoutError:
+            raise CallError(
+                "chrome_timeout", f"your browser did not answer {op} in {timeout:.0f} s"
+            ) from None
+        finally:
+            self.calls.pop(cid, None)
+
+    def log(self, name: str, ev: dict, who: str) -> int:
+        """Add an event to a tab's log; its revision."""
+        book = self.logs.setdefault(name, {"rev": 0, "events": []})
+        book["rev"] += 1
+        row = {k: v for k, v in ev.items() if k not in ("rev", "ts", "who")}
+        row |= {"rev": book["rev"], "ts": self._clock(), "who": who}
+        book["events"] = (book["events"] + [row])[-LOG_MAX:]
+        d = self.path.parent / "chrome" / name
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+            with (d / "events.jsonl").open("a") as f:
+                f.write(json.dumps(row, ensure_ascii=False) + "\n")
+        except OSError:
+            pass
+        return book["rev"]
+
+    def events(self, name: str, since: int = 0) -> tuple[int, list[dict]]:
+        book = self.logs.get(name, {"rev": 0, "events": []})
+        return book["rev"], [e for e in book["events"] if e["rev"] > since]
+
+    def acted(self, name: str, handle: str, line: str) -> int:
+        """An agent's action on a tab: logged, and shown in its panel."""
+        tab = self.tabs.get(name)
+        if tab is not None:
+            tab["last"] = f"{handle} {line}"
+            self.changed()
+        return self.log(name, {"kind": "agent", "what": f"{handle} {line}"}, "agent")
+
+    def shots_dir(self, name: str) -> Path:
+        return self.path.parent / "chrome" / name / "shots"
 
     # -- the theme ----------------------------------------------------------------
 
@@ -420,7 +558,7 @@ class Chrome:
                 for d in self.devices.values()
             ],
             "tabs": [
-                {k: t[k] for k in ("name", "title", "url", "grants")}
+                {k: t.get(k, "") for k in ("name", "title", "url", "grants", "last")}
                 for t in self.tabs.values()
             ],
             "requests": list(self.requests.values()),

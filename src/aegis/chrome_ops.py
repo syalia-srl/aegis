@@ -1,17 +1,22 @@
 """The operations behind Settings → Chrome and the person's shared tabs
 (chrome.py): a pairing code, unpairing, the theme, answering an agent's
 request and revoking a grant; and the agents' browser_list and
-browser_request. browser_open(where="person") reaches ``App.chrome_ask``."""
+browser_request. browser_open(where="person") reaches ``Chrome.ask_for``, and
+the browser_* tools on a ``chrome:`` id reach ``Chrome.drive``."""
 
 from __future__ import annotations
 
 import asyncio
+import base64
+import json
 import logging
+import time
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
-from .chrome import Chrome, PairError
+from .browsers import SNAPSHOT_MAX, event_line
+from .chrome import CallError, Chrome, PairError
 from .monitors import iso_now
 from .ops import Caller, OpError
 
@@ -128,6 +133,69 @@ def register_chrome_ops(app: App) -> Chrome:
         return {"request": req["id"], "state": "asked"}
 
     chrome.ask_for = ask
+
+    # What the extension does on a person's tab; the rest wait for later slices.
+    driven = ("snapshot", "click", "type", "press", "goto", "screenshot", "events")
+
+    async def drive(caller: Caller, op: str, p) -> object:
+        """A browser_* tool on chrome:<name>, run by the person's browser."""
+        name = (p.browser or "").removeprefix("chrome:")
+        s = app.sessions.sessions.get(caller.log_id or "")
+        if s is None:
+            raise OpError("agents_only", "only an agent's session drives a tab")
+        if op not in driven:
+            raise OpError(
+                "not_supported",
+                f"browser_{op} does not work on the person's tabs yet",
+            )
+        try:
+            chrome.tab_for(s.log_id, name)
+            if op == "events":
+                rev, evs = chrome.events(name, p.since)
+                if p.who != "all":
+                    evs = [e for e in evs if e.get("who") == p.who]
+                return {"rev": rev, "events": [event_line(e) for e in evs[-200:]]}
+            args = p.model_dump(exclude={"browser"})
+            rev, _ = chrome.events(name)
+            value = await chrome.call(s.log_id, name, op, args)
+        except CallError as e:
+            raise OpError(e.code, e.message) from None
+        if op == "snapshot":
+            tree = value.get("tree", "")
+            if len(tree) > SNAPSHOT_MAX:
+                tree = tree[:SNAPSHOT_MAX] + "\n… (cut)"
+            return f"{value.get('url', '')}  {value.get('title', '')}\nholder: agent\n\n{tree}"
+        if op == "screenshot":
+            shots = chrome.shots_dir(name)
+            shots.mkdir(parents=True, exist_ok=True)
+            path = shots / f"{time.strftime('%Y%m%d-%H%M%S')}-{rev}.png"
+            path.write_bytes(base64.b64decode(value.get("png", "")))
+            return {"path": str(path)}
+        if op == "goto":
+            line = f"goto {p.url or p.action}"
+        elif op == "type":
+            shown = (
+                f"{len(p.text)} characters"
+                if value.get("secret")
+                else json.dumps(p.text[:80], ensure_ascii=False)
+            )
+            line = f"type {shown} into {p.target}"
+        elif op == "press":
+            line = f"press {p.key}"
+        else:
+            line = f"click {p.target}"
+        chrome.acted(name, s.handle, line)
+        _, evs = chrome.events(name, rev)
+        out = {
+            "url": value.get("url", ""),
+            "title": value.get("title", ""),
+            "events": [event_line(e) for e in evs if e["kind"] != "agent"][-30:],
+        }
+        if value.get("note"):
+            out["note"] = value["note"]
+        return out
+
+    chrome.drive = drive
 
     # -- the person ---------------------------------------------------------------
 

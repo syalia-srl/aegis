@@ -52,7 +52,9 @@ class BrowserOpen(_Strict):
 
 class BrowserRef(_Strict):
     browser: str | None = Field(
-        None, description="The browser's id; defaults to your only one."
+        None,
+        description="The browser's id, or chrome:<name> for a tab the person"
+        " gave you; defaults to your only server browser.",
     )
 
 
@@ -146,6 +148,10 @@ def register_browser_ops(app: App) -> None:
             return {"docked": False, "reason": str(e)}
         return {"docked": where}
 
+    def person(p: BrowserRef) -> bool:
+        """A tab of the person's own browser (chrome.py), not a server's."""
+        return (p.browser or "").startswith("chrome:")
+
     def agent_browser(p: BrowserRef, caller: Caller, held: bool = True) -> Browser:
         b = br.of_session(caller.log_id or "", p.browser)
         if not b.running:
@@ -211,6 +217,8 @@ def register_browser_ops(app: App) -> None:
         """Load a URL in your browser, or go back, forward or reload."""
         if not p.url and not p.action:
             raise OpError("bad_params", "give a url or an action")
+        if person(p):
+            return await app.chrome.drive(caller, "goto", p)
         b = agent_browser(p, caller)
         br.act(b, f"goto {p.url or p.action}")
         return await br.goto(b.id, p.url, p.action, "agent")
@@ -226,6 +234,8 @@ def register_browser_ops(app: App) -> None:
     async def snapshot(p: BrowserRef, caller):
         """The page as text: its accessibility tree, the roles and names you
         can target. Works while the person holds the page too."""
+        if person(p):
+            return await app.chrome.drive(caller, "snapshot", p)
         b = agent_browser(p, caller, held=False)
         try:
             tree = await b.page.locator("body").aria_snapshot()
@@ -241,6 +251,8 @@ def register_browser_ops(app: App) -> None:
     async def click(p: BrowserTarget, caller):
         """Click an element, after Playwright's waits. Returns the page after
         it and what the log saw: navigations, dialogs, console errors."""
+        if person(p):
+            return await app.chrome.drive(caller, "click", p)
         b = agent_browser(p, caller)
         loc, n = await locate(b, p.target)
         rev = b.rev
@@ -258,6 +270,8 @@ def register_browser_ops(app: App) -> None:
     async def type_(p: BrowserType, caller):
         """Fill a field with text, replacing what it held; submit presses
         Enter after it."""
+        if person(p):
+            return await app.chrome.drive(caller, "type", p)
         b = agent_browser(p, caller)
         loc, _ = await locate(b, p.target)
         secret = (await loc.get_attribute("type")) == "password"
@@ -275,6 +289,8 @@ def register_browser_ops(app: App) -> None:
     @r.op("browser.press", BrowserPress, agent=True, names=(("browser", "browser"),))
     async def press(p: BrowserPress, caller):
         """Press a key or chord on an element, or on whatever has focus."""
+        if person(p):
+            return await app.chrome.drive(caller, "press", p)
         b = agent_browser(p, caller)
         rev = b.rev
         br.act(b, f"press {p.key}")
@@ -301,6 +317,8 @@ def register_browser_ops(app: App) -> None:
     async def screenshot(p: BrowserShot, caller):
         """Save a PNG of the viewport, the whole page or one element, and
         return its path; read it with your file tool to see it."""
+        if person(p):
+            return await app.chrome.drive(caller, "screenshot", p)
         b = agent_browser(p, caller, held=False)
         shots = b.dir / "shots"
         shots.mkdir(parents=True, exist_ok=True)
@@ -329,6 +347,8 @@ def register_browser_ops(app: App) -> None:
         """The browser's log after a revision: navigations, clicks and typing
         with the element each hit, console errors, failed requests, dialogs
         and changes of control. Pass the returned rev next time."""
+        if person(p):
+            return await app.chrome.drive(caller, "events", p)
         b = br.of_session(caller.log_id or "", p.browser)
         evs = [e for e in b.events if e["rev"] > p.since]
         if p.who != "all":
@@ -338,6 +358,8 @@ def register_browser_ops(app: App) -> None:
     @r.op("browser.eval", BrowserEval, agent=True, names=(("browser", "browser"),))
     async def eval_(p: BrowserEval, caller):
         """Run a JavaScript expression in the page and return its JSON value."""
+        if person(p):
+            return await app.chrome.drive(caller, "eval", p)
         b = agent_browser(p, caller)
         br.act(b, "eval")
         try:
@@ -350,6 +372,8 @@ def register_browser_ops(app: App) -> None:
     @r.op("browser.resize", BrowserResize, agent=True, names=(("browser", "browser"),))
     async def resize(p: BrowserResize, caller):
         """Set the page's viewport, such as 390x844 for a phone-width test."""
+        if person(p):
+            return await app.chrome.drive(caller, "resize", p)
         b = agent_browser(p, caller)
         br.act(b, f"resize {p.width}x{p.height}")
         return await br.resize(b.id, p.width, p.height)
@@ -361,6 +385,8 @@ def register_browser_ops(app: App) -> None:
         """Give the page to the person, with what they should do (pass a
         captcha, sign in, try a step), then end your turn. You are woken with
         > from browser:<id> · back, and what they did, when they give it back."""
+        if person(p):
+            return await app.chrome.drive(caller, "handover", p)
         b = agent_browser(p, caller)
         br.handover(b, p.reason)
         return (
@@ -372,6 +398,8 @@ def register_browser_ops(app: App) -> None:
     async def close(p: BrowserRef, caller):
         """Stop your browser and remove its tab. Its profile, with its
         sign-ins, stays for the next open."""
+        if person(p):
+            return await app.chrome.drive(caller, "close", p)
         b = br.of_session(caller.log_id or "", p.browser)
         await br.close(b.id)
 
