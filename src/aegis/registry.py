@@ -1251,7 +1251,7 @@ class Registry(Host):
         }
         # Its group's record went with its last open member: it stands alone
         # (#1039). A linked server's key stays: that server holds the record.
-        if (key := meta.get("group")) and "@" not in key:
+        if isinstance(key := meta.get("group"), str) and "@" not in key:
             if self.groups.get(key) is None:
                 meta["group"] = None
         # An open session may have taken its handle meanwhile (#673).
