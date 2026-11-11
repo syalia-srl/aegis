@@ -63,6 +63,7 @@ export class HeaderPart {
     this.root = mount.root || host;
     this.quietSeen = new Map(); // key -> whether it was quiet when last drawn
     this.tabFolds = new Set(JSON.parse(localStorage.getItem("aegis.tab-folds") || "[]"));
+    this.renaming = null; // the group key whose name is an input (#1039)
     this.phone = matchMedia("(max-width:760px)"); // the one-row header (client.css)
     this.coarse = matchMedia("(pointer:coarse)");
 
@@ -103,8 +104,27 @@ export class HeaderPart {
       onFocus: (key) => part.act.open?.(key),
       onClose: (key) => part.act.close?.(key),
       onMove: (keys, before) => part.act.move?.(keys, before),
+      onGroup: (key) => part.act.onGroup?.(key),
+      onJoin: (keys, group) => part.act.join?.(keys, group),
+      onLeave: (keys) => part.act.leave?.(keys),
+      // Rename in place (#1039): the part holds which group is an input, since
+      // the strip it draws is this part's own.
+      get renaming() {
+        return part.renaming;
+      },
+      onRenameStart: (key) => part.startRename(key),
+      onRenameSave: (key, name) => part.saveRename(key, name),
+      onRenameCancel: () => part.cancelRename(),
       get here() {
         return part.act.here?.() || "";
+      },
+      get group() {
+        return part.act.groupKey?.() || null;
+      },
+      // Every open session, quiet ones too: a quiet member has no tab but
+      // still counts in its group's +N (#1039).
+      get all() {
+        return part.mount.state.ordered;
       },
       folds: this.tabFolds,
       saveFolds: () => localStorage.setItem("aegis.tab-folds", JSON.stringify([...part.tabFolds])),
@@ -135,8 +155,15 @@ export class HeaderPart {
     });
     attachMenu(
       this.list,
-      (t) => (t?.dataset?.id && t.matches(".tab[data-id]") ? this.act.menu?.(t.dataset.id) : null),
-      { selector: ".tab[data-id]", touch: (t) => t.matches(".tab[data-id]") && this.tabCard.sheet(t) },
+      (t) => {
+        if (t?.dataset?.id && t.matches(".tab[data-id]")) return this.act.menu?.(t.dataset.id);
+        if (t?.dataset?.group && t.matches(".tab.named")) return this.act.groupMenu?.(t.dataset.group);
+        return null;
+      },
+      {
+        selector: ".tab[data-id], .tab.named[data-group]",
+        touch: (t) => t.matches(".tab[data-id]") && this.tabCard.sheet(t),
+      },
     );
 
     this.onPhone = () => this.size();
@@ -232,6 +259,26 @@ export class HeaderPart {
   // group, whose head and count depend on its members: then the bar redraws.
   patch(meta, focusId = null) {
     return patchTab(this.list, meta, focusId, this.tabActions);
+  }
+
+  // -- renaming a group in place (#1039) -------------------------------------
+  // A double click on the head, or the menu's Rename group, swaps the name for
+  // an input; Enter or leaving it saves, Escape cancels (tabs.js groupTab).
+  startRename(key) {
+    this.renaming = key;
+    this.render(this.tabs(), this.current());
+  }
+
+  saveRename(key, name) {
+    this.renaming = null;
+    this.act.renameGroup?.(key, name);
+    this.render(this.tabs(), this.current());
+  }
+
+  cancelRename() {
+    if (!this.renaming) return;
+    this.renaming = null;
+    this.render(this.tabs(), this.current());
   }
 
   // The tab in view, scrolled into the strip when it is out of reach. Only the

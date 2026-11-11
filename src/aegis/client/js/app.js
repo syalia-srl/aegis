@@ -32,7 +32,7 @@ import { BrowserPart } from "./parts/browser.js";
 import { factIcon, glyph, gorgoneion, icon, LABEL } from "./glyphs.js";
 import * as cmenu from "./menu.js";
 import { attachTabCard } from "./tabcard.js";
-import { blocksOf } from "./groups.js";
+import { groupKey } from "./groups.js";
 import { clampToRow, insertIntoComposer, quoted, rangeText } from "./quote.js";
 import { closeMonitorCard, tickMonitors } from "./monitors.js";
 import { CallTitle } from "./toolverb.js";
@@ -131,6 +131,8 @@ const header = new HeaderPart(app, root, {
     onSessions();
   },
   here: () => app.conn.server || localStorage.getItem("aegis.server") || "",
+  onGroup: (key) => go(`#g=${key}`),
+  groupKey: () => (route().view === "group" ? route().id : null),
   focusId: () => tabFocus(route()),
   go: (hash) => go(hash),
   hashOf: (key) => hashOf(key),
@@ -139,6 +141,10 @@ const header = new HeaderPart(app, root, {
   side: () => toggleSide(),
   push: (bell, anchor) => openPushPanel(phoneHeader.matches ? anchor : bell),
   menu: (key) => sessionMenu(key),
+  groupMenu: (key) => groupMenu(key),
+  join: (keys, group) => moveToGroup(keys, group),
+  leave: (keys) => moveToGroup(keys, null),
+  renameGroup: (key, name) => renameGroup(key, name),
   card: (m) => fleetCard(m, openCard, (k) => app.state.sessions.get(k) && closeSession(app.state.sessions.get(k)), app.t),
 });
 // The header is the grid's first row, under the connection banner and above
@@ -551,7 +557,7 @@ $("entries").addEventListener("click", (ev) => {
 // Terminals and browsers are tools, not agents: the "terminals" kind shows both.
 const isTool = (m) => m.kind === "term" || m.kind === "browser";
 
-// -- routing: #fleet, #new[?<fill>], #settings, #journal, #usage, #knowledge[=<name>], #files[=<path>[:line]], #schedules, #help[=<page>], #s=<key>, #t=<key>, #read=<key>, #w=<n>:<key> --
+// -- routing: #fleet, #new[?<fill>], #settings, #journal, #usage, #knowledge[=<name>], #files[=<path>[:line]], #schedules, #help[=<page>], #s=<key>, #t=<key>, #read=<key>, #w=<n>:<key>, #g=<group key> --
 // A help ref is URI-encoded; a hand-typed malformed one is a page name nobody has.
 const unhash = (s) => {
   try {
@@ -570,6 +576,8 @@ function route(hash = hashNow()) {
   if (h.startsWith("t=")) return { view: "term", id: h.slice(2) };
   if (h.startsWith("b=")) return { view: "browser", id: h.slice(2) };
   if (h.startsWith("read=")) return { view: "read", id: h.slice(5) };
+  // A group's page (#1039): the Fleet's cards over its members only.
+  if (h.startsWith("g=")) return { view: "group", id: h.slice(2) };
   // Window n of a session's canvas, a browser tab of its own (js/canvas.js).
   const w = /^w=(\d+):(.+)$/.exec(h);
   if (w) return { view: "window", id: w[2], n: Number(w[1]) };
@@ -1237,9 +1245,11 @@ function flushSessions() {
   const r = route();
   let whole = false; // a grouped tab redraws the bar (tabs.js patchTab)
   for (const id of ids) if (app.state.sessions.has(id) && !header.patch(app.state.sessions.get(id), tabFocus(r))) whole = true;
-  if (whole) header.render(tabbed(), tabFocus(r), r.view);
+  if (whole) header.render(tabbed(), tabFocus(r), headerView(r));
   if (r.view === "fleet") {
     fleet.patch(ids);
+  } else if (r.view === "group" && fleet.groupKey === r.id) {
+    fleet.patchGroup(ids);
   } else if (r.view === "session" && ids.has(r.id)) renderMeta(app.state.sessions.get(r.id));
   else if (r.view === "term" && ids.has(r.id)) terminal.draw(termCard(r.id));
   else if (r.view === "window" && ids.has(r.id)) drawWindow(r);
@@ -1282,6 +1292,8 @@ const openSession = (id) => route().view === "window" || go(hashOf(id));
 // A tab's hash: a terminal's view, or a session's.
 const hashOf = (key) => ({ term: `#t=${key}`, browser: `#b=${key}` })[app.state.sessions.get(key)?.kind] || `#s=${key}`;
 const tabFocus = (r) => (r.view === "session" || r.view === "term" || r.view === "browser" ? r.id : null);
+// A group's page is the Fleet's: its button stays on while one shows.
+const headerView = (r) => (r.view === "group" ? "fleet" : r.view);
 // The open terminal's card, with the log id and server it is reached by.
 function termCard(key) {
   const m = app.state.sessions.get(key);
@@ -1436,7 +1448,7 @@ function render() {
     go("#fleet"); // a link to a session no tab held: gone before this page drew it
     return;
   }
-  header.render(tabbed(), tabFocus(r), r.view);
+  header.render(tabbed(), tabFocus(r), headerView(r));
   if (r.view !== "usage") usage.close();
   if (r.view !== "schedules") schedules.close();
   root.dataset.mode = r.view === "read" ? "read" : "live";
@@ -1452,6 +1464,13 @@ function render() {
     watchHost("all");
     if (newView) drawQuota();
     setTitle("Fleet · aegis");
+  } else if (r.view === "group") {
+    // A group's page is the Fleet over its members only (#1039): the same
+    // view, so a card opens its session and every key works as it does there.
+    follow(null);
+    show("fleet");
+    watchHost(null);
+    setTitle(`${fleet.renderGroup(r.id)} · aegis`);
   } else if (r.view === "spawn") {
     watchHost(null);
     follow(null);
@@ -3098,6 +3117,78 @@ async function renameKey(key) {
   sidebar.startRename("handle");
 }
 
+// -- groups by hand (#1039) -----------------------------------------------------
+// A group's key on this server, as `group.set` takes it; null for one on a
+// linked server, whose membership this server cannot edit.
+function bareGroup(key) {
+  const here = header.tabActions.here;
+  return key.endsWith(`@${here}`) ? key.slice(0, -here.length - 1) : null;
+}
+
+// Every open member of the group `key`, quiet sessions and workers included.
+function groupMembers(key) {
+  const here = header.tabActions.here;
+  return app.state.ordered.filter((m) => groupKey(m, here) === key);
+}
+
+// The groups this server may edit, by name, as the menu lists them.
+function localGroups() {
+  const here = header.tabActions.here;
+  const by = new Map();
+  for (const m of app.state.ordered) {
+    if (m.server || !m.group || !m.group_name) continue;
+    by.set(`${m.group}@${here}`, m.group_name);
+  }
+  return [...by].map(([key, name]) => ({ key, name }));
+}
+
+// Move tabs named by their keys into `group` ("new", a bare group key, or null
+// to leave). The server publishes every member's new card, and the bar follows.
+function moveToGroup(keys, group) {
+  if (keys.some((k) => app.forKey(k).server)) return undefined;
+  const log_ids = keys.map((k) => app.forKey(k).log_id);
+  return app.conn
+    .call("group.set", { log_ids, group })
+    .catch((e) => toast(e.message, { kind: "error" }));
+}
+
+async function renameGroup(key, name) {
+  const bare = bareGroup(key);
+  if (!bare) return;
+  try {
+    await app.conn.call("group.rename", { group: bare, name });
+  } catch (e) {
+    toast(e.message, { kind: "error" });
+  }
+}
+
+function ungroupGroup(key) {
+  const members = groupMembers(key);
+  if (!members.length) return undefined;
+  return app.conn
+    .call("group.set", { log_ids: members.map((m) => app.forKey(m.key).log_id), group: null })
+    .catch((e) => toast(e.message, { kind: "error" }));
+}
+
+// The group head's own menu (#1039): Rename group, Ungroup, Archive group.
+function groupMenu(key) {
+  const name = groupMembers(key).find((m) => m.group_name)?.group_name || key;
+  const local = !!bareGroup(key);
+  const why = local ? (offline() ? app.t("tabs.noConnection") : undefined) : app.t("tabs.farGroup");
+  return {
+    title: app.t("tabs.groupTitle", { name }),
+    groups: [
+      [
+        { id: "renamegroup", label: app.t("tabs.renameGroup"), icon: "pencil", disabled: why, run: () => header.startRename(key) },
+        { id: "ungroup", label: app.t("tabs.ungroup"), icon: "close", disabled: why, run: () => ungroupGroup(key) },
+      ],
+      [
+        { id: "archivegroup", label: app.t("tabs.archiveGroup"), icon: "archive", danger: true, disabled: why, run: () => archiveGroup(groupMembers(key)) },
+      ],
+    ],
+  };
+}
+
 // -- the card and tab menu (menu.js) --------------------------------------------
 // What applies to the session's state, and what the viewer may do: another
 // member's session offers only opening it; a guard that blocks an action
@@ -3116,9 +3207,25 @@ function sessionMenu(key) {
       ? "No connection to its server"
       : undefined;
   const close = [{ id: "archive", label: "Archive", icon: "archive", danger: true, disabled: why, run: () => closeSession(s) }];
-  // A group's head archives the whole group, after one question (#586).
-  const group = blocksOf(tabbed(), header.tabActions.here).find((b) => b.head.key === key && b.members.length > 1);
-  if (group) close.push({ id: "archivegroup", label: "Archive group…", icon: "archive", danger: true, disabled: why, run: () => archiveGroup(group.members) });
+  // Moving a session in or out of a group is one server op (#1039). The menu
+  // lists the move instead of a submenu (menu.js has none): New group, then
+  // each of this server's groups by name.
+  const far = !!app.forKey(key).server;
+  const frozen = far ? app.t("tabs.farGroup") : why;
+  const current = groupKey(s, header.tabActions.here);
+  const move = [
+    { id: "moveto-new", label: app.t("tabs.newGroup"), icon: "start", disabled: frozen, run: () => moveToGroup([key], "new") },
+    ...localGroups()
+      .filter((g) => g.key !== current)
+      .map((g) => ({
+        id: `moveto-${g.key}`,
+        label: app.t("tabs.moveTo", { name: g.name }),
+        icon: "folder",
+        disabled: frozen,
+        run: () => moveToGroup([key], bareGroup(g.key)),
+      })),
+  ];
+  if (s.group) move.push({ id: "leavegroup", label: app.t("tabs.leaveGroup"), icon: "arrow", disabled: frozen, run: () => moveToGroup([key], null) });
   if (isTool(s)) return { title, groups: [opening, close] };
   if (s.quiet || s.stay_quiet) opening.push({ id: "unquiet", label: "Unquiet", icon: "unquiet", disabled: why, run: () => quietKey(key, false) });
   else opening.push({ id: "quiet", label: "Quiet", icon: "quiet", disabled: why, run: () => quietKey(key, true) });
@@ -3133,14 +3240,18 @@ function sessionMenu(key) {
   const rename = [{ id: "rename", label: "Rename…", icon: "pencil", disabled: why, run: () => renameKey(key) }];
   rename.push({ id: "autoclose", label: s.autoclose ? "Autoclose off" : "Autoclose on", icon: "done", disabled: why, run: () => autocloseKey(key, !s.autoclose) });
   if (!s.worker) rename.push({ id: "autohandoff", label: s.autohandoff ? "Autohandoff off" : "Autohandoff on", icon: "handoff", disabled: why, run: () => autohandoffKey(key, !s.autohandoff) });
-  return { title, groups: [opening, life, rename, close] };
+  return { title, groups: [opening, life, rename, move, close] };
 }
 // The menu of a card or tab pressed; none on the space around them.
+// A group's own card or open stack's header in the Fleet gets the group's
+// menu, as its tab does (#1039).
 function cardMenu(t) {
+  if (t.matches?.(".card.group[data-group]")) return groupMenu(t.dataset.group);
+  if (t.matches?.(".gopen > .gh")) return groupMenu(t.parentElement.dataset.group);
   return t.dataset?.id && t.matches(".card, .tab, .wait") ? sessionMenu(t.dataset.id) : null;
 }
 function attachCardMenu(box, opts = {}) {
-  cmenu.attach(box, cardMenu, { selector: ".card[data-id], .tab[data-id], .wait[data-id]", ...opts });
+  cmenu.attach(box, cardMenu, { selector: ".card[data-id], .tab[data-id], .wait[data-id], .card.group[data-group], .gopen > .gh", ...opts });
 }
 // The tab card (#586) belongs to the header part (b2): a session tab's Fleet
 // card on hover, with the tab menu's items as buttons, and a long press on a
