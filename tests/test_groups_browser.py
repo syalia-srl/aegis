@@ -4,6 +4,9 @@ import re
 
 import pytest
 
+import os
+from pathlib import Path
+
 from .test_agents import mcp
 from .test_browser import (  # noqa: F401
     beta_session,
@@ -12,6 +15,7 @@ from .test_browser import (  # noqa: F401
     playwright,
     report,
     server,
+    Server,
     spawn,
     turns_done,
 )
@@ -713,4 +717,44 @@ def test_a_handoff_keeps_the_group(server, page):  # noqa: F811
     [[head, ids]] = bar(page)
     assert head == key
     assert new in ids and set(ids) - {new} == {kid}
+    assert page.errors == []
+
+
+@pytest.fixture
+def names_server(tmp_path, fake_claude, fake_opencode):
+    from .test_browser import CONFIG
+
+    (tmp_path / ".aegis.yaml").write_text(CONFIG + "group_names: {agent: opus}\n")
+    s = Server(tmp_path, fake_claude, fake_opencode).start()
+    yield s
+    s.stop()
+
+
+def test_a_group_takes_its_generated_name_and_title(names_server, page):  # noqa: F811
+    """#1047: a child joining names the group after the quiet, the title shows
+    on hover and on the Fleet's group card."""
+    page.goto(names_server.url)
+    page.wait_for_selector("#a2[data-view=fleet]")
+    spawn(page, mcp("session_spawn", agent="opus", prompt="hello"))
+    page.wait_for_function(
+        "document.querySelectorAll('#tablist .tab[data-id]').length === 2"
+    )
+    page.wait_for_function(
+        "document.querySelector('#tablist .tab.named .hn')?.textContent === 'crew-of-2'",
+        timeout=40000,
+    )
+    tip = page.get_attribute("#tablist .tab.named", "title")
+    assert "\ngroup of " in tip
+    page.goto(names_server.url)
+    page.wait_for_selector("#a2[data-view=fleet]")
+    page.wait_for_selector(
+        ".card.group .ttl:has-text('group of'), .gopen .gh .gt:has-text('group of')",
+        timeout=8000,
+    )
+    if shots := os.environ.get("AEGIS_SHOTS"):
+        out = Path(shots)
+        out.mkdir(parents=True, exist_ok=True)
+        page.screenshot(path=str(out / "desktop.png"))
+        page.set_viewport_size({"width": 390, "height": 844})
+        page.screenshot(path=str(out / "phone.png"))
     assert page.errors == []

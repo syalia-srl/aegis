@@ -66,7 +66,7 @@ log = logging.getLogger("aegis.config")
 
 WATCH_EVERY_S = 1.0
 TOP_KEYS = (
-    "agents", "queues", "default_agent", "recap", "btw", "context", "usage",
+    "agents", "queues", "default_agent", "recap", "btw", "group_names", "context", "usage",
     "session_memory_max", "terminals", "terminal_memory_max", "park", "network",
     "host", "workflows", "harness_versions", "notices", "nudges",
     "knowledge", "exit_via", "max_workers", "hosts", "mcp", "model_ranking",
@@ -570,6 +570,7 @@ def fields() -> list[dict]:
 
     add("generators", "recap.agent", "agent", None)
     add("generators", "btw.agent", "agent", None)
+    add("generators", "group_names.agent", "agent", None)
     add("memory", "session_memory_max", "size", DEFAULT_MEMORY_MAX)
     add("memory", "terminal_memory_max", "size", DEFAULT_MEMORY_MAX)
     for k, v in CONTEXT_DEFAULTS.items():
@@ -1282,7 +1283,7 @@ def _validate_settings(doc: ConfigDoc, err: Callable[[str, str, str], None]) -> 
         if block in b and (e := error_of(b[block])):
             err(block, block, str(e))
     agents = {a.name: a for a in doc.agents}
-    for key in ("recap", "btw"):
+    for key in ("recap", "btw", "group_names"):
         name = doc.settings.get(f"{key}.agent")
         if not name:
             continue

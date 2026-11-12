@@ -407,6 +407,11 @@ recap is sent to the agent. `/btw` is the same one-shot path's second caller
 the fold (`btw.py`), while a turn runs too, and the question and answer are two
 records, `btw` and `btw_answer`, that fold into one entry and never reach the
 agent.
+The third caller names groups (`group_names.py`, #1047): the registry calls
+`group_changed` with a group's key whenever its open members change, and the
+agent `group_names:` names writes its name and title after a 15 s quiet, once
+per membership. A name a person or an agent chose is pinned in `groups.json`
+and keeps; the call then sets only the title.
 
 **One registry, every caller.** Every action is one registered operation with a
 pydantic params model. A websocket `call` is one projection of the registry, MCP

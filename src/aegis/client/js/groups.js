@@ -62,7 +62,7 @@ export function blocksOf(metas, here) {
     const mark = URGENT.find((a) => open.some((m) => m.mark === a)) || open[0].mark;
     return {
       key,
-      head: { kind: "group", key, name: nameOf(key, ms, handles), mark },
+      head: { kind: "group", key, name: nameOf(key, ms, handles), title: ms.find((m) => m.group_title)?.group_title || "", mark },
       members: ms,
     };
   });

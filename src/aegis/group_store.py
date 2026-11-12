@@ -1,16 +1,20 @@
 """Named groups (#1039): one small JSON file per server, next to the metas
-store, holding one record per group: ``{key, name, owner, created_at}``.
+store, holding one record per group: ``{key, name, owner, created_at, title,
+pinned}``.
 
 A group has no head. A session belongs to it through ``spec.group``, which
 holds its key; the record exists while it has an open member. The key is
 ``grp-`` and 8 hex characters. A generated name is an adjective and a
-laureate from the handle word lists (names.py); two of one owner's groups
+laureate from the handle word lists (names.py), until a generator agent
+names it from its members (group_names.py, #1047); ``pinned`` marks a name a
+person or an agent chose, which the generator never overwrites. Two of one owner's groups
 never share a name, the later one taking ``-2``, ``-3``... Writes go through
 write-then-rename, so a crash leaves the old file or the new one.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 import os
@@ -38,6 +42,8 @@ class Group:
     name: str
     owner: str | None
     created_at: float
+    title: str = ""
+    pinned: bool = False
 
 
 def generated_name(rng: random.Random | None = None) -> str:
@@ -64,27 +70,38 @@ class GroupStore:
         )
 
     def create(self, owner: str | None, name: str | None = None) -> Group:
-        """A new record, with ``name`` when given and a generated one otherwise;
-        a name its owner already uses gets a numeric suffix."""
+        """A new record, with ``name`` when given (pinned) and a generated one
+        otherwise; a name its owner already uses gets a numeric suffix."""
+        pinned = name is not None
         name = generated_name() if name is None else self._clean(name)
         g = Group(
             key=self._mint_key(),
             name=self._free_name(owner, name),
             owner=owner,
             created_at=time.time(),
+            pinned=pinned,
         )
         self._groups[g.key] = g
         self._save()
         return g
 
-    def rename(self, key: str, name: str) -> Group:
+    def rename(
+        self, key: str, name: str, title: str | None = None, pinned: bool = True
+    ) -> Group:
         """Rename a group; ``bad_name`` for an empty, multi-line or too long
-        name, and the suffix for one its owner already uses."""
+        name, and the suffix for one its owner already uses. A person's or an
+        agent's rename pins the name; the generator's (``pinned=False``) also
+        sets the title."""
         g = self._groups.get(key)
         if g is None:
             raise OpError("no_group", f"no group {key!r}")
         name = self._free_name(g.owner, self._clean(name), except_key=key)
-        g = Group(key=g.key, name=name, owner=g.owner, created_at=g.created_at)
+        g = dataclasses.replace(
+            g,
+            name=name,
+            title=g.title if title is None else title,
+            pinned=g.pinned or pinned,
+        )
         self._groups[key] = g
         self._save()
         return g
@@ -152,8 +169,14 @@ class GroupStore:
                 created_at = float(created)
             except (TypeError, ValueError):
                 created_at = time.time()
+            title = e.get("title")
             self._groups[key] = Group(
-                key=key, name=name, owner=owner, created_at=created_at
+                key=key,
+                name=name,
+                owner=owner,
+                created_at=created_at,
+                title=title if isinstance(title, str) else "",
+                pinned=e.get("pinned") is True,
             )
 
     def _save(self) -> None:
