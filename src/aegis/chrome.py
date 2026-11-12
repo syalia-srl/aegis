@@ -82,6 +82,19 @@ class CallError(Exception):
         self.message = message
 
 
+def shipped_version() -> str:
+    """The extension version this server hands out in Settings → Chrome."""
+    manifest = Path(__file__).parent / "extension" / "manifest.json"
+    return json.loads(manifest.read_text())["version"]
+
+
+def _older(have: str, want: str) -> bool:
+    def key(v: str) -> tuple[int, ...]:
+        return tuple(int(x) for x in v.split(".") if x.isdigit())
+
+    return key(have) < key(want)
+
+
 class PairError(Exception):
     def __init__(self, code: str, message: str) -> None:
         super().__init__(f"{code}: {message}")
@@ -527,6 +540,19 @@ class Chrome:
                  "args": args},
             )  # fmt: skip
             return await asyncio.wait_for(fut, timeout)
+        except CallError as e:
+            # An extension older than the server's does not know newer ops:
+            # say so, so the agent asks the person to update it.
+            have = self.devices.get(tab["device"], {}).get("version", "")
+            want = shipped_version()
+            if e.code == "not_supported" and _older(have, want):
+                raise CallError(
+                    "extension_outdated",
+                    f"the person's aegis extension is {have or 'unknown'} and does"
+                    f" not know browser_{op}; this server ships {want}: ask them to"
+                    " download it again from Settings → Chrome and reload it",
+                ) from None
+            raise
         except TimeoutError:
             raise CallError(
                 "chrome_timeout", f"your browser did not answer {op} in {timeout:.0f} s"

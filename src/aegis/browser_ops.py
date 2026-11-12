@@ -198,7 +198,8 @@ def register_browser_ops(app: App) -> None:
         transcript (dock=) and shows as a tab, where the person watches and
         clicks in it; you hold the page until you hand it over. Its profile
         keeps sign-ins between opens. With where="person", ask the person to
-        open the URL in a new tab of their own browser instead (chrome)."""
+        open the URL in a new tab of their own browser instead, through
+        aegis's own Chrome extension (Settings → Chrome)."""
         if not caller.is_agent:
             raise OpError("bad_caller", "a person opens a browser with browser.spawn")
         if p.where == "person":
