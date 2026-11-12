@@ -1,7 +1,7 @@
 {
   "source": "Artificial Analysis",
   "url": "https://artificialanalysis.ai",
-  "refreshed": "2026-11-11",
+  "refreshed": "2026-11-12",
   "models": {
     "fable": {
       "aa": "claude-fable-5-2",
