@@ -140,6 +140,7 @@ from .quota_gate import (
     refusal,
 )
 from .btws import SideNotes
+from .group_names import GroupNames
 from .recaps import Recaps
 from . import host_tokens
 from .policy_events import EventPump
@@ -625,6 +626,8 @@ class App:
             self.versions.running["version"], self.publish
         )
         self.recaps = Recaps(self)
+        self.group_names = GroupNames(self)
+        self.sessions.group_changed = self.group_names.changed
         self.side_notes = SideNotes(self)
         self.sessions.side_notes = self.side_notes
         self.nudges = Nudges(self.sessions, self.config)
@@ -1688,6 +1691,7 @@ class App:
         await self.monitors.shutdown()
         await self.feeds.shutdown()
         await self.recaps.shutdown()
+        await self.group_names.shutdown()
         if self.sessions.sign_in is not None:
             await self.sessions.sign_in.shutdown()
         await self.terminals.shutdown()

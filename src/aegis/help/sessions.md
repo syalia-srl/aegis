@@ -336,7 +336,10 @@ included, where a card opens that session.
 A group fills by itself. What a session spawns or enqueues joins that
 session's group, and a session in no group that starts its first child makes a
 group holding both, with a generated name such as `brisk-backus` (`-2` when
-the name is taken). A person's `/spawn` joins the group of the tab it was
+the name is taken). With `group_names:` set (config#group-names), an agent
+renames it from what its members work on each time one joins or leaves, and
+gives it a one-line title, shown when you hover its name and on its Fleet
+card; a name you or an agent chose stays. A person's `/spawn` joins the group of the tab it was
 typed in, making one if that tab has none. A group with one open member is
 drawn as that member's plain tab; its record stays, so a later spawn rejoins
 the same name.

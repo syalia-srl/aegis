@@ -128,7 +128,7 @@ function unit(u, metas, onOpen, onClose, stacks, t) {
     const fold = el("button", null, t("fleet.stack"));
     fold.type = "button";
     fold.addEventListener("click", () => stacks.onToggle(u.key));
-    gh.append(markNode(u.head), el("b", null, u.head.name), el("span", "n", t("fleet.stackCount", { n: members.length, working })), fold);
+    gh.append(markNode(u.head), el("b", null, u.head.name), ...(u.head.title ? [el("span", "gt", u.head.title)] : []), el("span", "n", t("fleet.stackCount", { n: members.length, working })), fold);
     const handles = new Map(metas.map((m) => [m.log_id, m.handle]));
     const cards = members.map((m) => {
       const c = card(m, onOpen, onClose, t);
@@ -171,7 +171,8 @@ function groupCard(u, t) {
   const hd = el("div", "hd");
   hd.append(markNode(u.head), el("span", "h", u.head.name));
   const working = u.members.filter((m) => m.attention === "working").length;
-  c.append(hd, el("div", "ttl", t("fleet.stackCount", { n: u.members.length, working })));
+  const count = t("fleet.stackCount", { n: u.members.length, working });
+  c.append(hd, el("div", "ttl", u.head.title ? `${u.head.title} · ${count}` : count));
   return c;
 }
 
