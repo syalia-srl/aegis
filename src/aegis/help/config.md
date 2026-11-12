@@ -31,6 +31,7 @@ queues:
   research: {agent: deepseek}
 recap: {agent: quick}
 btw: {agent: opus}
+group_names: {agent: quick}
 context: {handoff_at: 300000, cold_after: 3600, cold_min: 100000}
 notices: {disk: {on: 90, critical: 97, clear: 85}, cpu: false}
 park: {claude-code: 1200}
@@ -242,6 +243,15 @@ navigation pill asks for a fresh one.
 up to the last ten turns of the session, about 32,000
 tokens, and the side notes asked before. Without it, `/btw` says which line to
 add. A side note may need more model than a recap, so the two keys are separate.
+
+## Group names
+
+`group_names:` with `agent:` names an agent that names each group of tabs from
+what its members work on: two or three hyphenated words and a one-line title.
+It runs once each time a member joins or leaves, 15 seconds after the last
+change, so a queue batch costs one call, and it reads each member's handle,
+title, open plan items and last report. A name you or an agent chose stays;
+only its title changes. Without the key a group keeps its random name.
 
 ## Context size and the cache
 

@@ -179,6 +179,9 @@ class Registry(Host):
         self.version_policy: Callable[[], dict | None] = lambda: None
         # The person's pause of every session (pause.py): session -> why.
         self.pause_hold = None
+        # The app's GroupNames.changed (#1047): a group key whose open members
+        # changed. None names nothing, as a registry with no app does.
+        self.group_changed: Callable[[str], None] | None = None
         # The app's start_spec: a spec -> the spec to start (its cascade's
         # first model free now) and the gate it passes.
         self.start_spec = None
@@ -588,12 +591,6 @@ class Registry(Host):
         self._publish("sessions", [{"upsert": parent.wire()}])
         return g.key
 
-    def group_name(self, key: str | None) -> str | None:
-        """The name of the group ``key``, or None when the record is not here
-        (a session in no group, or one whose group began on a linked server)."""
-        g = self.groups.get(key) if key is not None else None
-        return g.name if g is not None else None
-
     def set_group(
         self, log_ids: list[str], key: str | None, owner: str | None
     ) -> str | None:
@@ -636,7 +633,10 @@ class Registry(Host):
         for old in emptied - {key}:
             if not any(x.spec.group == old for x in self.sessions.values()):
                 self.groups.delete(old)
+            else:
+                self._group_changed(old)
         if changed:
+            self._group_changed(key)
             self._publish("sessions", [{"upsert": s.wire()} for s in changed])
         return key
 
@@ -654,6 +654,27 @@ class Registry(Host):
         if members:
             self._publish("sessions", [{"upsert": s.wire()} for s in members])
         return {"key": g.key, "name": g.name}
+
+    def retitle_group(self, key: str, name: str | None, title: str) -> bool:
+        """The generator's name and title for ``key`` (group_names.py, #1047):
+        the name only when nobody pinned one and it is valid, the title always.
+        Republishes every member's card. False when the group is gone."""
+        g = self.groups.get(key)
+        if g is None:
+            return False
+        name = name if name is not None and not g.pinned else g.name
+        self.groups.rename(key, name, title=title, pinned=False)
+        members = [s for s in self.sessions.values() if s.spec.group == key]
+        if members:
+            self._publish("sessions", [{"upsert": s.wire()} for s in members])
+        return True
+
+    def _group_changed(self, key: str | None) -> None:
+        """Tell the generator a group's members changed; a linked server's
+        key is named there."""
+        if self.group_changed is not None and key and "@" not in key:
+            if self.groups.get(key) is not None:
+                self.group_changed(key)
 
     def card(self, session: Session) -> dict:
         out = {
@@ -674,8 +695,11 @@ class Registry(Host):
             else None,
         }
         # The bar and the Fleet name a group from any member's card (#1039).
-        if (name := self.group_name(session.spec.group)) is not None:
-            out["group_name"] = name
+        g = self.groups.get(session.spec.group) if session.spec.group else None
+        if g is not None:
+            out["group_name"] = g.name
+            if g.title:
+                out["group_title"] = g.title
         return out
 
     def _worker(self, s: Session) -> dict:
@@ -1161,6 +1185,7 @@ class Registry(Host):
         )
         self.sessions[log_id] = s
         s.host_env, s.admitted = env, True
+        self._group_changed(s.spec.group)
         self._publish("sessions", [{"upsert": s.wire()}])
         s.launch_by = launch_by
         self.event("start", log_id, {})
@@ -1213,6 +1238,8 @@ class Registry(Host):
             x.spec.group == s.spec.group for x in self.sessions.values()
         ):
             self.groups.delete(s.spec.group)
+        else:
+            self._group_changed(s.spec.group)
         s.archived = True
         s.artifacts.flush_all()  # a page's last coalesced write, before the store shuts
         s.store.close()

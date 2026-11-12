@@ -84,6 +84,8 @@ the five-hour window at that utilization.
 A ``--json-schema`` with an ``answer`` property is a side note: it gets
 ``{"answer": "btw of: <question>"}``, and ``needs_more`` when the question
 carries ``[[more]]``.
+A schema with a ``title`` property is a group's name: ``crew-of-<n>`` for
+n members, and ``group of <their sorted handles>``.
 
 With ``FAKE_CLAUDE_REPLAY=<store file>``, the first prompt instead replays the
 Claude lines of an aegis store, ``FAKE_CLAUDE_PACE`` seconds apart (default
@@ -1014,6 +1016,16 @@ def oneshot() -> None:
         ]
         q = asked[-1] if asked else ""
         out = {"answer": f"btw of: {q}", "needs_more": "[[more]]" in q}
+    elif "title" in schema.get("properties", {}):
+        # A group's name (group_names.py): one word per member, and a title
+        # that lists the handles, so a test reads which members it saw.
+        handles = [
+            ln[2:].split(":", 1)[0] for ln in prompt.splitlines() if ln.startswith("- ")
+        ]
+        out = {
+            "name": f"crew-of-{len(handles)}",
+            "title": "group of " + ", ".join(sorted(handles)),
+        }
     else:
         lines = [ln for ln in prompt.splitlines() if ln.startswith("user: ")]
         last = lines[-1].removeprefix("user: ") if lines else "nothing"

@@ -147,6 +147,8 @@ function groupTab(b, folded, actions) {
   node.dataset.group = b.key;
   node.title = t("tabs.groupTitle", { name: b.head.name });
   node.setAttribute("aria-label", node.title);
+  // The generated title (#1047) says what the group works on.
+  if (b.head.title) node.title += `\n${b.head.title}`;
   if (renaming === b.key) {
     const input = document.createElement("input");
     input.className = "ren";
