@@ -294,3 +294,21 @@ async def test_the_scripts_switch_goes_from_aegis_to_the_extension_and_back(worl
     # A reconnecting browser says what it holds.
     chrome.sync_tabs(ext.did, [TAB | {"grants": [a.log_id], "eval": True}])
     assert chrome.wire()["tabs"][0]["eval"] is True
+
+
+async def test_an_op_an_old_extension_does_not_know_says_it_is_outdated(world):
+    from aegis.chrome import shipped_version
+
+    def old(msg):
+        raise ValueError("not_supported", f"{msg['op']} does not work yet")
+
+    a = await world.spawn()
+    ext = Driven(world.app.chrome, old)
+    await ext.say(t="grant", tab=TAB, log_id=a.log_id)
+    dev = world.app.chrome.devices[ext.did]
+    dev["version"] = "0.4.0"
+    out = await turn(a, mcp("browser_eval", browser="chrome:qwen", expression="1"))
+    assert "extension_outdated" in out and "Settings → Chrome" in out
+    dev["version"] = shipped_version()
+    out = await turn(a, mcp("browser_eval", browser="chrome:qwen", expression="1"))
+    assert "not_supported" in out and "extension_outdated" not in out
