@@ -923,6 +923,7 @@
 .a2 .gopen{grid-column:1/-1;border:1px solid var(--g);border-radius:calc(var(--r) + 4px);padding:10px 12px 14px;background:color-mix(in srgb,var(--g) 6%,transparent)}
 .a2 .gopen .gh{display:flex;gap:10px;align-items:center;margin-bottom:10px;font-family:var(--font-mono);font-size:12.5px;color:var(--muted)}
 .a2 .gopen .gh b{color:var(--strong)}
+.a2 .gopen .gh .gt{font-family:var(--font-ui);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .a2 .gopen .gh button{margin-left:auto;font:12px var(--font-ui);padding:4px 10px;border:1px solid var(--rule);border-radius:var(--r);background:var(--surface);color:var(--strong);cursor:pointer}
 .a2 .gopen .gcards{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
 .a2 .gopen .card{box-shadow:inset 3px 0 0 var(--g)}
