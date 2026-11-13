@@ -315,7 +315,9 @@ def register_chrome_ops(app: App) -> Chrome:
     async def browser_list(_, caller):
         """Every browser you may use: the server's (kind server) and the tabs
         of the person's own browser they gave you (kind person, id
-        chrome:<name>)."""
+        chrome:<name>). Their tabs arrive through aegis's own Chrome extension
+        (Settings → Chrome), not any other: when none is listed, ask for one
+        with browser_request."""
         out = [
             {
                 "id": b.id,
@@ -343,7 +345,9 @@ def register_chrome_ops(app: App) -> Chrome:
         """Ask the person for one of the tabs open in their own browser, with
         their sign-ins. Say what you want in match and why. End your turn: you
         are woken with granted, naming the tab's id, or denied. You never learn
-        which other tabs exist."""
+        which other tabs exist. It goes through aegis's own Chrome extension;
+        chrome_unavailable means the person has not paired it (Settings →
+        Chrome) or their browser is closed."""
         return await ask(caller, "tab", p.match, "", p.why)
 
     return chrome
