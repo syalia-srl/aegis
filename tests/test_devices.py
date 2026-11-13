@@ -263,3 +263,26 @@ def test_no_device_and_an_unknown_name_say_so(web):
             dcall(conn, op="device.info", device="nope")["error"]["code"]
             == "unknown_device"
         )
+
+
+def test_attention_reaches_the_phone_as_a_notification(web):
+    app, c = web
+    phone = Phone()
+    pair(c, phone)
+    with c.websocket_connect("/device") as dev:
+        dev.send_json(phone.hello(dev.receive_json()))
+        dev.receive_json()
+        payload = {
+            "title": "fix-tests: needs you",
+            "body": "Merge it?",
+            "key": "20260101-000000-abcdef",
+            "kind": "needs_you",
+            "tag": "x:needs_you",
+        }
+        c.portal.call(app.push.sender._queue_for, "needs_you", payload)
+        got = dev.receive_json()
+        assert got["t"] == "notify" and got["title"] == "fix-tests: needs you"
+        # A finished turn is not a default source: the phone hears nothing.
+        c.portal.call(app.push.sender._queue_for, "done", payload | {"kind": "done"})
+        c.portal.call(app.push.sender._queue_for, "toast", payload | {"kind": "toast"})
+        assert dev.receive_json()["kind"] == "toast"
