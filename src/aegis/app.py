@@ -70,6 +70,7 @@ from .agent_ops import (
     spawn_opening,
     spawn_tail,
 )
+from .annotation_ops import register_annotation_ops
 from .artifact_ops import register_artifact_ops
 from .config_suggest import register_config_suggest
 from .secret_ops import register_secret_ops
@@ -690,6 +691,7 @@ class App:
         register_config_suggest(self)
         self.setup_records = setup.register_setup(self)
         register_artifact_ops(self)
+        register_annotation_ops(self)
         self.secrets = self.sessions.secrets = register_secret_ops(self)
         register_layout_ops(self)
         self.fs_index, self.fs_tickets = register_fs_ops(self)

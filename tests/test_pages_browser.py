@@ -445,6 +445,46 @@ def test_draw_highlight_arrow_and_point_keep_their_shape(server, page):  # noqa:
     assert page.errors == []
 
 
+def test_an_html_region_becomes_a_structured_annotation(server, page):  # noqa: F811
+    (server.root / "report.html").write_text(
+        "<html><body><h1 id=t>Title</h1><p>body copy here</p></body></html>"
+    )
+    page.goto(server.url)
+    spawn(page)
+    page.goto(f"{server.url.split('#')[0]}#files=report.html")
+    page.wait_for_selector(".v-files .fstage.html iframe")
+    page.click(".v-files .vatools [data-tool=area]")
+    drag_region(page, ".v-files .valayer")
+    page.locator(".v-files .ctray .note").fill("tighten this block")
+    page.locator(".v-files .ctray [data-act=send]").click()
+    text = page.input_value("#input")
+    assert "Annotations on report.html:" in text
+    assert '"type":"region"' in text
+    assert "tighten this block" in text
+    assert page.errors == []
+
+
+def test_an_html_element_pick_becomes_a_structured_annotation(server, page):  # noqa: F811
+    (server.root / "report.html").write_text(
+        "<html><body><h1 id=t>Title</h1><p id=p1>body copy here</p></body></html>"
+    )
+    page.goto(server.url)
+    key = spawn(page)
+    page.goto(f"{server.url.split('#')[0]}#files=report.html")
+    frame = frame_of(page, ".v-files .fstage.html iframe")
+    page.click(".v-files .vatools [data-tool=element]")
+    frame.locator("#t").click()
+    page.wait_for_selector(".v-files .ctray .cn")
+    assert page.locator(".v-files .ctray .cn").inner_text() == "1 annotation"
+    page.locator(".v-files .ctray [data-act=send]").click()
+    page.wait_for_function(f"location.hash === '#s={key}'")
+    text = page.input_value("#input")
+    assert '"type":"element"' in text
+    assert '"css":"#t"' in text
+    assert "Title" in text
+    assert page.errors == []
+
+
 PAGE = "<html><body><h2>Setup</h2><p id=p1>kiwi</p><p>plum</p></body></html>"
 
 

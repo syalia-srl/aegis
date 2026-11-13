@@ -367,7 +367,7 @@ export class Viewer {
       isCurrent: () => draw === this.drawn,
       drawn: (content) => tray?.layer(content),
     });
-    if (["image", "pdf"].includes(f.preview)) {
+    if (["image", "pdf", "html"].includes(f.preview)) {
       this.annotation = annotate(body.querySelector(".stage"), tray, {
         path: this.pathOf(),
         kind: f.preview,

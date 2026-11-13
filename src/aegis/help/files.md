@@ -1,10 +1,11 @@
 ---
 title: Files
 kind: howto
-when: opening, reading or editing any file on the server in the browser with Alt+O or the folder tree, viewing rendered Markdown, HTML, images, PDF, audio and video, creating, renaming, moving or deleting files and folders, undoing a delete, and saving a file that changed on disk, and asking a session about selected lines or elements, or commenting on them
+when: opening, reading or editing any file on the server in the browser with Alt+O or the folder tree, viewing rendered Markdown, HTML, images, PDF, audio and video, creating, renaming, moving or deleting files and folders, undoing a delete, and saving a file that changed on disk, asking a session about selected lines or elements, or commenting on them, and annotating an image, PDF or HTML page for an agent
 hints:
   - Press Alt+O to open any file on the server in the browser. #opening-a-file
   - Select lines in a file and comment on them for the agent. #pointing-at-lines-and-comments
+  - Annotate an image, PDF or HTML page and send the marks to the agent. #annotating-images-and-pdfs
 ---
 
 Files opens any file under the config root in the browser, so reading a file,
@@ -157,28 +158,34 @@ as before, without the menu or the bar inside it.
 
 ## Annotating images and PDFs
 
-An image or PDF opened in Files, opened from a sent file's card, or docked
-beside the transcript has icon tools over its preview. The name shows on
-hover: Point, Area, Draw, Highlight, Arrow, and Annotate off. Point marks a
-spot. Area drags a region. Highlight selects text on a PDF, the way a copy
-does, and the mark names those words; on an image it drags a translucent
-region. Draw follows the pointer, and Arrow runs from the press to the
-release. A PDF opens in Mozilla's viewer, so the page on screen is known, and
-Area and Point name the words under them when the page has text. The wheel
-still scrolls the document while a tool is on. Annotate off leaves the
-viewer's zoom, find, and page controls in reach.
+An image, PDF or HTML page opened in Files, opened from a sent file's card, or
+docked beside the transcript has icon tools over its preview. The name shows
+on hover: Point, Area, Draw, Highlight, Arrow, and Annotate off. HTML also
+has Element. Point marks a spot. Area drags a region. Highlight selects text
+on a PDF, the way a copy does, and the mark names those words; on an image or
+HTML page it drags a translucent region. Draw follows the pointer, and Arrow
+runs from the press to the release. Element outlines a node in the page: click
+to pin it, Arrow Up or Down to walk to a parent or child. A PDF opens in
+Mozilla's viewer, so the page on screen is known, and Area and Point name the
+words under them when the page has text. The wheel still scrolls the document
+while a tool is on. Annotate off leaves the viewer's zoom, find, and page
+controls in reach.
 
 Each mark adds a number and a note to the same comment tray used for text.
 On a wide window the list sits beside the picture, so the preview keeps its
 size. The note takes more than one line: Enter and Shift+Enter add a line, and
 neither sends. Remove individual marks, Discard them all, or Send them
 together. The message names the file and carries the annotation type, the PDF
-page when applicable, the words when the page has them, and normalized
-coordinates as JSON: a region for a point, an area or a highlight, and a list
-of points for a stroke or an arrow.
-An agent can identify the same place at any display size. On a docked file,
-Send writes that message into the session's composer. Unsent annotations stay
-only in this browser and are restored after a reload, like text comments.
+page when applicable, the words when the page has them, an HTML element's
+locator and a few computed styles when Element was used, and normalized
+coordinates as JSON: a region for a point, an area, a highlight or an
+element, and a list of points for a stroke or an arrow.
+An agent can identify the same place at any display size. To see the place,
+it calls `annotation_view` with that file and the region, page or CSS from
+the JSON; the tool renders at a fixed size, so the person's pane does not
+matter, and returns a PNG path. On a docked file, Send writes that message
+into the session's composer. Unsent annotations stay only in this browser and
+are restored after a reload, like text comments.
 
 ## When the file changed on disk
 

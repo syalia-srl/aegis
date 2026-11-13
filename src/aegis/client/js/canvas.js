@@ -550,7 +550,7 @@ export class Canvas {
   // into the session's composer. The tray key is the file's URL, so a mark
   // made here is still there if the file is opened in the viewer before Send.
   mountMarks(node, f) {
-    if (!f || !this.compose || !["image", "pdf"].includes(f.preview)) return;
+    if (!f || !this.compose || !["image", "pdf", "html"].includes(f.preview)) return;
     const stage = node.querySelector(".pbody .stage");
     if (!stage) return;
     const path = f.root_path || f.name;

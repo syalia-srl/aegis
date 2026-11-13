@@ -124,11 +124,12 @@ The gutter of each row names what the row is.
 | `g-lock` | A secret sent or asked for | the transcript |
 | `g-artifact` | A page the agent made for you | the transcript |
 | `g-comment` | Comment; a question in a workflow's story | menus, workflows |
-| `g-point` | Mark a point on an image or PDF | the annotation tools on a preview |
-| `g-region` | Outline an area on an image or PDF | the annotation tools on a preview |
-| `g-draw` | Draw a stroke on an image or PDF | the annotation tools on a preview |
-| `g-highlight` | Highlight a region on an image or PDF | the annotation tools on a preview |
-| `g-mark-arrow` | Draw an arrow on an image or PDF | the annotation tools on a preview |
+| `g-point` | Mark a point on an image, PDF or HTML page | the annotation tools on a preview |
+| `g-element` | Pick an HTML element to annotate | the annotation tools on an HTML preview |
+| `g-region` | Outline an area on an image, PDF or HTML page | the annotation tools on a preview |
+| `g-draw` | Draw a stroke on an image, PDF or HTML page | the annotation tools on a preview |
+| `g-highlight` | Highlight a region on an image, PDF or HTML page | the annotation tools on a preview |
+| `g-mark-arrow` | Draw an arrow on an image, PDF or HTML page | the annotation tools on a preview |
 | `g-unread` | An agent message you have not read | the transcript |
 | `g-read` | Read; done; nothing left to commit | the transcript, workflows, repos, the journal |
 | `g-copy` | Copy | buttons, menus |
