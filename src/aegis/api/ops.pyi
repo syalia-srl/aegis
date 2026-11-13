@@ -30,6 +30,8 @@ class Ops:
     @property
     def config(self) -> _config: ...
     @property
+    def device(self) -> _device: ...
+    @property
     def dictation(self) -> _dictation: ...
     @property
     def feed(self) -> _feed: ...
@@ -332,6 +334,23 @@ class _config:
         """config.suggestion.decline"""
     async def write(self, *, doc: dict[str, Any], stamp: str | None = ...) -> Any:
         """Write the Settings form to .aegis.yaml. Refused when the file changed since `stamp`; nothing is written when the document has a problem."""
+
+class _device:
+    async def call(
+        self,
+        *,
+        op: str,
+        args: dict[str, Any] = ...,
+        device: str | None = ...,
+        timeout: int = ...,
+    ) -> Any:
+        """Run an operation on a paired phone and get its result: read sensors (sensor.list, sensor.read, compass.read) or device.info. The phone may ask the person first, and answers denied when they refuse. help_read devices lists each operation and its arguments."""
+    async def list(self) -> Any:
+        """The phones paired to your owner: name, online, Android API level, app version and the operations each one runs (help: devices)."""
+    async def mine(self) -> Any:
+        """The person's paired phones, for Settings → Device."""
+    async def remove(self, *, id: str) -> Any:
+        """Unpair a phone: its key stops working and its socket closes."""
 
 class _dictation:
     async def prepare(self) -> Any:

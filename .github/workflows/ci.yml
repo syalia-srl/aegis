@@ -78,6 +78,48 @@ jobs:
   # out until they are fixed (#776). Until the fair release (#768), seven of
   # every twenty pushes to main went red on a flake, so a red PR said nothing.
 
+  # The Android app (android/, #1060): its JVM tests and a release APK signed
+  # with the key in the repository's secrets, kept as the run's artifact so a
+  # phone can install the PR's build. Without the secrets (a fork's PR) the APK
+  # is built unsigned and only the build is checked.
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20  # about 5 min
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+      - name: release key
+        env:
+          KEYSTORE_B64: ${{ secrets.AEGIS_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            printf '%s' "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/aegis.jks"
+            echo "AEGIS_KEYSTORE_FILE=$RUNNER_TEMP/aegis.jks" >> "$GITHUB_ENV"
+          fi
+      - name: test and build
+        env:
+          AEGIS_KEYSTORE_PASSWORD: ${{ secrets.AEGIS_KEYSTORE_PASSWORD }}
+        run: ./gradlew --no-daemon :app:testDebugUnitTest :app:assembleRelease
+      - name: verify the signature
+        if: env.AEGIS_KEYSTORE_FILE != ''
+        run: |
+          apksigner=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          "$apksigner" verify --print-certs app/build/outputs/apk/release/app-release.apk
+          cp app/build/outputs/apk/release/app-release.apk aegis.apk
+      - uses: actions/upload-artifact@v4
+        if: env.AEGIS_KEYSTORE_FILE != ''
+        with:
+          name: aegis-apk
+          path: android/aegis.apk
+          retention-days: 30
+
   # aegis's bench, on the PR's base and head on one runner so the machine
   # cancels out. Reports in the job summary and warns past 20% worse; it
   # never fails the run (scripts/bench_compare.py exits 0, and every step
