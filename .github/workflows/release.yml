@@ -49,3 +49,42 @@ jobs:
 
       - name: Publish to PyPI (trusted publishing via uv)
         run: uv publish --trusted-publishing always
+
+  # The Android app's APK for this release, at
+  # releases/latest/download/aegis.apk, which Settings → Phone app links.
+  # The release itself is made by hand after the tag (know-how/releasing.md,
+  # step 11), so this job waits for it for up to 30 minutes.
+  apk:
+    name: Attach the Android APK
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+      - name: build and sign
+        env:
+          KEYSTORE_B64: ${{ secrets.AEGIS_KEYSTORE_B64 }}
+          AEGIS_KEYSTORE_PASSWORD: ${{ secrets.AEGIS_KEYSTORE_PASSWORD }}
+        run: |
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/aegis.jks"
+          AEGIS_KEYSTORE_FILE="$RUNNER_TEMP/aegis.jks" ./gradlew --no-daemon :app:assembleRelease -PversionName="${GITHUB_REF_NAME#v}"
+          apksigner=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          "$apksigner" verify app/build/outputs/apk/release/app-release.apk
+          cp app/build/outputs/apk/release/app-release.apk aegis.apk
+      - name: attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in $(seq 60); do
+            gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 && break
+            sleep 30
+          done
+          gh release upload "$GITHUB_REF_NAME" aegis.apk --clobber
