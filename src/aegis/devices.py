@@ -186,7 +186,9 @@ class Devices:
             shell=hello.get("shell") if isinstance(hello.get("shell"), int) else None,
             api=hello.get("api") if isinstance(hello.get("api"), int) else None,
             model=str(hello.get("model") or "")[:NAME_MAX] or None,
-            ops=[o for o in ops if isinstance(o, str)][:200] if isinstance(ops, list) else [],
+            ops=[o for o in ops if isinstance(o, str)][:200]
+            if isinstance(ops, list)
+            else [],
         )
         self._save()
         self._drop(id)
@@ -220,7 +222,10 @@ class Devices:
         err = frame.get("error")
         if isinstance(err, dict):
             fut.set_exception(
-                OpError(str(err.get("code") or "android_error"), str(err.get("message") or ""))
+                OpError(
+                    str(err.get("code") or "android_error"),
+                    str(err.get("message") or ""),
+                )
             )
         else:
             fut.set_result(frame.get("result"))
@@ -250,7 +255,9 @@ class Devices:
             live.pending.pop(cid, None)
 
     def online(self, owner: str) -> list[str]:
-        return [r["id"] for r in self._rows if r["owner"] == owner and r["id"] in self._live]
+        return [
+            r["id"] for r in self._rows if r["owner"] == owner and r["id"] in self._live
+        ]
 
     async def notify(self, owner: str, payload: dict) -> None:
         """Send an attention notification to each of ``owner``'s phones online."""
@@ -261,4 +268,6 @@ class Devices:
             try:
                 await live.send({"t": "notify"} | payload)
             except Exception:
-                log.debug("aegis: a notification to device %s failed", id, exc_info=True)
+                log.debug(
+                    "aegis: a notification to device %s failed", id, exc_info=True
+                )

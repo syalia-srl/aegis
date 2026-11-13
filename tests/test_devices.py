@@ -94,7 +94,9 @@ async def test_a_phone_error_is_an_op_error(tmp_path):
     id = d.pair("ana", "Pixel", Phone().public_key)["id"]
 
     async def send(frame):
-        d.on_reply(live, {"id": frame["id"], "error": {"code": "denied", "message": "no"}})
+        d.on_reply(
+            live, {"id": frame["id"], "error": {"code": "denied", "message": "no"}}
+        )
 
     live = d.attach(id, {}, send)
     with pytest.raises(OpError) as e:
@@ -132,3 +134,132 @@ async def test_no_answer_is_a_timeout_and_offline_is_said_at_once(tmp_path):
     with pytest.raises(OpError) as e:
         await d.call(id, "s", "device.info", {}, 0.05)
     assert e.value.code == "device_timeout"
+
+
+# -- over HTTP and the sockets ------------------------------------------------------
+
+import threading  # noqa: E402
+
+from starlette.testclient import TestClient  # noqa: E402
+from starlette.websockets import WebSocketDisconnect  # noqa: E402
+
+from aegis.app import App  # noqa: E402
+from aegis.roots import make_roots  # noqa: E402
+from aegis.web import build_web  # noqa: E402
+
+from .test_web import ORIGIN, TOKEN, Conn, project  # noqa: E402,F401
+
+
+@pytest.fixture
+def web(project, fake_claude):  # noqa: F811
+    app = App(make_roots(project, None), claude_bin=fake_claude, interrupt_timeout=0.5)
+    with TestClient(build_web(app, TOKEN, {"testserver"})) as c:
+        yield app, c
+
+
+def pair(c, phone, name="Pixel", signed_in=True):
+    if signed_in:
+        c.get(f"/?token={TOKEN}")
+    r = c.post("/api/devices/pair", json={"name": name, "public_key": phone.public_key})
+    if r.status_code == 200:
+        phone.id = r.json()["id"]
+    return r
+
+
+def test_pairing_needs_the_cookie_and_json(web):
+    app, c = web
+    phone = Phone()
+    assert pair(c, phone, signed_in=False).status_code == 401
+    c.get(f"/?token={TOKEN}")
+    r = c.post("/api/devices/pair", data={"public_key": phone.public_key})
+    assert r.status_code == 415
+    r = pair(c, phone)
+    assert r.status_code == 200 and r.json()["name"] == "Pixel"
+    assert app.devices.get(phone.id)["owner"] == app.who(app_caller()).name
+
+
+def dcall(conn, **params):
+    """device.call over /ws: Conn.call takes the operation as ``op`` itself."""
+    conn.n += 1
+    conn.ws.send_json(
+        {"t": "call", "id": conn.n, "op": "device.call", "params": params}
+    )
+    while True:
+        msg = conn.ws.receive_json()
+        if msg.get("t") == "reply" and msg.get("id") == conn.n:
+            return msg
+
+
+def app_caller():
+    from aegis.ops import Caller
+
+    return Caller("user")
+
+
+def test_a_wrong_signature_is_refused(web):
+    _, c = web
+    phone = Phone()
+    pair(c, phone)
+    with c.websocket_connect("/device") as ws:
+        challenge = ws.receive_json()
+        ws.send_json(Phone().hello(challenge) | {"id": phone.id})
+        with pytest.raises(WebSocketDisconnect) as e:
+            ws.receive_json()
+        assert e.value.code == 4401
+
+
+def test_a_phone_answers_a_call_made_through_the_server(web):
+    app, c = web
+    phone = Phone()
+    pair(c, phone)
+    with c.websocket_connect("/device") as dev:
+        dev.send_json(
+            phone.hello(dev.receive_json(), ops=["device.info", "compass.read"])
+        )
+        welcome = dev.receive_json()
+        assert welcome["t"] == "welcome" and welcome["name"] == "Pixel"
+
+        def answer():
+            call = dev.receive_json()
+            assert call["t"] == "call" and call["op"] == "compass.read"
+            dev.send_json(
+                {"t": "reply", "id": call["id"], "result": {"azimuth": [212.0]}}
+            )
+
+        t = threading.Thread(target=answer)
+        t.start()
+        with c.websocket_connect("/ws", headers=ORIGIN) as ws:
+            conn = Conn(ws).hello()
+            listed = conn.call("device.mine")["result"]
+            assert listed[0]["online"] is True and listed[0]["model"] == "Fake Pixel"
+            got = dcall(conn, op="compass.read", args={"seconds": 1})
+            assert got["result"] == {"azimuth": [212.0]}
+            refused = dcall(conn, op="apps.install")
+            assert refused["error"]["code"] == "needs_newer_app"
+        t.join(5)
+
+
+def test_removing_a_device_closes_its_socket(web):
+    app, c = web
+    phone = Phone()
+    pair(c, phone)
+    with c.websocket_connect("/device") as dev:
+        dev.send_json(phone.hello(dev.receive_json()))
+        dev.receive_json()
+        with c.websocket_connect("/ws", headers=ORIGIN) as ws:
+            conn = Conn(ws).hello()
+            assert conn.call("device.remove", id=phone.id).get("error") is None
+        with pytest.raises(WebSocketDisconnect):
+            dev.receive_json()
+    assert app.devices.get(phone.id) is None
+
+
+def test_no_device_and_an_unknown_name_say_so(web):
+    _, c = web
+    with c.websocket_connect("/ws", headers=ORIGIN) as ws:
+        conn = Conn(ws).hello()
+        assert dcall(conn, op="device.info")["error"]["code"] == "no_device"
+        assert (
+            dcall(conn, op="device.info", device="nope")["error"]["code"]
+            == "unknown_device"
+        )
