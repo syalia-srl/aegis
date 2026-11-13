@@ -151,6 +151,9 @@ person_has_control: end your turn, and you are woken when it comes back.
 `browser_eval(browser, expression)` runs JavaScript in the page and returns
 its JSON value, only while the person has turned Scripts on for that tab;
 otherwise it fails with scripts_off, and you ask them to turn it on.
+A call the person's extension is too old for fails with
+extension_outdated: ask them to download it again from Settings → Chrome
+and reload it.
 `browser_resize` and `browser_close` do not work on the person's tabs yet. A call on a tab that
 was never yours fails with not_granted; on one whose grant ended (the person
 stopped sharing it, closed it or disconnected you) with revoked.
