@@ -277,7 +277,7 @@ pre.code{position:relative;white-space:pre-wrap;overflow-wrap:anywhere}
 </div>
 </details>
 
-<details class="task" id="task-7" data-state="doing">
+<details class="task" id="task-7" data-state="done">
 <summary><span class="num">7</span><span><span class="ttl">CI: test, build and sign; the release asset</span><span class="files">.github/workflows/ci.yml · .github/workflows/release.yml</span></span><span class="state">pending</span></summary>
 <div class="body">
 <ol class="steps">
@@ -289,7 +289,7 @@ pre.code{position:relative;white-space:pre-wrap;overflow-wrap:anywhere}
 </div>
 </details>
 
-<details class="task" id="task-8" data-state="pending">
+<details class="task" id="task-8" data-state="doing">
 <summary><span class="num">8</span><span><span class="ttl">Help page, changelog, and the phone test</span><span class="files">src/aegis/help/devices.md · src/aegis/help/phone.md · changelog.d/</span></span><span class="state">pending</span></summary>
 <div class="body">
 <ol class="steps">
@@ -305,6 +305,11 @@ pre.code{position:relative;white-space:pre-wrap;overflow-wrap:anywhere}
 <h2 id="departs"><span class="n">04</span>Where this plan departs from the spec</h2>
 <ul>
 <li>The spec's open question on the signing key is settled here for now: one key in CI secrets.</li>
+<li>Calls are not journaled separately (task 3, step 3): the journal already derives entries from each tool call in the transcript, so a <code>device_call</code> is recorded there with its session.</li>
+<li>No test pins that another person's session cannot see a phone (task 3, step 5): since aegis 3.0 a standalone server has one person, and every caller resolves to them. The owner check stays in <code>device_ops.py</code> for host policies.</li>
+<li>Settings calls the section "Phone app" rather than "Device", and lists phones on any browser once one is paired.</li>
+<li><code>compileSdk</code> is 37, not 36: <code>androidx.core</code> 1.19 requires it (CI, first android run).</li>
+<li><code>release.yml</code> gained an <code>apk</code> job that waits for the hand-made GitHub release and attaches <code>aegis.apk</code>, since releases are created after the tag.</li>
 </ul>
 </main>
 <script>
