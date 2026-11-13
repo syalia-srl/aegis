@@ -1,7 +1,7 @@
 {
   "source": "Artificial Analysis",
   "url": "https://artificialanalysis.ai",
-  "refreshed": "2026-11-12",
+  "refreshed": "2026-11-13",
   "models": {
     "fable": {
       "aa": "claude-fable-5-2",
@@ -35,8 +35,8 @@
       "aa": "gemini-4-argon",
       "coding": null,
       "intelligence": 50.4,
-      "price_in": 4,
-      "price_out": 20
+      "price_in": 2,
+      "price_out": 10
     },
     "opencode-go/kimi-k3.1-pro": {
       "aa": "kimi-k3-1-pro",
