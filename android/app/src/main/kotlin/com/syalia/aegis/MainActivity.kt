@@ -18,7 +18,6 @@ import android.webkit.PermissionRequest
 import android.webkit.URLUtil
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
-import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.widget.Button
@@ -28,6 +27,7 @@ import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.webkit.JavaScriptReplyProxy
+import androidx.webkit.WebResourceErrorCompat
 import androidx.webkit.WebViewClientCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
@@ -141,7 +141,7 @@ class MainActivity : ComponentActivity() {
                 return true
             }
 
-            override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
+            override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceErrorCompat) {
                 // The service worker answers offline loads itself; only a page with nothing to show lands here.
                 if (request.isForMainFrame && WebViewFeature.isFeatureSupported(WebViewFeature.WEB_RESOURCE_ERROR_GET_DESCRIPTION)) {
                     setup("Could not open $base: ${error.description}", base)
@@ -253,7 +253,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQ_MIC) {
             val r = micRequest ?: return
