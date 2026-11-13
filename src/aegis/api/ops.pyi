@@ -12,6 +12,8 @@ class Ops:
     @property
     def agents(self) -> _agents: ...
     @property
+    def annotation(self) -> _annotation: ...
+    @property
     def archive(self) -> _archive: ...
     @property
     def artifact(self) -> _artifact: ...
@@ -111,6 +113,17 @@ class Ops:
 class _agents:
     async def list(self) -> Any:
         """The agents you can spawn, each a preset of harness, model, effort and permission. session_spawn starts one and can override those."""
+
+class _annotation:
+    async def view(
+        self,
+        *,
+        path: str,
+        page: int | None = ...,
+        css: str | None = ...,
+        region: dict[str, Any] | None = ...,
+    ) -> Any:
+        """Save a PNG of an annotated place at a fixed size, independent of the person's pane. Pass the file and its region, PDF page, or HTML css from the annotation JSON; read the returned path to see it."""
 
 class _archive:
     async def list(

@@ -76,7 +76,9 @@ def register_annotation_ops(app: App) -> None:
         log_id = caller.log_id or ""
         if not log_id:
             raise OpError("no_session", "annotation.view needs a session")
-        box = attachments.ensure_inbox(app.roots.state_root, log_id) / "annotation-views"
+        box = (
+            attachments.ensure_inbox(app.roots.state_root, log_id) / "annotation-views"
+        )
         box.mkdir(parents=True, exist_ok=True)
         return box
 
