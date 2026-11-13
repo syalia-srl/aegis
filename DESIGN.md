@@ -1518,7 +1518,11 @@ Phone width toggle (`entries.phoneButton`): it narrows the frame to 390 px so
 the page's own media queries answer as on a phone, and the choice is a
 per-tab set of artifact ids, so every frame of one page agrees and a redrawn
 stage keeps it. It is client-only; agents are told to lay pages out for both
-widths because the person will look at both.
+widths because the person will look at both. `table.send` (#928) is the same
+bridge with a built-in page (`tables.py`, `client/js/table-artifact.js`): the
+agent passes columns and rows (or Markdown/HTML) and an optional edit policy;
+aegis writes the draft and lands it in one call, so filter/search/sort (and
+edits the policy allows) do not need a hand-rolled artifact.
 
 **A secret crosses between an agent and a person without a transcript holding
 it.** `secret.send` reads the agent's file on the server, keeps a random pad of

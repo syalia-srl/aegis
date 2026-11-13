@@ -4,6 +4,7 @@ kind: howto
 when: showing the person a page they can click, tune or answer, instead of asking in prose
 hints:
   - Ask an agent to show you a page to choose from instead of a question in prose. #write-and-send-one
+  - Ask an agent to send a filterable table with table_send instead of a Markdown table. #send-a-table
   - A page an agent sent can stay docked beside the transcript while you work. #pages-that-stay-in-view
 ---
 
@@ -43,6 +44,24 @@ fixed width or on hover alone.
 A send is refused when the page lost the script tag, or never calls
 `aegis.submit`, `aegis.emit` or `aegis.state`, since then no answer could ever
 reach you.
+
+## Send a table
+
+When the person should filter, search or edit tabular data — not read a static
+Markdown table in the reply — call `table_send` instead of writing a page by
+hand. Pass title and either columns with rows, a GFM markdown table, or an
+HTML table string. The person always gets search, filter and column sort.
+Omit edit (or pass false) for a view-only table; pass true, or an object, to
+let them change what you allow:
+
+- cells: true (every cell), false (none), or a list of column ids
+- add_rows / remove_rows / add_columns / remove_columns: booleans
+
+Done submits `{columns, rows}` and collapses the card to submit_label
+(default Done). The reply is the same shape as `artifact_send`; use
+`artifact_read`, `artifact_update` and `artifact_close` on the returned id.
+caption and dock work as on other artifacts. Prefer this over pasting a
+large table into the reply when the person needs to work the data.
 
 ## What the page can call
 
