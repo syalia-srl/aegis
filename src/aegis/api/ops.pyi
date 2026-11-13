@@ -231,7 +231,7 @@ class _browser:
     async def input(self, *, id: str, events: builtins.list[dict[str, Any]]) -> Any:
         """browser.input"""
     async def list(self) -> Any:
-        """Every browser you may use: the server's (kind server) and the tabs of the person's own browser they gave you (kind person, id chrome:<name>)."""
+        """Every browser you may use: the server's (kind server) and the tabs of the person's own browser they gave you (kind person, id chrome:<name>). Their tabs arrive through aegis's own Chrome extension (Settings → Chrome), not any other: when none is listed, ask for one with browser_request."""
     async def nav(
         self,
         *,
@@ -249,7 +249,7 @@ class _browser:
         where: Literal["server", "person"] = ...,
         why: str = ...,
     ) -> Any:
-        """Start a browser on the server and load a URL. It docks beside your transcript (dock=) and shows as a tab, where the person watches and clicks in it; you hold the page until you hand it over. Its profile keeps sign-ins between opens. With where="person", ask the person to open the URL in a new tab of their own browser instead (chrome)."""
+        """Start a browser on the server and load a URL. It docks beside your transcript (dock=) and shows as a tab, where the person watches and clicks in it; you hold the page until you hand it over. Its profile keeps sign-ins between opens. With where="person", ask the person to open the URL in a new tab of their own browser instead, through aegis's own Chrome extension (Settings → Chrome)."""
     async def press(
         self, *, browser: str | None = ..., key: str, target: str | None = ...
     ) -> Any:
@@ -257,7 +257,7 @@ class _browser:
     async def reopen(self, *, id: str) -> Any:
         """browser.reopen"""
     async def request(self, *, match: str, why: str = ...) -> Any:
-        """Ask the person for one of the tabs open in their own browser, with their sign-ins. Say what you want in match and why. End your turn: you are woken with granted, naming the tab's id, or denied. You never learn which other tabs exist."""
+        """Ask the person for one of the tabs open in their own browser, with their sign-ins. Say what you want in match and why. End your turn: you are woken with granted, naming the tab's id, or denied. You never learn which other tabs exist. It goes through aegis's own Chrome extension; chrome_unavailable means the person has not paired it (Settings → Chrome) or their browser is closed."""
     async def resize(
         self, *, browser: str | None = ..., width: int, height: int
     ) -> Any:
