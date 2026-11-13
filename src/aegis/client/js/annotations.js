@@ -1,13 +1,15 @@
-// Visual annotations for images and PDFs (#780, #913). The browser keeps
-// normalized coordinates in the same comment tray as text comments. They
-// survive a resize and a reload, and become JSON in the message the person
-// sends.
+// Visual annotations for images, PDFs and HTML (#780, #913). The browser keeps
+// normalized coordinates (and HTML element locators) in the same comment tray
+// as text comments. They survive a resize and a reload, and become JSON in the
+// message the person sends.
 //
-// Point, area, draw, highlight, arrow and off are icons, named on hover.
-// A wheel still scrolls a PDF while a tool is on: the notch that lands on
-// the layer steps it aside, and the notches after it reach the viewer.
-// Annotate off leaves the viewer's zoom and page controls in reach. A stroke
-// and an arrow store normalized points; a highlight is a translucent region.
+// Point, area, draw, highlight, arrow and off are icons, named on hover. HTML
+// also has Element: pagepoint.js picks a node (ArrowUp/Down walks parents and
+// children). A wheel still scrolls a PDF while a tool is on: the notch that
+// lands on the layer steps it aside, and the notches after it reach the
+// viewer. Annotate off leaves the viewer's zoom and page controls in reach.
+// A stroke and an arrow store normalized points; a highlight is a translucent
+// region (or selected PDF words).
 
 import { icon } from "./glyphs.js";
 import { pdfjsReady } from "./pdfview.js";
@@ -26,7 +28,7 @@ const STEP = 0.008; // how far the pen moves before the stroke keeps a point
 const MAX_POINTS = 200;
 
 // One line, so the glyph test can see every name. off reuses the close icon.
-const TOOL_GLYPH = { point: "point", area: "region", draw: "draw", highlight: "highlight", arrow: "mark-arrow", off: "close" };
+const TOOL_GLYPH = { element: "element", point: "point", area: "region", draw: "draw", highlight: "highlight", arrow: "mark-arrow", off: "close" };
 const TOOLS = [
   ["point", "Point"],
   ["area", "Area"],
@@ -35,6 +37,7 @@ const TOOLS = [
   ["arrow", "Arrow"],
   ["off", "Annotate off"],
 ];
+const HTML_TOOLS = [["element", "Element"], ...TOOLS];
 
 function svgEl(tag, attrs) {
   const n = document.createElementNS(NS, tag);
@@ -166,12 +169,14 @@ function selectionFrom(sel) {
 
 // Add the drawing layer and its controls to a preview stage. A PDF opens in
 // Mozilla's viewer, which is on our origin, so the page and the selected
-// words are readable. Highlight is a text selection. The page box remains
-// only when that viewer does not come up.
-// An image always; a PDF only in Mozilla's viewer, whose page and text layer
-// the tools read. Without `aegis pdfjs install` it opens in the browser's own.
+// words are readable. Highlight is a text selection there; on an image or
+// HTML file it is a translucent region. HTML also picks elements through
+// pagepoint.js. The page box remains only when that viewer does not come up.
+// An image or HTML always; a PDF only in Mozilla's viewer, whose page and
+// text layer the tools read. Without `aegis pdfjs install` it opens in the
+// browser's own.
 export function annotatable(kind) {
-  return kind === "image" || (kind === "pdf" && pdfjsReady());
+  return kind === "image" || kind === "html" || (kind === "pdf" && pdfjsReady());
 }
 
 export function annotate(stage, tray, { path, kind }) {
@@ -180,7 +185,8 @@ export function annotate(stage, tray, { path, kind }) {
   if (!target) return null;
   stage.classList.add("visual-annotations");
   const tools = el("div", "vatools");
-  const buttons = TOOLS.map(([name, title]) => {
+  const toolList = kind === "html" ? HTML_TOOLS : TOOLS;
+  const buttons = toolList.map(([name, title]) => {
     const b = el("button", "btn icon");
     b.type = "button";
     b.dataset.tool = name;
@@ -296,7 +302,8 @@ export function annotate(stage, tray, { path, kind }) {
   };
   target.addEventListener("load", () => {
     sync();
-    armViewer();
+    if (kind === "pdf") armViewer();
+    if (tool === "element") setElementMode(true);
   });
   const resize = new ResizeObserver(sync);
   resize.observe(stage);
@@ -313,11 +320,57 @@ export function annotate(stage, tray, { path, kind }) {
     passTimer = 0;
     layer.classList.remove("passing");
   };
+  const setElementMode = (on) => {
+    if (kind !== "html" || target.tagName !== "IFRAME") return;
+    target.contentWindow?.postMessage(
+      { jsonrpc: "2.0", method: "aegis/annotate", params: { active: on } },
+      "*",
+    );
+  };
+  const onPick = (ev) => {
+    if (tool !== "element" || ev.source !== target.contentWindow) return;
+    const m = ev.data;
+    if (!m || m.jsonrpc !== "2.0" || m.method !== "aegis/point" || m.params?.kind !== "pick") return;
+    const p = m.params;
+    // pagepoint's rect is in the iframe's viewport; the layer matches that box.
+    const w = target.clientWidth || layer.getBoundingClientRect().width;
+    const h = target.clientHeight || layer.getBoundingClientRect().height;
+    if (!w || !h || !p.rect) return;
+    const region = {
+      x: rounded(Math.max(0, Math.min(1, p.rect.left / w))),
+      y: rounded(Math.max(0, Math.min(1, p.rect.top / h))),
+      width: rounded(Math.max(0, Math.min(1, (p.rect.right - p.rect.left) / w))),
+      height: rounded(Math.max(0, Math.min(1, (p.rect.bottom - p.rect.top) / h))),
+    };
+    const locator = p.locator || {};
+    const css = locator.css || locator.id || "element";
+    const text = String(p.text || "").trim();
+    const annotation = {
+      file: path,
+      type: "element",
+      locator: { heading: locator.heading || null, id: locator.id || null, css: locator.css || null },
+      tag: p.tag || null,
+      text,
+      styles: p.styles || null,
+      region,
+    };
+    const where = [locator.heading && `§ ${locator.heading}`, css].filter(Boolean).join(" › ");
+    tray.add({
+      locator: where || "element",
+      quote: text,
+      at: { type: "element", ...region },
+      annotation,
+    });
+  };
+  window.addEventListener("message", onPick);
   const select = (name) => {
     tool = name;
     for (const b of buttons) b.setAttribute("aria-pressed", String(b.dataset.tool === name));
-    layer.classList.toggle("active", name !== "off");
-    stage.classList.toggle("text-select", kind === "pdf" && name === "highlight");
+    const drawing = name !== "off" && name !== "element";
+    layer.classList.toggle("active", drawing);
+    stage.classList.toggle("text-select", (kind === "pdf" && name === "highlight") || name === "element");
+    setElementMode(name === "element");
+    if (name === "element") target.focus?.();
     endPass();
   };
   for (const b of buttons) b.addEventListener("click", () => select(b.dataset.tool));
@@ -352,7 +405,7 @@ export function annotate(stage, tray, { path, kind }) {
     const { page: _page, text, ...rest } = extra;
     if (text) annotation.text = text;
     Object.assign(annotation, rest);
-    const where = kind === "pdf" ? `page ${annotation.page}` : "image";
+    const where = kind === "pdf" ? `page ${annotation.page}` : kind === "html" ? "page" : "image";
     return { annotation, where, text: text || "" };
   };
   const clear = () => {
@@ -374,7 +427,7 @@ export function annotate(stage, tray, { path, kind }) {
   layer.addEventListener("wheel", onWheel, { passive: true });
 
   layer.addEventListener("pointerdown", (ev) => {
-    if (ev.button !== 0 || tool === "off") return;
+    if (ev.button !== 0 || tool === "off" || tool === "element") return;
     ev.preventDefault();
     start = here(ev);
     if (!start) return;
@@ -466,10 +519,14 @@ export function annotate(stage, tray, { path, kind }) {
     tray.add({ locator: `${where} ${type}`, quote: text, at, annotation });
   });
   layer.addEventListener("pointercancel", clear);
-  if (target.contentDocument?.readyState === "complete") armViewer();
+  // PDF only: an HTML preview is sandboxed with an opaque origin, so reading
+  // contentWindow throws (and would show as a pageerror in the host).
+  if (kind === "pdf" && target.contentDocument?.readyState === "complete") armViewer();
   return {
     sync,
     destroy: () => {
+      setElementMode(false);
+      window.removeEventListener("message", onPick);
       resize.disconnect();
       clearTimeout(passTimer);
       layer.removeEventListener("wheel", onWheel);

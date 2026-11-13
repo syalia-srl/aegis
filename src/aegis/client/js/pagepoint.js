@@ -7,11 +7,13 @@
 // locator: {heading, id, css}, text}} to the parent on a gesture by the
 // person: "menu" on a right-click (not with Shift) or a touch held 500 ms
 // without moving 8 px, "select" when a selection settles, "clear" when it
-// goes or the page scrolls. A field, a link, an image or a press with no
-// text under it keeps the browser's own menu. The host draws the menu or the bar in its own document, and acts only
+// goes or the page scrolls, and "pick" when annotate mode is on and the
+// person clicks an element (ArrowUp/Down walks the parent or child). A field,
+// a link, an image or a press with no text under it keeps the browser's own
+// menu. The host draws the menu or the bar in its own document, and acts only
 // on an item the person picks there: a message proposes, nothing more. While
 // the host says its menu is open (aegis/point-open, aegis/point-closed), the
-// element is outlined.
+// element is outlined. Annotate mode is toggled with aegis/annotate.
 //
 // A plain script with no globals: a page's own code never sees it.
 (() => {
@@ -20,6 +22,7 @@
   const SLOP = 8;
   const TEXT_MAX = 300;
   const NATIVE = "input, textarea, select, [contenteditable], a[href], img, video, audio, canvas, svg";
+  const STYLE_KEYS = ["color", "backgroundColor", "fontSize", "fontFamily", "display", "position"];
   const post = (params) => window.parent.postMessage({ jsonrpc: "2.0", method: "aegis/point", params }, "*");
 
   const elOf = (n) => (n && n.nodeType === 1 ? n : n?.parentElement) || document.body;
@@ -60,6 +63,16 @@
     return { locator: { heading: headingOf(el), id: el.id || null, css: cssOf(el) }, text: cut(text) };
   }
 
+  function stylesOf(el) {
+    const cs = getComputedStyle(el);
+    return Object.fromEntries(STYLE_KEYS.map((k) => [k, cs[k]]));
+  }
+
+  function rectOf(el) {
+    const b = el.getBoundingClientRect();
+    return { left: b.left, top: b.top, right: b.right, bottom: b.bottom };
+  }
+
   const selected = () => {
     const sel = getSelection();
     return sel.rangeCount && !sel.isCollapsed && sel.toString().trim() ? sel.getRangeAt(0) : null;
@@ -67,6 +80,56 @@
 
   let pointed = null; // the element the last menu proposed or open is about
   const open = new Map(); // the host's menu number -> {el, outline}: its own, to put back
+  let annotate = false; // host toggles with aegis/annotate: pick elements for the tray
+  let hover = null; // {el, outline} while annotate mode is on
+  let pick = null; // the element ArrowUp/Down walks from
+
+  function clearHover() {
+    if (!hover) return;
+    if (![...open.values()].some((o) => o.el === hover.el) && hover.el !== pointed) {
+      hover.el.style.outline = hover.outline;
+    }
+    hover = null;
+  }
+
+  function setHover(el) {
+    if (!el || el === document.body || el === document.documentElement) return clearHover();
+    if (hover?.el === el) return;
+    clearHover();
+    hover = { el, outline: el.style.outline };
+    el.style.outline = "2px solid #2f6fdb";
+  }
+
+  function pickable(target) {
+    const el = elOf(target);
+    if (el === document.body || el === document.documentElement) return null;
+    if (el.closest(NATIVE) && !el.matches("img, svg")) return null;
+    return el;
+  }
+
+  function emitPick(el) {
+    pick = el;
+    setHover(el);
+    const text = (el.innerText || el.textContent || "").trim();
+    post({
+      kind: "pick",
+      tag: el.localName,
+      styles: stylesOf(el),
+      rect: rectOf(el),
+      ...locate(el, text),
+    });
+  }
+
+  function stepPick(dir) {
+    if (!pick) return;
+    if (dir < 0) {
+      const parent = pick.parentElement;
+      if (parent && parent !== document.documentElement) emitPick(parent);
+      return;
+    }
+    const child = [...pick.children].find((c) => c.nodeType === 1);
+    if (child) emitPick(child);
+  }
 
   // What a press at x, y on `target` is about: the selection under it, else
   // the element and its text. Null leaves the browser its own menu: a field
@@ -91,7 +154,7 @@
   // right-click or a long press of its own (a board, an editor, its own
   // menu) cancels the event, and gets no host menu over its own.
   window.addEventListener("contextmenu", (ev) => {
-    if (ev.shiftKey) return;
+    if (annotate || ev.shiftKey) return;
     clearTimeout(timer); // a touch's contextmenu before the long press's timer: one menu, not two
     if (swallow) return ev.preventDefault(); // the long press already reported it
     if (ev.defaultPrevented) return;
@@ -110,6 +173,7 @@
     // host never sees it, so it is told.
     if (pointed) post({ kind: "clear" });
     clearTimeout(timer);
+    if (annotate) return;
     if (ev.pointerType === "mouse" || ev.defaultPrevented || ev.target.closest?.(NATIVE)) return;
     at = [ev.clientX, ev.clientY];
     const target = ev.target;
@@ -122,11 +186,16 @@
     }, LONG_PRESS);
   });
   document.addEventListener("pointermove", (ev) => {
+    if (annotate) {
+      const el = pickable(document.elementFromPoint(ev.clientX, ev.clientY) || ev.target);
+      if (el) setHover(el);
+      return;
+    }
     if (at && Math.hypot(ev.clientX - at[0], ev.clientY - at[1]) > SLOP) clearTimeout(timer);
   });
   const settle = () => {
     clearTimeout(timer);
-    setTimeout(report); // a click inside a selection collapses it after pointerup
+    if (!annotate) setTimeout(report); // a click inside a selection collapses it after pointerup
   };
   document.addEventListener("pointerup", settle);
   document.addEventListener("pointercancel", () => clearTimeout(timer));
@@ -136,6 +205,15 @@
   document.addEventListener(
     "click",
     (ev) => {
+      if (annotate) {
+        const el = pickable(ev.target);
+        if (!el) return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        window.focus();
+        emitPick(el);
+        return;
+      }
       if (!swallow) return;
       swallow = false;
       ev.preventDefault();
@@ -147,6 +225,7 @@
   // A selection that settled, or one that went.
   let shown = "";
   function report() {
+    if (annotate) return;
     const r = selected();
     const text = r ? r.toString() : "";
     if (text === shown) return;
@@ -163,7 +242,13 @@
   });
 
   // Esc closes the host's menu: the focus stays in this frame while it is open.
+  // ArrowUp/Down walks the annotate pick to a parent or child.
   document.addEventListener("keydown", (ev) => {
+    if (annotate && (ev.key === "ArrowUp" || ev.key === "ArrowDown")) {
+      ev.preventDefault();
+      stepPick(ev.key === "ArrowUp" ? -1 : 1);
+      return;
+    }
     if (ev.key === "Escape" && (pointed || shown)) {
       shown = "";
       post({ kind: "clear" });
@@ -176,6 +261,7 @@
     "scroll",
     () => {
       clearTimeout(quiet); // a report still due would bring the bar back where it was
+      if (annotate) return;
       if (!pointed && !shown) return;
       shown = "";
       post({ kind: "clear" });
@@ -186,6 +272,7 @@
   // A press in another frame, or anywhere the host cannot see, takes the
   // focus from this page: what the host drew for it goes.
   window.addEventListener("blur", () => {
+    if (annotate) return;
     if (!pointed && !shown) return;
     shown = "";
     post({ kind: "clear" });
@@ -193,6 +280,14 @@
 
   window.addEventListener("message", (ev) => {
     if (ev.source !== window.parent || ev.data?.jsonrpc !== "2.0") return;
+    if (ev.data.method === "aegis/annotate") {
+      annotate = !!ev.data.params?.active;
+      if (!annotate) {
+        clearHover();
+        pick = null;
+      }
+      return;
+    }
     // Each message names its menu: the host closes the old one after it
     // opened the new, so a closed message ends only its own.
     const n = ev.data.params?.n;
@@ -203,7 +298,7 @@
     } else if (ev.data.method === "aegis/point-closed" && open.has(n)) {
       const { el, outline } = open.get(n);
       open.delete(n);
-      if (![...open.values()].some((o) => o.el === el)) el.style.outline = outline;
+      if (![...open.values()].some((o) => o.el === el) && hover?.el !== el) el.style.outline = outline;
       if (el === pointed && !open.size) pointed = null;
     }
   });
