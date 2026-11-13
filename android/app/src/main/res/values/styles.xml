@@ -1,0 +1,9 @@
+<resources>
+    <!-- The ink theme's background, so the window matches the page before it paints. -->
+    <style name="App" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">#0B0A09</item>
+        <item name="android:navigationBarColor">#11100E</item>
+        <item name="android:windowBackground">#11100E</item>
+        <item name="android:colorAccent">#E0A872</item>
+    </style>
+</resources>
