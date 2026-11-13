@@ -10,7 +10,7 @@ val keyAliasName = System.getenv("AEGIS_KEY_ALIAS") ?: "aegis"
 
 android {
     namespace = "com.syalia.aegis"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.syalia.aegis"

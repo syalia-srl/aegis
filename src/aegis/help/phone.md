@@ -90,6 +90,12 @@ Push is built for Chrome, on Android and on the desktop, and for the other
 desktop browsers. Safari on an iPhone supports push for apps on the home
 screen, but this has not been tried there.
 
+## The Android app
+
+On Android there is also an app: the same page, plus a way for your agents to
+use the phone, such as reading its sensors. Settings → Phone app links it.
+help_read devices says how to pair it and what agents can do.
+
 ## Share from another app
 
 Once the app is installed on Android, it appears in the share sheet of other
