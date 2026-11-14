@@ -1,7 +1,7 @@
 {
   "source": "Artificial Analysis",
   "url": "https://artificialanalysis.ai",
-  "refreshed": "2026-11-13",
+  "refreshed": "2026-11-14",
   "models": {
     "fable": {
       "aa": "claude-fable-5-2",
@@ -175,7 +175,7 @@
       "aa": "nemotron-3-5-super-vl",
       "coding": null,
       "intelligence": 13.6,
-      "price_in": 0.175,
+      "price_in": 0.2,
       "price_out": 0.5
     },
     "opencode/nemotron-3.5-lightning-free": {
@@ -238,14 +238,14 @@
       "aa": "deepseek-v4-1-flash",
       "coding": null,
       "intelligence": null,
-      "price_in": 0.29,
+      "price_in": 0.3,
       "price_out": 1.2
     },
     "opencode-go/deepseek-v4.1-flash": {
       "aa": "deepseek-v4-1-flash",
       "coding": null,
       "intelligence": null,
-      "price_in": 0.29,
+      "price_in": 0.3,
       "price_out": 1.2
     },
     "opencode-go/kimi-k3": {
@@ -294,8 +294,8 @@
       "aa": "mimo-v2-5-pro",
       "coding": null,
       "intelligence": null,
-      "price_in": 0.3915,
-      "price_out": 0.783
+      "price_in": 0.348,
+      "price_out": 0.696
     }
   }
 }
