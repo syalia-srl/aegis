@@ -160,6 +160,12 @@ the file again, and each is at most 100 MB. If one cannot be sent, none is. Send
 the person asked for or something they must see to discuss it; they see the
 source code you edited as diffs already.
 
+## Page the card from the keyboard
+
+When the person has a card of several files selected, Left and Right move
+through them and wrap from the last to the first. The same keys do this
+while the set is open in the viewer.
+
 ## Pages that stay in view
 
 A card scrolls away as the transcript grows. To keep a page or a file on

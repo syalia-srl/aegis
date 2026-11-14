@@ -332,3 +332,88 @@ def test_a_swipe_pages_the_card_and_the_viewer_round_the_set(
     assert vfn.inner_text() == "a.md"
     assert phone.errors == []
     ctx.close()
+
+
+def test_left_and_right_page_the_selected_card_and_the_open_viewer(
+    server,  # noqa: F811
+    page,  # noqa: F811
+):
+    """#904: Left and Right page the selected multi-file card, and the open
+    viewer, and wrap. They do nothing in the message box, on a one-file card,
+    or on a row that is not a file card. The viewer keeps its own place."""
+    (server.root / "a.md").write_text("# A\n")
+    (server.root / "b.md").write_text("# B\n")
+    (server.root / "c.md").write_text("# C\n")
+    page.goto(server.url)
+    page.wait_for_selector("#a2[data-view=fleet]")
+    spawn(page)
+    send(page, 1, ["a.md", "b.md", "c.md"])
+    send(page, 2, ["a.md"])
+    album = page.locator("#entries .row.file").nth(0)
+    one = page.locator("#entries .row.file").nth(1)
+    album.locator(".pager").wait_for()
+    assert one.locator(".pager").count() == 0
+
+    def select(row, key):
+        want = row.get_attribute("data-id")
+        page.keyboard.press("Alt+,")
+        for _ in range(24):
+            got = page.evaluate(
+                "document.querySelector('#entries .row.sel')?.dataset.id ?? null"
+            )
+            if got == want:
+                return
+            page.keyboard.press(key)
+        raise AssertionError(want)
+
+    select(album, "k")
+    assert album.locator(".count").inner_text() == "1 / 3"
+    assert album.locator(".fn").inner_text() == "a.md"
+    page.keyboard.press("ArrowRight")
+    assert album.locator(".fn").inner_text() == "b.md"
+    assert album.locator(".count").inner_text() == "2 / 3"
+    page.keyboard.press("ArrowLeft")
+    assert album.locator(".fn").inner_text() == "a.md"
+    page.keyboard.press("ArrowLeft")
+    assert album.locator(".fn").inner_text() == "c.md"
+
+    # In the message box the arrows move the caret, and the picture stays.
+    page.keyboard.press("Alt+.")
+    assert page.evaluate("document.activeElement.id") == "input"
+    page.keyboard.press("ArrowRight")
+    assert album.locator(".fn").inner_text() == "c.md"
+
+    select(one, "j")
+    assert one.locator(".fn").inner_text() == "a.md"
+    page.keyboard.press("ArrowRight")
+    assert one.locator(".fn").inner_text() == "a.md"
+    assert album.locator(".fn").inner_text() == "c.md"
+
+    page.keyboard.press("g")
+    assert page.locator("#entries .row.file.sel").count() == 0
+    page.keyboard.press("ArrowRight")
+    assert album.locator(".fn").inner_text() == "c.md"
+
+    album.locator(".view").click()
+    viewer = page.locator("#viewer")
+    viewer.wait_for()
+    assert viewer.locator(".vbar .fn").inner_text() == "c.md"
+    page.keyboard.press("j")
+    page.keyboard.press("ArrowRight")
+    assert viewer.locator(".vbar .fn").inner_text() == "a.md"
+    # The transcript is covered, so the card's name is read from the DOM.
+    assert album.locator(".fn").text_content() == "c.md"
+
+    page.keyboard.press("Escape")
+    assert viewer.is_hidden()
+    page.keyboard.press("?")
+    page.wait_for_selector("#keymap", state="visible")
+    listed = page.locator("#keymap").inner_text()
+    assert (
+        "←" in listed
+        and "Previous file on the selected card, or in the viewer" in listed
+    )
+    assert (
+        "→" in listed and "Next file on the selected card, or in the viewer" in listed
+    )
+    assert page.errors == []

@@ -2195,6 +2195,17 @@ function nextNeed() {
 
 // What each key in keys.js does. `input` is declared below;
 // a key is pressed only after this module has run.
+// Left and Right page the open viewer when it holds a set, and otherwise the
+// selected row's card. An open viewer with one file, or a page, stays put:
+// the card under it is covered.
+function pageShownFile(d) {
+  if (viewer.isOpen) {
+    viewer.step(d);
+    return;
+  }
+  transcript.pageFile(d);
+}
+
 // A transcript key does nothing while the canvas's tabs hide the transcript.
 const onTranscript = (run) => (ev) => canvas.transcriptShown() && run(ev);
 const offKeys = installKeys(
@@ -2241,6 +2252,8 @@ const offKeys = installKeys(
       find.open();
     },
     press: onTranscript(() => transcript.press()),
+    filePrev: onTranscript(() => pageShownFile(-1)),
+    fileNext: onTranscript(() => pageShownFile(1)),
     copy: onTranscript(() => transcript.selected && copyRow(transcript.selected, transcript.nodes.get(transcript.selected), copyDeps)),
     foldLevel: () => foldLevel((transcript.foldLevel + 1) % 3),
     walk() {},
