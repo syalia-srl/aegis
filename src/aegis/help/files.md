@@ -5,6 +5,7 @@ when: opening, reading or editing any file on the server in the browser with Alt
 hints:
   - Press Alt+O to open any file on the server in the browser. #opening-a-file
   - Select lines in a file and comment on them for the agent. #pointing-at-lines-and-comments
+  - Mark a region on an image, PDF or HTML file for the agent. #annotating-images-and-pdfs
 ---
 
 Files opens any file under the config root in the browser, so reading a file,
@@ -106,7 +107,7 @@ A file opens the way its kind is drawn when a session sends it:
 - HTML opens in a sandboxed frame: its scripts run, but the page has no origin
   of its own, so it cannot reach aegis or your sign-in. Files it links to
   beside it (stylesheets, images) do not load.
-- Images open fitted to the pane. A PDF opens in the browser's own viewer;
+- Images open fitted to the pane. A PDF opens in Mozilla's viewer;
   audio and video in their players.
 - Anything else shows its type and size, Download, and, when the browser runs
   on the server's desktop, a button that opens it in the desktop's app for it.
@@ -154,6 +155,37 @@ disk, starts with none.
 
 A page whose own Content-Security-Policy blocks scripts from the server works
 as before, without the menu or the bar inside it.
+
+## Annotating images and PDFs
+
+An image, PDF or HTML file opened in Files, opened from a sent file's card, or
+docked beside the transcript has icon tools over its preview. The name shows
+on hover: Point, Area, Draw, Highlight, Arrow, and Annotate off. HTML also
+has Element. Point marks a spot. Area drags a region. Highlight selects text
+on a PDF, the way a copy does, and the mark names those words; on an image or
+HTML file it drags a translucent region. Draw follows the pointer, and Arrow
+runs from the press to the release. Element outlines a node in the document:
+click to pin it, Arrow Up or Down to walk to a parent or child. A PDF opens
+in Mozilla's reader, so which sheet is on screen is known, and Area and Point
+name the words under them when that sheet has text. The wheel still scrolls
+the document while a tool is on. Annotate off leaves the reader's zoom, find,
+and sheet controls in reach.
+
+Each mark adds a number and a note to the same comment tray used for text.
+On a wide window the list sits beside the picture, so the preview keeps its
+size. The note takes more than one line: Enter and Shift+Enter add a line, and
+neither sends. Remove individual marks, Discard them all, or Send them
+together. The message names the file and carries the annotation type, the PDF
+sheet when applicable, the words when that sheet has them, an HTML element's
+locator and a few computed styles when Element was used, and normalized
+coordinates as JSON: a region for a point, an area, a highlight or an
+element, and a list of points for a stroke or an arrow.
+An agent can identify the same place at any display size. To see the place,
+it calls `annotation_view` with that file and the region, sheet number or CSS
+from the JSON; the tool renders at a fixed size, so the person's pane does not
+matter, and returns a PNG path. On a docked file, Send writes that message
+into the session's composer. Unsent annotations stay only in this browser and
+are restored after a reload, like text comments.
 
 ## When the file changed on disk
 

@@ -166,7 +166,7 @@ def test_the_client_writes_no_svg_outside_the_sprite():
     outside the page and its theme, a monitor's sparkline (monitors.js) and a
     feed's bars (feeds.js) are charts, and a theme's background pattern is a
     data URL in its CSS."""
-    allowed = {"ping.js", "monitors.js", "feeds.js"}
+    allowed = {"ping.js", "monitors.js", "feeds.js", "annotations.js"}
     found = [
         at
         for at, line in code_lines()

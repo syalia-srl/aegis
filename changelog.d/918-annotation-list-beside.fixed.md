@@ -1,0 +1,1 @@
+- **The list of marks sits beside the picture.** It used to grow under the preview and shrink it as marks were added.
