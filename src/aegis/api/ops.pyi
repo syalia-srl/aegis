@@ -96,6 +96,8 @@ class Ops:
     @property
     def speech(self) -> _speech: ...
     @property
+    def table(self) -> _table: ...
+    @property
     def task(self) -> _task: ...
     @property
     def term(self) -> _term: ...
@@ -952,6 +954,22 @@ class _skill:
 class _speech:
     async def prepare(self) -> Any:
         """Phonon's package and model, on disk and verified, for a browser that opted in to it (speech.py)."""
+
+class _table:
+    async def send(
+        self,
+        *,
+        title: str,
+        columns: builtins.list[Any] | None = ...,
+        rows: builtins.list[Any] | None = ...,
+        markdown: str | None = ...,
+        html: str | None = ...,
+        edit: dict[str, Any] | bool | None = ...,
+        caption: str | None = ...,
+        dock: str | None = ...,
+        submit_label: str = ...,
+    ) -> Any:
+        """Land a built-in interactive table for the person. Pass columns and rows, or a Markdown/HTML table; they get filter, search and sort. Omit edit (or pass false) for a view-only table; pass true or an object to let them edit cells and/or add or remove rows and columns as you allow. Done submits {columns, rows} and collapses the card. Returns the same shape as artifact_send (id, url, started, watching); use artifact_read / artifact_update / artifact_close on the id. With dock, the page also opens beside the transcript."""
 
 class _task:
     async def cancel(self, *, task_id: str) -> Any:

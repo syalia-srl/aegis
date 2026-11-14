@@ -16,11 +16,12 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field, field_validator
 
-from . import artifacts, dictation, files
+from . import artifacts, dictation, files, tables
 from . import attachments as att
 from . import layout as canvas
 from .artifacts import ArtifactError
 from .ops import Caller, OpError
+from .tables import TableError
 
 if TYPE_CHECKING:
     from .app import App
@@ -68,6 +69,57 @@ class ArtifactUpdate(_Strict):
 class ArtifactClose(_Strict):
     id: str
     label: str | None = Field(None, max_length=artifacts.LABEL_MAX, pattern=r"^[^\n]+$")
+
+
+class TableEdit(_Strict):
+    cells: bool | list[str] = Field(
+        True,
+        description="true: every cell; false: none; or column ids that may be edited.",
+    )
+    add_rows: bool = False
+    remove_rows: bool = False
+    add_columns: bool = False
+    remove_columns: bool = False
+
+
+class TableSend(_Strict):
+    title: str = Field(
+        min_length=1,
+        max_length=artifacts.TITLE_MAX,
+        pattern=r"^[^\n]+$",
+        description="The page's heading and title.",
+    )
+    columns: list[Any] | None = Field(
+        None,
+        description="Column labels, or {id, label} objects. With rows; not with markdown/html.",
+    )
+    rows: list[Any] | None = Field(
+        None,
+        description="Row lists (positional) or objects keyed by column id.",
+    )
+    markdown: str | None = Field(
+        None, description="A GFM Markdown table; alternative to columns+rows."
+    )
+    html: str | None = Field(
+        None, description="An HTML <table>; alternative to columns+rows."
+    )
+    edit: TableEdit | bool | None = Field(
+        None,
+        description="Omit or false for view-only (filter/search/sort). "
+        "true or an object enables edits the person may make; Done submits "
+        "{columns, rows}.",
+    )
+    caption: str | None = Field(
+        None, description="One line of Markdown shown above the card."
+    )
+    dock: str | None = Field(None, description=canvas.DOCK_DOC)
+    submit_label: str = Field(
+        "Done",
+        min_length=1,
+        max_length=artifacts.LABEL_MAX,
+        pattern=r"^[^\n]+$",
+        description="Label on the Done button and on the collapsed card after submit.",
+    )
 
 
 class PageRef(_Strict):
@@ -219,6 +271,52 @@ def register_artifact_ops(app: App) -> None:
         run = asyncio.to_thread
         path = await run(artifacts.write_draft, s.drafts, a.id, p.title)
         return {"id": a.id, "path": str(path), "html": artifacts.skeleton(p.title)}
+
+    @r.op("table.send", TableSend, agent=True)
+    async def table_send(p: TableSend, caller):
+        """Land a built-in interactive table for the person. Pass columns and
+        rows, or a Markdown/HTML table; they get filter, search and sort.
+        Omit edit (or pass false) for a view-only table; pass true or an
+        object to let them edit cells and/or add or remove rows and columns
+        as you allow. Done submits {columns, rows} and collapses the card.
+        Returns the same shape as artifact_send (id, url, started, watching);
+        use artifact_read / artifact_update / artifact_close on the id. With
+        dock, the page also opens beside the transcript."""
+        s = own(caller)
+        edit = p.edit
+        if isinstance(edit, TableEdit):
+            edit = edit.model_dump()
+        try:
+            state = tables.build_state(
+                columns=p.columns,
+                rows=p.rows,
+                markdown=p.markdown,
+                html_src=p.html,
+                edit=edit,
+                submit_label=p.submit_label,
+            )
+        except TableError as e:
+            raise OpError(e.code, e.message) from e
+        a = s.artifacts.create(p.title, p.caption, state, write=False)
+        try:
+            await asyncio.to_thread(tables.write_draft, s.drafts, a.id, p.title)
+            if p.dock is not None:
+                try:
+                    canvas.place(s.layout, a.id, p.dock, s.dockable)
+                except canvas.LayoutError as e:
+                    raise OpError("bad_params", str(e)) from e
+            out = await land(s, a, p.caption)
+        except Exception:
+            # Nothing for the agent to edit: drop the draft on any failure.
+            if a.id in s.artifacts.items and s.artifacts.items[a.id].status == "draft":
+                s.artifacts.close(a.id, None)
+            raise
+        if p.dock is not None:
+            try:
+                s.set_layout(canvas.place(s.layout, a.id, p.dock, s.dockable), "agent")
+            except canvas.LayoutError as e:
+                out |= {"docked": False, "reason": str(e)}
+        return out
 
     @r.op("artifact.send", ArtifactSend, agent=True)
     async def send(p: ArtifactSend, caller):

@@ -519,3 +519,75 @@ async def test_a_restart_forgets_drafts_but_a_live_page_can_still_be_resent(
         await turn(a, mcp("artifact_update", id=aid, resend=True))
     )  # its working copy survived
     assert arts(a)[0]["detail"]["url"] == re["url"]
+
+
+async def test_table_send_lands_view_and_edit_tables(world, tmp_path):
+    a = await world.spawn()
+    view = ok(
+        await turn(
+            a,
+            mcp(
+                "table_send",
+                title="Scores",
+                columns=["name", "score"],
+                rows=[["Ada", "12"], ["Grace", "9"]],
+            ),
+        )
+    )
+    assert view["id"].startswith("art-") and view["started"] is None
+    (e,) = arts(a)
+    assert e["status"] == "live" and e["detail"]["state"]["edit"] is None
+    assert e["detail"]["state"]["rows"] == [["Ada", "12"], ["Grace", "9"]]
+    page = (
+        tmp_path / ".aegis" / "state" / "artifacts" / view["id"] / "index.html"
+    ).read_text()
+    assert "table-artifact.js" in page and "aegis.state(" in page
+
+    edit = ok(
+        await turn(
+            a,
+            mcp(
+                "table_send",
+                title="Edit me",
+                markdown="| n |\n|---|\n| 1 |\n| 2 |",
+                edit={"cells": True, "add_rows": True},
+                submit_label="Save",
+            ),
+        )
+    )
+    assert len(arts(a)) == 2
+    got = ok(await turn(a, mcp("artifact_read", id=edit["id"])))
+    assert got["state"]["edit"]["add_rows"] is True
+    assert got["state"]["submit_label"] == "Save"
+    # Person submits the edited table through the bridge.
+    await world.app.registry.call(
+        "artifact.submit",
+        {
+            "log_id": a.log_id,
+            "artifact_id": edit["id"],
+            "data": {
+                "columns": got["state"]["columns"],
+                "rows": [["1"], ["2"], ["3"]],
+            },
+            "label": "Save",
+        },
+    )
+    await until(lambda: inbox(a) and a.status == "idle", what="table submit")
+    (m,) = inbox(a)
+    assert m["title"].startswith(f"artifact:{edit['id']} · submit")
+    assert "Save" in m["md"]
+
+
+async def test_table_send_refuses_mixed_sources(world):
+    a = await world.spawn()
+    said = await turn(
+        a,
+        mcp(
+            "table_send",
+            title="Bad",
+            columns=["a"],
+            rows=[["1"]],
+            markdown="| a |\n|---|\n| 1 |",
+        ),
+    )
+    assert said.startswith("mcp error: bad_params")
