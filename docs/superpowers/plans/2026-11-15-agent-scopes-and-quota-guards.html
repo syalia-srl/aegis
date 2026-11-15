@@ -82,7 +82,7 @@ details[data-state=doing] summary .s{color:var(--accent)}
 
 <h2>Slice 1 · agent scopes (#1066)</h2>
 
-<details class="task" id="task-1" data-state="pending" open><summary><span class="n">1</span><span class="t">Parse <code>tools:</code> on an agent preset</span><span class="s">pending</span><span class="f">src/aegis/scopes.py (new), src/aegis/agents.py, src/aegis/config.py, tests/test_scopes.py, tests/test_agents.py</span></summary>
+<details class="task" id="task-1" data-state="done" open><summary><span class="n">1</span><span class="t">Parse <code>tools:</code> on an agent preset</span><span class="s">pending</span><span class="f">src/aegis/scopes.py (new), src/aegis/agents.py, src/aegis/config.py, tests/test_scopes.py, tests/test_agents.py</span></summary>
 <ol>
   <li>New module <code>scopes.py</code>: <code>GROUPS</code> (spawn, queues, workflows, schedules, browser, secrets, config, help, as in spec section 04), <code>ALWAYS = {"turn_end"}</code>, a frozen <code>Scope(tools: frozenset[str] | None, queues: frozenset[str] | None, agents: frozenset[str] | None)</code> where None means any, <code>parse(raw, all_tools) -&gt; (Scope, error)</code> expanding groups, and <code>Scope.meet(other)</code> (intersection, None as the identity).</li>
   <li><code>allow</code> and <code>deny</code> are exclusive; an unknown tool or group name is an error that stops the agent, as <code>keep_harness_tools</code> errors do (<code>agents.py</code>, <code>_keep</code>).</li>

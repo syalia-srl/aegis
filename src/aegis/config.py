@@ -77,7 +77,7 @@ NOT_PER_HOST = ("hosts",)
 AGENT_KEYS = (
     "harness", "provider", "model", "models", "effort", "permission", "priming",
     "keep_harness_tools", "exit", "mcp",
-    "harness_tools", "isolated", "primer", "notices",
+    "harness_tools", "isolated", "primer", "notices", "tools",
 )  # fmt: skip
 QUEUE_KEYS = ("agent", "priority", "quiet")
 
