@@ -215,7 +215,17 @@ details[data-state=doing] summary .s{color:var(--accent)}
 </details>
 
 <h2>Where this plan departs from the spec</h2>
-<p>Nothing yet. Each worker's departures are copied here before its PR.</p>
+<h3>Slice 1</h3>
+<ul>
+  <li><code>scopes.TOOLS</code> is a fixed list of the agent tools: <code>.aegis.yaml</code> is read before any registry exists. <code>tests/test_scopes.py</code> fails when it and the registry differ, so a new agent tool must be added there.</li>
+  <li><code>StandalonePolicy.guard</code> raises <code>out_of_scope</code> itself, before <code>default_guard</code>, which would answer <code>not_for_agents</code>.</li>
+  <li><code>peer_handoff</code> is refused when the target session's agent is outside <code>agents:</code>, though it starts no session: otherwise a session could steer a wider one.</li>
+  <li>A <code>session_handoff</code> onto the session's own agent is always allowed, so a long-lived scoped agent can hand off when its context fills.</li>
+  <li>Queue workers record their enqueuer in a new <code>started_by</code>, not <code>spawned_by</code>, which would make them children in the tree. The enqueuer's scope is recorded on the task at enqueue.</li>
+  <li>A schedule made by an agent stores that agent's scope in its owner record; a run meets it.</li>
+  <li>The primer's help paragraph is a part too, and the lists naming features in the help and turn_end paragraphs name only what the scope has.</li>
+  <li>Settings carries <code>tools:</code> through a save and shows it read-only on the agent card (<code>tests/test_config_coverage.py</code> requires every key in the form).</li>
+</ul>
 </main>
 <script>
 const tasks=[...document.querySelectorAll('details.task')];
