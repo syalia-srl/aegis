@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A shield in the ink theme's accent, inside the 66 dp safe zone of a 108 dp adaptive icon. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#E0A872"
+        android:pathData="M54,28 L76,36 L76,54 C76,67 66,77 54,82 C42,77 32,67 32,54 L32,36 Z" />
+    <path android:fillColor="#11100E"
+        android:pathData="M54,36 L68,41 L68,54 C68,62 62,69 54,73 Z" />
+</vector>
