@@ -271,15 +271,17 @@ def is_budget(g: Gate) -> bool:
 def notice(g: Gate) -> str:
     """What a session past a cap is told: the spend, to finish, and until
     when no turn a person did not start runs."""
-    until = (
-        f"until it has room again, at {clock(g.resets_at)}"
-        if g.resets_at is not None
-        else "again: a session cap never frees"
-    )
-    return (
-        f"{g.why}. {FINISH} aegis starts no turn here that a person did not"
-        f" start {until}."
-    )
+    if g.resets_at is None:
+        after = (
+            "aegis starts no more turns here that a person did not start: a"
+            " session cap never frees."
+        )
+    else:
+        after = (
+            "aegis starts no turn here that a person did not start until it"
+            f" has room again, at {clock(g.resets_at)}."
+        )
+    return f"{g.why}. {FINISH} {after}"
 
 
 def again(g: Gate) -> str:
