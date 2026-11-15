@@ -52,7 +52,6 @@ from .monitors import iso_now
 from .notice_sources import Item
 from .names import default_title
 from .ops import OpError
-from . import pause
 from .quota_gate import Gate, waits
 from .scopes import Scope
 
@@ -414,13 +413,39 @@ class Queues:
         _, g = start_spec(spec, name)
         return g
 
+    def guard_gate(
+        self, name: str, q: dict, enqueuer: str | None, cwd: str, owner: str | None
+    ) -> Gate:
+        """The guards alone over a worker of ``name`` that ``enqueuer``
+        starts (guards.py), across its cascade: closed only when every model
+        it may start on is, with the first one's why and reopen. A cooling
+        model or the pause never closes it: they only ever hold a task."""
+        guard = self._registry.guard
+        if guard is None:
+            return Gate("open")
+        try:
+            agents = list(self._config.current().agents)
+            spec = resolve(agents, None, q["agent"], {}, Path(cwd), owner=owner)
+        except OpError:
+            return Gate("open")
+        spec = dataclasses.replace(spec, started_by=enqueuer)
+        models = spec.cascade if spec.model in spec.cascade else (spec.model,)
+        first: Gate | None = None
+        for m in models:
+            g = guard(spec, name, m)
+            if g.may_start:
+                return g
+            first = first or g
+        return first or Gate("open")
+
     def admit(
         self, name: str, enqueuer: str | None, cwd: str, owner: str | None
     ) -> str | None:
         """Whether queue ``name`` takes one more task from ``enqueuer`` now:
         past ``max_pending`` it raises queue_full whatever the gate says;
-        with the gate closed, ``on_closed: reject`` raises queue_closed and
-        ``warn`` returns the warning; ``hold``, the default, waits silently."""
+        with the guards closed (guard_gate), ``on_closed: reject`` raises
+        queue_closed and ``warn`` returns the warning; ``hold``, the default,
+        waits silently, as a task waits for a cooling model or the pause."""
         q = self.queues[name]
         pending = sum(
             1 for t in self.tasks.values() if t.queue == name and t.status == "pending"
@@ -431,10 +456,12 @@ class Queues:
                 f"queue {name!r} already holds {pending} pending tasks, its "
                 f"max_pending; nothing was enqueued",
             )
-        g = self.gate(name, q, enqueuer, cwd, owner)
         guard = q.get("guard")
         action = guard.on_closed if guard is not None else "hold"
-        if g.may_start or action == "hold" or g.why == pause.WHY:
+        if action == "hold":
+            return None
+        g = self.guard_gate(name, q, enqueuer, cwd, owner)
+        if g.may_start:
             return None
         text = waits(g)
         if action == "reject":

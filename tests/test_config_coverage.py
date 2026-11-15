@@ -77,6 +77,7 @@ notices:
   plan: {stale_min: 5}
   queues: false
   held: false
+  guard: false
 """
 
 

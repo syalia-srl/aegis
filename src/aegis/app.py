@@ -133,10 +133,12 @@ from .schedule_ops import register_schedule_ops
 from .schedules import Schedules
 from .workflow_ops import register_workflow_ops
 from .workflows import Workflows
+from .notice_sources import Item as NoticeItem
 from .quota import Quota
 from .quota_gate import (
     Gate,
     continued,
+    opens_again,
     pool_for,
     refusal,
 )
@@ -675,8 +677,6 @@ class App:
         # Sessions a pause or a continue is under way for, so a reading that
         # lands before it finishes does not start a second one.
         self._quota_busy: set[str] = set()
-        # Per session, the guard state its last notice told it (guard_notice).
-        self._guard_noticed: dict[str, str] = {}
         # Every session paused by the person, and the ones resumed since
         # (pause.py); read before boot, so a cut turn waits.
         self.paused = pause.read(roots.state_root)
@@ -686,13 +686,14 @@ class App:
         self.quota.history = self.journal.usual_spend
         reg.pause_hold = self.pause_hold
         reg.refuse = self.refuse_hold
-        reg.guard_note = self.guard_notice
+        reg.guard_items = lambda s: self.guard_items(s, self.session_guard(s))
         # Models that fell, and the one timer that releases held work when the
         # first of them is free again (cascade.py).
         self.cooling = Cooling()
         self._cool_timer: asyncio.TimerHandle | None = None
         self._cool_at: float | None = None
         reg.start_spec = self.start_spec
+        reg.guard = self.guard
         reg.cascade = self.cascade_next
         reg.start_pending_handoff = self.start_pending_handoff
         self.registry = Ops()
@@ -1021,15 +1022,18 @@ class App:
     ) -> Gate:
         """The gate the guards on ``spec`` set (guards.py): its agent's, its
         queue's for a worker, and its starters' agents', on the pool
-        ``model`` (else the spec's) draws on, read from .aegis.yaml now."""
+        ``model`` (else the spec's) draws on, each starter's on its own
+        pool, read from .aegis.yaml now."""
         cur = self.config.current()
         agents = {a.name: a.guard for a in cur.agents}
         queues = {n: q.get("guard") for n, q in cur.queues.items()}
-        over = guards.levels(spec.record(), queue, agents, queues, self._record_of)
+        pool = pool_for(spec.harness, model or spec.model)
+        over = guards.levels(
+            spec.record(), queue, agents, queues, self._record_of, pool
+        )
         if not over:
             return Gate("open")
-        pool = pool_for(spec.harness, model or spec.model)
-        return guards.worst(over, pool, self.quota.snapshot(), time.time())
+        return guards.worst(over, self.quota.snapshot(), time.time())
 
     def session_guard(self, s) -> Gate:
         """The gate the guards set on a running session now."""
@@ -1042,9 +1046,12 @@ class App:
         return own.guard.on_closed if own is not None and own.guard else "warn"
 
     def refuse_hold(self, s) -> str | None:
-        """Why a turn a person did not start may not start now: the guard
-        is stopped, or closed on an agent whose on_closed is refuse. A
-        person's message runs, with the notice (guard_notice)."""
+        """Why a turn a person did not start may not start now: a stop line
+        cut the session's turn and the guard has not been read open since,
+        the guard is stopped, or it is closed on an agent whose on_closed is
+        refuse. A person's message runs, with the notice (guard_items)."""
+        if guards.is_cut(s.quota_paused):
+            return guards.uncut(s.quota_paused)
         g = self.session_guard(s)
         if g.state == "stopped" or (
             g.state == "closed" and self._on_closed(s) == "refuse"
@@ -1052,39 +1059,36 @@ class App:
             return g.why
         return None
 
-    def guard_notice(self, s) -> str | None:
-        """The notice a turn starts with when the session's guard changed
-        state since the last one it got: closed, with what is closed and
-        when it opens, or open again. Never for a session with notices off."""
-        if not s.spec.notices:
-            return None
-        g = self.session_guard(s)
-        state = "open" if g.may_start else "closed"
-        if state == self._guard_noticed.get(s.log_id, "open"):
-            return None
-        self._guard_noticed[s.log_id] = state
-        head = f"> from aegis:notice · quota · {state} · {iso_now()}"
-        if state == "open":
-            return f"{head}\nYour agent's quota guard is open again. Work as usual."
+    def guard_items(self, s, g: Gate) -> None:
+        """Tell a session its guard is closed, through the notices (source
+        ``guard``): one item while it is closed or stopped, whose end says it
+        is open again. A gate open on no reading changes nothing, so a restart
+        neither clears nor repeats what the session was told."""
+        if g.state == "open":
+            if g.measured:
+                self.notices.set(s.log_id, guards.SOURCE, [])
+            return
         own = next(
             (a for a in self.config.current().agents if a.name == s.spec.agent), None
         )
         advice = own.guard.advice if own is not None and own.guard else None
-        lines = [f"Your agent's quota guard is closed: {g.why}."]
         shut = self._closed_queues(s)
-        lines.append(
-            f"While it is closed: {'; '.join(shut)}. Start no long work."
+        lines = [
+            f"Your agent's quota guard is {g.state}: {g.why}.",
+            f"While it is {g.state}: {'; '.join(shut)}. Start no long work."
             if shut
-            else "While it is closed, start no long work."
+            else f"While it is {g.state}, start no long work.",
+            advice or guards.ADVICE,
+        ]
+        if again := opens_again(g).strip():
+            lines.append(again)
+        item = NoticeItem(
+            "closed",
+            "critical" if g.state == "stopped" else "warn",
+            "\n".join(lines),
+            clear=guards.OPEN_AGAIN,
         )
-        lines.append(advice or guards.ADVICE)
-        if g.reopens and g.resets_at is not None:
-            at = time.strftime("%a %H:%M", time.localtime(g.resets_at))
-            lines.append(
-                f"It opens again when the window {g.reopens}, at the latest at"
-                f" the reset, {at}."
-            )
-        return "\n".join([head, *lines])
+        self.notices.set(s.log_id, guards.SOURCE, [item])
 
     def _closed_queues(self, s) -> list[str]:
         """The queues in the session's scope that reject or hold its tasks now."""
@@ -1093,8 +1097,8 @@ class App:
         for name, q in self.queues.queues.items():
             if "error" in q or (allowed is not None and name not in allowed):
                 continue
-            g = self.queues.gate(name, q, s.log_id, str(s.spec.cwd), s.spec.owner)
-            if g.may_start or g.why == pause.WHY:
+            g = self.queues.guard_gate(name, q, s.log_id, str(s.spec.cwd), s.spec.owner)
+            if g.may_start:
                 continue
             guard = q.get("guard")
             verb = (
@@ -1181,10 +1185,20 @@ class App:
                 continue
             if self.pause_hold(s) is not None:
                 continue  # the person's pause outranks it (pause.py)
-            g = self.session_guard(s) if self._live(s) else Gate("open")
+            live = self._live(s)
+            g = self.session_guard(s) if live else Gate("open")
+            if live:
+                self.guard_items(s, g)
             if g.state == "stopped":
-                if s.status == "working" and not s.quota_paused:
+                # A turn a person started runs on: they chose to spend.
+                if s.status == "working" and not s.quota_paused and not s.person_turn:
                     self._quota_task(s, self._stop(s, g.why))
+                continue
+            if guards.is_cut(s.quota_paused):
+                # A stop cut it: only a fresh reading that opens it continues
+                # it, never a stale one or none (_continue checks again).
+                if g.state == "open" and g.measured:
+                    self._quota_task(s, self._continue(s))
                 continue
             holding = any(m.get("held_for") == "quota" for m in s.held)
             if s.quota_paused or (holding and self.refuse_hold(s) is None):
@@ -1193,8 +1207,11 @@ class App:
 
     async def _stop(self, s, why: str) -> None:
         """A guard's stop line was reached: cut the session's turn, which
-        ``_continue`` carries on when the guard opens again."""
-        s.quota_paused = why
+        ``_continue`` carries on when the guard opens again. The turn may
+        have ended, or a person's message begun one, since the reading."""
+        if s.status != "working" or s.person_turn or s.quota_paused:
+            return
+        s.quota_paused = guards.cut(why)
         self.sessions.metas.write(s.meta())
         s.report({"kind": "quota_paused", "why": why})
         await s.interrupt(through_lock=True)
@@ -1205,6 +1222,7 @@ class App:
         workflow nodes and pending queue tasks."""
         self.schedules.quota_opened()
         self.workflows.changed()
+        self.feeds.release()
         if any(t.status == "pending" for t in self.queues.tasks.values()):
             t = asyncio.create_task(self.queues.dispatch())
             self._background.add(t)
@@ -1234,14 +1252,25 @@ class App:
         if not self._live(s):
             return
         paused = s.quota_paused
+        if guards.is_cut(paused):
+            g = self.session_guard(s)
+            if not (g.state == "open" and g.measured):
+                return  # read again: no fresh reading opened it
+        elif self.refuse_hold(s) is not None:
+            return
         msgs = [{k: v for k, v in m.items() if k != "held_for"} for m in s.held]
-        if s.quota_paused:
+        if paused:
             owner = s.spec.owner or self.user
+            body = (
+                guards.continued(guards.uncut(paused))
+                if guards.is_cut(paused)
+                else continued(owner, paused)
+            )
             msgs.insert(
                 0,
                 {
                     "header": f"> from aegis:quota · {iso_now()}",
-                    "body": continued(owner, s.quota_paused),
+                    "body": body,
                     "ts": time.time(),
                 },
             )
@@ -1320,7 +1349,7 @@ class App:
         cut = s.quota_paused == pause.WHY
         if cut:
             s.quota_paused = None
-        if self.sessions.quota_hold(s) is not None:
+        if self.sessions.quota_hold(s) is not None or self.refuse_hold(s) is not None:
             self.sessions.metas.write(s.meta())
             return
         msgs = [{k: v for k, v in m.items() if k != "held_for"} for m in s.held]

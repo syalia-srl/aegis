@@ -72,7 +72,7 @@ def test_a_queue_guard_defaults_to_hold_and_takes_max_pending():
         ({"quota": {"claude": {"session": 50}, "on_closed": "refuse"}}, "reject"),
         (
             {"quota": {"claude": {"session": 50}, "advice": "x"}},
-            "no quota for 'advice'",
+            "a queue takes none",
         ),
     ],
 )
@@ -113,21 +113,25 @@ LOOSE = Guard({"claude": {"weekly_all": 90}})
 STOP = Guard({"claude": {"weekly_all": {"used": 60, "stop": 70}}})
 
 
+CC = {"harness": "claude-code", "model": "sonnet"}
+GO = {"harness": "opencode", "model": "opencode-go/deepseek"}
+
+
 def test_the_worst_of_agent_queue_and_starters_wins_and_names_its_level():
     recs = {
-        "s-fair": {"agent": "fair"},
-        "s-boss": {"agent": "boss", "spawned_by": "s-fair"},
+        "s-fair": {"agent": "fair", **CC},
+        "s-boss": {"agent": "boss", "spawned_by": "s-fair", **CC},
     }
-    worker = {"agent": "deepseek", "started_by": "s-boss"}
+    worker = {"agent": "deepseek", "started_by": "s-boss", **CC}
     agents = {"fair": TIGHT, "boss": None, "deepseek": LOOSE}
-    over = levels(worker, "fair-work", agents, {"fair-work": None}, recs.get)
-    assert [label for label, _ in over] == ["agent deepseek", "agent fair"]
-    g = worst(over, "claude", snap(55), NOW)
+    over = levels(worker, "fair-work", agents, {"fair-work": None}, recs.get, "claude")
+    assert [label for label, _, _ in over] == ["agent deepseek", "agent fair"]
+    g = worst(over, snap(55), NOW)
     assert g.state == "closed" and g.why.startswith("agent fair: ")
     assert g.by == "agent fair"
-    assert worst(over, "claude", snap(40), NOW).state == "open"
-    over = levels(worker, "fair-work", agents, {"fair-work": STOP}, recs.get)
-    g = worst(over, "claude", snap(75), NOW)
+    assert worst(over, snap(40), NOW).state == "open"
+    over = levels(worker, "fair-work", agents, {"fair-work": STOP}, recs.get, "claude")
+    g = worst(over, snap(75), NOW)
     assert g.state == "stopped" and g.why.startswith("queue fair-work: ")
 
 
@@ -136,13 +140,59 @@ def test_no_guard_anywhere_is_open_and_a_loop_in_the_chain_ends():
         "a": {"agent": "x", "continues": "b"},
         "b": {"agent": "x", "spawned_by": "a"},
     }
-    assert levels({"agent": "x", "spawned_by": "a"}, None, {}, {}, recs.get) == []
-    assert worst([], "claude", snap(99), NOW).state == "open"
+    rec = {"agent": "x", "spawned_by": "a"}
+    assert levels(rec, None, {}, {}, recs.get, "claude") == []
+    assert worst([], snap(99), NOW).state == "open"
 
 
 def test_a_guard_on_another_pool_does_not_hold():
-    over = [("agent fair", TIGHT)]
-    assert worst(over, "opencode-go", snap(99), NOW).state == "open"
+    over = [("agent fair", TIGHT, "opencode-go")]
+    assert worst(over, snap(99), NOW).state == "open"
+
+
+def test_a_closed_starter_closes_a_worker_on_another_pool():
+    """Spec section 07: fair's Claude line is closed, so a worker it enqueued
+    on an OpenCode queue is closed too, read on fair's own pool."""
+    recs = {"s-fair": {"agent": "fair", **CC}}
+    worker = {"agent": "deepseek", "started_by": "s-fair", **GO}
+    over = levels(worker, "fair-work", {"fair": TIGHT}, {}, recs.get, "opencode-go")
+    assert over == [("agent fair", TIGHT, "claude")]
+    g = worst(over, snap(86), NOW)
+    assert g.state == "closed" and g.why.startswith("agent fair: Claude weekly")
+
+
+def test_a_handoff_carries_guards_only_onto_the_same_agent():
+    recs = {"old": {"agent": "fair", **CC}}
+    same = {"agent": "fair", "continues": "old", **CC}
+    other = {"agent": "opus", "continues": "old", **CC}
+    agents = {"fair": TIGHT}
+    assert [x[0] for x in levels(same, None, agents, {}, recs.get, "claude")] == [
+        "agent fair"
+    ]
+    assert levels(other, None, agents, {}, recs.get, "claude") == []
+
+
+def test_the_reopen_sentence_names_every_level_that_holds_and_the_latest_reset():
+    from aegis.quota_gate import opens_again
+
+    two = snap(86, 120)
+    two["providers"][0]["windows"].append(
+        {"kind": "session", "label": "5 hours", "percent": 70, "projected": None,
+         "resets_at": NOW + 7200}
+    )  # fmt: skip
+    over = [
+        ("agent fair", Guard({"claude": {"weekly_all": {"used": 80, "projected": 200}}}), "claude"),
+        ("queue q", Guard({"claude": {"session": 60, "weekly_all": "pace"}}), "claude"),
+    ]  # fmt: skip
+    g = worst(over, two, NOW)
+    assert g.reopens == (
+        "Claude weekly drops below 80% used (agent fair)",
+        "Claude 5 hours drops below 60% (queue q)",
+        "Claude weekly is back on pace (queue q)",
+    )
+    assert g.resets_at == NOW + 7200
+    assert opens_again(g).startswith(" It opens again when all of: Claude weekly")
+    assert "at the latest at" in opens_again(g)
 
 
 # -- the real app ------------------------------------------------------------------
@@ -233,7 +283,58 @@ async def test_a_stop_line_pauses_a_turn_and_its_reopening_continues_it(world):
     world.app.on_quota(world.app.quota.snapshot())
     await until(lambda: not s.quota_paused and s.status == "idle", 8, "the continue")
     sent = [e for e in s.entries() if e["kind"] == "inbox"]
-    assert any("quota line was reached" in e["md"] for e in sent)
+    assert any("reached its stop line" in e["md"] for e in sent)
+
+
+async def test_a_stale_reading_keeps_a_stopped_turn_stopped(world):
+    """A reading 20 minutes old says nothing was spent less: the stop holds
+    until a fresh one opens the guard (review of #1071)."""
+    s = await spawn(world)
+    await turn(s, "hello")
+    await s.send("/busy 30")
+    await until(lambda: s.status == "working", 5, "the long turn")
+    gauge(world, 98)
+    world.app.on_quota(world.app.quota.snapshot())
+    await until(lambda: s.quota_paused and s.status != "working", 8, "the stop")
+    snap = world.app.quota.snapshot()
+    snap["providers"][0]["read_at"] = time.time() - 1200
+    world.app.quota.snapshot = lambda: snap
+    world.app.on_quota(snap)
+    await asyncio.sleep(0.5)
+    assert s.quota_paused and s.status != "working"
+    world.app.quota.snapshot = lambda: {"providers": []}  # never read
+    world.app.on_quota(world.app.quota.snapshot())
+    await asyncio.sleep(0.5)
+    assert s.quota_paused and s.status != "working"
+    assert await s.deliver("> from feed:tickets · 1 new", "ticket 7") == "held"
+    gauge(world, 50)
+    world.app.on_quota(world.app.quota.snapshot())
+    await until(lambda: not s.quota_paused and not s.held, 8, "the continue")
+
+
+async def test_a_persons_turn_is_never_cut_by_the_stop_line(world):
+    s = await spawn(world)
+    await turn(s, "hello")
+    gauge(world, 98)
+    await s.send("/busy 30", by_person=True)  # a person's message runs
+    await until(lambda: s.status == "working", 5, "the person's turn")
+    world.app.on_quota(world.app.quota.snapshot())
+    await asyncio.sleep(0.5)
+    assert s.status == "working" and not s.quota_paused
+    await s.interrupt()
+
+
+async def test_a_person_may_prompt_a_session_a_stop_line_cut(world):
+    s = await spawn(world)
+    await turn(s, "hello")
+    await s.send("/busy 30")
+    await until(lambda: s.status == "working", 5, "the long turn")
+    gauge(world, 98)
+    world.app.on_quota(world.app.quota.snapshot())
+    await until(lambda: s.quota_paused and s.status != "working", 8, "the stop")
+    await world.app.registry.call("session.send", {"log_id": s.log_id, "text": "go on"})
+    await until(lambda: any("go on" in t for t in sent(s)), 5, "the person's prompt")
+    assert "guard:closed · critical" in sent(s)[-1]
 
 
 async def test_an_unguarded_agent_is_never_stopped(world):
@@ -264,7 +365,9 @@ async def test_a_rejecting_queue_refuses_with_why_and_when(world):
         await enqueue(world)
     assert e.value.code == "queue_closed"
     assert "queue fair-work: Claude weekly is at 85%, launch line 80%" in str(e.value)
-    assert "opens again when the window drops below 80%" in str(e.value)
+    assert "opens again when Claude weekly drops below 80% (queue fair-work)" in str(
+        e.value
+    )
     assert not world.app.queues.tasks
     gauge(world, 10)
     r = await enqueue(world, payload="hi")
@@ -321,27 +424,58 @@ def sent(s) -> list[str]:
     return [r["text"] for r in recs if r.get("kind") == "send"]
 
 
-async def test_a_warned_turn_starts_with_the_notice_once_then_the_open_notice(world):
+async def test_a_warned_turn_carries_the_notice_once_then_the_open_notice(world):
     s = await spawn(world)
     gauge(world, 86, 104)
     await turn(s, "a ticket came in")
     first = sent(s)[-1]
-    assert first.startswith("> from aegis:notice · quota · closed · ")
+    assert "> from aegis:notice · guard:closed · warn · " in first
     assert (
         "Your agent's quota guard is closed: agent fair: Claude weekly is at 86%"
         in first
     )
     assert "queue fair-work holds new tasks until it opens" in first
     assert "File what is asked as an issue" in first
-    assert "drops below 80% used and 90% projected" in first
-    assert first.index("aegis:notice") < first.index("a ticket came in")
+    assert (
+        "opens again when Claude weekly drops below 80% used and is projected"
+        " below 90% (agent fair), at the latest at" in first
+    )
+    assert "aegis:notice · quota:" not in first  # the host's quota advice waits
     await turn(s, "another ticket")
-    assert "aegis:notice" not in sent(s)[-1]
+    assert "guard:closed" not in sent(s)[-1]
     gauge(world, 10)
     await turn(s, "a third")
-    assert sent(s)[-1].startswith("> from aegis:notice · quota · open · ")
+    assert "guard:closed · clear" in sent(s)[-1]
+    assert "quota guard is open again" in sent(s)[-1]
     await turn(s, "a fourth")
-    assert "aegis:notice" not in sent(s)[-1]
+    assert "guard:closed" not in sent(s)[-1]
+
+
+async def test_the_notice_folds_as_its_own_row_and_reaches_a_turn_mid_way(world):
+    s = await spawn(world)
+    await turn(s, "hello")
+    gauge(world, 86)
+    await turn(s, "a ticket came in")
+    rows = [e for e in s.entries() if ":notice:" in e["id"]]
+    assert [e["title"].split(" · ")[1] for e in rows] == ["guard:closed"]
+    said = [e for e in s.entries() if e["kind"] == "user"]
+    assert said[-1]["md"] == "a ticket came in"  # not inside the prompt's row
+    gauge(world, 10)
+    world.app.on_quota(world.app.quota.snapshot())
+    assert "guard:closed" in world.app.notices.pending(s, "tool")
+
+
+async def test_guard_notices_off_by_source(world, tmp_path):
+    (tmp_path / ".aegis.yaml").write_text(
+        GUARDED % ("warn", "hold") + "notices: {guard: false}\n"
+    )
+    await until(
+        lambda: world.app.config.current().notices.get("guard") is False, 5, "config"
+    )
+    s = await spawn(world)
+    gauge(world, 86)
+    await turn(s, "hello")
+    assert "guard:closed" not in sent(s)[-1]
 
 
 @pytest.mark.parametrize("config", [("refuse", "reject")])
@@ -371,7 +505,7 @@ async def test_a_refusing_agent_refuses_a_handoff_and_runs_a_persons_message(wor
     assert f"{s.handle} takes no handoff now: agent fair: Claude weekly" in said
     await turn(s, "a person asks", by_person=True)
     last = sent(s)[-1]
-    assert "quota · closed" in last and "queue fair-work rejects new tasks" in last
+    assert "guard:closed" in last and "queue fair-work rejects new tasks" in last
 
 
 async def test_an_agent_with_notices_off_gets_no_notice(world, tmp_path):
@@ -408,3 +542,69 @@ async def test_a_schedule_run_of_a_refusing_agent_is_skipped_with_why(world):
     gauge(world, 10)
     await tick(world, t)
     assert len(runs(world, "fair-sweep", "fired")) == 1
+
+
+# -- the worked example (spec section 07) ------------------------------------------
+EXAMPLE = GUARDED.replace(
+    "queues:\n",
+    "  go:\n    harness: opencode\n    model: opencode-go/deepseek\n"
+    "    effort: low\n    permission: full\n"
+    "queues:\n"
+    "  go-work:\n    agent: go\n    quota:\n"
+    "      opencode-go: {monthly: {projected: 95, stop: 99}}\n"
+    "      on_closed: reject\n",
+)
+
+
+async def test_a_closed_agent_cannot_spend_through_a_queue_on_another_pool(
+    world, tmp_path
+):
+    (tmp_path / ".aegis.yaml").write_text(EXAMPLE % ("warn", "hold"))
+    await until(lambda: "go-work" in world.app.queues.queues, 5, "the config")
+    s = await spawn(world)
+    await turn(s, "hello")
+    gauge(world, 86)  # Claude only: OpenCode Go has no reading at all
+    said = await turn(s, mcp("queue_enqueue", queue="go-work", payload="x"))
+    assert said.startswith("mcp error: queue_closed")
+    assert "agent fair: Claude weekly is at 86%" in said
+    assert not world.app.queues.tasks
+    await turn(s, "a ticket")
+    assert "queue go-work rejects new tasks" in sent(s)[-1]
+    gauge(world, 10)
+    said = await turn(s, mcp("queue_enqueue", queue="go-work", payload="x"))
+    assert "queue_closed" not in said
+
+
+@pytest.mark.parametrize("config", [("refuse", "reject")])
+async def test_a_persons_held_message_goes_alone_and_the_wakes_wait_in_order(world):
+    s = await spawn(world)
+    await turn(s, "hello")
+    await s.send("/busy 30")
+    await until(lambda: s.status == "working", 5, "the long turn")
+    gauge(world, 86)
+    await s.deliver("> from feed:tickets · batch#1", "ticket 7")
+    await s.deliver("> from agent:boss · handoff", "do it")
+    await s.deliver("> from person", "a person asks", by_person=True)
+    await s.interrupt()
+    await until(lambda: any("a person asks" in t for t in sent(s)), 8, "the person's")
+    assert not any("ticket 7" in t for t in sent(s))
+    assert [m["body"] for m in s.held] == ["ticket 7", "do it"]
+    assert all(m["held_for"] == "quota" for m in s.held)
+
+
+def test_a_guard_with_no_pool_and_a_queue_advice_are_errors():
+    from aegis.guards import AGENT_ACTIONS, QUEUE_ACTIONS, parse
+
+    assert "names no pool" in (parse({"on_closed": "warn"}, AGENT_ACTIONS)[1] or "")
+    assert "a queue takes none" in (
+        parse({"claude": {"session": 50}, "advice": "x"}, QUEUE_ACTIONS)[1] or ""
+    )
+
+
+def test_a_schedule_line_takes_no_stop():
+    from pydantic import ValidationError
+
+    from aegis.schedule_log import LineMap
+
+    with pytest.raises(ValidationError, match="takes no stop"):
+        LineMap.model_validate({"used": 80, "stop": 97})

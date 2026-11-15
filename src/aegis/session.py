@@ -193,11 +193,6 @@ class Host:
         start (guards.py, on_closed: refuse), or None when it does not."""
         return None
 
-    def guard_notice(self, session: "Session") -> str | None:
-        """The aegis notice the session's next turn starts with: its quota
-        guard closed or opened again since the last one, or None."""
-        return None
-
     def workflow_lock(self, session: "Session") -> str | None:
         """Why nobody but the engine may prompt or interrupt the session (a
         node of a live workflow run, workflows.py), or None."""
@@ -1143,9 +1138,12 @@ class Session:
             return msg | {"header": "> continue"}
         return None
 
-    async def _flush_held(self) -> None:
+    async def _flush_held(self, keep: list[dict] | None = None) -> None:
+        """Send what is held in one turn; ``keep``, the messages that stay
+        held (a refusing guard's wakes, when a person's message goes)."""
         self._flushing = True
-        batch, self.held = [m for m in map(self._quiet, self.held) if m], []
+        batch = [m for m in map(self._quiet, self.held) if m]
+        self.held = list(keep or [])
         try:
             if batch:
                 # Before the send gathers notices: the "held" warning ends here.
@@ -1216,9 +1214,6 @@ class Session:
             ]
             if extra := "\n\n".join(b for b in blocks if b):
                 text = f"{text}\n\n{extra}"
-        if not text.startswith("/") and (note := self._host.guard_notice(self)):
-            # Its first input: the agent reads it before what woke it (#1067).
-            text = f"{note}\n\n{text}"
         record: dict = {"kind": "send", "text": text}
         if attached:
             record |= {"typed": typed or "", "files": attached}
@@ -1636,11 +1631,19 @@ class Session:
             log.warning("%s: a notice did not reach the agent", self.handle)
 
     def _turn_over(self) -> None:
-        """A turn ended: send what it held, unless the gate says no new turn."""
-        refused = not any(m.get("by_person") for m in self.held) and (
-            self.held and self._host.refuse_hold(self) is not None
-        )
-        if self.held and (self._host.quota_hold(self) is not None or refused):
+        """A turn ended: send what it held, unless the gate says no new turn.
+        A guard that refuses wakes lets a person's messages go alone: the
+        rest wait, in their order, for it to open."""
+        refused = bool(self.held) and self._host.refuse_hold(self) is not None
+        person = [m for m in self.held if m.get("by_person")]
+        if self.held and self._host.quota_hold(self) is None and refused and person:
+            rest = [
+                m | {"held_for": "quota"} for m in self.held if not m.get("by_person")
+            ]
+            self.held = person
+            self._flushing = True
+            asyncio.get_running_loop().create_task(self._flush_held(keep=rest))
+        elif self.held and (self._host.quota_hold(self) is not None or refused):
             # The gate says no new turn: they wait for it to open.
             self.held = [m | {"held_for": "quota"} for m in self.held]
             self._metas.write_soon(self.log_id, self.meta)

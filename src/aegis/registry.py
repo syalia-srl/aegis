@@ -25,7 +25,7 @@ from pathlib import Path
 
 
 from .archive import Position, count_workers, page as archive_page
-from . import attention, cache, restarts, secret_store
+from . import attention, cache, guards, restarts, secret_store
 from .cgroups import SessionCgroups
 from .config import CONTEXT_DEFAULTS
 from .group_store import GroupStore
@@ -179,9 +179,10 @@ class Registry(Host):
         self.version_policy: Callable[[], dict | None] = lambda: None
         # The person's pause of every session (pause.py): session -> why.
         self.pause_hold = None
-        # The app's refuse_hold and guard_notice (guards.py, #1067).
+        # The app's refuse_hold, guard and guard_items (guards.py, #1067).
         self.refuse = None
-        self.guard_note = None
+        self.guard = None
+        self.guard_items: Callable[[Session], None] | None = None
         # The app's GroupNames.changed (#1047): a group key whose open members
         # changed. None names nothing, as a registry with no app does.
         self.group_changed: Callable[[str], None] | None = None
@@ -524,6 +525,10 @@ class Registry(Host):
     def notice_blocks(self, session: Session, at: str) -> str:
         if not session.spec.notices:
             return ""
+        if at == "send" and self.guard_items is not None:
+            # A turn starts: its guard's notice is as of now, not as of the
+            # last reading's on_quota (a session spawned since has none).
+            self.guard_items(session)
         blocks = "" if self.notices is None else self.notices.pending(session, at)
         menus = "" if self.know_how is None else self.know_how.pending(session)
         return "\n\n".join(b for b in (blocks, menus) if b)
@@ -575,16 +580,17 @@ class Registry(Host):
     def quota_hold(self, session: Session) -> str | None:
         """Why a session may not start a turn now: every session is paused
         (pause.py), or a quota line paused it before aegis 3.0 removed the
-        lines, until on_quota continues it."""
+        lines, until on_quota continues it. A turn a guard's stop line cut
+        is not held here: a person's message to it runs, and refuse_hold
+        holds every other wake (guards.py)."""
         if self.pause_hold is not None and (why := self.pause_hold(session)):
             return why
+        if guards.is_cut(session.quota_paused):
+            return None
         return session.quota_paused or None
 
     def refuse_hold(self, session: Session) -> str | None:
         return self.refuse(session) if self.refuse is not None else None
-
-    def guard_notice(self, session: Session) -> str | None:
-        return self.guard_note(session) if self.guard_note is not None else None
 
     def ensure_group(self, parent: Session) -> str:
         """The group a child of ``parent`` joins (#1039): the parent's own, or a
@@ -802,8 +808,9 @@ class Registry(Host):
         approved run it is the main agent of, by name, and the sessions it
         waits on by handle, the first two and then a count."""
         n_mon = len(self.monitors.of(s.log_id)) if self.monitors is not None else 0
-        quota = s.quota_paused or (
-            any(m.get("held_for") == "quota" for m in s.held) and self.quota_hold(s)
+        quota = (guards.uncut(s.quota_paused) if s.quota_paused else None) or (
+            any(m.get("held_for") == "quota" for m in s.held)
+            and (self.quota_hold(s) or self.refuse_hold(s))
         )
         whom = self._waiting_for(s)
         names = [w["handle"] for w in whom if w["handle"]]
@@ -1079,9 +1086,10 @@ class Registry(Host):
                 # when it ends, like any held message, never into it.
                 self.metas.write(s.meta())
                 continue
-            if self.quota_hold(s) is not None:
+            if self.quota_hold(s) is not None or self.refuse_hold(s) is not None:
                 # Through the gate: they wait for the owner's quota to open
-                # (app.on_quota), and a paused session stays paused.
+                # (app.on_quota), and a paused session stays paused, as does
+                # one a guard's stop line cut.
                 s.held = [m | {"held_for": "quota"} for m in msgs]
                 self.metas.write(s.meta())
                 continue

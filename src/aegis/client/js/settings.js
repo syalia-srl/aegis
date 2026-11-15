@@ -1246,7 +1246,7 @@ export class Settings {
   // has it, with a queue's max_pending; a save writes both back unchanged.
   quotaFold(quota, key, maxPending) {
     const q = quota || {};
-    const fmt = (v) => (typeof v === "object" ? Object.entries(v).map(([k, x]) => `${k} ${x}`).join(", ") : String(v));
+    const fmt = (v) => (v !== null && typeof v === "object" ? Object.entries(v).map(([k, x]) => `${k} ${x}`).join(", ") : String(v));
     const lines = Object.entries(q).flatMap(([k, v]) => (typeof v === "object" && v !== null && !Array.isArray(v) && !["on_closed", "advice"].includes(k)
       ? Object.entries(v).map(([w, line]) => h("div", { className: "kv" }, h("span", { textContent: `${k} ${w}` }), h("span", { textContent: fmt(line) })))
       : [h("div", { className: "kv" }, h("span", { textContent: k }), h("span", { textContent: fmt(v) }))]));
