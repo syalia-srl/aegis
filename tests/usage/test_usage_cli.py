@@ -234,4 +234,7 @@ def test_a_version_2_file_is_derived_again_with_agents(tmp_path):
     assert tables.is_complete(con)
     assert con.execute(
         "SELECT log_id, agent FROM usage_turns ORDER BY log_id"
-    ).fetchall() == [("20261020-120000-aaaaaa", "fair"), ("20261020-120000-bbbbbb", None)]
+    ).fetchall() == [
+        ("20261020-120000-aaaaaa", "fair"),
+        ("20261020-120000-bbbbbb", None),
+    ]
