@@ -40,7 +40,11 @@ aegis usage --split mode --where harness=claude-code --where person=ana
 ```
 
 `--split` takes one or more of `person`, `owner`, `repo`, `harness`, `model`,
-`mode`, `kind`, `purpose`, `activity`, `billing`, `context` and `session`.
+`mode`, `kind`, `purpose`, `activity`, `billing`, `context`, `session`,
+`agent` (the session's agent preset) and `queue` (a worker's queue; none for
+any other session). The Usage page splits its trend by `agent` and `queue`
+too. Each turn also records the session that started it, which per-agent
+budgets charge (config, [Budget an agent](config#budget-an-agent)).
 `--by` buckets by `hour`, `day`, `week`, `month`, `dow` (weekday) or
 `--by dow_hour`; `--by hour` alone shows the hour of the day. `--measure` is one of
 `cost`, `tokens`, `secs`, `turns`, `sessions`, `calls`, `errors`, `exits`,

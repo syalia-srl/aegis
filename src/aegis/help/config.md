@@ -1,7 +1,7 @@
 ---
 title: Configuration
 kind: concept
-when: adding or changing agents, settings that differ per server (hosts:), the default agent, queues, recaps, side notes, the per-session memory cap, notices about disk, memory, CPU and quota, an agent's status and stalled monitors, when aegis nudges a silent agent, parking idle sessions, untested harness versions, search embeddings for skills and memories, the disks the Host rows list or the network readings in .aegis.yaml, or picking a theme
+when: adding or changing agents, an agent's spending budget, settings that differ per server (hosts:), the default agent, queues, recaps, side notes, the per-session memory cap, notices about disk, memory, CPU and quota, an agent's status and stalled monitors, when aegis nudges a silent agent, parking idle sessions, untested harness versions, search embeddings for skills and memories, the disks the Host rows list or the network readings in .aegis.yaml, or picking a theme
 hints:
   - Add an agent with its own harness, model and effort in .aegis.yaml. #add-an-agent
   - A cascade starts on a cheap model and moves up when the task needs it. #cascades
@@ -348,6 +348,75 @@ agent with `notices: false` gets no notice at all: under `on_closed: warn`
 such an agent runs its turns as if unguarded, held back only by its queues
 and the stop line. A wrong `quota:` or `max_pending:` stops the agent or
 queue with the error `aegis doctor` shows, and Settings shows both read-only.
+
+## Budget an agent
+
+An agent may carry `budget:`, a list of spending caps. Unlike `quota:`, which
+reads the pool's gauges, a budget counts what the agent's own sessions spent.
+Without it the agent spends without limit, as before.
+
+```yaml
+agents:
+  fair:
+    harness: claude-code
+    model: sonnet
+    effort: low
+    permission: full
+    budget:
+      - {usd: 2, per: session}
+      - {usd: 25, per: 7d}
+      - {tokens: 2000000, per: 24h}
+  deepseek:
+    harness: opencode
+    model: opencode-go/deepseek-v4-pro
+    effort: high
+    permission: full
+    budget: [{usd: 1, per: session}]   # bounds every task of a queue it runs
+```
+
+Each cap is `usd` or `tokens` and a `per:`. `usd` is each turn's cost as the
+harness reports it, the API-equivalent cost on a subscription; `tokens` is
+input plus output tokens. `per: session` caps one session; a duration in
+hours or days (`24h`, `7d`, `30d`) caps a rolling window that ends now. A cap
+counts turns once they end, from the usage rows (usage,
+[Split by any dimension](usage#split-by-any-dimension)): aegis estimates
+nothing before a turn.
+
+Spend is charged by lineage. A session's turns count for its own agent and
+for every agent up its chain of starters: the session that enqueued it,
+spawned it or handed off to it, and so on, as for guards (a handoff onto
+another agent starts a new line). So a worker that `fair` enqueued on a queue
+of `deepseek` counts for `deepseek`'s caps and for `fair`'s: for the
+per-session cap of the session that enqueued it, and for `fair`'s windows.
+
+- A session cap sums the session and every session started from it. Once
+  spent it never frees: an agent that keeps one session for weeks, such as a
+  feed reader, fits a window better.
+- A window sums every session of the agent, and every session started from
+  one, over the window. It has room again when enough of its oldest spend
+  ages out, and aegis names that time.
+
+Past a cap, the session, and every running session whose chain holds the
+agent, is told once by an aegis notice, its own row in the transcript. It
+rides on the next prompt or, mid-turn, on the next tool call:
+
+```text
+> from aegis:notice · budget:spent:fair · warn · 2026-11-15T09:12:00Z
+agent fair has spent $25.40 of $25 in the last 7d. Finish what you are doing as soon as possible and end your turn. aegis starts no turn here that a person did not start until it has room again, at Fri 14:05.
+```
+
+A Claude Code session reads it mid-turn on any tool call. OpenCode, Codex,
+Cursor and Pi sessions read it on their next aegis tool call, or with their
+next prompt. When that turn ends, the session starts no turn that a person
+did not start, as under a guard's `on_closed: refuse`, whatever its own
+`on_closed:` says. A wake waits, a feed's batch stays in the feed, a schedule
+run is skipped, and a `peer_handoff` from an agent is refused. A person's
+message runs, with the notice. Its enqueues meet each queue's `on_closed:`, as
+under a closed guard. Only a guard's stop line outranks a budget. When a
+window has room again, `budget:spent:fair · clear` says so and what was held
+goes out. `notices: {budget: false}` turns the notice off and leaves the
+caps. A wrong `budget:` stops the agent with the error `aegis doctor` shows,
+whose row also lists the caps. Settings shows them read-only.
 
 ## The default agent
 
