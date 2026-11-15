@@ -139,12 +139,12 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)}
 <div class="trio">
   <div class="card"><h4>One number per window</h4><p><code>projected = percent + rate × hours_left</code>. The spent part is real; only the rest is estimated, from the rate now.</p></div>
   <div class="card"><h4>A rate that follows the work</h4><p>The rate falls when spending stops and rises when it starts. It carries across window resets, so a fresh window has a rate from its first minute.</p></div>
-  <div class="card"><h4>Configurable</h4><p><code>quota.projection.half_life</code> sets how far back "current" reaches, per window length: 24 h for a week by default.</p></div>
+  <div class="card"><h4>Configurable</h4><p><code>quota.projection.half_life</code> sets how far back "current" reaches, per window length: 6 h for a week by default.</p></div>
 </div>
 <div class="stats">
   <div class="stat"><div class="v">125%</div><div class="k">current projection on a real week, 29.5% elapsed, 37% spent, idle for 12 h</div></div>
-  <div class="stat"><div class="v">99%</div><div class="k">the same moment with a 24 h half-life, which still weighs a burst two days back</div></div>
-  <div class="stat"><div class="v">−31%</div><div class="k">hours a pace gate at 98 stays shut while spending is already low, in simulation</div></div>
+  <div class="stat"><div class="v">69%</div><div class="k">the same moment with the default 6 h half-life</div></div>
+  <div class="stat"><div class="v">−42%</div><div class="k">hours a pace gate at 98 stays shut while spending is already low, in simulation</div></div>
   <div class="stat"><div class="v">±0.1</div><div class="k">points of difference in quota spent per week, in the same simulation</div></div>
 </div>
 
@@ -157,7 +157,7 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)}
 <tr><td>How many estimates</td><td>One, <code>projected</code>, configurable</td><td class="why"><span class="who">maintainer</span> Every consumer (gauge, notice, pace line, <code>quota_read</code>) reads the same number.</td></tr>
 <tr><td>Scope</td><td>The estimate only. How launch rules use it is separate work</td><td class="why"><span class="who">maintainer</span> The pace line keeps its meaning (projected at most 100%); it reads the better number.</td></tr>
 <tr><td>The rate</td><td>An exponentially weighted average of the percent's rise per hour</td><td class="why"><span class="who q">proposed</span> It needs only the readings every provider already gives. A faster hybrid that adds turn cost scored the same on quota spent and only slightly better inside the week (<a href="#evidence">evidence</a>).</td></tr>
-<tr><td>Default half-life</td><td>24 h for a week; span ÷ 7 for any other window (43 min for 5 h, about 4.3 days for 30 days)</td><td class="why"><span class="who q">proposed</span> 24 h was the best of 6, 12, 24, 36 and 48 h on real weekly readings. It also smooths the day and night cycle. The other windows scale by the same ratio, untested.</td></tr>
+<tr><td>Default half-life</td><td>6 h for a week; span ÷ 28 for any other window, never under 30 min (30 min for 5 h, about 26 h for 30 days)</td><td class="why"><span class="who">maintainer</span> The projection must let work resume within hours of a stop. With 24 h it still read 99% after 12 idle hours. In the calibrated closed loop 6 h spent the same quota as 24 h and kept a pace gate shut without need 30 h a week instead of 36 (52 with the window average). As a forecast of the final percent 24 to 36 h scored better; that is not what the number is for. The other windows scale by the same ratio, untested.</td></tr>
 <tr><td>Across resets</td><td>The rate carries over. The first reading of a new window counts as a rise from 0</td><td class="why"><span class="who q">proposed</span> The rate describes the work, which does not reset with the window. This removes the 15% floor the average needs early in a window.</td></tr>
 <tr><td>Within a window</td><td>The percent is taken as a running maximum</td><td class="why"><span class="who q">proposed</span> Readings minutes apart alternate between two values (36, 37, 36). The quota never goes back inside a window.</td></tr>
 <tr><td>Where history lives</td><td>The <code>usage_quota</code> table the journal already keeps, read once at start; in memory after</td><td class="why"><span class="who q">proposed</span> The table holds every change of percent and reset per account and window. A restart then keeps the rate.</td></tr>
@@ -178,7 +178,7 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)}
 <p>Readings are whole percents. At 0.5 points per hour a new point lands every two hours, so the rate cannot react faster than that, whatever the polling interval. The update in step 2 spreads each rise over the time since the previous change, which is what makes coarse readings usable.</p>
 
 <h3 id="history">History and restarts</h3>
-<p>At start, the projector reads from <code>usage_quota</code> the rows of each billing and window for the last seven half-lives (seven days for a weekly window) and replays them through the update above. The table only stores changes, so a gap between two rows is time with no rise, which the update already treats correctly. After that, every reading the quota service publishes goes through the same update in memory. A linked server computes its own projection from its own journal.</p>
+<p>At start, the projector reads from <code>usage_quota</code> the rows of each billing and window for the last seven half-lives (42 hours for a weekly window) and replays them through the update above. The table only stores changes, so a gap between two rows is time with no rise, which the update already treats correctly. After that, every reading the quota service publishes goes through the same update in memory. A linked server computes its own projection from its own journal.</p>
 
 <h3 id="fallback">Fallback</h3>
 <p>While the replayed history covers less than one half-life, the window keeps today's projection, <code>percent ÷ max(elapsed fraction, 0.15)</code>, and the wire says <code>projection: average</code>. A stale reading (a failed poll) gets no projection, as today.</p>
@@ -186,7 +186,7 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)}
 <h3 id="try">Try it</h3>
 <div class="sim">
   <div class="bar">
-    <label>half-life <b id="hlv">24 h</b><input id="hl" type="range" min="2" max="72" step="1" value="24"></label>
+    <label>half-life <b id="hlv">6 h</b><input id="hl" type="range" min="2" max="72" step="1" value="6"></label>
     <label>agents stop at hour <b id="stv">40</b><input id="st" type="range" min="10" max="150" step="1" value="40"></label>
   </div>
   <svg id="chart" viewBox="0 0 640 240" role="img" aria-label="Projection over a sample week"></svg>
@@ -200,11 +200,11 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)}
 <pre><span class="k">quota</span>:
   <span class="k">projection</span>:
     <span class="k">half_life</span>:        <span class="c"># how far back "the current rate" looks, per window length</span>
-      <span class="k">5h</span>: 45m
-      <span class="k">week</span>: 24h
-      <span class="k">month</span>: 4d</pre>
+      <span class="k">5h</span>: 30m
+      <span class="k">week</span>: 6h
+      <span class="k">month</span>: 1d</pre>
 <ul>
-<li>Keys are window lengths, matched to the span each provider declares in <code>window_spans</code>: <code>5h</code>, <code>week</code>, <code>month</code>. A window whose length is not listed uses its span ÷ 7.</li>
+<li>Keys are window lengths, matched to the span each provider declares in <code>window_spans</code>: <code>5h</code>, <code>week</code>, <code>month</code>. A window whose length is not listed uses its span ÷ 28, at least 30 minutes.</li>
 <li>Values are durations with a unit: <code>m</code>, <code>h</code> or <code>d</code>. A half-life must be at least 10 minutes and at most the window's span.</li>
 <li>Every key is optional; an absent block means the defaults. A wrong block keeps the defaults and reports the error in <code>aegis doctor</code>, as <code>notices</code> does.</li>
 <li><code>half_life: average</code> in place of the mapping keeps today's whole-window average for every window.</li>
@@ -261,13 +261,15 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)}
 <thead><tr><th>Estimator</th><th>Unspent</th><th>Out &gt; 6 h early</th><th>Shut without need</th><th>Open over budget</th></tr></thead>
 <tbody>
 <tr><td>Window average (today)</td><td data-h="unspent">1.2</td><td data-h="out > 6 h early">0%</td><td data-h="shut without need">52 h</td><td data-h="open over budget">10.5 h</td></tr>
-<tr><td>EWMA 24 h (this spec)</td><td data-h="unspent">1.1</td><td data-h="out > 6 h early">0%</td><td data-h="shut without need">36 h</td><td data-h="open over budget">5.6 h</td></tr>
+<tr><td>EWMA 6 h (this spec)</td><td data-h="unspent">1.0</td><td data-h="out > 6 h early">2%</td><td data-h="shut without need">30 h</td><td data-h="open over budget">5.2 h</td></tr>
+<tr><td>EWMA 12 h</td><td data-h="unspent">1.1</td><td data-h="out > 6 h early">2%</td><td data-h="shut without need">33 h</td><td data-h="open over budget">5.0 h</td></tr>
+<tr><td>EWMA 24 h</td><td data-h="unspent">1.1</td><td data-h="out > 6 h early">0%</td><td data-h="shut without need">36 h</td><td data-h="open over budget">5.6 h</td></tr>
 <tr><td>EWMA 48 h</td><td data-h="unspent">1.2</td><td data-h="out > 6 h early">0%</td><td data-h="shut without need">37 h</td><td data-h="open over budget">8.1 h</td></tr>
 <tr><td>Rate over 0.5 × hours left</td><td data-h="unspent">1.1</td><td data-h="out > 6 h early">2%</td><td data-h="shut without need">40 h</td><td data-h="open over budget">10.8 h</td></tr>
 <tr><td>Hybrid with turn cost</td><td data-h="unspent">1.1</td><td data-h="out > 6 h early">4%</td><td data-h="shut without need">35 h</td><td data-h="open over budget">4.7 h</td></tr>
 </tbody>
 </table>
-<p>Every estimator spends the same quota over the week. The threshold decides that: 97 to 98 left 1 to 2 points with no week out more than 6 hours early, 100 left none with 4 to 12% of weeks out more than 6 hours early. The estimators differ inside the week, where the average keeps a gate shut about 15 hours a week longer.</p>
+<p>Every estimator spends the same quota over the week. The threshold decides that: 97 to 98 left 1 to 2 points with no week out more than 6 hours early, 100 left none with 4 to 12% of weeks out more than 6 hours early. The estimators differ inside the week, where the average keeps a gate shut about 22 hours a week longer than a 6 h half-life.</p>
 
 <h2 id="delivery"><span class="n">07</span>Delivery</h2>
 <p>One pull request: the projector, the seed read, the config key, the wire fields, the tooltip, a help section on the projection in the quota help page, a <code>changelog.d/</code> fragment and the DESIGN.md paragraph on pace.</p>
