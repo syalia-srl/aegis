@@ -33,6 +33,13 @@ MIGRATE_2_3 = (
     ("usage_turns", ("agent", "queue", "starter")),
     ("usage_parts", ("agent", "queue")),
 )
+# What a budget reads (budgets.py): an agent's sessions, and the sessions a
+# starter started. IF NOT EXISTS, so every start adds them to a file that
+# lacks them without dropping a table.
+INDEXES = (
+    "CREATE INDEX IF NOT EXISTS usage_turns_agent ON usage_turns(agent, log_id)",
+    "CREATE INDEX IF NOT EXISTS usage_turns_starter ON usage_turns(starter, log_id)",
+)
 SCHEMA = """
 CREATE TABLE usage_turns(
   log_id TEXT NOT NULL, rec INTEGER NOT NULL, ts REAL NOT NULL, person TEXT NOT NULL,
@@ -112,11 +119,14 @@ def ensure(con: sqlite3.Connection) -> bool:
         if version == "2":
             # 2 -> 3 adds the agent, queue and starter columns (#1068). Quota
             # readings and imported sessions are in no store, so they are
-            # kept: add the columns in place and mark a backfill, which
-            # re-derives the rows the stores hold.
+            # kept: add the columns in place, delete the rows the stores
+            # hold, as clear() does, and mark a backfill, which derives them
+            # again with the new columns (its inserts skip a row that exists).
             for t, cols in MIGRATE_2_3:
                 for c in cols:
                     con.execute(f"ALTER TABLE {t} ADD COLUMN {c} TEXT")
+            for t in DERIVED:
+                con.execute(f"DELETE FROM {t} WHERE log_id NOT LIKE 'cc-%'")
             _set(con, "version", str(USAGE_VERSION))
             _set(con, "backfill", "0")
         elif fresh:
@@ -127,6 +137,8 @@ def ensure(con: sqlite3.Connection) -> bool:
                     con.execute(stmt)
             _set(con, "version", str(USAGE_VERSION))
             _set(con, "backfill", "0")
+        for stmt in INDEXES:
+            con.execute(stmt)
         con.execute("COMMIT")
     except BaseException:
         con.execute("ROLLBACK")

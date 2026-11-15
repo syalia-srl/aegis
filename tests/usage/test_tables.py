@@ -177,10 +177,22 @@ def test_a_version_2_file_keeps_its_quota_readings_and_imports(tmp_path):
         "INSERT INTO usage_quota VALUES('claude', 'weekly_all', 1.0, 37.0, 9.0)"
     )
     con.execute("INSERT INTO usage_imports VALUES('/x.jsonl', 10, 1.0)")
+    # A turn a store holds and one imported from Claude Code (cc-).
+    for log_id in ("20261020-120000-aaaaaa", "cc-abc"):
+        con.execute(
+            "INSERT INTO usage_turns VALUES(?,1,1.0,'','foreground','claude-code',"
+            "'opus','default','api',0.5,'billed',1,1,0,0,1.0,0,0,0,0,0,NULL)",
+            (log_id,),
+        )
     con.commit()
     assert tables.ensure(con)
     assert con.execute("SELECT count(*) FROM usage_quota").fetchone()[0] == 1
     assert con.execute("SELECT count(*) FROM usage_imports").fetchone()[0] == 1
+    # The store's row is gone, for the backfill to derive it with an agent;
+    # the imported one is in no store and stays.
+    assert con.execute("SELECT log_id FROM usage_turns").fetchall() == [("cc-abc",)]
+    indexes = {r[1] for r in con.execute("PRAGMA index_list(usage_turns)")}
+    assert {"usage_turns_agent", "usage_turns_starter"} <= indexes
     for t, cols in (
         ("usage_turns", COLUMNS["usage_turns"]),
         ("usage_parts", COLUMNS["usage_parts"]),
