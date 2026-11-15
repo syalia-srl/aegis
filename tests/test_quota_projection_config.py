@@ -58,3 +58,9 @@ def test_quota_rows_lead_with_the_state_before_since():
         (40.0, 40.0, 999.0),
     ]
     assert tables.quota_rows(con, "c:b", "weekly_all", 0.0) == []
+
+
+def test_quota_is_a_known_top_level_key():
+    from aegis.config import TOP_KEYS
+
+    assert "quota" in TOP_KEYS

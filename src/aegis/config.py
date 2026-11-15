@@ -70,7 +70,7 @@ TOP_KEYS = (
     "agents", "queues", "default_agent", "recap", "btw", "group_names", "context", "usage",
     "session_memory_max", "terminals", "terminal_memory_max", "park", "network",
     "host", "workflows", "harness_versions", "notices", "nudges",
-    "knowledge", "exit_via", "max_workers", "hosts", "mcp", "model_ranking",
+    "knowledge", "exit_via", "max_workers", "hosts", "mcp", "model_ranking", "quota",
 )  # fmt: skip
 # Read once at boot, before the server knows its name (cli.serve), so a host's
 # block cannot set them.
