@@ -110,7 +110,7 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)}
 <div class="chrome">
   <span>aegis</span>
   <span class="tab">spec · quota projection at the current rate</span>
-  <span class="st"><span class="pill acc">proposed</span><span class="pill">2026-11-15</span><span class="pill">#1065</span></span>
+  <span class="st"><span class="pill acc">built on spec/1065-quota-projection</span><span class="pill">2026-11-15</span><span class="pill">#1065</span></span>
 </div>
 
 <div class="wrap">
@@ -132,7 +132,7 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)}
 
 <main>
 <h1>Quota projection at the current rate</h1>
-<div class="meta"><span>docs/superpowers/specs/2026-11-15-quota-projection-design.html</span><span>·</span><span>proposed, not started</span><span>·</span><span>issue #1065</span></div>
+<div class="meta"><span>docs/superpowers/specs/2026-11-15-quota-projection-design.html</span><span>·</span><span>built, in review</span><span>·</span><span>issue #1065</span></div>
 <p class="lede">Each quota window gets one projection: the percent already spent, as the vendor reports it, plus the current spending rate times the hours left. The rate is an exponentially weighted average of how fast the percent rises, with a half-life set per window length in <code>.aegis.yaml</code>. It replaces the whole-window average, which stays far above 100% for days after an early burst, even when nothing is running.</p>
 
 <h2 id="delivers"><span class="n">01</span>What this delivers</h2>
