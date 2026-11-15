@@ -273,6 +273,7 @@ export class Settings {
       this.harnesses(),
       this.workflows(),
       this.usage(),
+      this.fieldSection("quota"),
       this.fieldSection("embeddings"),
       this.fieldSection("network"),
       this.fieldSection("host"),
