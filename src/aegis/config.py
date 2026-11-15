@@ -735,8 +735,9 @@ class AgentDoc(BaseModel):
     tools: dict[str, list[str]] = Field(default_factory=dict)
     # The quota: block as the file has it (guards.py), kept like tools.
     quota: dict[str, Any] = Field(default_factory=dict)
-    # The budget: list as the file has it (budgets.py), kept like quota.
-    budget: list[Any] = Field(default_factory=list)
+    # The budget: node as the file has it (budgets.py), whatever its shape:
+    # a save writes it back unchanged, a wrong one too; None: no budget:.
+    budget: Any = None
 
 
 class QueueDoc(BaseModel):
@@ -909,10 +910,13 @@ def _quota_raw(node: object) -> dict:
     return json.loads(json.dumps(raw)) if isinstance(raw, dict) else {}
 
 
-def _budget_raw(node: object) -> list:
-    """An agent's budget: list as the file has it, kept like quota:."""
-    raw = cast(dict, node).get("budget") if isinstance(node, dict) else None
-    return json.loads(json.dumps(raw)) if isinstance(raw, list) else []
+def _budget_raw(node: object) -> Any:
+    """An agent's budget: node as the file has it, whatever its shape, so a
+    wrong one is shown wrong and written back, never dropped; None when the
+    agent has none."""
+    if not isinstance(node, dict) or "budget" not in node:
+        return None
+    return json.loads(json.dumps(cast(dict, node)["budget"], default=str))
 
 
 def _mcp_raw(data: dict, name: str) -> list[str]:
@@ -1414,7 +1418,7 @@ def _set_agent(node: CommentedMap, a: AgentDoc) -> None:
         _put(node, "quota", a.quota)
     else:
         node.pop("quota", None)
-    if a.budget:
+    if a.budget is not None:
         _put(node, "budget", a.budget)
     else:
         node.pop("budget", None)

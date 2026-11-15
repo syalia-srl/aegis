@@ -1257,13 +1257,22 @@ export class Settings {
     return fold;
   }
 
-  // An agent's budget: list (budgets.py, #1068), shown as the file has it; a
-  // save writes it back unchanged. It is edited in .aegis.yaml.
+  // An agent's budget: node (budgets.py, #1068), shown as the file has it,
+  // whatever its shape; a save writes it back unchanged. A cap budgets.parse
+  // would refuse shows as invalid, with what the file says.
   budgetFold(a) {
-    const caps = Array.isArray(a.budget) ? a.budget : [];
-    if (!caps.length) return null;
-    const lines = caps.map((c) => {
-      const m = "usd" in c ? `$${c.usd}` : `${c.tokens} tokens`;
+    if (a.budget == null) return null;
+    const raw = Array.isArray(a.budget) ? a.budget : [a.budget];
+    if (!raw.length) return null;
+    const span = /^[1-9][0-9]*[hd]$/;
+    const lines = raw.map((c) => {
+      const named = c && typeof c === "object" && !Array.isArray(c) ? ["usd", "tokens"].filter((k) => k in c) : [];
+      const v = named.length === 1 ? c[named[0]] : null;
+      const ok = Array.isArray(a.budget) && named.length === 1 && Object.keys(c).every((k) => k === named[0] || k === "per")
+        && typeof v === "number" && Number.isFinite(v) && v > 0 && (named[0] === "usd" || Number.isInteger(v))
+        && (c.per === "session" || (typeof c.per === "string" && span.test(c.per)));
+      if (!ok) return h("div", { className: "kv" }, h("span", { textContent: "invalid" }), h("span", { textContent: JSON.stringify(c) }));
+      const m = named[0] === "usd" ? `$${v}` : `${v} tokens`;
       return h("div", { className: "kv" }, h("span", { textContent: `per ${c.per}` }), h("span", { textContent: m }));
     });
     const fold = h("details", { className: "set-priming set-budget" }, h("summary", { textContent: "Budget" }), ...lines, h("p", { className: "set-none", textContent: "Past a cap its sessions are told to finish, and no turn a person did not start runs until the cap has room. Edit budget: in .aegis.yaml; help: config, Budget an agent." }));
