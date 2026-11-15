@@ -569,7 +569,13 @@ async def test_a_closed_agent_cannot_spend_through_a_queue_on_another_pool(
     assert "agent fair: Claude weekly is at 86%" in said
     assert not world.app.queues.tasks
     await turn(s, "a ticket")
-    assert "queue go-work rejects new tasks" in sent(s)[-1]
+    # The notice rides the first prompt or tool result after on_quota sets it,
+    # which may be the enqueue's own tool call: check what the session was owed
+    # and told, not which turn carried it.
+    owed = world.app.notices._items.get(s.log_id, {})
+    guard = [i for k, i in owed.items() if k.startswith("guard:")]
+    assert guard and "queue go-work rejects new tasks" in guard[0].text
+    assert any(k.startswith("guard:") for k in s.items_sent)
     gauge(world, 10)
     said = await turn(s, mcp("queue_enqueue", queue="go-work", payload="x"))
     assert "queue_closed" not in said
