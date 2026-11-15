@@ -30,6 +30,12 @@ queue whose entry in `.aegis.yaml` is broken is refused with what is wrong.
 A session whose agent's scope lists its queues is refused any other with
 out_of_scope and the queues it may use (config, [Scope an
 agent](config#scope-an-agent)).
+A queue with `max_pending:` refuses a task past that many pending with
+queue_full. While a queue's quota guard is closed for you, its
+`on_closed: reject` refuses with queue_closed, why and when it opens; `warn` takes the
+task and the reply carries a `warning` saying it waits; `hold` takes it
+silently (config, [Guard an agent or a
+queue](config#guard-an-agent-or-a-queue)).
 Across a [link](links#what-agents-can-do-across-a-link), `queue@server`
 enqueues on the other server: the task id comes back as `task-id@server`, which
 `task_status`, `task_cancel` and `task_resume` take, and the result reaches
@@ -51,8 +57,10 @@ pending, and `task_status` says `paused: true`, until the priority goes above
 running: the new numbers apply to the next start. Both are read from the file
 as it changes, with no restart, and the Settings page edits them.
 
-A pending task also waits, without failing, while its owner's quota policy
-keeps the harness it needs closed.
+A pending task also waits, without failing, while a quota guard is closed
+on it: its queue's, its worker's agent's, or that of an agent up the chain
+that enqueued it. Such a queue leaves its share of the workers to the
+others, by their priorities, until the guard opens.
 
 ## What a worker is
 

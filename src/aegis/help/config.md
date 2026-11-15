@@ -258,6 +258,82 @@ its own agent's scope met with its starter's: a worker of `fair-work` that
 `fair` enqueued cannot start workflows even if its own agent can. `aegis
 doctor` shows an agent's scope on its row.
 
+## Guard an agent or a queue
+
+An agent or a queue may carry `quota:`, which holds its work back while the
+pool it draws on is over a line. Without it the agent or queue is never held,
+as before.
+
+```yaml
+agents:
+  fair:
+    harness: claude-code
+    model: sonnet
+    effort: low
+    permission: full
+    quota:
+      claude: {weekly_all: {used: 80, projected: 90, stop: 97}}
+      on_closed: warn
+      advice: Answer in the group in one short message and file the request as an issue.
+queues:
+  fair-work:
+    agent: deepseek
+    max_pending: 50
+    quota:
+      opencode-go: {monthly: {projected: 95, stop: 99}}
+      on_closed: reject
+```
+
+`quota:` maps a pool to its windows, as a schedule's quota does (schedules,
+[Quota lines](schedules#quota-lines)): the pool claude has session and
+weekly_all, opencode-go has rolling, weekly and monthly. Each window takes a
+line: a percent, the launch line on the percent used; `pace`, the same as
+`{projected: 100}`; or a map of `used`, `projected` and `stop`, naming used,
+projected or both. The guard is closed when either launch line is reached,
+and stopped at `stop`, which is on the percent used. A stop cuts the running
+turns it covers, as the pause does, and continues them when the window is back
+under it. A pool aegis has never read sets no line, and a reading older than
+15 minutes closes the guard and never stops it.
+
+Beside the pools sit `on_closed:` and, for an agent, `advice`:
+
+| | `on_closed:` | What happens while the guard is closed |
+|---|---|---|
+| agent | `warn` (default) | every turn starts with the notice below |
+| agent | `refuse` | a wake no person started (a feed batch, a monitor, a task's result) waits until the guard opens; a schedule run is skipped, with why in its run log; a `peer_handoff` from an agent is refused with quota_closed. A person's message runs, with the notice |
+| queue | `hold` (default) | `queue_enqueue` takes the task, which waits |
+| queue | `warn` | the task is taken and waits; the reply carries a `warning` with why and when it opens |
+| queue | `reject` | `queue_enqueue` is refused with queue_closed, why and when it opens |
+
+`max_pending:` on a queue, a whole number from 1 up, refuses with queue_full
+any task that would go past that many pending tasks, whatever the guard says.
+
+The gate a turn or a worker passes is the most restrictive of its agent's
+guard, its queue's for a worker, and the guards of the agents up its chain of
+starters (the session that enqueued, spawned or handed off to it, and so on),
+each read on the pool the session draws on. So a guarded agent cannot spend
+through an open queue: a worker that `fair` enqueued waits while `fair`'s
+guard is closed on the worker's pool. A held queue leaves its share of
+`max_workers:` to the others. Guards are read from the file as it is now: a
+line tightened on disk applies to sessions already running.
+
+A turn under a closed guard starts with a notice, before what woke it:
+
+```text
+> from aegis:notice · quota · closed · 2026-11-15T09:12:00Z
+Your agent's quota guard is closed: agent fair: Claude weekly is at 86%, launch line 80%.
+While it is closed: queue fair-work rejects new tasks. Start no long work.
+Answer in the group in one short message and file the request as an issue.
+It opens again when the window drops below 80% used and 90% projected, at the latest at the reset, Mon 02:00.
+```
+
+The second line names the queues in the agent's scope that reject or hold its
+tasks now, the third is `advice` or a default, and the notice comes once per
+change: the next turn after the guard opens starts with `quota · open`. An
+agent with `notices: false` gets neither. A wrong `quota:` or `max_pending:`
+stops the agent or queue with the error `aegis doctor` shows, and Settings
+shows both read-only.
+
 ## The default agent
 
 `default_agent:` names the agent `session_spawn` starts from when it is given
@@ -278,6 +354,9 @@ gets two of them for each one a queue at priority 1 gets, and priority 0
 pauses a queue. Name queues by the goal their work serves (development,
 research, a client) rather than by the model that runs it, and move the
 priorities as the goals change: aegis reads the file again at once.
+
+`quota:` and `max_pending:` hold a queue's work back on the quota and bound
+its length; see [Guard an agent or a queue](#guard-an-agent-or-a-queue).
 
 `max_parallel:`, each queue's own bound before `max_workers:` existed, is ignored: a queue that
 still sets it runs, and `aegis doctor` warns. See the queues page for how

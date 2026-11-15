@@ -97,7 +97,8 @@ def line_of(v: object) -> dict | None:
     if _percent(v):
         return {"used": v}
     if isinstance(v, dict):
-        return {k: v[k] for k in ("used", "projected", "stop") if k in v}
+        d = cast(dict, v)
+        return {k: d[k] for k in ("used", "projected", "stop") if k in d}
     return None
 
 
@@ -105,8 +106,9 @@ def normal(line: object) -> dict:
     """A policy's line, either form, as ``{used?, projected?, stop?}``: the
     old ``{launch, stop}`` of a token policy, or a line ``line_of`` reads."""
     if isinstance(line, dict) and "launch" in line:
-        out = line_of(line["launch"]) or {}
-        return out | ({"stop": line["stop"]} if "stop" in line else {})
+        d = cast(dict, line)
+        out = line_of(d["launch"]) or {}
+        return out | ({"stop": d["stop"]} if "stop" in d else {})
     return line_of(line) or {}
 
 
@@ -153,7 +155,8 @@ def quota_errors(quota: object) -> list[str]:
     if not isinstance(quota, dict):
         return ["quota is a map of pools to windows"]
     errs: list[str] = []
-    for pool, ws in quota.items():
+    for pool, ws in cast(dict, quota).items():
+        pool = str(pool)
         if pool not in KINDS:
             errs.append(f"aegis reads no quota for {pool!r}")
             continue
@@ -235,7 +238,9 @@ def decide(policy: dict | None, pool: str | None, snapshot: dict, now: float) ->
 
 
 def _clock(ts: float) -> str:
-    return time.strftime("%H:%M", time.localtime(ts))
+    """A reset time: the hour within a day, else the day and the hour."""
+    fmt = "%H:%M" if ts - time.time() < 86400 else "%a %H:%M"
+    return time.strftime(fmt, time.localtime(ts))
 
 
 def waits(g: Gate) -> str:

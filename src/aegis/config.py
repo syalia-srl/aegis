@@ -36,7 +36,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field, replace
 from io import StringIO
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, Field
 from ruamel.yaml import YAML, YAMLError
@@ -902,7 +902,7 @@ def _tools_raw(data: dict, name: str) -> dict[str, list[str]]:
 def _quota_raw(node: object) -> dict:
     """An agent's or queue's quota: block as the file has it, so a save
     writes it back unchanged, a block the reader refuses too."""
-    raw = node.get("quota") if isinstance(node, dict) else None
+    raw = cast(dict, node).get("quota") if isinstance(node, dict) else None
     return json.loads(json.dumps(raw)) if isinstance(raw, dict) else {}
 
 

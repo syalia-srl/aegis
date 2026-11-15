@@ -106,7 +106,9 @@ class Definition(_Strict):
     fire: Fire
     prompt: str = Field(min_length=1)
     quota: dict[str, dict[str, Line]] = Field(
-        default_factory=lambda: {k: dict(v) for k, v in DEFAULT_QUOTA.items()},
+        default_factory=lambda: {
+            k: dict[str, Line](v) for k, v in DEFAULT_QUOTA.items()
+        },
         description="Launch lines by pool and window: a percent under which a "
         'tick may fire, "pace" (projected below 100% at reset), or a map '
         "{used, projected, stop} naming either or both. A pool not named has "
