@@ -34,7 +34,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from . import host
+from . import host, notice_sources
+from .guards import SOURCE as GUARD
 from .notice_sources import Item
 from .monitors import iso_now
 from .quota_gate import pool_for
@@ -464,8 +465,9 @@ class Notices:
             items = []  # off in .aegis.yaml, or a product agent's (#983)
         mine = self._items.setdefault(log_id, {})
         prefix = f"{source}:"
+        fit = _cut if notice_sources.cuts(source) else str.strip
         new = {
-            prefix + i.key: Item(i.key, i.level, _cut(i.text), _cut(i.clear), i.wake)
+            prefix + i.key: Item(i.key, i.level, fit(i.text), fit(i.clear), i.wake)
             for i in items
         }
         sent = s.items_sent if s is not None else {}
@@ -814,8 +816,14 @@ class Notices:
             for k, v in self.levels().items()
             if not k.startswith("quota:") or k.partition(":")[2] == pool
         }
+        # While its quota guard is closed the session is told that instead
+        # (App.guard_items): the pool's own advice would contradict it, so
+        # the quota kinds are neither told nor cleared until it opens.
+        guarded = any(k.startswith(f"{GUARD}:") for k in self._items.get(s.log_id, {}))
         blocks = []
         for key, (level, reading) in active.items():
+            if guarded and key.startswith("quota:"):
+                continue
             # A level kept from before a restart has no reading to print yet.
             if s.notices_sent.get(key) == level or not reading:
                 continue
@@ -826,7 +834,11 @@ class Notices:
                 reading = reading | self._own(s, key, reading)
             blocks.append(block(key, level, reading, role))
             s.notices_sent[key] = level
-        for key in [k for k in s.notices_sent if k not in active]:
+        for key in [
+            k
+            for k in s.notices_sent
+            if k not in active and not (guarded and k.startswith("quota:"))
+        ]:
             blocks.append(self._clear(key))
             del s.notices_sent[key]
         before = dict(s.items_sent)

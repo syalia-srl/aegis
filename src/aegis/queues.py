@@ -44,12 +44,15 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 from .agents import ConfigError, read_config, resolve
+from . import guards
+from .guards import QUEUE_ACTIONS
 from . import restarts
 from . import notice_sources
 from .monitors import iso_now
 from .notice_sources import Item
 from .names import default_title
 from .ops import OpError
+from .quota_gate import Gate, waits
 from .scopes import Scope
 
 if TYPE_CHECKING:
@@ -139,6 +142,8 @@ def queues_from(raw: Any) -> dict[str, dict]:
             }
         elif not isinstance(q.get("quiet", True), bool):
             out[str(name)] = {"error": f"quiet {q['quiet']!r} is not true or false"}
+        elif (bad := _guard_error(q)) is not None:
+            out[str(name)] = {"error": bad}
         else:
             # A worker starts with no tab: its result goes to its enqueuer (#386).
             out[str(name)] = {
@@ -146,8 +151,18 @@ def queues_from(raw: Any) -> dict[str, dict]:
                 "priority": priority,
                 "quiet": q.get("quiet", True),
                 "legacy": [k for k in LEGACY_QUEUE_KEYS if k in q],
+                # Its quota guard, None for none, and its bound (#1067).
+                "guard": guards.parse(q.get("quota"), QUEUE_ACTIONS)[0],
+                "max_pending": guards.max_pending(q.get("max_pending"))[0],
             }
     return out
+
+
+def _guard_error(q: dict) -> str | None:
+    return (
+        guards.parse(q.get("quota"), QUEUE_ACTIONS)[1]
+        or guards.max_pending(q.get("max_pending"))[1]
+    )
 
 
 def load_queues(config_root: Path) -> dict[str, dict]:
@@ -372,20 +387,86 @@ class Queues:
             await self._start(best[1], best[2])
 
     def quota_wait(self, t: Task, q: dict) -> str | None:
-        """Why ``t``'s owner's quota gate keeps it pending, or None. A task
-        that waits is skipped, never failed, so the next owner's starts; the
-        gate's next reading dispatches it (app.on_quota). An agent that cannot
-        resolve is left to _start, which fails the task with the reason."""
+        """Why ``t``'s gate keeps it pending, or None. A task that waits is
+        skipped, never failed, so the next one starts, and a queue with none
+        to start leaves its share of max_workers to the others; the gate's
+        next reading dispatches it (app.on_quota)."""
+        g = self.gate(t.queue, q, t.enqueuer, t.cwd, t.owner)
+        return None if g.may_start else g.why
+
+    def gate(
+        self, name: str, q: dict, enqueuer: str | None, cwd: str, owner: str | None
+    ) -> Gate:
+        """The gate a worker of queue ``name`` enqueued by ``enqueuer`` passes
+        now: the cascade, the pause, and the guards of its agent, the queue
+        and the enqueuer's chain (guards.py). An agent that cannot resolve is
+        left to _start, which fails the task with the reason."""
         start_spec = self._registry.start_spec
         if start_spec is None:
-            return None
+            return Gate("open")
         try:
             agents = list(self._config.current().agents)
-            spec = resolve(agents, None, q["agent"], {}, Path(t.cwd), owner=t.owner)
+            spec = resolve(agents, None, q["agent"], {}, Path(cwd), owner=owner)
         except OpError:
+            return Gate("open")
+        spec = dataclasses.replace(spec, started_by=enqueuer)
+        _, g = start_spec(spec, name)
+        return g
+
+    def guard_gate(
+        self, name: str, q: dict, enqueuer: str | None, cwd: str, owner: str | None
+    ) -> Gate:
+        """The guards alone over a worker of ``name`` that ``enqueuer``
+        starts (guards.py), across its cascade: closed only when every model
+        it may start on is, with the first one's why and reopen. A cooling
+        model or the pause never closes it: they only ever hold a task."""
+        guard = self._registry.guard
+        if guard is None:
+            return Gate("open")
+        try:
+            agents = list(self._config.current().agents)
+            spec = resolve(agents, None, q["agent"], {}, Path(cwd), owner=owner)
+        except OpError:
+            return Gate("open")
+        spec = dataclasses.replace(spec, started_by=enqueuer)
+        models = spec.cascade if spec.model in spec.cascade else (spec.model,)
+        first: Gate | None = None
+        for m in models:
+            g = guard(spec, name, m)
+            if g.may_start:
+                return g
+            first = first or g
+        return first or Gate("open")
+
+    def admit(
+        self, name: str, enqueuer: str | None, cwd: str, owner: str | None
+    ) -> str | None:
+        """Whether queue ``name`` takes one more task from ``enqueuer`` now:
+        past ``max_pending`` it raises queue_full whatever the gate says;
+        with the guards closed (guard_gate), ``on_closed: reject`` raises
+        queue_closed and ``warn`` returns the warning; ``hold``, the default,
+        waits silently, as a task waits for a cooling model or the pause."""
+        q = self.queues[name]
+        pending = sum(
+            1 for t in self.tasks.values() if t.queue == name and t.status == "pending"
+        )
+        if (cap := q.get("max_pending")) is not None and pending >= cap:
+            raise OpError(
+                "queue_full",
+                f"queue {name!r} already holds {pending} pending tasks, its "
+                f"max_pending; nothing was enqueued",
+            )
+        guard = q.get("guard")
+        action = guard.on_closed if guard is not None else "hold"
+        if action == "hold":
             return None
-        _, g = start_spec(spec)
-        return None if g.may_start else g.why
+        g = self.guard_gate(name, q, enqueuer, cwd, owner)
+        if g.may_start:
+            return None
+        text = waits(g)
+        if action == "reject":
+            raise OpError("queue_closed", f"queue {name!r} rejects new tasks: {text}")
+        return f"the task waits until the gate opens: {text}"
 
     async def _start(self, t: Task, q: dict) -> None:
         try:
@@ -415,7 +496,7 @@ class Queues:
             self._fail(t, f"the queue's agent {q['agent']!r} cannot start: {e.message}")
             return
         if self._registry.start_spec is not None:
-            spec, _ = self._registry.start_spec(spec)
+            spec, _ = self._registry.start_spec(spec, t.queue)
         try:
             s = await self._registry.spawn(
                 spec,

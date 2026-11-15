@@ -128,7 +128,7 @@ details[data-state=doing] summary .s{color:var(--accent)}
 
 <h2>Slice 2 · quota guards on agents and queues (#1067)</h2>
 
-<details class="task" id="task-6" data-state="pending" open><summary><span class="n">6</span><span class="t">The map line form in <code>quota_gate</code></span><span class="s">pending</span><span class="f">src/aegis/quota_gate.py, src/aegis/schedules.py, tests/test_quota_gate.py, tests/test_schedule*.py</span></summary>
+<details class="task" id="task-6" data-state="done" open><summary><span class="n">6</span><span class="t">The map line form in <code>quota_gate</code></span><span class="s">pending</span><span class="f">src/aegis/quota_gate.py, src/aegis/schedules.py, tests/test_quota_gate.py, tests/test_schedule*.py</span></summary>
 <ol>
   <li>A line is a percent (used), <code>"pace"</code> (projected 100) or <code>{used?, projected?, stop?}</code> with at least one of used/projected. One function turns a guard's <code>quota:</code> map into the policy <code>decide()</code> reads, used by schedules (<code>Schedules._line</code>) and by guards.</li>
   <li><code>decide()</code> closes at <code>used ≥ used</code> or <code>projected ≥ projected</code>, stops at <code>used ≥ stop</code>, and keeps its stale and never-read rules. The <code>why</code> names which one tripped.</li>
@@ -137,7 +137,7 @@ details[data-state=doing] summary .s{color:var(--accent)}
 <div class="verify"><b>verify</b> <code>uv run pytest tests/test_quota_gate.py tests/test_quota_pace.py tests -q -k "schedule and quota"</code>.</div>
 </details>
 
-<details class="task" id="task-7" data-state="pending" open><summary><span class="n">7</span><span class="t"><code>quota:</code>, <code>on_closed</code>, <code>advice</code>, <code>max_pending</code> in config</span><span class="s">pending</span><span class="f">src/aegis/agents.py, src/aegis/config.py (QUEUE_KEYS, QueueDoc), src/aegis/queues.py, tests/test_config*.py, tests/test_agents.py</span></summary>
+<details class="task" id="task-7" data-state="done" open><summary><span class="n">7</span><span class="t"><code>quota:</code>, <code>on_closed</code>, <code>advice</code>, <code>max_pending</code> in config</span><span class="s">pending</span><span class="f">src/aegis/agents.py, src/aegis/config.py (QUEUE_KEYS, QueueDoc), src/aegis/queues.py, tests/test_config*.py, tests/test_agents.py</span></summary>
 <ol>
   <li>Agents: <code>quota:</code> map, <code>on_closed: refuse | warn</code> (default warn), <code>advice:</code> string. Queues: <code>quota:</code>, <code>on_closed: reject | warn | hold</code> (default hold), <code>max_pending:</code> positive int.</li>
   <li>Wrong values are reported by <code>aegis doctor</code> on the row and stop the agent or queue, as other config errors do. <code>hosts.&lt;name&gt;</code> overrides take the new keys.</li>
@@ -145,7 +145,7 @@ details[data-state=doing] summary .s{color:var(--accent)}
 <div class="verify"><b>verify</b> <code>uv run pytest tests/test_config.py tests/test_config_hosts.py tests/test_agents.py tests/test_queues.py -q</code>.</div>
 </details>
 
-<details class="task" id="task-8" data-state="pending" open><summary><span class="n">8</span><span class="t">The combined gate: agent, queue and starters</span><span class="s">pending</span><span class="f">src/aegis/app.py (gate, start_spec, on_quota), src/aegis/guards.py (new), tests/test_guards.py</span></summary>
+<details class="task" id="task-8" data-state="done" open><summary><span class="n">8</span><span class="t">The combined gate: agent, queue and starters</span><span class="s">pending</span><span class="f">src/aegis/app.py (gate, start_spec, on_quota), src/aegis/guards.py (new), tests/test_guards.py</span></summary>
 <ol>
   <li><code>guards.py</code>: <code>chain(log_id)</code> walks starters (spawned_by, continues, worker's enqueuer) to the root; <code>gate_for(spec, queue)</code> returns the worst of the agent's guard, the queue's guard and every starter's agent guard, with <code>why</code> prefixed by the level ("agent fair: …", "queue fair-work: …").</li>
   <li><code>App.gate</code> uses it; <code>start_spec</code> and the cascade's pick pass the spec through.</li>
@@ -154,7 +154,7 @@ details[data-state=doing] summary .s{color:var(--accent)}
 <div class="verify"><b>verify</b> <code>uv run pytest tests/test_guards.py tests/test_cascade*.py -q</code>: worst-of over the three levels against fake snapshots; a stopped guard pauses and an open one continues.</div>
 </details>
 
-<details class="task" id="task-9" data-state="pending" open><summary><span class="n">9</span><span class="t">Queues: reject, warn, hold, max_pending, fair share</span><span class="s">pending</span><span class="f">src/aegis/queues.py, src/aegis/agent_ops.py (queue.enqueue), tests/test_queues.py</span></summary>
+<details class="task" id="task-9" data-state="done" open><summary><span class="n">9</span><span class="t">Queues: reject, warn, hold, max_pending, fair share</span><span class="s">pending</span><span class="f">src/aegis/queues.py, src/aegis/agent_ops.py (queue.enqueue), tests/test_queues.py</span></summary>
 <ol>
   <li>At enqueue: past <code>max_pending</code> raise <code>queue_full</code>; with the gate closed for this enqueuer, <code>reject</code> raises <code>queue_closed</code> with why and reopen, <code>warn</code> returns the task plus a <code>warning</code>, <code>hold</code> returns as today.</li>
   <li>In <code>dispatch</code>, a queue whose next task's gate is closed counts as having nothing to start, so its share goes to the others.</li>
@@ -162,7 +162,7 @@ details[data-state=doing] summary .s{color:var(--accent)}
 <div class="verify"><b>verify</b> <code>uv run pytest tests/test_queues.py -q</code>: the three actions, the cap, and two queues at equal priority where one is held and the other gets every slot.</div>
 </details>
 
-<details class="task" id="task-10" data-state="pending" open><summary><span class="n">10</span><span class="t">Agents: refuse or warn when a turn would start</span><span class="s">pending</span><span class="f">src/aegis/session.py, src/aegis/app.py, src/aegis/feeds.py, src/aegis/schedules.py, src/aegis/notices.py, tests/test_guards.py</span></summary>
+<details class="task" id="task-10" data-state="done" open><summary><span class="n">10</span><span class="t">Agents: refuse or warn when a turn would start</span><span class="s">pending</span><span class="f">src/aegis/session.py, src/aegis/app.py, src/aegis/feeds.py, src/aegis/schedules.py, src/aegis/notices.py, tests/test_guards.py</span></summary>
 <ol>
   <li>Find the point where a message (person, feed batch, schedule run, handoff, monitor, task callback) starts a turn and check the session's gate there.</li>
   <li><code>refuse</code>: a feed batch is held (<code>held_for: quota</code>) and delivered on open; a schedule run is skipped with why in its log; a handoff is refused to its sender with why; a person's message runs with the notice.</li>
@@ -171,7 +171,7 @@ details[data-state=doing] summary .s{color:var(--accent)}
 <div class="verify"><b>verify</b> <code>uv run pytest tests/test_guards.py tests/test_feeds*.py tests/test_notices.py -q</code>: a held feed batch is delivered on open; the notice appears once, then the open-again notice.</div>
 </details>
 
-<details class="task" id="task-11" data-state="pending" open><summary><span class="n">11</span><span class="t">Help, changelog, live check</span><span class="s">pending</span><span class="f">src/aegis/help/config.md, src/aegis/help/queues.md, src/aegis/help/schedules.md, changelog.d/</span></summary>
+<details class="task" id="task-11" data-state="done" open><summary><span class="n">11</span><span class="t">Help, changelog, live check</span><span class="s">pending</span><span class="f">src/aegis/help/config.md, src/aegis/help/queues.md, src/aegis/help/schedules.md, changelog.d/</span></summary>
 <ol>
   <li>Help for guards on agents and queues, the map line form (also in <code>schedules.md</code>), <code>max_pending</code>, <code>queue_closed</code>, <code>queue_full</code> and the notice.</li>
   <li>Fragment (Added). Live: an agent whose guard line is under the current reading gets the notice in the browser, and its queue rejects.</li>
@@ -225,6 +225,23 @@ details[data-state=doing] summary .s{color:var(--accent)}
   <li>A schedule made by an agent stores that agent's scope in its owner record; a run meets it.</li>
   <li>The primer's help paragraph is a part too, and the lists naming features in the help and turn_end paragraphs name only what the scope has.</li>
   <li>Settings carries <code>tools:</code> through a save and shows it read-only on the agent card (<code>tests/test_config_coverage.py</code> requires every key in the form).</li>
+</ul>
+<h3>Slice 2</h3>
+<ul>
+  <li><code>on_closed</code> and <code>advice</code> sit inside <code>quota:</code>, beside the pools, as spec section 05 and the worked example write them, not as top-level agent keys as task 7 reads. A queue's <code>advice</code> is an error that says so, and so is a <code>quota:</code> with <code>on_closed</code> or <code>advice</code> and no pool; <code>quota: {}</code> is no guard.</li>
+  <li><code>"pace"</code> keeps its old meaning, closed only above 100% projected; a map's <code>projected: N</code> closes at N or more. A schedule's line refuses <code>stop</code>, and its percent and pace lines keep the stop at 100 the old form gave them, so no existing schedule changes behaviour.</li>
+  <li>A closed gate's <code>reopens</code> lists every window that holds it, at every level, with the part of its line that tripped ("Claude weekly drops below 80% used (agent fair)"), and <code>resets_at</code> is the latest of their resets: "It opens again when all of: …, at the latest at Fri 01:00."</li>
+  <li><code>App.gate</code> still answers open; the combined gate is <code>App.guard(spec, queue, model)</code> in <code>guards.py</code> (<code>levels</code>, <code>worst</code>), and <code>start_spec</code> takes <code>queue</code> and <code>guarded</code>. Queues, workflows and cascades start guarded; <code>session_spawn</code> and <code>session_handoff</code> start unguarded, so a guard never refuses a spawn: the new session's turns meet its agent's <code>on_closed</code>. Only <code>peer_handoff</code> is refused.</li>
+  <li>Guards are read from <code>.aegis.yaml</code> as it is now, not fixed at spawn as scopes are. The agent's and the queue's level are read on the pool of the session being started, each starter's on the pool its own record's model draws on, so a closed starter closes its descendants on any pool (spec section 07: fair's Claude line closed, fair-work on OpenCode Go rejects fair's enqueue). <code>continues</code> carries guards only between two sessions of the same agent.</li>
+  <li>At enqueue, a queue's <code>reject</code> and <code>warn</code> decide on the guards alone (<code>Queues.guard_gate</code>), across the worker agent's cascade: closed only when every model's guard is, with the first one's why and reopen. A cooling model and the pause only ever hold. A queue without <code>quota:</code> holds. The fair share needed no dispatcher change: <code>quota_wait</code> already skipped a closed head, and now its gate includes the guards.</li>
+  <li>The notice is a notice source, <code>guard</code>, declared uncut (<code>notice_sources.declare(..., cut=False)</code>): its several lines are built from facts and keep their end. <code>App.guard_items</code> sets one item, key <code>closed</code>, warn (critical when stopped), from <code>on_quota</code> for every live session and before each send, and [] when the gate is read open; its clear says the guard is open again. A gate open only because no reading exists changes nothing, so a restart neither clears nor repeats it. It folds as its own row, rides mid-turn on the next tool call, is kept in <code>items_sent</code>, and honours <code>notices: false</code> and <code>notices: {guard: false}</code>. While a session holds a guard item, the host's <code>quota:&lt;pool&gt;</code> notice is neither told nor cleared. It rides after the prompt, as every notice does, not before it.</li>
+  <li>A stop line never cuts a turn a person started (<code>person_turn</code>), and <code>_stop</code> re-checks the status first. A cut is marked in <code>quota_paused</code> with the prefix <code>guards.CUT</code>, apart from <code>pause.WHY</code>: <code>quota_hold</code> ignores it, so a person's prompt runs, while <code>refuse_hold</code> returns it, so every other wake, a boot continue and an unpause wait. A cut session continues only when a fresh reading opens the gate (<code>Gate.measured</code>); a stale reading or none keeps it cut. <code>_continue</code> re-checks the gate or <code>refuse_hold</code> before it sends.</li>
+  <li>A stopped guard also holds wakes no person started and skips schedule runs on a <code>warn</code> agent (<code>App.refuse_hold</code>): stop means no new turn. At a turn's end under a refusing guard, a person's held messages go alone and the wakes stay held, in their order.</li>
+  <li>A feed's batch to a refusing agent is not made: its items stay the feed's <code>pending</code> (the read cursor has moved, the items are kept by the feed), and <code>App._release_held</code> wakes the feeds so they go when the guard opens. A workflow step that reuses a session waits while that session's guard refuses.</li>
+  <li>A skipped schedule run is logged as <code>skipped</code> with <code>why: quota</code> and the why in <code>line</code>; the schedules view shows "skipped: …". The session card names <code>refuse_hold</code>'s reason for held messages.</li>
+  <li>A reset more than a day away is written with its weekday.</li>
+  <li>The schedules editor shows a map line as text and keeps it through a save; it edits only the percent and pace forms.</li>
+  <li>Live check: <code>aegis serve</code> from the worktree on a temp root with the fake claude and a copy of the machine's Claude reading (week 39%) behind a live backoff, so no fetch was made; <code>fair</code> with <code>used: 30</code>, <code>on_closed: warn</code>, and <code>fair-work</code> on an OpenCode Go agent with <code>on_closed: reject</code>. A headless Playwright script at 1280 and 390 px saw the <code>guard:closed</code> notice as its own row, and <code>fair</code>'s enqueue refused with <code>queue_closed</code> naming agent fair.</li>
 </ul>
 </main>
 <script>

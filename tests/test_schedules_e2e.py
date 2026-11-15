@@ -316,6 +316,20 @@ async def test_a_launch_line_holds_a_fire_into_an_existing_session(world):
     await until(lambda: inbox(a), 10, "the released message")
 
 
+async def test_a_schedule_quota_line_on_projected_holds_a_fire(world):
+    t = frozen(world)
+    gauge(world, weekly_projected=95)
+    create(
+        world, "ahead-line", DONE, quota={"claude": {"weekly_all": {"projected": 90}}}
+    )
+    await tick(world, t)
+    (held,) = runs(world, "ahead-line", "tick")
+    assert held["why"] == "quota" and "launch line 90%" in held["line"]
+    gauge(world, weekly_projected=80)
+    await world.app.schedules.step()
+    assert len(runs(world, "ahead-line", "fired")) == 1
+
+
 async def test_an_empty_quota_sets_no_line(world):
     t = frozen(world)
     gauge(world, session=99, weekly_projected=400)

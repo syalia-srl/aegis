@@ -188,6 +188,11 @@ class Host:
         or None when it may."""
         return None
 
+    def refuse_hold(self, session: "Session") -> str | None:
+        """Why the session's quota guard refuses a turn a person did not
+        start (guards.py, on_closed: refuse), or None when it does not."""
+        return None
+
     def workflow_lock(self, session: "Session") -> str | None:
         """Why nobody but the engine may prompt or interrupt the session (a
         node of a live workflow run, workflows.py), or None."""
@@ -1109,7 +1114,9 @@ class Session:
         if self.status == "working" or self._flushing:
             self._hold(msg)
             return "held"
-        if self._host.quota_hold(self) is not None:
+        if self._host.quota_hold(self) is not None or (
+            not by_person and self._host.refuse_hold(self) is not None
+        ):
             self._hold(msg | {"held_for": "quota"})
             return "held"
         await self._send(_inbox_text([msg]), by_person=by_person)
@@ -1131,9 +1138,12 @@ class Session:
             return msg | {"header": "> continue"}
         return None
 
-    async def _flush_held(self) -> None:
+    async def _flush_held(self, keep: list[dict] | None = None) -> None:
+        """Send what is held in one turn; ``keep``, the messages that stay
+        held (a refusing guard's wakes, when a person's message goes)."""
         self._flushing = True
-        batch, self.held = [m for m in map(self._quiet, self.held) if m], []
+        batch = [m for m in map(self._quiet, self.held) if m]
+        self.held = list(keep or [])
         try:
             if batch:
                 # Before the send gathers notices: the "held" warning ends here.
@@ -1621,8 +1631,19 @@ class Session:
             log.warning("%s: a notice did not reach the agent", self.handle)
 
     def _turn_over(self) -> None:
-        """A turn ended: send what it held, unless the gate says no new turn."""
-        if self.held and self._host.quota_hold(self) is not None:
+        """A turn ended: send what it held, unless the gate says no new turn.
+        A guard that refuses wakes lets a person's messages go alone: the
+        rest wait, in their order, for it to open."""
+        refused = bool(self.held) and self._host.refuse_hold(self) is not None
+        person = [m for m in self.held if m.get("by_person")]
+        if self.held and self._host.quota_hold(self) is None and refused and person:
+            rest = [
+                m | {"held_for": "quota"} for m in self.held if not m.get("by_person")
+            ]
+            self.held = person
+            self._flushing = True
+            asyncio.get_running_loop().create_task(self._flush_held(keep=rest))
+        elif self.held and (self._host.quota_hold(self) is not None or refused):
             # The gate says no new turn: they wait for it to open.
             self.held = [m | {"held_for": "quota"} for m in self.held]
             self._metas.write_soon(self.log_id, self.meta)

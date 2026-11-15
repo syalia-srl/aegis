@@ -26,6 +26,7 @@ stays the shared layer, so a save never copies one server's values into all.
 
 from __future__ import annotations
 
+import json
 import asyncio
 import contextlib
 import logging
@@ -35,7 +36,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field, replace
 from io import StringIO
 from pathlib import Path
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, Field
 from ruamel.yaml import YAML, YAMLError
@@ -77,9 +78,9 @@ NOT_PER_HOST = ("hosts",)
 AGENT_KEYS = (
     "harness", "provider", "model", "models", "effort", "permission", "priming",
     "keep_harness_tools", "exit", "mcp",
-    "harness_tools", "isolated", "primer", "notices", "tools",
+    "harness_tools", "isolated", "primer", "notices", "tools", "quota",
 )  # fmt: skip
-QUEUE_KEYS = ("agent", "priority", "quiet")
+QUEUE_KEYS = ("agent", "priority", "quiet", "quota", "max_pending")
 
 Stamp = tuple[int, int, int]
 
@@ -780,6 +781,8 @@ class AgentDoc(BaseModel):
     # The tools: block as the file has it (scopes.py); the form shows it and
     # a save writes it back unchanged.
     tools: dict[str, list[str]] = Field(default_factory=dict)
+    # The quota: block as the file has it (guards.py), kept like tools.
+    quota: dict[str, Any] = Field(default_factory=dict)
 
 
 class QueueDoc(BaseModel):
@@ -790,6 +793,10 @@ class QueueDoc(BaseModel):
     priority: int | None = None
     # None: the file leaves it out, which reads as true.
     quiet: bool | None = None
+    # The quota: block as the file has it (guards.py), kept like an agent's.
+    quota: dict[str, Any] = Field(default_factory=dict)
+    # None: the file leaves it out, which bounds nothing.
+    max_pending: int | None = None
 
 
 class TerminalDoc(BaseModel):
@@ -875,6 +882,7 @@ def doc_from(data: dict) -> ConfigDoc:
             mcp=_mcp_raw(data, a.name),
             **{k: getattr(a, k) for k in SWITCHES},
             tools=_tools_raw(data, a.name),
+            quota=_quota_raw((data.get("agents") or {}).get(a.name)),
         )
         for a in agents_from(data)
     ]
@@ -890,6 +898,8 @@ def doc_from(data: dict) -> ConfigDoc:
                 agent=str(q.get("agent") or ""),
                 priority=priority if ok else None,
                 quiet=q["quiet"] if isinstance(q.get("quiet"), bool) else None,
+                quota=_quota_raw(q),
+                max_pending=mp if _positive(mp := q.get("max_pending")) else None,
             )
         )
     d = data.get("default_agent")
@@ -935,6 +945,13 @@ def _tools_raw(data: dict, name: str) -> dict[str, list[str]]:
     if not isinstance(raw, dict):
         return {}
     return {str(k): [str(n) for n in v] for k, v in raw.items() if isinstance(v, list)}
+
+
+def _quota_raw(node: object) -> dict:
+    """An agent's or queue's quota: block as the file has it, so a save
+    writes it back unchanged, a block the reader refuses too."""
+    raw = cast(dict, node).get("quota") if isinstance(node, dict) else None
+    return json.loads(json.dumps(raw)) if isinstance(raw, dict) else {}
 
 
 def _mcp_raw(data: dict, name: str) -> list[str]:
@@ -1434,6 +1451,10 @@ def _set_agent(node: CommentedMap, a: AgentDoc) -> None:
         _put(node, "tools", a.tools)
     else:
         node.pop("tools", None)
+    if a.quota:
+        _put(node, "quota", a.quota)
+    else:
+        node.pop("quota", None)
     for k, default in SWITCHES.items():
         if getattr(a, k) != default:
             _put(node, k, getattr(a, k))
@@ -1468,6 +1489,11 @@ def _apply(data: CommentedMap, doc: ConfigDoc) -> None:
                 queues[q.name].pop("quiet", None)
             else:
                 _put(queues[q.name], "quiet", q.quiet)
+            for k, v in (("quota", q.quota), ("max_pending", q.max_pending)):
+                if v:
+                    _put(queues[q.name], k, v)
+                else:
+                    queues[q.name].pop(k, None)
     else:
         data.pop("queues", None)
     if doc.max_workers is None:
