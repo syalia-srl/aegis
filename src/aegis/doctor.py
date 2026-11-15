@@ -683,6 +683,8 @@ async def doctor(
     if "error" in snap.usage:
         out.append(Finding("error", "usage", snap.usage["error"]))
     out += _notices(snap.notices)
+    if "error" in snap.quota:
+        out.append(Finding("error", "quota", snap.quota["error"]))
     if "error" in snap.nudges:
         out.append(Finding("error", "nudges", snap.nudges["error"]))
     out.append(_park(snap.park))
