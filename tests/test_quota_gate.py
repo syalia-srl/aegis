@@ -179,7 +179,8 @@ def test_a_refusal_names_the_line_that_reopens_the_gate():
 
     stopped = decide(LINES, "claude", snap(w("session", 95, label="5 hours")), NOW)
     text = refusal("ben", stopped)
-    assert "stop line 90%" in text and "drops below 50%" in text and "resets at" in text
+    assert "stop line 90%" in text and "5 hours drops below 50%" in text
+    assert "at the latest at" in text
     paced = decide(LINES, "claude", snap(w("weekly_all", 30, projected=130)), NOW)
     assert "back on pace" in refusal("ben", paced)
 
@@ -201,23 +202,35 @@ GUARD = {"claude": {"weekly_all": {"used": 80, "projected": 90, "stop": 97}}}
 
 
 @pytest.mark.parametrize(
-    "percent,projected,state,says",
+    "percent,projected,state,says,reopens",
     [
-        (60, 85, "open", ""),
-        (86, 85, "closed", "at 86%, launch line 80%"),
-        (60, 104, "closed", "on pace for 104% at reset, launch line 90%"),
-        (97, 120, "stopped", "stop line 97%"),
+        (60, 85, "open", "", ""),
+        (86, 85, "closed", "at 86%, launch line 80%", "drops below 80% used"),
+        (
+            60,
+            104,
+            "closed",
+            "on pace for 104% at reset, launch line 90%",
+            "is projected below 90%",
+        ),
+        (
+            97,
+            120,
+            "stopped",
+            "stop line 97%",
+            "drops below 80% used and is projected below 90%",
+        ),
     ],
 )
 def test_a_map_line_closes_on_used_or_projected_and_stops_on_used(
-    percent, projected, state, says
+    percent, projected, state, says, reopens
 ):
     from aegis.quota_gate import lines_gate
 
     g = lines_gate(GUARD, "claude", snap(w("weekly_all", percent, projected)), NOW)
     assert g.state == state and says in g.why
     if state != "open":
-        assert g.reopens == "drops below 80% used and 90% projected"
+        assert g.reopens == (f"claude weekly_all {reopens}",)
 
 
 def test_a_map_line_has_no_line_on_a_pool_never_read_and_a_stale_one_closes():
@@ -247,3 +260,20 @@ def test_quota_errors(quota, says):
 
     errs = quota_errors(quota)
     assert (says is None and errs == []) or any(says in e for e in errs)
+
+
+@pytest.mark.parametrize(
+    "line,projected,state",
+    [
+        ("pace", 100, "open"),  # pace holds only above 100%, as it always did
+        ("pace", 101, "closed"),
+        ({"projected": 100}, 100, "closed"),  # a map line closes at its line
+        ({"projected": 100}, 99, "open"),
+    ],
+)
+def test_pace_closes_above_100_and_a_map_projected_at_its_line(line, projected, state):
+    from aegis.quota_gate import lines_gate
+
+    quota = {"claude": {"weekly_all": line}}
+    g = lines_gate(quota, "claude", snap(w("weekly_all", 40, projected)), NOW)
+    assert g.state == state

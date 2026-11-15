@@ -297,7 +297,17 @@ class Schedules:
         and holding every tick would stop the schedule for good. A stale
         reading holds, as it does a token's gate."""
         pool = pool_for(harness, model)
-        g = lines_gate(s.d.lines(), pool, self._app.quota.snapshot(), time.time())
+        # A percent or pace line keeps the form it always had: a full
+        # window holds a fire (its stop at 100), and pace closes only above
+        # 100% projected (quota_gate._pace). A map line reads as written.
+        lines = {
+            p: {
+                k: v if isinstance(v, dict) else {"launch": v, "stop": 100}
+                for k, v in ws.items()
+            }
+            for p, ws in s.d.lines().items()
+        }
+        g = lines_gate(lines, pool, self._app.quota.snapshot(), time.time())
         return None if g.may_start else g.why
 
     # -- the layers ---------------------------------------------------------------

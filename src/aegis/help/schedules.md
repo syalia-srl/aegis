@@ -184,9 +184,11 @@ own last `turn_end`.
 A fire waits while the pool it draws on is over the schedule's own launch
 line, and goes once, at most one tick, when it drops back under. `quota` maps
 a pool to its windows and each window to a percent from 0 to 99, to
-`"pace"`, which holds while the window is projected to reach 100% by its
-reset, or to a map of `used` and `projected` (either or both, and an optional
-`stop`), which holds when either is reached. The pool claude has the windows session and weekly_all, and the pool
+`"pace"`, which holds while the window is projected to pass 100% by its
+reset, or to a map of `used` and `projected` (either or both), which holds
+when either is reached. A schedule's line takes no `stop`: a schedule only
+holds its fires, and a stop line, which cuts running turns, belongs on an
+agent or a queue. The pool claude has the windows session and weekly_all, and the pool
 opencode-go has rolling, weekly and monthly. Without `quota` a
 schedule holds while either weekly window is off pace; `{}` sets no line.
 

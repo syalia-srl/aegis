@@ -52,19 +52,27 @@ class _Strict(BaseModel):
 
 
 class LineMap(_Strict):
-    """A line on percent used, projected at reset, or both, and a stop line
-    (quota_gate.line_of)."""
+    """A line on percent used, projected at reset, or both
+    (quota_gate.line_of). A schedule only holds its fires, so its line takes
+    no stop: that interrupts turns, and only an agent's or a queue's does."""
 
     used: Annotated[int, Field(ge=0, le=100)] | None = None
     projected: Annotated[int, Field(ge=1, le=1000)] | None = None
-    stop: Annotated[int, Field(ge=1, le=100)] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _no_stop(cls, v: object) -> object:
+        if isinstance(v, dict) and "stop" in v:
+            raise ValueError(
+                "a schedule's line takes no stop: a schedule only holds its "
+                "fires; a stop line belongs on an agent's or a queue's quota"
+            )
+        return v
 
     @model_validator(mode="after")
     def _some(self) -> "LineMap":
         if self.used is None and self.projected is None:
             raise ValueError("a line names used, projected or both")
-        if self.used is not None and self.stop is not None and self.used >= self.stop:
-            raise ValueError("used is below stop")
         return self
 
 
