@@ -196,3 +196,38 @@ def describe(raw: Any) -> str:
     f = form(raw)
     parts = [f"{k} {', '.join(f[k]) or 'none'}" for k in KEYS if k in f]
     return "; ".join(parts)
+
+
+def _allowed(names: frozenset[str]) -> str:
+    return ", ".join(sorted(names)) or "none"
+
+
+def check_tool(scope: Scope, tool: str) -> None:
+    """Refuse a call to a tool outside ``scope`` with out_of_scope."""
+    if scope.tools is None or tool in scope.tools:
+        return
+    from .ops import OpError
+
+    shut = TOOLS - scope.tools
+    said = (
+        f"it may call {_allowed(scope.tools)}"
+        if len(scope.tools) <= len(shut)
+        else f"it may call every aegis tool but {_allowed(shut)}"
+    )
+    raise OpError("out_of_scope", f"{tool} is outside this session's scope; {said}")
+
+
+def check_name(scope: Scope, kind: str, name: str) -> None:
+    """Refuse a queue or an agent outside ``scope`` with out_of_scope; ``kind``
+    is "queues" or "agents"."""
+    allowed = getattr(scope, kind)
+    if allowed is None or name in allowed:
+        return
+    from .ops import OpError
+
+    what = "queue" if kind == "queues" else "agent"
+    raise OpError(
+        "out_of_scope",
+        f"{what} {name} is outside this session's scope; its {kind}: "
+        f"{_allowed(allowed)}",
+    )

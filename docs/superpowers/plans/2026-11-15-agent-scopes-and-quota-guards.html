@@ -100,7 +100,7 @@ details[data-state=doing] summary .s{color:var(--accent)}
 <div class="verify"><b>verify</b> <code>uv run pytest tests/test_scopes.py tests/test_queues.py -q</code>: a worker enqueued by a session whose scope denies workflows has a scope without <code>workflow_arm</code>, though its agent has none; a resumed session reads its scope from the record.</div>
 </details>
 
-<details class="task" id="task-3" data-state="pending" open><summary><span class="n">3</span><span class="t">Enforce: list, refuse, narrow queues and agents</span><span class="s">pending</span><span class="f">src/aegis/policy.py, src/aegis/ops.py, src/aegis/agent_ops.py, tests/test_policy_tools.py, tests/test_ops.py</span></summary>
+<details class="task" id="task-3" data-state="done" open><summary><span class="n">3</span><span class="t">Enforce: list, refuse, narrow queues and agents</span><span class="s">pending</span><span class="f">src/aegis/policy.py, src/aegis/ops.py, src/aegis/agent_ops.py, tests/test_policy_tools.py, tests/test_ops.py</span></summary>
 <ol>
   <li><code>StandalonePolicy.tools</code> returns the session's scope tools (None when any). <code>App.tools_for</code> already turns that into hiding and refusing; keep <code>ALWAYS</code> in.</li>
   <li><code>queue_enqueue</code> with a queue outside <code>scope.queues</code>, and <code>session_spawn</code>, <code>session_handoff</code>, <code>peer_handoff</code> with an agent outside <code>scope.agents</code>, raise <code>OpError("out_of_scope", ...)</code> naming what the scope allows.</li>
