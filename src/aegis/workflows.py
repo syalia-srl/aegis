@@ -2121,7 +2121,10 @@ class Workflows:
         if s is None:
             self._fail(st, inst, "the session it continues is gone", say, retry=False)
             return "failed"
-        if not self._reg.finished(s):
+        if not self._reg.finished(s) or self._reg.refuse_hold(s) is not None:
+            # Still in a turn, or its quota guard refuses a turn nobody
+            # started by hand (guards.py): it waits, as a spawn the gate
+            # holds does, for the gate's next change.
             self._queuing.add(inst)
             return "queued"
         try:

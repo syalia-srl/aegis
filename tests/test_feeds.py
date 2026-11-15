@@ -85,9 +85,13 @@ class FakeRegistry:
     def __init__(self, *sessions):
         self.sessions = {s.log_id: s for s in sessions}
         self.notices = None
+        self.refusing: set[str] = set()  # sessions whose quota guard refuses
 
     def refresh_card(self, log_id):
         pass
+
+    def refuse_hold(self, s):
+        return "closed" if s.log_id in self.refusing else None
 
 
 async def _feeds(tmp_path, *sessions):
@@ -392,5 +396,29 @@ async def test_a_batch_records_the_turn_it_started(tmp_path):
         assert f.batches[0]["tokens"] == 1500 and f.batches[0]["turn_s"] >= 0
         card = f.card(s)
         assert card["waiting"] == [] and card["recent"][0]["text"] == "a"
+    finally:
+        await feeds.shutdown()
+
+
+async def test_a_refusing_guard_keeps_the_batch_in_the_feed_until_it_opens(tmp_path):
+    """on_closed: refuse (guards.py): the items stay the feed's pending, so
+    the feed keeps them, and the first poll after the guard opens sends them."""
+    log = tmp_path / "chat.log"
+    log.write_text("")
+    feeds, reg, s = await _feeds(tmp_path)
+    reg.refusing.add("s1")
+    try:
+        f = await feeds.start(
+            "s1", str(tmp_path), "chat", {"file": "chat.log", **FAST}, debounce_s=0.1
+        )
+        with log.open("a") as fh:
+            fh.write("ticket 7\n")
+        await until(lambda: f.pending, timeout=3, what="the item read")
+        await asyncio.sleep(0.4)
+        assert not s.got and not s.held and f.batch == 0
+        reg.refusing.clear()
+        feeds.release()
+        await until(lambda: s.got, timeout=3, what="the batch after the guard opened")
+        assert "ticket 7" in s.got[0][1]
     finally:
         await feeds.shutdown()
