@@ -131,7 +131,7 @@ ANY = Scope()
 def _names(raw: Any, key: str) -> tuple[list[str], str | None]:
     if not isinstance(raw, list) or not all(isinstance(n, str) and n for n in raw):
         return [], f"tools.{key} must be a list of names"
-    return list(raw), None
+    return [str(n) for n in raw], None
 
 
 def _expand(names: list[str], key: str) -> tuple[frozenset[str], str | None]:
