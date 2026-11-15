@@ -154,7 +154,7 @@ details[data-state=doing] summary .s{color:var(--accent)}
 <div class="verify"><b>verify</b> <code>uv run pytest tests/test_guards.py tests/test_cascade*.py -q</code>: worst-of over the three levels against fake snapshots; a stopped guard pauses and an open one continues.</div>
 </details>
 
-<details class="task" id="task-9" data-state="pending" open><summary><span class="n">9</span><span class="t">Queues: reject, warn, hold, max_pending, fair share</span><span class="s">pending</span><span class="f">src/aegis/queues.py, src/aegis/agent_ops.py (queue.enqueue), tests/test_queues.py</span></summary>
+<details class="task" id="task-9" data-state="done" open><summary><span class="n">9</span><span class="t">Queues: reject, warn, hold, max_pending, fair share</span><span class="s">pending</span><span class="f">src/aegis/queues.py, src/aegis/agent_ops.py (queue.enqueue), tests/test_queues.py</span></summary>
 <ol>
   <li>At enqueue: past <code>max_pending</code> raise <code>queue_full</code>; with the gate closed for this enqueuer, <code>reject</code> raises <code>queue_closed</code> with why and reopen, <code>warn</code> returns the task plus a <code>warning</code>, <code>hold</code> returns as today.</li>
   <li>In <code>dispatch</code>, a queue whose next task's gate is closed counts as having nothing to start, so its share goes to the others.</li>

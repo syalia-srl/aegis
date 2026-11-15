@@ -1076,7 +1076,10 @@ def register_agent_ops(app: App) -> None:
         with the task id; the worker's final message reaches your inbox when it
         finishes (with callback). Keep working meanwhile. `queue@server`
         enqueues on a linked server; the result still reaches your
-        inbox, and the task id comes back as `task-id@server`."""
+        inbox, and the task id comes back as `task-id@server`. A queue past
+        its max_pending refuses with queue_full; one whose quota guard is
+        closed refuses with queue_closed, or takes the task with a warning
+        that it waits."""
         if caller.is_agent and caller.log_id in reg.sessions:
             check_name(reg.sessions[caller.log_id].spec.scope, "queues", p.queue)
         name, server = split_address(p.queue, app.server_name)
@@ -1107,6 +1110,9 @@ def register_agent_ops(app: App) -> None:
             raise OpError("bad_config", f"queue {name!r} in .aegis.yaml: {err}")
         enqueuer = own(caller) if caller.is_agent else None
         cwd = str(enqueuer.spec.cwd if enqueuer else app.roots.harness_cwd)
+        warning = app.queues.admit(
+            name, enqueuer.log_id if enqueuer else None, cwd, app.who(caller).name
+        )
         t = await app.queues.enqueue(
             name,
             p.payload,
@@ -1117,7 +1123,8 @@ def register_agent_ops(app: App) -> None:
             far_enqueuer=far,
             scope=enqueuer.spec.scope.record() if enqueuer else None,
         )
-        return {"task_id": t.id, "status": t.status, "position": app.queues.position(t)}
+        out = {"task_id": t.id, "status": t.status, "position": app.queues.position(t)}
+        return out | ({"warning": warning} if warning and t.status == "pending" else {})
 
     @r.op(
         "queue.deliver",

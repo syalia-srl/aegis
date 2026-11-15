@@ -52,6 +52,8 @@ from .monitors import iso_now
 from .notice_sources import Item
 from .names import default_title
 from .ops import OpError
+from . import pause
+from .quota_gate import Gate, waits
 from .scopes import Scope
 
 if TYPE_CHECKING:
@@ -386,22 +388,58 @@ class Queues:
             await self._start(best[1], best[2])
 
     def quota_wait(self, t: Task, q: dict) -> str | None:
-        """Why ``t``'s owner's quota gate keeps it pending, or None. A task
-        that waits is skipped, never failed, so the next owner's starts; the
-        gate's next reading dispatches it (app.on_quota). An agent that cannot
-        resolve is left to _start, which fails the task with the reason."""
+        """Why ``t``'s gate keeps it pending, or None. A task that waits is
+        skipped, never failed, so the next one starts, and a queue with none
+        to start leaves its share of max_workers to the others; the gate's
+        next reading dispatches it (app.on_quota)."""
+        g = self.gate(t.queue, q, t.enqueuer, t.cwd, t.owner)
+        return None if g.may_start else g.why
+
+    def gate(
+        self, name: str, q: dict, enqueuer: str | None, cwd: str, owner: str | None
+    ) -> Gate:
+        """The gate a worker of queue ``name`` enqueued by ``enqueuer`` passes
+        now: the cascade, the pause, and the guards of its agent, the queue
+        and the enqueuer's chain (guards.py). An agent that cannot resolve is
+        left to _start, which fails the task with the reason."""
         start_spec = self._registry.start_spec
         if start_spec is None:
-            return None
+            return Gate("open")
         try:
             agents = list(self._config.current().agents)
-            spec = resolve(agents, None, q["agent"], {}, Path(t.cwd), owner=t.owner)
+            spec = resolve(agents, None, q["agent"], {}, Path(cwd), owner=owner)
         except OpError:
+            return Gate("open")
+        spec = dataclasses.replace(spec, started_by=enqueuer)
+        _, g = start_spec(spec, name)
+        return g
+
+    def admit(
+        self, name: str, enqueuer: str | None, cwd: str, owner: str | None
+    ) -> str | None:
+        """Whether queue ``name`` takes one more task from ``enqueuer`` now:
+        past ``max_pending`` it raises queue_full whatever the gate says;
+        with the gate closed, ``on_closed: reject`` raises queue_closed and
+        ``warn`` returns the warning; ``hold``, the default, waits silently."""
+        q = self.queues[name]
+        pending = sum(
+            1 for t in self.tasks.values() if t.queue == name and t.status == "pending"
+        )
+        if (cap := q.get("max_pending")) is not None and pending >= cap:
+            raise OpError(
+                "queue_full",
+                f"queue {name!r} already holds {pending} pending tasks, its "
+                f"max_pending; nothing was enqueued",
+            )
+        g = self.gate(name, q, enqueuer, cwd, owner)
+        guard = q.get("guard")
+        action = guard.on_closed if guard is not None else "hold"
+        if g.may_start or action == "hold" or g.why == pause.WHY:
             return None
-        # Its enqueuer's chain counts (guards.py), as for the worker it starts.
-        spec = dataclasses.replace(spec, started_by=t.enqueuer)
-        _, g = start_spec(spec, t.queue)
-        return None if g.may_start else g.why
+        text = waits(g)
+        if action == "reject":
+            raise OpError("queue_closed", f"queue {name!r} rejects new tasks: {text}")
+        return f"the task waits until the gate opens: {text}"
 
     async def _start(self, t: Task, q: dict) -> None:
         try:

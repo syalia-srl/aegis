@@ -238,6 +238,17 @@ def _clock(ts: float) -> str:
     return time.strftime("%H:%M", time.localtime(ts))
 
 
+def waits(g: Gate) -> str:
+    """Why ``g`` is closed and when it opens again, in one sentence or two."""
+    text = f"{g.why}."
+    if g.reopens and g.resets_at is not None:
+        text += (
+            f" It opens again when the window {g.reopens}, at the latest when it"
+            f" resets at {_clock(g.resets_at)}."
+        )
+    return text
+
+
 def refusal(owner: str, g: Gate) -> str:
     """Why ``owner`` may start nothing now, and when that changes."""
     text = f"{owner} cannot start a session now: {g.why}."

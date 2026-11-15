@@ -244,3 +244,67 @@ async def test_an_unguarded_agent_is_never_stopped(world):
     await asyncio.sleep(0.3)
     assert s.status == "working" and not s.quota_paused
     await s.interrupt()
+
+
+# -- queues ------------------------------------------------------------------------
+from aegis.ops import OpError  # noqa: E402
+
+
+async def enqueue(world, queue: str = "fair-work", payload: str = "/busy 20"):
+    return await world.app.registry.call(
+        "queue.enqueue", {"queue": queue, "payload": payload}
+    )
+
+
+@pytest.mark.parametrize("config", [("warn", "reject")])
+async def test_a_rejecting_queue_refuses_with_why_and_when(world):
+    gauge(world, 85)
+    with pytest.raises(OpError) as e:
+        await enqueue(world)
+    assert e.value.code == "queue_closed"
+    assert "queue fair-work: Claude weekly is at 85%, launch line 80%" in str(e.value)
+    assert "opens again when the window drops below 80%" in str(e.value)
+    assert not world.app.queues.tasks
+    gauge(world, 10)
+    r = await enqueue(world, payload="hi")
+    assert "warning" not in r
+
+
+@pytest.mark.parametrize("config", [("warn", "warn")])
+async def test_a_warning_queue_takes_the_task_and_says_it_waits(world):
+    gauge(world, 85)
+    r = await enqueue(world, payload="hi")
+    assert r["status"] == "pending" and "waits until the gate opens" in r["warning"]
+    t = world.app.queues.tasks[r["task_id"]]
+    gauge(world, 10)
+    world.app.on_quota(world.app.quota.snapshot())
+    await until(lambda: t.status == "completed", 12, "the task after the gate opened")
+
+
+async def test_a_holding_queue_waits_silently_and_max_pending_bounds_it(world):
+    gauge(world, 85)
+    a, b = await enqueue(world), await enqueue(world)
+    assert "warning" not in a and a["status"] == b["status"] == "pending"
+    with pytest.raises(OpError) as e:
+        await enqueue(world)
+    assert e.value.code == "queue_full" and "2 pending" in str(e.value)
+
+
+@pytest.mark.parametrize("config", [("warn", "hold")])
+async def test_a_held_queue_leaves_every_slot_to_the_open_one(world, tmp_path):
+    (tmp_path / ".aegis.yaml").write_text(
+        "max_workers: 2\n" + GUARDED % ("warn", "hold")
+    )
+    await until(lambda: world.app.config.current().max_workers == 2, 5, "the config")
+    gauge(world, 85)
+    await enqueue(world)
+    await enqueue(world, "general")
+    await enqueue(world, "general")
+    q = world.app.queues
+    await until(
+        lambda: sum(t.status == "running" for t in q.tasks.values()) == 2, 8, "slots"
+    )
+    running = {t.queue for t in q.tasks.values() if t.status == "running"}
+    assert running == {"general"}
+    for t in list(q.tasks.values()):
+        await q.cancel(t)
