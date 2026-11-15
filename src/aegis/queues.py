@@ -50,6 +50,7 @@ from .monitors import iso_now
 from .notice_sources import Item
 from .names import default_title
 from .ops import OpError
+from .scopes import Scope
 
 if TYPE_CHECKING:
     from .config import Config
@@ -87,6 +88,9 @@ class Task:
     # The agent on a linked server that enqueued it, as
     # {handle, server}: its result goes back over the link (#684).
     far_enqueuer: dict | None = None
+    # The enqueuer's scope when it enqueued (scopes.py, #1066), in its record
+    # form; {} for any. The worker's scope is its agent's met with it.
+    scope: dict = field(default_factory=dict)
 
     def public(self) -> dict:
         d = asdict(self)
@@ -289,6 +293,7 @@ class Queues:
         cwd: str,
         owner: str | None = None,
         far_enqueuer: dict | None = None,
+        scope: dict | None = None,
     ) -> Task:
         t = Task(
             id=f"task-{secrets.token_hex(4)}",
@@ -299,6 +304,7 @@ class Queues:
             cwd=cwd,
             owner=owner,
             far_enqueuer=far_enqueuer,
+            scope=dict(scope or {}),
         )
         self.tasks[t.id] = t
         self._log(t, "enqueued")
@@ -391,8 +397,17 @@ class Queues:
                 self._registry.ensure_group(enqueuer) if enqueuer is not None else None
             )
             spec = resolve(
-                agents, None, q["agent"], {}, Path(t.cwd), owner=t.owner, group=group
+                agents,
+                None,
+                q["agent"],
+                {},
+                Path(t.cwd),
+                owner=t.owner,
+                group=group,
+                within=Scope.from_record(t.scope),
             )
+            # Its starter, so the chain of starters can be walked (#1066).
+            spec = dataclasses.replace(spec, started_by=t.enqueuer)
             if enqueuer is not None:
                 # A worker stays where its enqueuer's host put it (#959).
                 spec = dataclasses.replace(spec, tags=dict(enqueuer.spec.tags))

@@ -29,6 +29,7 @@ from .confirm import TTL_S
 from .monitors import find_source, iso_now
 from .names import SPAWN_HEAD, SPAWN_TASK, valid_handle
 from .ops import Caller, OpError
+from .scopes import check_name
 from .session import Archived
 from .transcript.entries import CONTENT_KINDS
 
@@ -1076,6 +1077,8 @@ def register_agent_ops(app: App) -> None:
         finishes (with callback). Keep working meanwhile. `queue@server`
         enqueues on a linked server; the result still reaches your
         inbox, and the task id comes back as `task-id@server`."""
+        if caller.is_agent and caller.log_id in reg.sessions:
+            check_name(reg.sessions[caller.log_id].spec.scope, "queues", p.queue)
         name, server = split_address(p.queue, app.server_name)
         if server is not None:
             link = across(app, server, caller)
@@ -1112,6 +1115,7 @@ def register_agent_ops(app: App) -> None:
             cwd,
             owner=app.who(caller).name,
             far_enqueuer=far,
+            scope=enqueuer.spec.scope.record() if enqueuer else None,
         )
         return {"task_id": t.id, "status": t.status, "position": app.queues.position(t)}
 
@@ -1218,6 +1222,9 @@ def register_agent_ops(app: App) -> None:
             # The link delivers as its own token on the far server (web.py).
             return await far_handoff(handle, server, p, caller)
         to = target(p.target)
+        if caller.is_agent and caller.log_id in reg.sessions:
+            # A scope's agents: are the agents it may reach, not only start.
+            check_name(reg.sessions[caller.log_id].spec.scope, "agents", to.spec.agent)
         to.check_lock()  # before an interrupt reaches it
         sender = (
             f"agent:{reg.sessions[caller.log_id].handle}"

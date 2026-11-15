@@ -128,3 +128,113 @@ async def test_without_the_primer_the_prompt_is_the_hosts_alone(world_with):
     assert (
         said.startswith("You edit the document.") and "aegis, a workplace" not in said
     )
+
+
+# -- agent scopes under aegis serve's policy (#1066) ---------------------------
+SCOPED = """\
+default_agent: opus
+agents:
+  opus: {harness: claude-code, model: opus, effort: high, permission: full}
+  quick: {harness: claude-code, model: haiku, effort: low, permission: full}
+  fair:
+    harness: claude-code
+    model: opus
+    effort: high
+    permission: full
+    tools: {deny: [workflows], queues: [general], agents: [opus]}
+queues:
+  general: {agent: opus}
+  other: {agent: opus}
+"""
+
+
+@pytest.fixture
+async def scoped(tmp_path, fake_claude):
+    (tmp_path / ".aegis.yaml").write_text(SCOPED)
+    w = World(tmp_path, fake_claude)
+    await w.start()
+    yield w
+    await w.stop()
+
+
+async def mcp_call(w, s, tool: str, args: dict) -> dict:
+    """A call as ``aegis call`` from the session's shell makes it: /mcp
+    tools/call with the session's token."""
+    token = w.app.sessions.tokens._by_session[s.log_id]
+    async with httpx.AsyncClient() as c:
+        r = await c.post(
+            w.base + "/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": tool, "arguments": args},
+            },
+            headers={
+                "accept": "application/json, text/event-stream",
+                "x-aegis-session": token,
+                "x-aegis-shell": "1",
+            },
+        )
+    return r.json()["result"]
+
+
+async def spawn_fair(w):
+    r = await w.app.registry.call("session.spawn", {"agent": "fair"})
+    return w.app.sessions.sessions[r["log_id"]]
+
+
+async def test_a_scope_denying_workflows_neither_lists_nor_calls_them(scoped):
+    s = await spawn_fair(scoped)
+    await until(lambda: s.log_id in scoped.app.tools_of, what="the tools")
+    names = await tool_names(scoped, s)
+    assert "workflow_arm" not in names and "plan_update" in names
+    assert "turn_end" in names
+    with pytest.raises(OpError) as e:
+        await scoped.app.registry.call("workflow.list", {}, Caller("agent", s.log_id))
+    assert e.value.code == "out_of_scope" and "workflow_arm" in e.value.message
+    said = await mcp_call(scoped, s, "workflow_list", {})
+    assert said["isError"] and "out_of_scope" in said["content"][0]["text"]
+
+
+async def test_a_scope_refuses_a_queue_it_does_not_name(scoped):
+    s = await spawn_fair(scoped)
+    me = Caller("agent", s.log_id)
+    with pytest.raises(OpError) as e:
+        await scoped.app.registry.call(
+            "queue.enqueue", {"queue": "other", "payload": "x"}, me
+        )
+    assert e.value.code == "out_of_scope" and "general" in e.value.message
+    r = await scoped.app.registry.call(
+        "queue.enqueue", {"queue": "general", "payload": "x", "callback": False}, me
+    )
+    assert r["task_id"]
+
+
+async def test_a_scope_refuses_an_agent_it_does_not_name(scoped):
+    s = await spawn_fair(scoped)
+    me = Caller("agent", s.log_id)
+    with pytest.raises(OpError) as e:
+        await scoped.app.registry.call("session.spawn", {"agent": "fair"}, me)
+    assert e.value.code == "out_of_scope" and "opus" in e.value.message
+    with pytest.raises(OpError) as e:
+        await scoped.app.registry.call("session.handoff", {"agent": "quick"}, me)
+    assert e.value.code == "out_of_scope"
+    other = await spawn_fair(scoped)
+    with pytest.raises(OpError) as e:
+        await scoped.app.registry.call(
+            "peer.handoff", {"target": other.handle, "context": "hi"}, me
+        )
+    assert e.value.code == "out_of_scope"
+    r = await scoped.app.registry.call("session.spawn", {"agent": "opus"}, me)
+    assert r["log_id"]
+
+
+async def test_a_scope_still_hands_off_to_its_own_agent(scoped):
+    """A long-lived scoped agent continues itself when its context fills."""
+    s = await spawn_fair(scoped)
+    me = Caller("agent", s.log_id)
+    try:
+        await scoped.app.registry.call("session.handoff", {}, me)
+    except OpError as e:
+        assert e.code != "out_of_scope", e.message

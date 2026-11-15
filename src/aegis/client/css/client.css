@@ -1591,6 +1591,10 @@
 .aegis .set-agent{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-lg);padding:10px 14px;display:grid;grid-template-columns:120px 1fr;gap:6px 12px;align-items:center}
 .aegis .set-card-foot{grid-column:2;display:flex;align-items:flex-start;gap:12px}
 .aegis .set-card-foot .set-priming{flex:1}
+.aegis .set-card-foot:has(.set-scope[open]){flex-wrap:wrap}
+.aegis .set-card-foot .set-scope[open]{flex-basis:100%;order:10}
+.aegis .set-scope .kv{display:flex;gap:10px;font-family:var(--font-mono);font-size:12px;margin-top:4px}
+.aegis .set-scope .kv span:first-child{color:var(--faint);min-width:56px}
 .aegis .set-agent > .set-why{grid-column:2}
 .aegis .set-agent:focus-within{border-color:var(--faint)}
 .aegis .set-agent.is-default{border-color:var(--accent)}

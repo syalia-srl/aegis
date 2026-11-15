@@ -82,7 +82,7 @@ details[data-state=doing] summary .s{color:var(--accent)}
 
 <h2>Slice 1 · agent scopes (#1066)</h2>
 
-<details class="task" id="task-1" data-state="pending" open><summary><span class="n">1</span><span class="t">Parse <code>tools:</code> on an agent preset</span><span class="s">pending</span><span class="f">src/aegis/scopes.py (new), src/aegis/agents.py, src/aegis/config.py, tests/test_scopes.py, tests/test_agents.py</span></summary>
+<details class="task" id="task-1" data-state="done" open><summary><span class="n">1</span><span class="t">Parse <code>tools:</code> on an agent preset</span><span class="s">pending</span><span class="f">src/aegis/scopes.py (new), src/aegis/agents.py, src/aegis/config.py, tests/test_scopes.py, tests/test_agents.py</span></summary>
 <ol>
   <li>New module <code>scopes.py</code>: <code>GROUPS</code> (spawn, queues, workflows, schedules, browser, secrets, config, help, as in spec section 04), <code>ALWAYS = {"turn_end"}</code>, a frozen <code>Scope(tools: frozenset[str] | None, queues: frozenset[str] | None, agents: frozenset[str] | None)</code> where None means any, <code>parse(raw, all_tools) -&gt; (Scope, error)</code> expanding groups, and <code>Scope.meet(other)</code> (intersection, None as the identity).</li>
   <li><code>allow</code> and <code>deny</code> are exclusive; an unknown tool or group name is an error that stops the agent, as <code>keep_harness_tools</code> errors do (<code>agents.py</code>, <code>_keep</code>).</li>
@@ -91,7 +91,7 @@ details[data-state=doing] summary .s{color:var(--accent)}
 <div class="verify"><b>verify</b> <code>uv run pytest tests/test_scopes.py tests/test_agents.py tests/test_agent_config.py -q</code>: groups expand, allow/deny exclusive, unknown names refused, a preset with no <code>tools:</code> has the all-None scope.</div>
 </details>
 
-<details class="task" id="task-2" data-state="pending" open><summary><span class="n">2</span><span class="t">Fix the scope at spawn and intersect it with the parent's</span><span class="s">pending</span><span class="f">src/aegis/session.py (SpawnSpec), src/aegis/app.py, src/aegis/queues.py, tests/test_scopes.py, tests/test_queues.py</span></summary>
+<details class="task" id="task-2" data-state="done" open><summary><span class="n">2</span><span class="t">Fix the scope at spawn and intersect it with the parent's</span><span class="s">pending</span><span class="f">src/aegis/session.py (SpawnSpec), src/aegis/app.py, src/aegis/queues.py, tests/test_scopes.py, tests/test_queues.py</span></summary>
 <ol>
   <li><code>SpawnSpec</code> gets <code>scope</code>, serialized in the spawn record like <code>keep_harness_tools</code> (fixed at spawn: editing the agent never widens a running session).</li>
   <li>Every start path computes it as the agent's scope met with the starter's: <code>session_spawn</code> and a handoff (the parent is <code>spawned_by</code> or <code>continues</code>), a queue worker (the task's <code>enqueuer</code>), a workflow node and a schedule run (their owner session, when there is one).</li>
@@ -100,7 +100,7 @@ details[data-state=doing] summary .s{color:var(--accent)}
 <div class="verify"><b>verify</b> <code>uv run pytest tests/test_scopes.py tests/test_queues.py -q</code>: a worker enqueued by a session whose scope denies workflows has a scope without <code>workflow_arm</code>, though its agent has none; a resumed session reads its scope from the record.</div>
 </details>
 
-<details class="task" id="task-3" data-state="pending" open><summary><span class="n">3</span><span class="t">Enforce: list, refuse, narrow queues and agents</span><span class="s">pending</span><span class="f">src/aegis/policy.py, src/aegis/ops.py, src/aegis/agent_ops.py, tests/test_policy_tools.py, tests/test_ops.py</span></summary>
+<details class="task" id="task-3" data-state="done" open><summary><span class="n">3</span><span class="t">Enforce: list, refuse, narrow queues and agents</span><span class="s">pending</span><span class="f">src/aegis/policy.py, src/aegis/ops.py, src/aegis/agent_ops.py, tests/test_policy_tools.py, tests/test_ops.py</span></summary>
 <ol>
   <li><code>StandalonePolicy.tools</code> returns the session's scope tools (None when any). <code>App.tools_for</code> already turns that into hiding and refusing; keep <code>ALWAYS</code> in.</li>
   <li><code>queue_enqueue</code> with a queue outside <code>scope.queues</code>, and <code>session_spawn</code>, <code>session_handoff</code>, <code>peer_handoff</code> with an agent outside <code>scope.agents</code>, raise <code>OpError("out_of_scope", ...)</code> naming what the scope allows.</li>
@@ -109,7 +109,7 @@ details[data-state=doing] summary .s{color:var(--accent)}
 <div class="verify"><b>verify</b> <code>uv run pytest tests/test_policy_tools.py tests/test_ops.py tests/test_policy_spawn.py -q</code>: an agent with <code>deny: [workflows]</code> does not list <code>workflow_arm</code> and is refused calling it; an agent with <code>queues: [a]</code> is refused enqueuing on <code>b</code>.</div>
 </details>
 
-<details class="task" id="task-4" data-state="pending" open><summary><span class="n">4</span><span class="t">Trim the primer to the tools in scope</span><span class="s">pending</span><span class="f">src/aegis/mcp.py, tests/test_mcp*.py</span></summary>
+<details class="task" id="task-4" data-state="done" open><summary><span class="n">4</span><span class="t">Trim the primer to the tools in scope</span><span class="s">pending</span><span class="f">src/aegis/mcp.py, tests/test_mcp*.py</span></summary>
 <ol>
   <li>Split <code>PRIMER</code>'s paragraphs about monitors and feeds, queues and workers, workflows, schedules, spawning and handoffs, artifacts, browsers and secrets into named parts, as <code>BROWSERS</code> already is, and leave out each part whose tools the session's scope lacks.</li>
   <li>A session with the all-None scope gets exactly today's text (pin it with a test).</li>
@@ -117,7 +117,7 @@ details[data-state=doing] summary .s{color:var(--accent)}
 <div class="verify"><b>verify</b> <code>uv run pytest tests -q -k primer</code>: the unscoped primer is byte-identical to before; a scope denying workflows has no "workflow" in its primer.</div>
 </details>
 
-<details class="task" id="task-5" data-state="pending" open><summary><span class="n">5</span><span class="t">Help, changelog, live check</span><span class="s">pending</span><span class="f">src/aegis/help/config.md, src/aegis/help/queues.md, changelog.d/</span></summary>
+<details class="task" id="task-5" data-state="done" open><summary><span class="n">5</span><span class="t">Help, changelog, live check</span><span class="s">pending</span><span class="f">src/aegis/help/config.md, src/aegis/help/queues.md, changelog.d/</span></summary>
 <ol>
   <li><code>config.md</code>: a "Scope an agent" section with the YAML of spec section 04 and the group table; <code>queues.md</code>: the <code>out_of_scope</code> refusal.</li>
   <li>A <code>changelog.d</code> fragment (Added) ending in a <code>help:</code> line.</li>
@@ -215,7 +215,17 @@ details[data-state=doing] summary .s{color:var(--accent)}
 </details>
 
 <h2>Where this plan departs from the spec</h2>
-<p>Nothing yet. Each worker's departures are copied here before its PR.</p>
+<h3>Slice 1</h3>
+<ul>
+  <li><code>scopes.TOOLS</code> is a fixed list of the agent tools: <code>.aegis.yaml</code> is read before any registry exists. <code>tests/test_scopes.py</code> fails when it and the registry differ, so a new agent tool must be added there.</li>
+  <li><code>StandalonePolicy.guard</code> raises <code>out_of_scope</code> itself, before <code>default_guard</code>, which would answer <code>not_for_agents</code>.</li>
+  <li><code>peer_handoff</code> is refused when the target session's agent is outside <code>agents:</code>, though it starts no session: otherwise a session could steer a wider one.</li>
+  <li>A <code>session_handoff</code> onto the session's own agent is always allowed, so a long-lived scoped agent can hand off when its context fills.</li>
+  <li>Queue workers record their enqueuer in a new <code>started_by</code>, not <code>spawned_by</code>, which would make them children in the tree. The enqueuer's scope is recorded on the task at enqueue.</li>
+  <li>A schedule made by an agent stores that agent's scope in its owner record; a run meets it.</li>
+  <li>The primer's help paragraph is a part too, and the lists naming features in the help and turn_end paragraphs name only what the scope has.</li>
+  <li>Settings carries <code>tools:</code> through a save and shows it read-only on the agent card (<code>tests/test_config_coverage.py</code> requires every key in the form).</li>
+</ul>
 </main>
 <script>
 const tasks=[...document.querySelectorAll('details.task')];

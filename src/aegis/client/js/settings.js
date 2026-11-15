@@ -1247,7 +1247,7 @@ export class Settings {
       this.draw();
     }, "link danger");
     const fold = h("details", { className: "set-priming", open: !!a.priming }, h("summary", { textContent: a.priming ? "Priming" : "Add a priming" }), priming);
-    card.append(name, h("div", { className: "picks" }, harness, effort, permission), casc, h("div", { className: "set-card-foot" }, fold, this.keepFold(a), this.mcpFold(a), this.productFold(a), this.exitFold(a), star, del));
+    card.append(name, h("div", { className: "picks" }, harness, effort, permission), casc, h("div", { className: "set-card-foot" }, fold, this.keepFold(a), this.mcpFold(a), this.scopeFold(a), this.productFold(a), this.exitFold(a), star, del));
     if (isDefault) card.classList.add("is-default");
     return card;
   }
@@ -1302,6 +1302,18 @@ export class Settings {
     });
     const fold = h("details", { className: "set-priming set-mcp", open: on.length > 0 }, summary, h("p", { className: "set-none", textContent: "Its sessions get these servers beside aegis's own, and call their tools without asking." }), h("div", { className: "set-tools" }, ...toggles));
     fold.dataset.key = "agents.*.mcp";
+    return fold;
+  }
+
+  // The agent's tools: block (scopes.py, #1066), shown as the file has it; a
+  // save writes it back unchanged. It is edited in .aegis.yaml.
+  scopeFold(a) {
+    const t = a.tools || {};
+    const keys = ["allow", "deny", "queues", "agents"].filter((k) => k in t);
+    if (!keys.length) return null;
+    const lines = keys.map((k) => h("div", { className: "kv" }, h("span", { textContent: k }), h("span", { textContent: t[k].join(", ") || "none" })));
+    const fold = h("details", { className: "set-priming set-scope" }, h("summary", { textContent: "Scope" }), ...lines, h("p", { className: "set-none", textContent: "Its sessions use only these aegis tools, queues and agents. Edit tools: in .aegis.yaml; help: config, Scope an agent." }));
+    fold.dataset.key = "agents.*.tools";
     return fold;
   }
 

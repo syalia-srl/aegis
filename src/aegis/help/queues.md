@@ -27,6 +27,9 @@ while it waits for a slot, its position in the queue. With a slot free, the
 worker has already started, and the status says running.
 An unknown queue is refused with the names of the queues there are, and a
 queue whose entry in `.aegis.yaml` is broken is refused with what is wrong.
+A session whose agent's scope lists its queues is refused any other with
+out_of_scope and the queues it may use (config, [Scope an
+agent](config#scope-an-agent)).
 Across a [link](links#what-agents-can-do-across-a-link), `queue@server`
 enqueues on the other server: the task id comes back as `task-id@server`, which
 `task_status`, `task_cancel` and `task_resume` take, and the result reaches
