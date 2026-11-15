@@ -35,7 +35,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field, replace
 from io import StringIO
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 from pydantic import BaseModel, Field
 from ruamel.yaml import YAML, YAMLError
@@ -356,12 +356,12 @@ def quota_from(raw: object) -> dict:
     spans = ", ".join(QUOTA_SPANS)
     if not isinstance(raw, dict) or set(raw) - {"projection"}:
         return out | {"error": "quota takes one key, projection"}
-    proj = raw.get("projection")
+    proj = cast(dict, raw).get("projection")
     if proj is None:
         return out
     if not isinstance(proj, dict) or set(proj) - {"half_life"}:
         return out | {"error": "quota.projection takes one key, half_life"}
-    hl = proj.get("half_life")
+    hl = cast(dict, proj).get("half_life")
     if hl is None:
         return out
     if hl == "average":

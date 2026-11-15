@@ -114,16 +114,14 @@ def provider_wire(
         span = None if stale else provider.window_spans.get(kind)
         typical = PACE_USUAL_DEFAULT
         billing = f"{provider.name}:{head['account']}"
-        known = bool(span and head["account"] and w.resets_at is not None)
-        # The current rate first (#1065); the window's average blended with
-        # what finished windows spent while there is too little history.
-        got = (
-            project(billing, kind, span, w, wall - state.age_s, wall)
-            if known and project
-            else None
-        )
-        if usual is not None and known and got is None:
-            typical = usual(billing, kind, span, w.resets_at)
+        got = None
+        if span and head["account"] and w.resets_at is not None:
+            # The current rate first (#1065); the window's average blended
+            # with what finished windows spent while there is too little history.
+            if project is not None:
+                got = project(billing, kind, span, w, wall - state.age_s, wall)
+            if usual is not None and got is None:
+                typical = usual(billing, kind, span, w.resets_at)
         rate = None
         if got is not None:
             projected, rate = got
