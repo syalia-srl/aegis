@@ -6,8 +6,15 @@ A policy maps a pool (a quota provider's name: ``claude``, ``opencode-go``, or
 reading with a launch line and a stop line. Below every launch line the token
 is open. At or above any stop line it is stopped: aegis interrupts its turns
 (app.py). In between it is closed: running work goes on, nothing new starts. A
-launch line of ``"pace"`` means the window's projected spend at reset is at
-most 100%.
+launch line of ``"pace"`` means the window's projected spend at reset is
+below 100%.
+
+A line has three forms, shared by schedules, agents and queues (#1067): a
+percent, the launch line on the percent used; ``"pace"``, ``{projected:
+100}``; or a map ``{used?, projected?, stop?}`` naming at least one of used
+and projected. A window is closed when either launch line is reached and
+stopped at ``stop``, which is on the percent used: real spend, not an
+estimate. ``lines_gate`` reads a ``quota:`` map of pools to windows to lines.
 
 A pool the policy does not name is closed, and so is a session that draws on
 an account aegis reads no gauge for (OpenCode on a provider other than Go).
@@ -79,6 +86,102 @@ def _reading(snapshot: dict, pool: str) -> dict | None:
     )
 
 
+def line_of(v: object) -> dict | None:
+    """A line in its map form, or None when ``v`` is not a line: a percent
+    is ``{used: n}``, ``"pace"`` is ``{projected: 100}``, and a map keeps
+    its ``used``, ``projected`` and ``stop``."""
+    if v == "pace":
+        return {"projected": 100}
+    if _percent(v):
+        return {"used": v}
+    if isinstance(v, dict):
+        return {k: v[k] for k in ("used", "projected", "stop") if k in v}
+    return None
+
+
+def normal(line: object) -> dict:
+    """A policy's line, either form, as ``{used?, projected?, stop?}``: the
+    old ``{launch, stop}`` of a token policy, or a line ``line_of`` reads."""
+    if isinstance(line, dict) and "launch" in line:
+        out = line_of(line["launch"]) or {}
+        return out | ({"stop": line["stop"]} if "stop" in line else {})
+    return line_of(line) or {}
+
+
+def _reopens(n: dict) -> str:
+    used, ahead = n.get("used"), n.get("projected")
+    if used is not None and ahead is not None:
+        return f"drops below {used}% used and {ahead}% projected"
+    if used is not None:
+        return f"drops below {used}%"
+    if ahead == 100:
+        return "is back on pace"
+    if ahead is not None:
+        return f"is projected below {ahead}%"
+    return f"drops below {n.get('stop')}%"
+
+
+def line_errors(where: str, v: object) -> list[str]:
+    """What is wrong with one line of a guard or a schedule."""
+    n = line_of(v)
+    if n is None:
+        return [f"{where}: a line is a percent, pace or a map of used, projected, stop"]
+    if isinstance(v, dict) and set(v) - {"used", "projected", "stop"}:
+        extra = ", ".join(sorted(map(str, set(v) - {"used", "projected", "stop"})))
+        return [f"{where}: a line takes used, projected and stop, not {extra}"]
+    errs = []
+    used, ahead, stop = n.get("used"), n.get("projected"), n.get("stop")
+    if used is None and ahead is None:
+        errs.append(f"{where}: a line names used, projected or both")
+    if used is not None and (not _percent(used) or not 0 <= used <= 100):
+        errs.append(f"{where}: used is 0 to 100")
+    if ahead is not None and (not _percent(ahead) or not 1 <= ahead <= 1000):
+        errs.append(f"{where}: projected is a whole percent from 1")
+    if stop is not None:
+        if not _percent(stop) or not 1 <= stop <= 100:
+            errs.append(f"{where}: stop is 1 to 100")
+        elif _percent(used) and used >= stop:
+            errs.append(f"{where}: used is below stop")
+    return errs
+
+
+def quota_errors(quota: object) -> list[str]:
+    """What is wrong with a ``quota:`` map of pools to windows to lines, the
+    form schedules, agents and queues share."""
+    if not isinstance(quota, dict):
+        return ["quota is a map of pools to windows"]
+    errs: list[str] = []
+    for pool, ws in quota.items():
+        if pool not in KINDS:
+            errs.append(f"aegis reads no quota for {pool!r}")
+            continue
+        if not isinstance(ws, dict):
+            errs.append(f"{pool}: a map of windows to lines")
+            continue
+        for kind, v in ws.items():
+            if kind not in KINDS[pool]:
+                have = ", ".join(KINDS[pool])
+                errs.append(f"{pool} has no window {kind!r}; it has {have}")
+                continue
+            errs += line_errors(f"{pool} {kind}", v)
+    return errs
+
+
+def lines_gate(quota: dict, pool: str | None, snapshot: dict, now: float) -> Gate:
+    """The gate of a ``quota:`` map for a start on ``pool``. A pool the map
+    does not name, or that aegis has never read, has no line: there is
+    nothing to measure, and holding would stop the work for good. A stale
+    reading closes and never stops (decide)."""
+    lines = quota.get(pool or "") if pool else None
+    read = any(
+        p.get("name") == pool and p.get("read_at") is not None
+        for p in snapshot.get("providers", [])
+    )
+    if not pool or not lines or not read:
+        return Gate("open")
+    return decide({pool: {"mode": "lines", "lines": lines}}, pool, snapshot, now)
+
+
 def decide(policy: dict | None, pool: str | None, snapshot: dict, now: float) -> Gate:
     if policy is None:
         return Gate("open")
@@ -104,20 +207,22 @@ def decide(policy: dict | None, pool: str | None, snapshot: dict, now: float) ->
             continue
         label = x.get("label") or kind
         pct = float(x.get("percent") or 0)
-        launch = line["launch"]
-        reopens = "is back on pace" if launch == "pace" else f"drops below {launch}%"
-        if not stale and pct >= float(line["stop"]):
-            why = f"{name} {label} is at {pct:.0f}%, stop line {line['stop']}%"
+        n = normal(line)
+        used, ahead, stop = n.get("used"), n.get("projected"), n.get("stop")
+        reopens = _reopens(n)
+        if not stale and stop is not None and pct >= float(stop):
+            why = f"{name} {label} is at {pct:.0f}%, stop line {stop}%"
             return Gate("stopped", why, x.get("resets_at"), reopens)
         if closed is not None:
             continue
-        if launch == "pace":
-            proj = x.get("projected")
-            if proj is not None and proj > 100:
-                why = f"{name} {label} is on pace for {proj}% at reset"
-                closed = Gate("closed", why, x.get("resets_at"), reopens)
-        elif pct >= float(launch):
-            why = f"{name} {label} is at {pct:.0f}%, launch line {launch}%"
+        proj = x.get("projected")
+        if used is not None and pct >= float(used):
+            why = f"{name} {label} is at {pct:.0f}%, launch line {used}%"
+            closed = Gate("closed", why, x.get("resets_at"), reopens)
+        elif ahead is not None and proj is not None and proj >= ahead:
+            why = f"{name} {label} is on pace for {proj}% at reset"
+            if ahead != 100:
+                why += f", launch line {ahead}%"
             closed = Gate("closed", why, x.get("resets_at"), reopens)
     if stale:
         return Gate(
@@ -179,7 +284,9 @@ def validate(policy: object) -> list[str]:
             if not isinstance(kind, str) or kind not in KINDS[pool]:
                 errs.append(f"{pool}: unknown window {kind!r}")
                 continue
-            line = line if isinstance(line, dict) else {}
+            if not (isinstance(line, dict) and "launch" in line):
+                errs += line_errors(f"{pool} {kind}", line)
+                continue
             launch, stop = line.get("launch"), line.get("stop")
             if not _percent(stop) or not 1 <= stop <= 100:
                 errs.append(f"{pool} {kind}: stop is 1 to 100")

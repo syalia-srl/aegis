@@ -182,3 +182,68 @@ def test_a_refusal_names_the_line_that_reopens_the_gate():
     assert "stop line 90%" in text and "drops below 50%" in text and "resets at" in text
     paced = decide(LINES, "claude", snap(w("weekly_all", 30, projected=130)), NOW)
     assert "back on pace" in refusal("ben", paced)
+
+
+def test_the_three_line_forms_read_as_one_map():
+    from aegis.quota_gate import line_of
+
+    assert line_of(80) == {"used": 80}
+    assert line_of("pace") == {"projected": 100}
+    assert line_of({"used": 80, "projected": 90, "stop": 97}) == {
+        "used": 80,
+        "projected": 90,
+        "stop": 97,
+    }
+    assert line_of(True) is None and line_of("soon") is None
+
+
+GUARD = {"claude": {"weekly_all": {"used": 80, "projected": 90, "stop": 97}}}
+
+
+@pytest.mark.parametrize(
+    "percent,projected,state,says",
+    [
+        (60, 85, "open", ""),
+        (86, 85, "closed", "at 86%, launch line 80%"),
+        (60, 104, "closed", "on pace for 104% at reset, launch line 90%"),
+        (97, 120, "stopped", "stop line 97%"),
+    ],
+)
+def test_a_map_line_closes_on_used_or_projected_and_stops_on_used(
+    percent, projected, state, says
+):
+    from aegis.quota_gate import lines_gate
+
+    g = lines_gate(GUARD, "claude", snap(w("weekly_all", percent, projected)), NOW)
+    assert g.state == state and says in g.why
+    if state != "open":
+        assert g.reopens == "drops below 80% used and 90% projected"
+
+
+def test_a_map_line_has_no_line_on_a_pool_never_read_and_a_stale_one_closes():
+    from aegis.quota_gate import lines_gate
+
+    assert lines_gate(GUARD, "claude", {"providers": []}, NOW).state == "open"
+    assert lines_gate(GUARD, "opencode-go", snap(), NOW).state == "open"
+    old = snap(w("weekly_all", 99, 120), read_at=NOW - 901)
+    assert lines_gate(GUARD, "claude", old, NOW).state == "closed"
+
+
+@pytest.mark.parametrize(
+    "quota,says",
+    [
+        (GUARD, None),
+        ({"claude": {"session": 50, "weekly_all": "pace"}}, None),
+        ({"claude": {"weekly_all": {"stop": 90}}}, "names used, projected or both"),
+        ({"claude": {"weekly_all": {"used": 95, "stop": 90}}}, "used is below stop"),
+        ({"claude": {"weekly_all": {"used": 80, "soon": 1}}}, "not soon"),
+        ({"claude": {"weekly_all": True}}, "a line is a percent"),
+        ({"claude": {"rolling": 50}}, "has no window"),
+        ({"nope": {"weekly": 50}}, "reads no quota"),
+    ],
+)
+def test_quota_errors(quota, says):
+    from aegis.quota_gate import quota_errors
+
+    errs = quota_errors(quota)
+    assert (says is None and errs == []) or any(says in e for e in errs)

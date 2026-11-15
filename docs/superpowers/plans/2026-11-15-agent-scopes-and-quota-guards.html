@@ -128,7 +128,7 @@ details[data-state=doing] summary .s{color:var(--accent)}
 
 <h2>Slice 2 · quota guards on agents and queues (#1067)</h2>
 
-<details class="task" id="task-6" data-state="pending" open><summary><span class="n">6</span><span class="t">The map line form in <code>quota_gate</code></span><span class="s">pending</span><span class="f">src/aegis/quota_gate.py, src/aegis/schedules.py, tests/test_quota_gate.py, tests/test_schedule*.py</span></summary>
+<details class="task" id="task-6" data-state="done" open><summary><span class="n">6</span><span class="t">The map line form in <code>quota_gate</code></span><span class="s">pending</span><span class="f">src/aegis/quota_gate.py, src/aegis/schedules.py, tests/test_quota_gate.py, tests/test_schedule*.py</span></summary>
 <ol>
   <li>A line is a percent (used), <code>"pace"</code> (projected 100) or <code>{used?, projected?, stop?}</code> with at least one of used/projected. One function turns a guard's <code>quota:</code> map into the policy <code>decide()</code> reads, used by schedules (<code>Schedules._line</code>) and by guards.</li>
   <li><code>decide()</code> closes at <code>used ≥ used</code> or <code>projected ≥ projected</code>, stops at <code>used ≥ stop</code>, and keeps its stale and never-read rules. The <code>why</code> names which one tripped.</li>

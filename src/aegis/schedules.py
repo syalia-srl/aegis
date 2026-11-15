@@ -51,7 +51,7 @@ from .monitors import run_bash
 from .names import valid_handle
 from .ops import OpError
 from .scopes import Scope
-from .quota_gate import decide, pool_for
+from .quota_gate import lines_gate, pool_for
 from .workflow_lang import edit_diff, parse, rows as workflow_rows
 from .workflow_store import check_named
 from .schedule_log import (
@@ -283,21 +283,7 @@ class Schedules:
         and holding every tick would stop the schedule for good. A stale
         reading holds, as it does a token's gate."""
         pool = pool_for(harness, model)
-        lines = s.d.quota.get(pool or "")
-        snap = self._app.quota.snapshot()
-        read = any(
-            p.get("name") == pool and p.get("read_at") is not None
-            for p in snap.get("providers", [])
-        )
-        if not pool or not lines or not read:
-            return None
-        policy = {
-            pool: {
-                "mode": "lines",
-                "lines": {k: {"launch": v, "stop": 100} for k, v in lines.items()},
-            }
-        }
-        g = decide(policy, pool, snap, time.time())
+        g = lines_gate(s.d.lines(), pool, self._app.quota.snapshot(), time.time())
         return None if g.may_start else g.why
 
     # -- the layers ---------------------------------------------------------------
