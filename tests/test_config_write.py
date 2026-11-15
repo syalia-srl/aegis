@@ -396,3 +396,43 @@ def test_the_product_switches_survive_a_save_and_defaults_are_not_written(tmp_pa
     node = safe(p)["agents"]["p"]
     assert node["isolated"] is True
     assert not {"notices", "harness_tools", "primer"} & set(node)
+
+
+def budget_file(tmp_path, budget: str):
+    return setup(
+        tmp_path,
+        "agents:\n  a: {harness: claude-code, model: opus, effort: high,"
+        f" permission: full, budget: {budget}}}\n",
+    )
+
+
+@pytest.mark.parametrize(
+    "budget", ["[{usd: 2, per: session}, {tokens: 9, per: 7d}]", "[]"]
+)
+def test_a_budget_is_written_back_as_the_file_has_it(tmp_path, budget):
+    p, doc = budget_file(tmp_path, budget)
+    before = safe(p)["agents"]["a"]["budget"]
+    assert doc.agents[0].budget == before
+    doc.default_agent = "a"
+    assert write(p, doc, stamp_of(p)) == []
+    assert safe(p)["agents"]["a"]["budget"] == before
+
+
+@pytest.mark.parametrize("budget", ["{usd: 2}", "[{usd: 2, per: week}]", "[3]"])
+def test_a_wrong_budget_is_kept_and_named_never_dropped(tmp_path, budget):
+    """A wrong budget: reaches the page as the file has it, and a save
+    names its row and writes nothing: it is never turned into no budget."""
+    p, doc = budget_file(tmp_path, budget)
+    text = p.read_text()
+    assert doc.agents[0].budget == safe(p)["agents"]["a"]["budget"]
+    doc.default_agent = "a"
+    (f,) = write(p, doc, stamp_of(p))
+    assert f.row == "agents.a" and "budget" in f.message
+    assert p.read_text() == text
+
+
+def test_an_agent_without_budget_writes_none(tmp_path):
+    p, doc = setup(tmp_path, WORKSPACE)
+    assert doc.agents[0].budget is None
+    assert write(p, doc, stamp_of(p)) == []
+    assert "budget" not in safe(p)["agents"]["opus"]

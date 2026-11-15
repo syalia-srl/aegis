@@ -36,6 +36,10 @@ queue_full. While a queue's quota guard is closed for you, its
 task and the reply carries a `warning` saying it waits; `hold` takes it
 silently (config, [Guard an agent or a
 queue](config#guard-an-agent-or-a-queue)).
+Past a spent per-session budget up your line, every queue refuses with
+queue_closed and the why, whatever its `on_closed:`, and a task of yours
+still pending fails: a session cap never frees (config, [Budget an
+agent](config#budget-an-agent)).
 Across a [link](links#what-agents-can-do-across-a-link), `queue@server`
 enqueues on the other server: the task id comes back as `task-id@server`, which
 `task_status`, `task_cancel` and `task_resume` take, and the result reaches

@@ -9,7 +9,7 @@ A ``Settle`` fixes the purpose of a part written before its purpose was known.
 Money is REAL dollars rounded to 1e-9: SQLite has no decimal.
 
 A part carries its turn's dimensions (person, kind, harness, model, mode,
-billing, cost_kind) and its own calls, errors and exits, so a query reads one
+billing, cost_kind, agent, queue) and its own calls, errors and exits, so a query reads one
 table: the join to the turns doubled a four-week query's time. ``turn`` is
 its turn's rowid, so a query counts distinct turns by an integer.
 """
@@ -21,13 +21,25 @@ from decimal import Decimal
 
 from .turns import Derived
 
-USAGE_VERSION = 2
+USAGE_VERSION = 3
 # Derived from the stores: dropped by a version bump, emptied by a rebuild.
 DERIVED = ("usage_turns", "usage_parts", "usage_waits", "usage_ctx", "usage_whatif")
 # What the import read (importer.py): rows of an imported session, log id
 # cc-<stem>, are not in any store, so a rebuild keeps them and these.
 IMPORTS = ("usage_imports", "usage_import_ids")
 TABLES = (*DERIVED, *IMPORTS, "usage_quota", "repo_owners", "usage_meta")
+# The columns version 3 added, in schema order, for a version 2 file.
+MIGRATE_2_3 = (
+    ("usage_turns", ("agent", "queue", "starter")),
+    ("usage_parts", ("agent", "queue")),
+)
+# What a budget reads (budgets.py): an agent's sessions, and the sessions a
+# starter started. IF NOT EXISTS, so every start adds them to a file that
+# lacks them without dropping a table.
+INDEXES = (
+    "CREATE INDEX IF NOT EXISTS usage_turns_agent ON usage_turns(agent, log_id)",
+    "CREATE INDEX IF NOT EXISTS usage_turns_starter ON usage_turns(starter, log_id)",
+)
 SCHEMA = """
 CREATE TABLE usage_turns(
   log_id TEXT NOT NULL, rec INTEGER NOT NULL, ts REAL NOT NULL, person TEXT NOT NULL,
@@ -36,7 +48,8 @@ CREATE TABLE usage_turns(
   tok_in INTEGER NOT NULL, tok_out INTEGER NOT NULL, tok_cw INTEGER NOT NULL,
   tok_cr INTEGER NOT NULL, secs REAL NOT NULL, calls INTEGER NOT NULL,
   errors INTEGER NOT NULL, exits INTEGER NOT NULL, ctx_start INTEGER NOT NULL,
-  ctx_peak INTEGER NOT NULL, continues TEXT, PRIMARY KEY(log_id, rec));
+  ctx_peak INTEGER NOT NULL, continues TEXT, agent TEXT, queue TEXT, starter TEXT,
+  PRIMARY KEY(log_id, rec));
 CREATE INDEX usage_turns_ts ON usage_turns(ts);
 CREATE TABLE usage_parts(
   log_id TEXT NOT NULL, rec INTEGER NOT NULL, n INTEGER NOT NULL, ts REAL NOT NULL,
@@ -45,7 +58,7 @@ CREATE TABLE usage_parts(
   calls INTEGER NOT NULL, errors INTEGER NOT NULL, exits INTEGER NOT NULL,
   person TEXT NOT NULL, kind TEXT NOT NULL, harness TEXT NOT NULL, model TEXT NOT NULL,
   mode TEXT NOT NULL, billing TEXT NOT NULL, cost_kind TEXT NOT NULL,
-  turn INTEGER NOT NULL, PRIMARY KEY(log_id, rec, n));
+  turn INTEGER NOT NULL, agent TEXT, queue TEXT, PRIMARY KEY(log_id, rec, n));
 CREATE INDEX usage_parts_ts ON usage_parts(ts);
 CREATE INDEX usage_parts_repo ON usage_parts(repo, ts);
 CREATE TABLE usage_waits(
@@ -101,8 +114,22 @@ def ensure(con: sqlite3.Connection) -> bool:
     tables are not touched."""
     con.execute("BEGIN IMMEDIATE")
     try:
-        fresh = _get(con, "version") != str(USAGE_VERSION)
-        if fresh:
+        version = _get(con, "version")
+        fresh = version != str(USAGE_VERSION)
+        if version == "2":
+            # 2 -> 3 adds the agent, queue and starter columns (#1068). Quota
+            # readings and imported sessions are in no store, so they are
+            # kept: add the columns in place, delete the rows the stores
+            # hold, as clear() does, and mark a backfill, which derives them
+            # again with the new columns (its inserts skip a row that exists).
+            for t, cols in MIGRATE_2_3:
+                for c in cols:
+                    con.execute(f"ALTER TABLE {t} ADD COLUMN {c} TEXT")
+            for t in DERIVED:
+                con.execute(f"DELETE FROM {t} WHERE log_id NOT LIKE 'cc-%'")
+            _set(con, "version", str(USAGE_VERSION))
+            _set(con, "backfill", "0")
+        elif fresh:
             for t in TABLES:
                 con.execute(f"DROP TABLE IF EXISTS {t}")
             for stmt in SCHEMA.split(";"):
@@ -110,6 +137,8 @@ def ensure(con: sqlite3.Connection) -> bool:
                     con.execute(stmt)
             _set(con, "version", str(USAGE_VERSION))
             _set(con, "backfill", "0")
+        for stmt in INDEXES:
+            con.execute(stmt)
         con.execute("COMMIT")
     except BaseException:
         con.execute("ROLLBACK")
@@ -139,7 +168,7 @@ def insert(con: sqlite3.Connection, log_id: str, d: Derived) -> int:
     con.execute("BEGIN")
     try:
         con.executemany(
-            "INSERT INTO usage_turns VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+            "INSERT INTO usage_turns VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
             " ON CONFLICT DO NOTHING",
             [
                 (
@@ -165,6 +194,9 @@ def insert(con: sqlite3.Connection, log_id: str, d: Derived) -> int:
                     t.ctx_start,
                     t.ctx_peak,
                     t.continues,
+                    t.agent,
+                    t.queue,
+                    t.starter,
                 )  # fmt: skip
                 for t in d.turns
             ],
@@ -178,7 +210,7 @@ def insert(con: sqlite3.Connection, log_id: str, d: Derived) -> int:
             for rec in turn
         }
         con.executemany(
-            "INSERT INTO usage_parts VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+            "INSERT INTO usage_parts VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
             " ON CONFLICT DO NOTHING",
             [
                 (
@@ -204,6 +236,8 @@ def insert(con: sqlite3.Connection, log_id: str, d: Derived) -> int:
                     turn[p.rec].billing,
                     turn[p.rec].cost_kind,
                     rowid[p.rec],
+                    turn[p.rec].agent,
+                    turn[p.rec].queue,
                 )
                 for p in d.parts
             ],

@@ -51,9 +51,11 @@ DIMS = {
     "billing": "p.billing",
     "context": _CONTEXT,
     "session": "p.log_id",
+    "agent": "p.agent",
+    "queue": "p.queue",
 }
 # Turn-level dimensions, which usage_turns answers alone.
-TURN_DIMS = {"person", "harness", "model", "mode", "kind", "billing"}
+TURN_DIMS = {"person", "harness", "model", "mode", "kind", "billing", "agent", "queue"}
 
 
 @dataclass

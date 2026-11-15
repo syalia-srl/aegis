@@ -78,7 +78,7 @@ NOT_PER_HOST = ("hosts",)
 AGENT_KEYS = (
     "harness", "provider", "model", "models", "effort", "permission", "priming",
     "keep_harness_tools", "exit", "mcp",
-    "harness_tools", "isolated", "primer", "notices", "tools", "quota",
+    "harness_tools", "isolated", "primer", "notices", "tools", "quota", "budget",
 )  # fmt: skip
 QUEUE_KEYS = ("agent", "priority", "quiet", "quota", "max_pending")
 
@@ -791,6 +791,9 @@ class AgentDoc(BaseModel):
     tools: dict[str, list[str]] = Field(default_factory=dict)
     # The quota: block as the file has it (guards.py), kept like tools.
     quota: dict[str, Any] = Field(default_factory=dict)
+    # The budget: node as the file has it (budgets.py), whatever its shape:
+    # a save writes it back unchanged, a wrong one too; None: no budget:.
+    budget: Any = None
 
 
 class QueueDoc(BaseModel):
@@ -891,6 +894,7 @@ def doc_from(data: dict) -> ConfigDoc:
             **{k: getattr(a, k) for k in SWITCHES},
             tools=_tools_raw(data, a.name),
             quota=_quota_raw((data.get("agents") or {}).get(a.name)),
+            budget=_budget_raw((data.get("agents") or {}).get(a.name)),
         )
         for a in agents_from(data)
     ]
@@ -960,6 +964,15 @@ def _quota_raw(node: object) -> dict:
     writes it back unchanged, a block the reader refuses too."""
     raw = cast(dict, node).get("quota") if isinstance(node, dict) else None
     return json.loads(json.dumps(raw)) if isinstance(raw, dict) else {}
+
+
+def _budget_raw(node: object) -> Any:
+    """An agent's budget: node as the file has it, whatever its shape, so a
+    wrong one is shown wrong and written back, never dropped; None when the
+    agent has none."""
+    if not isinstance(node, dict) or "budget" not in node:
+        return None
+    return json.loads(json.dumps(cast(dict, node)["budget"], default=str))
 
 
 def _mcp_raw(data: dict, name: str) -> list[str]:
@@ -1464,6 +1477,10 @@ def _set_agent(node: CommentedMap, a: AgentDoc) -> None:
         _put(node, "quota", a.quota)
     else:
         node.pop("quota", None)
+    if a.budget is not None:
+        _put(node, "budget", a.budget)
+    else:
+        node.pop("budget", None)
     for k, default in SWITCHES.items():
         if getattr(a, k) != default:
             _put(node, k, getattr(a, k))
