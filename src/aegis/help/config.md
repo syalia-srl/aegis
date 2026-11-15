@@ -200,6 +200,62 @@ agents:
 A name that is not on that list stops the agent with an error rather than
 keeping nothing. Like the priming, the list is fixed when a session starts.
 
+## Scope an agent
+
+An agent may carry `tools:`, which fences what its sessions use of aegis.
+Without it the agent gets every aegis tool, as before.
+
+```yaml
+agents:
+  fair:
+    harness: claude-code
+    model: sonnet
+    effort: low
+    permission: full
+    tools:
+      deny: [spawn, workflows, schedules]
+      queues: [fair-work]          # queue_enqueue only here
+      agents: []                   # may start no session of any agent
+  helper:
+    harness: claude-code
+    model: haiku
+    effort: low
+    permission: write
+    tools:
+      allow: [turn_end, plan_update, toast, file_send, queue_enqueue, task_status, help]
+      queues: [helper]
+```
+
+`allow:` names the tools the agent keeps, `deny:` the ones it loses; give one
+of them, not both. Each takes tool names and these groups:
+
+| Group | Tools |
+|---|---|
+| `spawn` | session_spawn, session_handoff, peer_handoff, session_close |
+| `queues` | queue_enqueue, task_status, task_cancel, task_resume |
+| `workflows` | every workflow_* tool |
+| `schedules` | every schedule_* tool |
+| `browser` | every browser_* tool, signin_open |
+| `secrets` | secret_send, secret_request |
+| `config` | config_suggest, layout_set, skill_save, skill_delete, notice_announce |
+| `help` | help_search, help_read, meta |
+
+`turn_end` is always kept: a session without it cannot hand back its turn.
+`queues:` lists the queues `queue_enqueue` may name, and `agents:` the agents
+`session_spawn` and `session_handoff` may start and `peer_handoff` may reach;
+leaving either out means any, and `[]` means none. A name aegis does not know
+stops the agent with an error rather than leaving a tool open.
+
+A session lists only the tools in its scope, and its workplace prompt leaves
+out the paragraphs about the others. A call to a tool outside it, as a tool or
+through `aegis call`, is refused with out_of_scope and what the scope
+allows. The scope is fixed when the session starts, so editing the agent never
+widens a running session. A session started by another one (a spawn, a
+handoff, a queue worker, a workflow node, a schedule run made by an agent) gets
+its own agent's scope met with its starter's: a worker of `fair-work` that
+`fair` enqueued cannot start workflows even if its own agent can. `aegis
+doctor` shows an agent's scope on its row.
+
 ## The default agent
 
 `default_agent:` names the agent `session_spawn` starts from when it is given

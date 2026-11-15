@@ -729,6 +729,9 @@ class AgentDoc(BaseModel):
     isolated: bool = False
     primer: bool = True
     notices: bool = True
+    # The tools: block as the file has it (scopes.py); the form shows it and
+    # a save writes it back unchanged.
+    tools: dict[str, list[str]] = Field(default_factory=dict)
 
 
 class QueueDoc(BaseModel):
@@ -823,6 +826,7 @@ def doc_from(data: dict) -> ConfigDoc:
             exit=a.exit,
             mcp=_mcp_raw(data, a.name),
             **{k: getattr(a, k) for k in SWITCHES},
+            tools=_tools_raw(data, a.name),
         )
         for a in agents_from(data)
     ]
@@ -873,6 +877,16 @@ def _keep_raw(data: dict, name: str) -> list[str]:
     if isinstance(provider, dict) and "keep_harness_tools" in provider:
         raw = provider["keep_harness_tools"]
     return [str(t) for t in raw] if isinstance(raw, list) else []
+
+
+def _tools_raw(data: dict, name: str) -> dict[str, list[str]]:
+    """The agent's tools: block as the file has it, kept like keep_harness_tools
+    so a save does not drop a block the reader refuses."""
+    node = (data.get("agents") or {}).get(name)
+    raw = node.get("tools") if isinstance(node, dict) else None
+    if not isinstance(raw, dict):
+        return {}
+    return {str(k): [str(n) for n in v] for k, v in raw.items() if isinstance(v, list)}
 
 
 def _mcp_raw(data: dict, name: str) -> list[str]:
@@ -1366,6 +1380,10 @@ def _set_agent(node: CommentedMap, a: AgentDoc) -> None:
         _put(node, "mcp", list(a.mcp))
     else:
         node.pop("mcp", None)
+    if a.tools:
+        _put(node, "tools", a.tools)
+    else:
+        node.pop("tools", None)
     for k, default in SWITCHES.items():
         if getattr(a, k) != default:
             _put(node, k, getattr(a, k))
