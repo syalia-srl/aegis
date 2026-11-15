@@ -117,3 +117,75 @@ def test_usual_spend_with_no_finished_window_is_none(tmp_path):
     assert tables.usual_spend(con, "claude:a", "session", 1000.0, 500.0, 20) is None
     assert tables.usual_spend(con, "claude:b", "session", 1000.0, 5000.0, 20) is None
     assert tables.usual_spend(con, "claude:a", "weekly_all", 1000.0, 5000.0, 20) is None
+
+
+# The version 2 schema, as it was before #1068 added agent, queue and starter.
+V2_SCHEMA = """
+CREATE TABLE usage_turns(
+  log_id TEXT NOT NULL, rec INTEGER NOT NULL, ts REAL NOT NULL, person TEXT NOT NULL,
+  kind TEXT NOT NULL, harness TEXT NOT NULL, model TEXT NOT NULL, mode TEXT NOT NULL,
+  billing TEXT NOT NULL, cost REAL NOT NULL, cost_kind TEXT NOT NULL,
+  tok_in INTEGER NOT NULL, tok_out INTEGER NOT NULL, tok_cw INTEGER NOT NULL,
+  tok_cr INTEGER NOT NULL, secs REAL NOT NULL, calls INTEGER NOT NULL,
+  errors INTEGER NOT NULL, exits INTEGER NOT NULL, ctx_start INTEGER NOT NULL,
+  ctx_peak INTEGER NOT NULL, continues TEXT, PRIMARY KEY(log_id, rec));
+CREATE INDEX usage_turns_ts ON usage_turns(ts);
+CREATE TABLE usage_parts(
+  log_id TEXT NOT NULL, rec INTEGER NOT NULL, n INTEGER NOT NULL, ts REAL NOT NULL,
+  repo TEXT, purpose TEXT NOT NULL, activity TEXT NOT NULL, settled INTEGER NOT NULL,
+  cost REAL NOT NULL, tokens INTEGER NOT NULL, secs REAL NOT NULL,
+  calls INTEGER NOT NULL, errors INTEGER NOT NULL, exits INTEGER NOT NULL,
+  person TEXT NOT NULL, kind TEXT NOT NULL, harness TEXT NOT NULL, model TEXT NOT NULL,
+  mode TEXT NOT NULL, billing TEXT NOT NULL, cost_kind TEXT NOT NULL,
+  turn INTEGER NOT NULL, PRIMARY KEY(log_id, rec, n));
+CREATE INDEX usage_parts_ts ON usage_parts(ts);
+CREATE INDEX usage_parts_repo ON usage_parts(repo, ts);
+CREATE TABLE usage_waits(
+  log_id TEXT NOT NULL, rec INTEGER NOT NULL, ts REAL NOT NULL, woke_by TEXT NOT NULL,
+  secs REAL NOT NULL, PRIMARY KEY(log_id, rec));
+CREATE INDEX usage_waits_ts ON usage_waits(ts);
+CREATE TABLE usage_ctx(
+  log_id TEXT NOT NULL, rec INTEGER NOT NULL, band INTEGER NOT NULL,
+  calls INTEGER NOT NULL, cost REAL NOT NULL, tok_cr INTEGER NOT NULL,
+  PRIMARY KEY(log_id, rec, band));
+CREATE TABLE usage_whatif(
+  log_id TEXT NOT NULL, rec INTEGER NOT NULL, at INTEGER NOT NULL,
+  handoffs INTEGER NOT NULL, saved REAL NOT NULL, rewrite REAL NOT NULL,
+  PRIMARY KEY(log_id, rec, at));
+CREATE TABLE usage_quota(
+  billing TEXT NOT NULL, window TEXT NOT NULL, ts REAL NOT NULL, percent REAL NOT NULL,
+  resets_at REAL, PRIMARY KEY(billing, window, ts));
+CREATE TABLE repo_owners(
+  repo TEXT PRIMARY KEY, owner TEXT NOT NULL, remote TEXT, checked_at REAL NOT NULL);
+CREATE TABLE usage_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE usage_imports(path TEXT PRIMARY KEY, size INTEGER NOT NULL, mtime REAL NOT NULL);
+CREATE TABLE usage_import_ids(mid TEXT PRIMARY KEY, path TEXT NOT NULL);
+CREATE INDEX usage_import_ids_path ON usage_import_ids(path);
+"""
+
+
+def test_a_version_2_file_keeps_its_quota_readings_and_imports(tmp_path):
+    """2 -> 3 adds columns in place: quota readings and imported sessions are
+    in no store, so a drop would lose them for good."""
+    con, _ = db.connect(tmp_path / "j.db")
+    for stmt in V2_SCHEMA.split(";"):
+        if stmt.strip():
+            con.execute(stmt)
+    con.execute("INSERT INTO usage_meta VALUES('version', '2')")
+    con.execute("INSERT INTO usage_meta VALUES('backfill', '7')")
+    con.execute(
+        "INSERT INTO usage_quota VALUES('claude', 'weekly_all', 1.0, 37.0, 9.0)"
+    )
+    con.execute("INSERT INTO usage_imports VALUES('/x.jsonl', 10, 1.0)")
+    con.commit()
+    assert tables.ensure(con)
+    assert con.execute("SELECT count(*) FROM usage_quota").fetchone()[0] == 1
+    assert con.execute("SELECT count(*) FROM usage_imports").fetchone()[0] == 1
+    for t, cols in (
+        ("usage_turns", COLUMNS["usage_turns"]),
+        ("usage_parts", COLUMNS["usage_parts"]),
+    ):
+        got = [r[1] for r in con.execute(f"PRAGMA table_info({t})")]
+        assert got == cols.split()
+    assert not tables.is_complete(con)
+    assert not tables.ensure(con)  # settled: a second start changes nothing

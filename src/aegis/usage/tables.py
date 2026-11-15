@@ -28,6 +28,11 @@ DERIVED = ("usage_turns", "usage_parts", "usage_waits", "usage_ctx", "usage_what
 # cc-<stem>, are not in any store, so a rebuild keeps them and these.
 IMPORTS = ("usage_imports", "usage_import_ids")
 TABLES = (*DERIVED, *IMPORTS, "usage_quota", "repo_owners", "usage_meta")
+# The columns version 3 added, in schema order, for a version 2 file.
+MIGRATE_2_3 = (
+    ("usage_turns", ("agent", "queue", "starter")),
+    ("usage_parts", ("agent", "queue")),
+)
 SCHEMA = """
 CREATE TABLE usage_turns(
   log_id TEXT NOT NULL, rec INTEGER NOT NULL, ts REAL NOT NULL, person TEXT NOT NULL,
@@ -102,8 +107,19 @@ def ensure(con: sqlite3.Connection) -> bool:
     tables are not touched."""
     con.execute("BEGIN IMMEDIATE")
     try:
-        fresh = _get(con, "version") != str(USAGE_VERSION)
-        if fresh:
+        version = _get(con, "version")
+        fresh = version != str(USAGE_VERSION)
+        if version == "2":
+            # 2 -> 3 adds the agent, queue and starter columns (#1068). Quota
+            # readings and imported sessions are in no store, so they are
+            # kept: add the columns in place and mark a backfill, which
+            # re-derives the rows the stores hold.
+            for t, cols in MIGRATE_2_3:
+                for c in cols:
+                    con.execute(f"ALTER TABLE {t} ADD COLUMN {c} TEXT")
+            _set(con, "version", str(USAGE_VERSION))
+            _set(con, "backfill", "0")
+        elif fresh:
             for t in TABLES:
                 con.execute(f"DROP TABLE IF EXISTS {t}")
             for stmt in SCHEMA.split(";"):
