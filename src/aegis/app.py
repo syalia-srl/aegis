@@ -2931,7 +2931,10 @@ class App:
                         "not_yours", "an agent can hand off only its own session"
                     )
                 old = reg.open(caller.log_id)
-                check_name(old.spec.scope, "agents", p.agent or old.spec.agent)
+                # Continuing on its own agent widens nothing: a long-lived
+                # scoped agent must still hand off when its context fills.
+                if p.agent not in (None, old.spec.agent):
+                    check_name(old.spec.scope, "agents", p.agent)
             else:
                 if p.log_id is None:
                     raise OpError("bad_params", "session.handoff needs a log_id")

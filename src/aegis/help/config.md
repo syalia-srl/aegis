@@ -243,7 +243,9 @@ of them, not both. Each takes tool names and these groups:
 `turn_end` is always kept: a session without it cannot hand back its turn.
 `queues:` lists the queues `queue_enqueue` may name, and `agents:` the agents
 `session_spawn` and `session_handoff` may start and `peer_handoff` may reach;
-leaving either out means any, and `[]` means none. A name aegis does not know
+leaving either out means any, and `[]` means none. A `session_handoff` that
+continues on the session's own agent is always allowed, so a scoped agent can
+still hand off when its context fills. A name aegis does not know
 stops the agent with an error rather than leaving a tool open.
 
 A session lists only the tools in its scope, and its workplace prompt leaves

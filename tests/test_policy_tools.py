@@ -135,6 +135,7 @@ SCOPED = """\
 default_agent: opus
 agents:
   opus: {harness: claude-code, model: opus, effort: high, permission: full}
+  quick: {harness: claude-code, model: haiku, effort: low, permission: full}
   fair:
     harness: claude-code
     model: opus
@@ -217,7 +218,7 @@ async def test_a_scope_refuses_an_agent_it_does_not_name(scoped):
         await scoped.app.registry.call("session.spawn", {"agent": "fair"}, me)
     assert e.value.code == "out_of_scope" and "opus" in e.value.message
     with pytest.raises(OpError) as e:
-        await scoped.app.registry.call("session.handoff", {}, me)
+        await scoped.app.registry.call("session.handoff", {"agent": "quick"}, me)
     assert e.value.code == "out_of_scope"
     other = await spawn_fair(scoped)
     with pytest.raises(OpError) as e:
@@ -227,3 +228,13 @@ async def test_a_scope_refuses_an_agent_it_does_not_name(scoped):
     assert e.value.code == "out_of_scope"
     r = await scoped.app.registry.call("session.spawn", {"agent": "opus"}, me)
     assert r["log_id"]
+
+
+async def test_a_scope_still_hands_off_to_its_own_agent(scoped):
+    """A long-lived scoped agent continues itself when its context fills."""
+    s = await spawn_fair(scoped)
+    me = Caller("agent", s.log_id)
+    try:
+        await scoped.app.registry.call("session.handoff", {}, me)
+    except OpError as e:
+        assert e.code != "out_of_scope", e.message
