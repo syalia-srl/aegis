@@ -145,7 +145,7 @@ details[data-state=doing] summary .s{color:var(--accent)}
 <div class="verify"><b>verify</b> <code>uv run pytest tests/test_config.py tests/test_config_hosts.py tests/test_agents.py tests/test_queues.py -q</code>.</div>
 </details>
 
-<details class="task" id="task-8" data-state="pending" open><summary><span class="n">8</span><span class="t">The combined gate: agent, queue and starters</span><span class="s">pending</span><span class="f">src/aegis/app.py (gate, start_spec, on_quota), src/aegis/guards.py (new), tests/test_guards.py</span></summary>
+<details class="task" id="task-8" data-state="done" open><summary><span class="n">8</span><span class="t">The combined gate: agent, queue and starters</span><span class="s">pending</span><span class="f">src/aegis/app.py (gate, start_spec, on_quota), src/aegis/guards.py (new), tests/test_guards.py</span></summary>
 <ol>
   <li><code>guards.py</code>: <code>chain(log_id)</code> walks starters (spawned_by, continues, worker's enqueuer) to the root; <code>gate_for(spec, queue)</code> returns the worst of the agent's guard, the queue's guard and every starter's agent guard, with <code>why</code> prefixed by the level ("agent fair: …", "queue fair-work: …").</li>
   <li><code>App.gate</code> uses it; <code>start_spec</code> and the cascade's pick pass the spec through.</li>

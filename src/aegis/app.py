@@ -59,7 +59,7 @@ from pydantic import BaseModel, Field, model_validator
 from pydantic.json_schema import SkipJsonSchema
 
 from . import archive, attachments as att, commands, dictation, files, restarts, speech
-from . import mcp_servers, pause
+from . import guards, mcp_servers, pause
 from . import feedback, harness_versions, self_update, setup
 from . import layout as canvas
 from . import ranking
@@ -137,6 +137,7 @@ from .quota import Quota
 from .quota_gate import (
     Gate,
     continued,
+    pool_for,
     refusal,
 )
 from .btws import SideNotes
@@ -998,28 +999,58 @@ class App:
         return host_tokens.mint(self.host_secret, key, ttl)
 
     def gate(self, owner: str | None, harness: str, model: str | None) -> Gate:
-        """Whether a harness may start on that pool now: always, since quota
-        lines per token left with multi-user mode (#958). A cascade's cooling
-        and the person's pause hold work on their own (start_spec)."""
+        """Whether a harness may start on that pool for its owner: always,
+        since quota lines per token left with multi-user mode (#958). The
+        guards on agents and queues are ``guard``."""
         return Gate("open")
 
-    def start_spec(self, spec: SpawnSpec) -> tuple[SpawnSpec, Gate]:
+    def _record_of(self, log_id: str) -> dict | None:
+        """A session's spec record, open or archived, for walking its chain
+        of starters (guards.starters)."""
+        s = self.sessions.sessions.get(log_id)
+        if s is not None:
+            return s.spec.record()
+        return self.sessions.archived.get(log_id)
+
+    def guard(
+        self, spec: SpawnSpec, queue: str | None = None, model: str | None = None
+    ) -> Gate:
+        """The gate the guards on ``spec`` set (guards.py): its agent's, its
+        queue's for a worker, and its starters' agents', on the pool
+        ``model`` (else the spec's) draws on, read from .aegis.yaml now."""
+        cur = self.config.current()
+        agents = {a.name: a.guard for a in cur.agents}
+        queues = {n: q.get("guard") for n, q in cur.queues.items()}
+        over = guards.levels(spec.record(), queue, agents, queues, self._record_of)
+        if not over:
+            return Gate("open")
+        pool = pool_for(spec.harness, model or spec.model)
+        return guards.worst(over, pool, self.quota.snapshot(), time.time())
+
+    def session_guard(self, s) -> Gate:
+        """The gate the guards set on a running session now."""
+        return self.guard(s.spec, (s.worker or {}).get("queue"))
+
+    def start_spec(
+        self, spec: SpawnSpec, queue: str | None = None, guarded: bool = True
+    ) -> tuple[SpawnSpec, Gate]:
         """The spec a start runs and the gate it passes. A cascade starts on
-        its first model that is neither cooling nor gated, or is closed with
-        why. A spec with no cascade, or whose model a person moved outside it
-        (a handoff after /model), asks that model's gate alone. Nothing new
-        starts while every session is paused (pause.py)."""
+        its first model that is neither cooling nor closed by a guard, or is
+        closed with why. A spec with no cascade, or whose model a person
+        moved outside it (a handoff after /model), asks that model's gate
+        alone. Nothing new starts while every session is paused (pause.py).
+        ``guarded`` False leaves the guards out: a spawn or a handoff starts
+        and its turns meet the agent's on_closed (guard_turn)."""
         if self.paused is not None:
             return spec, Gate("stopped", pause.WHY)
+
+        def gate(m: str) -> Gate:
+            return self.guard(spec, queue, m) if guarded else Gate("open")
+
         if spec.model not in spec.cascade:
-            return spec, self.gate(spec.owner, spec.harness, spec.model)
+            return spec, gate(spec.model)
         model, why = pick(
-            spec.cascade,
-            -1,
-            spec.harness,
-            lambda m: self.gate(spec.owner, spec.harness, m),
-            self.cooling,
-            time.time(),
+            spec.cascade, -1, spec.harness, gate, self.cooling, time.time()
         )
         if model is None:
             return spec, Gate("closed", why)
@@ -1076,10 +1107,24 @@ class App:
                 continue
             if self.pause_hold(s) is not None:
                 continue  # the person's pause outranks it (pause.py)
+            g = self.session_guard(s) if self._live(s) else Gate("open")
+            if g.state == "stopped":
+                if s.status == "working" and not s.quota_paused:
+                    self._quota_task(s, self._stop(s, g.why))
+                continue
             holding = any(m.get("held_for") == "quota" for m in s.held)
             if s.quota_paused or holding:
                 self._quota_task(s, self._continue(s))
         self._release_held()
+
+    async def _stop(self, s, why: str) -> None:
+        """A guard's stop line was reached: cut the session's turn, which
+        ``_continue`` carries on when the guard opens again."""
+        s.quota_paused = why
+        self.sessions.metas.write(s.meta())
+        s.report({"kind": "quota_paused", "why": why})
+        await s.interrupt(through_lock=True)
+        s._publish_now()
 
     def _release_held(self) -> None:
         """Wake what a closed gate or a cooling cascade held: schedule ticks,
@@ -2435,7 +2480,7 @@ class App:
             spawned_from=None,
             group=old.spec.group,
         )
-        spec, g = self.start_spec(spec)
+        spec, g = self.start_spec(spec, guarded=False)
         if not g.may_start:
             raise OpError("quota_closed", refusal(spec.owner or self.user, g))
         # Set before the spawn awaits, so a second click in that window is
@@ -2766,7 +2811,7 @@ class App:
                     "a quiet session needs a prompt: without one it is idle "
                     "and nothing would ever bring its tab back",
                 )
-            spec, g = self.start_spec(spec)
+            spec, g = self.start_spec(spec, guarded=False)
             if not g.may_start:
                 raise OpError("quota_closed", refusal(spec.owner or self.user, g))
             person = parent is None and caller.link is None and not caller.is_agent

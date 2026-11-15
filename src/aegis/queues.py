@@ -398,7 +398,9 @@ class Queues:
             spec = resolve(agents, None, q["agent"], {}, Path(t.cwd), owner=t.owner)
         except OpError:
             return None
-        _, g = start_spec(spec)
+        # Its enqueuer's chain counts (guards.py), as for the worker it starts.
+        spec = dataclasses.replace(spec, started_by=t.enqueuer)
+        _, g = start_spec(spec, t.queue)
         return None if g.may_start else g.why
 
     async def _start(self, t: Task, q: dict) -> None:
@@ -429,7 +431,7 @@ class Queues:
             self._fail(t, f"the queue's agent {q['agent']!r} cannot start: {e.message}")
             return
         if self._registry.start_spec is not None:
-            spec, _ = self._registry.start_spec(spec)
+            spec, _ = self._registry.start_spec(spec, t.queue)
         try:
             s = await self._registry.spawn(
                 spec,

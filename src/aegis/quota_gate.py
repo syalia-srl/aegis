@@ -63,6 +63,8 @@ class Gate:
     # When it opens again, for a gate a window's line closed: "drops below
     # 50%" or "is back on pace".
     reopens: str = ""
+    # The guard that closed it, "agent fair" or "queue fair-work" (guards.py).
+    by: str = ""
 
     @property
     def may_start(self) -> bool:

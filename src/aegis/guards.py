@@ -8,14 +8,24 @@ held: the maintainer's own sessions must never feel the quota.
 
 A wrong ``quota:`` stops the agent or the queue with the error, as any other
 config error does, rather than running it unguarded.
+
+The gate a start or a turn passes is the worst of the agent's guard, for a
+queue worker its queue's, and the guards of the agents up its chain of
+starters (``spawned_by``, ``started_by``, ``continues``): each is a ceiling
+someone set, and none may lift another's, so a guarded agent cannot spend
+through an open queue or a wider child. Each guard is read on the pool the
+session draws on, and from ``.aegis.yaml`` as it is now: unlike a scope, a
+guard tightened on disk applies to sessions already running.
 """
 
 from __future__ import annotations
 
+import dataclasses
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from .quota_gate import quota_errors
+from .quota_gate import Gate, lines_gate, quota_errors
 
 AGENT_ACTIONS = ("refuse", "warn")
 QUEUE_ACTIONS = ("reject", "warn", "hold")
@@ -58,3 +68,61 @@ def max_pending(raw: Any) -> tuple[int | None, str | None]:
     if isinstance(raw, bool) or not isinstance(raw, int) or raw < 1:
         return None, f"max_pending {raw!r} is not a whole number from 1 up"
     return raw, None
+
+
+RANK = {"open": 0, "closed": 1, "stopped": 2}
+LINKS = ("spawned_by", "started_by", "continues")
+
+
+def starters(rec: dict, lookup: Callable[[str], dict | None]) -> list[dict]:
+    """The records up ``rec``'s chain of starters, nearest first. A starter
+    aegis no longer knows ends that branch."""
+    seen: set[str] = set()
+    out: list[dict] = []
+    todo = [rec[k] for k in LINKS if rec.get(k)]
+    while todo:
+        log_id = todo.pop(0)
+        if log_id in seen:
+            continue
+        seen.add(log_id)
+        if (r := lookup(log_id)) is None:
+            continue
+        out.append(r)
+        todo += [r[k] for k in LINKS if r.get(k)]
+    return out
+
+
+def levels(
+    rec: dict,
+    queue: str | None,
+    agents: dict[str, Guard | None],
+    queues: dict[str, Guard | None],
+    lookup: Callable[[str], dict | None],
+) -> list[tuple[str, Guard]]:
+    """Every guard over a start of ``rec`` (a spec's record or a meta), by
+    the level that set it: its agent, its queue, the agents of its starters."""
+    named = [(f"agent {rec.get('agent')}", agents.get(str(rec.get("agent"))))]
+    if queue:
+        named.append((f"queue {queue}", queues.get(queue)))
+    named += [
+        (f"agent {r.get('agent')}", agents.get(str(r.get("agent"))))
+        for r in starters(rec, lookup)
+    ]
+    out: dict[str, Guard] = {}
+    for label, g in named:
+        if g is not None and label not in out:
+            out[label] = g
+    return list(out.items())
+
+
+def worst(
+    guards: list[tuple[str, Guard]], pool: str | None, snapshot: dict, now: float
+) -> Gate:
+    """The most restrictive gate of ``guards`` on ``pool``, open < closed <
+    stopped, its why prefixed with the level that set it."""
+    out = Gate("open")
+    for label, g in guards:
+        x = lines_gate(g.lines, pool, snapshot, now)
+        if RANK[x.state] > RANK[out.state]:
+            out = dataclasses.replace(x, why=f"{label}: {x.why}", by=label)
+    return out
