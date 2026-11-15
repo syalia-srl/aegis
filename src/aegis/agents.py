@@ -263,9 +263,11 @@ def resolve(
     spawned_by: str | None = None,
     group: str | None = None,
     owner: str | None = None,
+    within: Scope | None = None,
 ) -> SpawnSpec:
     """The spec a spawn runs: the agent's fields, each replaced by its override
-    when one is given. The priming is always the agent's."""
+    when one is given. The priming is always the agent's. Its scope is the
+    agent's met with ``within``, the scope of the session that starts it."""
     name = name or default
     if not name:
         raise OpError("no_agent", "no agent given and no default_agent in .aegis.yaml")
@@ -305,4 +307,5 @@ def resolve(
         spawned_by=spawned_by,
         group=group,
         owner=owner,
+        scope=agent.scope.meet(within),
     )

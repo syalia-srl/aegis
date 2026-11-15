@@ -91,7 +91,7 @@ details[data-state=doing] summary .s{color:var(--accent)}
 <div class="verify"><b>verify</b> <code>uv run pytest tests/test_scopes.py tests/test_agents.py tests/test_agent_config.py -q</code>: groups expand, allow/deny exclusive, unknown names refused, a preset with no <code>tools:</code> has the all-None scope.</div>
 </details>
 
-<details class="task" id="task-2" data-state="pending" open><summary><span class="n">2</span><span class="t">Fix the scope at spawn and intersect it with the parent's</span><span class="s">pending</span><span class="f">src/aegis/session.py (SpawnSpec), src/aegis/app.py, src/aegis/queues.py, tests/test_scopes.py, tests/test_queues.py</span></summary>
+<details class="task" id="task-2" data-state="done" open><summary><span class="n">2</span><span class="t">Fix the scope at spawn and intersect it with the parent's</span><span class="s">pending</span><span class="f">src/aegis/session.py (SpawnSpec), src/aegis/app.py, src/aegis/queues.py, tests/test_scopes.py, tests/test_queues.py</span></summary>
 <ol>
   <li><code>SpawnSpec</code> gets <code>scope</code>, serialized in the spawn record like <code>keep_harness_tools</code> (fixed at spawn: editing the agent never widens a running session).</li>
   <li>Every start path computes it as the agent's scope met with the starter's: <code>session_spawn</code> and a handoff (the parent is <code>spawned_by</code> or <code>continues</code>), a queue worker (the task's <code>enqueuer</code>), a workflow node and a schedule run (their owner session, when there is one).</li>

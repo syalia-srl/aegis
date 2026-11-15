@@ -1112,6 +1112,7 @@ def register_agent_ops(app: App) -> None:
             cwd,
             owner=app.who(caller).name,
             far_enqueuer=far,
+            scope=enqueuer.spec.scope.record() if enqueuer else None,
         )
         return {"task_id": t.id, "status": t.status, "position": app.queues.position(t)}
 

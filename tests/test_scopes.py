@@ -90,3 +90,76 @@ async def test_the_fixed_list_names_every_agent_tool(tmp_path, fake_claude):
         await w.stop()
     assert scopes.TOOLS == names
     assert all(g <= names for g in GROUPS.values())
+
+
+SCOPED = """\
+default_agent: opus
+agents:
+  opus: {harness: claude-code, model: opus, effort: high, permission: full}
+  fair:
+    harness: claude-code
+    model: opus
+    effort: high
+    permission: full
+    tools: {deny: [workflows], queues: [general]}
+queues:
+  general: {agent: opus}
+  other: {agent: opus}
+"""
+
+
+@pytest.fixture
+async def scoped(tmp_path, fake_claude):
+    (tmp_path / ".aegis.yaml").write_text(SCOPED)
+    w = await World(tmp_path, fake_claude).start()
+    yield w
+    await w.stop()
+
+
+async def spawn(w, agent: str, by=None):
+    from aegis.ops import Caller
+
+    caller = Caller("agent", by.log_id) if by is not None else None
+    args = ("session.spawn", {"agent": agent}) + ((caller,) if caller else ())
+    r = await w.app.registry.call(*args)
+    return w.app.sessions.sessions[r["log_id"]]
+
+
+def test_a_spec_keeps_its_scope_through_its_record(tmp_path):
+    from aegis.session import SpawnSpec
+
+    scope = Scope(frozenset({"turn_end", "toast"}), frozenset({"q"}), None)
+    spec = SpawnSpec("a", "opus", "high", "full", tmp_path, scope=scope, started_by="x")
+    back = SpawnSpec.from_record(spec.record(), tmp_path)
+    assert back.scope == scope and back.started_by == "x"
+    plain = SpawnSpec("a", "opus", "high", "full", tmp_path)
+    assert "scope" not in plain.record()
+    assert SpawnSpec.from_record(plain.record(), tmp_path).scope == ANY
+
+
+async def test_a_spawn_from_a_scoped_session_meets_its_scope(scoped):
+    fair = await spawn(scoped, "fair")
+    assert "workflow_arm" not in fair.spec.scope.tools
+    child = await spawn(scoped, "opus", by=fair)
+    assert child.spec.scope == fair.spec.scope
+    assert (await spawn(scoped, "opus")).spec.scope == ANY
+
+
+async def test_a_worker_of_a_scoped_enqueuer_has_its_scope(scoped):
+    from aegis.ops import Caller
+
+    from .conftest import until
+
+    fair = await spawn(scoped, "fair")
+    r = await scoped.app.registry.call(
+        "queue.enqueue",
+        {"queue": "general", "payload": "hello", "callback": False},
+        Caller("agent", fair.log_id),
+    )
+    t = scoped.app.queues.tasks[r["task_id"]]
+    await until(lambda: t.worker, timeout=10, what="the worker")
+    meta = scoped.app.sessions.archived.get(t.worker)
+    spec = meta if meta is not None else scoped.session(t.worker).spec.record()
+    assert spec["agent"] == "opus" and spec["started_by"] == fair.log_id
+    worker = Scope.from_record(spec["scope"])
+    assert worker == fair.spec.scope and "workflow_arm" not in worker.tools

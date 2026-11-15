@@ -2340,6 +2340,7 @@ class App:
                 spec.cwd,
                 spawned_by=spec.spawned_by,
                 owner=spec.owner,
+                within=spec.scope,
             )
         else:
             spec = dataclasses.replace(
@@ -2728,6 +2729,7 @@ class App:
                 group=self._group_for(parent, p.from_session, caller),
                 # Every session is the server's one person's.
                 owner=self.who(caller).name,
+                within=parent.spec.scope if parent else None,
             )
             if p.spawned_from is not None:
                 if not valid_handle(p.spawned_from.handle):
