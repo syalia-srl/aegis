@@ -709,7 +709,7 @@ class _queue:
 
 class _quota:
     async def read(self) -> Any:
-        """How much of each subscription window is left: per provider, each window's percent used, severity, projected percent at reset and reset time (epoch seconds). Reads the last reading; never asks the vendor, so calling it costs nothing."""
+        """How much of each subscription window is left: per provider, each window's percent used, severity, projected percent at reset, the rate behind it (points per hour, or null for the window average) and reset time (epoch seconds). Reads the last reading; never asks the vendor, so calling it costs nothing."""
 
 class _recap:
     async def request(self, *, log_id: str, force: bool = ...) -> Any:

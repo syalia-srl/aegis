@@ -431,6 +431,20 @@ class Journal:
         a window's percent or reset moved."""
         self._q.put(("quota", snapshot))
 
+    def quota_rows(
+        self, billing: str, window: str, since: float
+    ) -> list[tuple[float, float, float | None]]:
+        """The rows a projection replays (tables.quota_rows); empty when the
+        file or its table is not there yet."""
+        try:
+            con = db.open_read(self.path)
+            try:
+                return tables.quota_rows(con, billing, window, since)
+            finally:
+                con.close()
+        except sqlite3.Error:
+            return []
+
     def usual_spend(self, billing: str, window: str, span_s: float) -> float | None:
         """What the last finished windows of this kind spent (tables.usual_spend).
         None when the file or its table is not there yet, as before a backfill."""

@@ -219,7 +219,11 @@ def pace_severity(
     absorbs needs no one to slow down. A window with no projection keeps its
     level verdict.
     """
-    projected = window_pace(window, span_s, now=now, usual=usual)
+    return severity_from(window, window_pace(window, span_s, now=now, usual=usual))
+
+
+def severity_from(window: QuotaWindow, projected: float | None) -> str:
+    """pace_severity's verdict for a projection already made, by either method."""
     if projected is None:
         return window.severity
     if window.severity == "critical" or window.percent >= CRITICAL_AT:

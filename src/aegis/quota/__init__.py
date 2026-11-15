@@ -39,10 +39,12 @@ from .core import (
     QuotaState,
     boot_clock,
     cancel_and_wait,
-    pace_severity,
+    QuotaWindow,
+    severity_from,
     window_pace,
 )
 from .opencode import PROVIDER as OPENCODE_GO
+from .projection import Projector, half_life
 
 log = logging.getLogger("aegis.quota")
 
@@ -76,6 +78,10 @@ def provider_wire(
     now: datetime,
     wall: float,
     usual: Callable[[str, str, float, datetime], float] | None = None,
+    project: Callable[
+        [str, str, float, QuotaWindow, float, float], tuple[float, float] | None
+    ]
+    | None = None,
 ) -> dict | None:
     """One provider on the wire, or None when it has nothing to say: no
     credentials (a rail not in use), or no reading and no failure yet."""
@@ -107,10 +113,22 @@ def provider_wire(
             continue
         span = None if stale else provider.window_spans.get(kind)
         typical = PACE_USUAL_DEFAULT
-        if usual is not None and span and head["account"] and w.resets_at is not None:
-            billing = f"{provider.name}:{head['account']}"
+        billing = f"{provider.name}:{head['account']}"
+        known = bool(span and head["account"] and w.resets_at is not None)
+        # The current rate first (#1065); the window's average blended with
+        # what finished windows spent while there is too little history.
+        got = (
+            project(billing, kind, span, w, wall - state.age_s, wall)
+            if known and project
+            else None
+        )
+        if usual is not None and known and got is None:
             typical = usual(billing, kind, span, w.resets_at)
-        projected = window_pace(w, span, now=now, usual=typical)
+        rate = None
+        if got is not None:
+            projected, rate = got
+        else:
+            projected = window_pace(w, span, now=now, usual=typical)
         resets = None if w.resets_at is None else w.resets_at.timestamp()
         starts = None
         if projected is not None and resets is not None and span:
@@ -120,10 +138,13 @@ def provider_wire(
                 "kind": kind,
                 "label": label,
                 "percent": w.percent,
-                "severity": "normal"
-                if stale
-                else pace_severity(w, span, now=now, usual=typical),
+                "severity": "normal" if stale else severity_from(w, projected),
                 "projected": None if projected is None else round(projected),
+                # Points per hour, and which method made ``projected``.
+                "rate": None if rate is None else round(rate, 2),
+                "projection": None
+                if projected is None
+                else ("rate" if rate is not None else "average"),
                 "starts_at": starts,
                 "resets_at": None if resets is None else round(resets),
             }
@@ -173,6 +194,30 @@ class Quota:
         # or None without any. Unset until the journal is there.
         self.history: Callable[[str, str, float], float | None] | None = None
         self._usual: dict[tuple[str, str], tuple[float, float]] = {}
+        # Reads the usage_quota rows a projection replays (Journal.quota_rows),
+        # and the quota: block's half-lives (config.quota_from). Unset, the
+        # projection starts from the readings this process sees.
+        self.rows: Callable[[str, str, float], list] | None = None
+        self.half_lives: Callable[[], dict | str] = dict
+        self._projector = Projector(
+            lambda b, k, since: [] if self.rows is None else self.rows(b, k, since)
+        )
+
+    def _project(
+        self,
+        billing: str,
+        kind: str,
+        span: float,
+        w: QuotaWindow,
+        at: float,
+        wall: float,
+    ) -> tuple[float, float] | None:
+        hl = half_life(span, self.half_lives())
+        if hl is None or w.resets_at is None:
+            return None
+        return self._projector.project(
+            billing, kind, span, hl, at, w.percent, w.resets_at.timestamp(), wall
+        )
 
     def _usual_spend(
         self, billing: str, kind: str, span: float, resets_at: datetime
@@ -201,6 +246,7 @@ class Quota:
                 now=now,
                 wall=wall,
                 usual=self._usual_spend,
+                project=self._project,
             )
             if wire is not None:
                 providers.append(wire)
