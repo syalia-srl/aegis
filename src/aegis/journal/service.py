@@ -40,6 +40,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
+from ..guards import LINKS
 from ..quota.core import PACE_HISTORY_LONG, PACE_HISTORY_SHORT
 from ..transcript.store import read_store
 from ..usage import tables
@@ -112,12 +113,15 @@ class Journal:
         # or pushed in dirs: the Repos row must see a write before the turn
         # that made it closes.
         self.on_live = on_live
+        # Called on the loop when usage rows were written (budgets.py).
+        self.on_usage: Callable[[], None] | None = None
         self._seen: dict[str, int] = {}
         self.path = db_path or state_root / "journal.db"
         self._publish = publish
         self._derivers: dict[str, Deriver] = {}
-        # A session's meta (owner, kind, harness, continues) and the account
-        # each harness is logged in as, read when its usage deriver is made.
+        # A session's meta (owner, kind, harness, continues, agent, worker
+        # queue, starter) and the account each harness is logged in as, read
+        # when its usage deriver is made.
         self.meta_of = meta_of
         self.accounts = accounts
         self._usage: dict[str, UsageDeriver] = {}
@@ -238,6 +242,8 @@ class Journal:
             n = self._backfill(con, token)
             tables.ensure(con)
             token = _token()
+            # In progress before the rows go, so no budget reads them gone.
+            self._progress = {"done": 0, "total": 0}
             tables.clear(con, token)
             self._usage_backfill(con, token)
             return n
@@ -358,6 +364,9 @@ class Journal:
             kind=_kind(meta),
             harness=str(meta.get("harness") or "claude-code"),
             continues=meta.get("continues") or None,
+            agent=meta.get("agent") or None,
+            queue=(meta.get("worker") or {}).get("queue") or None,
+            starter=next((meta[k] for k in LINKS if meta.get(k)), None),
             account=lambda harness: self.accounts().get(harness),
             replay_start=self._replay_start(con),
         )
@@ -467,6 +476,8 @@ class Journal:
             self._loop.call_soon_threadsafe(
                 self._publish, "usage", [{"set": self.usage_snapshot()}]
             )
+        if self.on_usage is not None and self._loop is not None:
+            self._loop.call_soon_threadsafe(self.on_usage)
 
     def _insert(self, con, log_id: str, rows: list[Row]) -> int:
         return sum(

@@ -180,3 +180,61 @@ def test_split_context_with_whatif_prints_the_replay(tmp_path):
     assert "Handing off at 200k: 0 handoffs" in res.output
     bad = invoke("usage", "--root", str(root), "--whatif", "250k")
     assert bad.exit_code == 2 and "100k, 150k, 200k, 300k, 400k" in bad.output
+
+
+def test_split_agent_and_queue_group_by_preset_and_queue(tmp_path):
+    """A row carries its session's agent preset, queue and starter, as aegis
+    serve's meta gives them, so --split agent and --split queue group them."""
+    _recent(tmp_path)
+    metas = {
+        "20261020-120000-aaaaaa": {"agent": "fair"},
+        "20261020-120000-bbbbbb": {
+            "agent": "deepseek",
+            "worker": {"task_id": "t1", "queue": "fair-work"},
+            "started_by": "20261020-120000-aaaaaa",
+        },
+    }
+    state = tmp_path / ".aegis" / "state"
+    Journal(state, None, meta_of=lambda log_id: metas.get(log_id, {})).rebuild()
+    res = invoke("usage", "--root", str(tmp_path), "--since", "4w", "--split",
+                 "agent,queue", "--json")  # fmt: skip
+    assert res.exit_code == 0, res.output
+    rows = json.loads(res.output)["rows"]
+    assert {(r["agent"], r["queue"]): r["cost"] for r in rows} == {
+        ("fair", None): 0.4,
+        ("deepseek", "fair-work"): 0.1,
+    }
+    con = sqlite3.connect(state / "journal.db")
+    assert con.execute(
+        "SELECT starter FROM usage_turns WHERE log_id = '20261020-120000-bbbbbb'"
+    ).fetchall() == [("20261020-120000-aaaaaa",)]
+
+
+def test_a_version_2_file_is_derived_again_with_agents(tmp_path):
+    """A version 2 file's rows have no agent: the 2 -> 3 migration deletes
+    the rows the stores hold and the backfill derives them with one."""
+    from aegis.journal import db
+    from aegis.usage import tables
+
+    _recent(tmp_path)
+    state = tmp_path / ".aegis" / "state"
+    con, _ = db.connect(state / "journal.db")
+    # Back to version 2: without the columns #1068 added.
+    con.execute("DROP INDEX usage_turns_agent")
+    con.execute("DROP INDEX usage_turns_starter")
+    for t, cols in tables.MIGRATE_2_3:
+        for c in cols:
+            con.execute(f"ALTER TABLE {t} DROP COLUMN {c}")
+    con.execute("UPDATE usage_meta SET value = '2' WHERE key = 'version'")
+    con.commit()
+    metas = {"20261020-120000-aaaaaa": {"agent": "fair"}}
+    journal = Journal(state, None, meta_of=lambda log_id: metas.get(log_id, {}))
+    assert tables.ensure(con) and not tables.is_complete(con)
+    journal._usage_backfill(con)
+    assert tables.is_complete(con)
+    assert con.execute(
+        "SELECT log_id, agent FROM usage_turns ORDER BY log_id"
+    ).fetchall() == [
+        ("20261020-120000-aaaaaa", "fair"),
+        ("20261020-120000-bbbbbb", None),
+    ]

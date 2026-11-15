@@ -30,7 +30,7 @@ from ruamel.yaml import YAML, YAMLError
 
 from .claude.process import PERMISSION_MODE, REPLACED_TOOLS
 from .guards import AGENT_ACTIONS, Guard
-from . import guards
+from . import budgets, guards
 from .ops import OpError
 from . import scopes
 from .roots import CONFIG_FILE
@@ -94,6 +94,8 @@ class Agent:
     tools: dict = field(default_factory=dict)
     # Its quota guard (guards.py, #1067); None: unguarded.
     guard: Guard | None = None
+    # Its spending caps (budgets.py, #1068); (): no cap.
+    budget: tuple[budgets.Cap, ...] = ()
 
     @property
     def enabled(self) -> bool:
@@ -156,6 +158,7 @@ def _agent(name: str, raw: Any) -> Agent:
     mcp_error = None if mcp_ok else "mcp must be a list of MCP server names"
     scope, scope_error = scopes.parse(d.get("tools"))
     guard, guard_error = guards.parse(d.get("quota"), AGENT_ACTIONS)
+    budget, budget_error = budgets.parse(d.get("budget"))
     switches = {k: d.get(k, default) for k, default in SWITCHES.items()}
     switch_error = next(
         (f"{k} must be true or false" for k, v in switches.items()
@@ -174,7 +177,8 @@ def _agent(name: str, raw: Any) -> Agent:
         or mcp_error
         or switch_error
         or scope_error
-        or guard_error,
+        or guard_error
+        or budget_error,
         models=models or ((values["model"],) if values["model"] else ()),
         repeated=repeated,
         harness_tools=_flag(switches, "harness_tools"),
@@ -184,6 +188,7 @@ def _agent(name: str, raw: Any) -> Agent:
         scope=scope,
         tools=scopes.form(d.get("tools")),
         guard=guard,
+        budget=budget,
     )
 
 

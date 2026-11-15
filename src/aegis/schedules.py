@@ -44,7 +44,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
 
-from . import commands
+from . import budgets, commands
 from .agents import PERMISSION_ORDER, resolve
 from .clock import Clock, clock_from
 from .monitors import run_bash
@@ -278,15 +278,20 @@ class Schedules:
 
     def _refused(self, spec) -> str | None:
         """Why the guard of a run's new session refuses its first turn: an
-        agent with on_closed: refuse, or a stop line (guards.py). The run is
-        skipped with the why; a warned agent's run fires with the notice."""
+        agent with on_closed: refuse, a spent budget (budgets.py) or a stop
+        line (guards.py). The run is skipped with the why; a warned agent's
+        run fires with the notice."""
         g = self._app.guard(spec)
         agent = next(
             (a for a in self._app.config.current().agents if a.name == spec.agent),
             None,
         )
         refuse = agent is not None and agent.guard and agent.guard.on_closed == "refuse"
-        if g.state == "stopped" or (g.state == "closed" and refuse):
+        if budgets.never_frees(g):
+            return f"{g.why}; {budgets.NEVER}"
+        if g.state == "stopped" or (
+            g.state == "closed" and (refuse or budgets.is_budget(g))
+        ):
             return g.why
         return None
 

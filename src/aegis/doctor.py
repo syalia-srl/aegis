@@ -334,7 +334,12 @@ def _agent(a: Agent, f: Found | None) -> list[Finding]:
             "ok",
             row,
             f"{a.harness} {a.model}, effort {a.effort}, permission {a.permission}"
-            + (f"; tools: {scopes.describe(a.tools)}" if a.tools else ""),
+            + (f"; tools: {scopes.describe(a.tools)}" if a.tools else "")
+            + (
+                f"; budget: {', '.join(c.describe() for c in a.budget)}"
+                if a.budget
+                else ""
+            ),
             row,
         )
     ]

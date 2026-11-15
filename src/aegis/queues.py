@@ -44,7 +44,7 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 from .agents import ConfigError, read_config, resolve
-from . import guards
+from . import budgets, guards
 from .guards import QUEUE_ACTIONS
 from . import restarts
 from . import notice_sources
@@ -355,6 +355,12 @@ class Queues:
             if present and t.status == "pending" and (q is None or "error" in q):
                 why = q["error"] if q else "it is no longer configured"
                 self._fail(t, f"its queue {t.queue!r} in .aegis.yaml: {why}")
+            elif t.status == "pending" and q is not None:
+                # A spent session cap up its line never frees (budgets.py):
+                # the task would wait forever.
+                g = self.gate(t.queue, q, t.enqueuer, t.cwd, t.owner)
+                if budgets.never_frees(g):
+                    self._fail(t, f"{g.why}; {budgets.NEVER}")
         limit = self._config.current().max_workers
         while True:
             running = Counter(
@@ -445,7 +451,9 @@ class Queues:
         past ``max_pending`` it raises queue_full whatever the gate says;
         with the guards closed (guard_gate), ``on_closed: reject`` raises
         queue_closed and ``warn`` returns the warning; ``hold``, the default,
-        waits silently, as a task waits for a cooling model or the pause."""
+        waits silently, as a task waits for a cooling model or the pause. A
+        spent session cap up the enqueuer's line raises queue_closed
+        whatever on_closed says: it never frees (budgets.py)."""
         q = self.queues[name]
         pending = sum(
             1 for t in self.tasks.values() if t.queue == name and t.status == "pending"
@@ -458,10 +466,15 @@ class Queues:
             )
         guard = q.get("guard")
         action = guard.on_closed if guard is not None else "hold"
-        if action == "hold":
-            return None
         g = self.guard_gate(name, q, enqueuer, cwd, owner)
-        if g.may_start:
+        if budgets.never_frees(g):
+            # A spent session cap up the line: whatever on_closed says, the
+            # task could never start (budgets.py).
+            raise OpError(
+                "queue_closed",
+                f"queue {name!r} rejects new tasks: {g.why}; {budgets.NEVER}",
+            )
+        if action == "hold" or g.may_start:
             return None
         text = waits(g)
         if action == "reject":
