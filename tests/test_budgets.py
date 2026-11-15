@@ -161,3 +161,107 @@ def test_spend_is_read_from_the_usage_rows(tmp_path):
         tables.insert(con, "W", Derived(turns=[t]))
     con.close()
     assert budgets.read(path, 10.0) == [Row("W", 20.0, 0.25, 150, "deepseek")]
+
+
+# Against a running aegis: the fake claude's every turn costs $0.01.
+import asyncio  # noqa: E402
+
+from .conftest import until  # noqa: E402
+from .test_agents import World, mcp, turn  # noqa: E402
+from .test_guards import sent  # noqa: E402
+
+CAPPED = """\
+default_agent: opus
+agents:
+  opus: {harness: claude-code, model: opus, effort: high, permission: full}
+  fair:
+    harness: claude-code
+    model: sonnet
+    effort: low
+    permission: full
+    budget: [{usd: %s, per: session}]
+queues:
+  fair-work:
+    agent: opus
+    quota:
+      claude: {weekly_all: {used: 99}}
+      on_closed: reject
+"""
+KEY = "budget:spent:fair"
+
+
+@pytest.fixture
+async def world(tmp_path, fake_claude):
+    (tmp_path / ".aegis.yaml").write_text(CAPPED % "0.01")
+    w = await World(tmp_path, fake_claude).start()
+    w.app.quota.snapshot = lambda: {"providers": []}  # no reading: no guard holds
+    yield w
+    await w.stop()
+
+
+async def spawn(world, agent: str = "fair"):
+    r = await world.app.registry.call("session.spawn", {"agent": agent})
+    return world.app.sessions.sessions[r["log_id"]]
+
+
+def owed(world, s) -> dict:
+    return world.app.notices._items.get(s.log_id, {})
+
+
+async def test_past_its_session_cap_a_session_is_told_once_and_holds_a_wake(world):
+    s = await spawn(world)
+    await turn(s, "hello")
+    await until(lambda: KEY in owed(world, s), 8, "the budget notice")
+    assert owed(world, s)[KEY].text.startswith(
+        "agent fair has spent $0.01 of $0.01 in this session. Finish what you"
+        " are doing as soon as possible and end your turn."
+    )
+    # A wake no person started is held, whatever on_closed says.
+    assert await s.deliver("> from feed:tickets · 1 new", "ticket 7") == "held"
+    assert s.held and s.held[0]["held_for"] == "quota" and s.status == "idle"
+    # A person's message runs, and carries the notice.
+    await turn(s, "a person asks", by_person=True)
+    assert KEY in s.items_sent
+    await turn(s, "and again", by_person=True)
+    rows = [e for e in s.entries() if ":notice:" in e["id"]]
+    assert [e["title"].split(" · ")[1] for e in rows] == ["budget:spent:fair"]
+    assert s.held and not any("ticket 7" in t for t in sent(s))
+
+
+async def test_a_cap_with_room_again_releases_what_it_held(world, tmp_path):
+    s = await spawn(world)
+    await turn(s, "hello")
+    await until(lambda: KEY in owed(world, s), 8, "the budget notice")
+    assert await s.deliver("> from feed:tickets · 1 new", "ticket 7") == "held"
+    (tmp_path / ".aegis.yaml").write_text(CAPPED % "5")
+    await until(
+        lambda: world.app.config.current().agents[1].budget[0].limit == 5, 5, "config"
+    )
+    world.app.on_quota(world.app.quota.snapshot())
+    await until(lambda: not s.held and s.status == "idle", 8, "the held wake")
+    assert any("ticket 7" in t for t in sent(s))
+    assert KEY not in owed(world, s)
+
+
+async def test_a_workers_spend_closes_its_enqueuer_and_its_queue_rejects(
+    world, tmp_path
+):
+    (tmp_path / ".aegis.yaml").write_text(CAPPED % "0.015")
+    await until(
+        lambda: world.app.config.current().agents[1].budget[0].limit == 0.015,
+        5,
+        "config",
+    )
+    s = await spawn(world)
+    said = await turn(s, mcp("queue_enqueue", queue="fair-work", payload="hi"))
+    assert "mcp error" not in said
+    (task,) = world.app.queues.tasks.values()
+    await until(lambda: task.status == "completed", 12, "the worker")
+    # fair spent $0.01, its worker $0.01: past fair's $0.015 session cap.
+    await until(lambda: KEY in owed(world, s), 8, "the budget notice")
+    said = await turn(
+        s, mcp("queue_enqueue", queue="fair-work", payload="more"), by_person=True
+    )
+    assert said.startswith("mcp error: queue_closed")
+    assert "agent fair has spent $0.0" in said and "of $0.01 in session" in said
+    await asyncio.sleep(0)

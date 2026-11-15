@@ -113,6 +113,8 @@ class Journal:
         # or pushed in dirs: the Repos row must see a write before the turn
         # that made it closes.
         self.on_live = on_live
+        # Called on the loop when usage rows were written (budgets.py).
+        self.on_usage: Callable[[], None] | None = None
         self._seen: dict[str, int] = {}
         self.path = db_path or state_root / "journal.db"
         self._publish = publish
@@ -458,6 +460,8 @@ class Journal:
             self._loop.call_soon_threadsafe(
                 self._publish, "usage", [{"set": self.usage_snapshot()}]
             )
+        if self.on_usage is not None and self._loop is not None:
+            self._loop.call_soon_threadsafe(self.on_usage)
 
     def _insert(self, con, log_id: str, rows: list[Row]) -> int:
         return sum(
