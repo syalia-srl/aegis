@@ -50,6 +50,7 @@ from .clock import Clock, clock_from
 from .monitors import run_bash
 from .names import valid_handle
 from .ops import OpError
+from .scopes import Scope
 from .quota_gate import decide, pool_for
 from .workflow_lang import edit_diff, parse, rows as workflow_rows
 from .workflow_store import check_named
@@ -402,7 +403,14 @@ class Schedules:
         agents, default = self._app._agents()
         cwd = Path(s.d.fire.cwd) if s.d.fire.cwd else self._app.roots.harness_cwd
         spec = resolve(
-            agents, default, s.d.fire.agent, {}, cwd, owner=s.owner.get("principal")
+            agents,
+            default,
+            s.d.fire.agent,
+            {},
+            cwd,
+            owner=s.owner.get("principal"),
+            # The maker's scope, recorded when it made the schedule (#1066).
+            within=Scope.from_record(s.owner["scope"]) if "scope" in s.owner else None,
         )
         if tags := s.owner.get("tags"):
             spec = dataclasses.replace(spec, tags=dict(tags))

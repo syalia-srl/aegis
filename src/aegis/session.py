@@ -65,6 +65,7 @@ from .names import default_title
 from .ops import OpError
 from .policy import McpServer
 from .park import TIMER_TOOLS
+from .scopes import ANY as ANY_SCOPE, Scope
 from .transcript.entries import EMPTY_STANDING, Fold, fold_records
 from .transcript.store import Store, read_store
 from .transcript.wire import wire, wire_ops
@@ -307,6 +308,13 @@ class SpawnSpec:
     isolated: bool = False
     primer: bool = True
     notices: bool = True
+    # What the session may use (scopes.py, #1066): its agent's scope met with
+    # its starter's, fixed at spawn so editing the agent never widens it.
+    scope: Scope = ANY_SCOPE
+    # The log id of the session that started this one without being its
+    # parent: a queue worker's enqueuer. spawned_by would make the worker a
+    # child in the tree.
+    started_by: str | None = None
 
     def record(self) -> dict:
         """The fields a spawn record and a meta carry."""
@@ -343,6 +351,10 @@ class SpawnSpec:
         for k, default in SWITCHES.items():
             if getattr(self, k) != default:
                 d[k] = getattr(self, k)
+        if not self.scope.any:
+            d["scope"] = self.scope.record()
+        if self.started_by:
+            d["started_by"] = self.started_by
         return d
 
     @classmethod
@@ -368,6 +380,8 @@ class SpawnSpec:
             knowledge_native=bool(d.get("knowledge_native")),
             tags=dict(d.get("tags") or {}),
             **{k: bool(d.get(k, default)) for k, default in SWITCHES.items()},
+            scope=Scope.from_record(d.get("scope")),
+            started_by=d.get("started_by"),
         )
 
 

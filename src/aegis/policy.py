@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from .ops import OpError, default_guard
+from .scopes import ANY, Scope, check_tool
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -234,7 +235,19 @@ class StandalonePolicy(HostPolicy):
     owner's name, which every owner field on disk already holds."""
 
     def guard(self, op: Operation, who: Any, caller: CallerInfo) -> None:
+        if caller.kind == "agent" and op.agent and caller.log_id:
+            check_tool(self._scope(caller.log_id), op.tool_name)
         default_guard(op, caller)
+
+    def tools(self, who: Any, session: SessionView) -> set[str] | None:
+        """The session's scope (scopes.py, #1066): its agent's tools: block met
+        with its starters'; None, every tool, when it has none."""
+        tools = self._scope(session.log_id).tools
+        return None if tools is None else set(tools)
+
+    def _scope(self, log_id: str) -> Scope:
+        s = self._app.sessions.sessions.get(log_id)
+        return s.spec.scope if s is not None else ANY
 
     async def identify(self, cred: Credential) -> Any:
         if self._app.principals.resolve(cred.token) is None:

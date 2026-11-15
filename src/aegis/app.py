@@ -157,6 +157,7 @@ from .policy import (
     StandalonePolicy,
 )
 from .ops import Caller, NoParams, OpError, Principal, Registry as Ops
+from .scopes import check_name
 from . import launch
 from .opencode import sweep as opencode_sweep
 from .tokens import TokenStore
@@ -2340,6 +2341,7 @@ class App:
                 spec.cwd,
                 spawned_by=spec.spawned_by,
                 owner=spec.owner,
+                within=spec.scope,
             )
         else:
             spec = dataclasses.replace(
@@ -2694,6 +2696,9 @@ class App:
             linked server, as this server's link there, and that server's quota
             gate decides."""
             parent = reg.sessions.get(caller.log_id) if caller.is_agent else None
+            if parent is not None:
+                named = p.agent or self._agents()[1] or ""
+                check_name(parent.spec.scope, "agents", named)
             if p.agent and "@" in p.agent:
                 name, _, server = p.agent.rpartition("@")
                 if server != self.server_name:
@@ -2728,6 +2733,7 @@ class App:
                 group=self._group_for(parent, p.from_session, caller),
                 # Every session is the server's one person's.
                 owner=self.who(caller).name,
+                within=parent.spec.scope if parent else None,
             )
             if p.spawned_from is not None:
                 if not valid_handle(p.spawned_from.handle):
@@ -2925,6 +2931,10 @@ class App:
                         "not_yours", "an agent can hand off only its own session"
                     )
                 old = reg.open(caller.log_id)
+                # Continuing on its own agent widens nothing: a long-lived
+                # scoped agent must still hand off when its context fills.
+                if p.agent not in (None, old.spec.agent):
+                    check_name(old.spec.scope, "agents", p.agent)
             else:
                 if p.log_id is None:
                     raise OpError("bad_params", "session.handoff needs a log_id")

@@ -180,6 +180,7 @@ def register_schedule_ops(app: App) -> None:
             "log_id": s.log_id,
             "principal": who.name,
             "ceiling": s.spec.permission,
+            **({"scope": s.spec.scope.record()} if not s.spec.scope.any else {}),
             # Its runs stay where the maker's host put it (#959).
             **({"tags": dict(s.spec.tags)} if s.spec.tags else {}),
         }

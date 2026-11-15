@@ -2717,6 +2717,7 @@ class Workflows:
             self._app._resolve_cwd(cwd, owner.spec.cwd),
             spawned_by=owner.log_id,
             owner=owner.spec.owner,
+            within=owner.spec.scope,
         )
         spec, g = self._app.start_spec(spec)
         if not g.may_start:
