@@ -30,10 +30,10 @@ FULL = """\
 default_agent: opus
 exit_via: far
 agents:
-  opus: {exit: "off", harness: claude-code, model: opus, effort: high, permission: full, priming: Be brief., keep_harness_tools: [Agent], mcp: [notes, phone], harness_tools: false, isolated: true, primer: false, notices: false, tools: {deny: [workflows], queues: [general], agents: [quick]}}
+  opus: {exit: "off", harness: claude-code, model: opus, effort: high, permission: full, priming: Be brief., keep_harness_tools: [Agent], mcp: [notes, phone], harness_tools: false, isolated: true, primer: false, notices: false, tools: {deny: [workflows], queues: [general], agents: [quick]}, quota: {claude: {weekly_all: {used: 80, projected: 90, stop: 97}}, on_closed: refuse, advice: File it.}}
   quick: {harness: claude-code, models: [haiku, sonnet], effort: low, permission: read}
 queues:
-  general: {agent: opus, priority: 3, quiet: false}
+  general: {agent: opus, priority: 3, quiet: false, quota: {opencode-go: {weekly: pace}, on_closed: reject}, max_pending: 50}
 max_workers: 7
 model_ranking: false
 recap: {agent: quick}
@@ -141,6 +141,8 @@ def paths(node: object, prefix: str = "") -> set[str]:
             "usage.owner_names",
             "usage.subscriptions",
             "agents.*.tools",
+            "agents.*.quota",
+            "queues.*.quota",
         ) or (p.startswith(("terminals.*.", "mcp.*.")) and p.count(".") == 2)
         out |= {p} if leaf else paths(v, p)
     return out

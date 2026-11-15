@@ -44,6 +44,8 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 from .agents import ConfigError, read_config, resolve
+from . import guards
+from .guards import QUEUE_ACTIONS
 from . import restarts
 from . import notice_sources
 from .monitors import iso_now
@@ -139,6 +141,8 @@ def queues_from(raw: Any) -> dict[str, dict]:
             }
         elif not isinstance(q.get("quiet", True), bool):
             out[str(name)] = {"error": f"quiet {q['quiet']!r} is not true or false"}
+        elif (bad := _guard_error(q)) is not None:
+            out[str(name)] = {"error": bad}
         else:
             # A worker starts with no tab: its result goes to its enqueuer (#386).
             out[str(name)] = {
@@ -146,8 +150,18 @@ def queues_from(raw: Any) -> dict[str, dict]:
                 "priority": priority,
                 "quiet": q.get("quiet", True),
                 "legacy": [k for k in LEGACY_QUEUE_KEYS if k in q],
+                # Its quota guard, None for none, and its bound (#1067).
+                "guard": guards.parse(q.get("quota"), QUEUE_ACTIONS)[0],
+                "max_pending": guards.max_pending(q.get("max_pending"))[0],
             }
     return out
+
+
+def _guard_error(q: dict) -> str | None:
+    return (
+        guards.parse(q.get("quota"), QUEUE_ACTIONS)[1]
+        or guards.max_pending(q.get("max_pending"))[1]
+    )
 
 
 def load_queues(config_root: Path) -> dict[str, dict]:

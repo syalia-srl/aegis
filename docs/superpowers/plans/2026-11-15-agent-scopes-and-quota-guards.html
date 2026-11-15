@@ -137,7 +137,7 @@ details[data-state=doing] summary .s{color:var(--accent)}
 <div class="verify"><b>verify</b> <code>uv run pytest tests/test_quota_gate.py tests/test_quota_pace.py tests -q -k "schedule and quota"</code>.</div>
 </details>
 
-<details class="task" id="task-7" data-state="pending" open><summary><span class="n">7</span><span class="t"><code>quota:</code>, <code>on_closed</code>, <code>advice</code>, <code>max_pending</code> in config</span><span class="s">pending</span><span class="f">src/aegis/agents.py, src/aegis/config.py (QUEUE_KEYS, QueueDoc), src/aegis/queues.py, tests/test_config*.py, tests/test_agents.py</span></summary>
+<details class="task" id="task-7" data-state="done" open><summary><span class="n">7</span><span class="t"><code>quota:</code>, <code>on_closed</code>, <code>advice</code>, <code>max_pending</code> in config</span><span class="s">pending</span><span class="f">src/aegis/agents.py, src/aegis/config.py (QUEUE_KEYS, QueueDoc), src/aegis/queues.py, tests/test_config*.py, tests/test_agents.py</span></summary>
 <ol>
   <li>Agents: <code>quota:</code> map, <code>on_closed: refuse | warn</code> (default warn), <code>advice:</code> string. Queues: <code>quota:</code>, <code>on_closed: reject | warn | hold</code> (default hold), <code>max_pending:</code> positive int.</li>
   <li>Wrong values are reported by <code>aegis doctor</code> on the row and stop the agent or queue, as other config errors do. <code>hosts.&lt;name&gt;</code> overrides take the new keys.</li>
