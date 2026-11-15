@@ -78,7 +78,7 @@ NOT_PER_HOST = ("hosts",)
 AGENT_KEYS = (
     "harness", "provider", "model", "models", "effort", "permission", "priming",
     "keep_harness_tools", "exit", "mcp",
-    "harness_tools", "isolated", "primer", "notices", "tools", "quota",
+    "harness_tools", "isolated", "primer", "notices", "tools", "quota", "budget",
 )  # fmt: skip
 QUEUE_KEYS = ("agent", "priority", "quiet", "quota", "max_pending")
 
@@ -735,6 +735,8 @@ class AgentDoc(BaseModel):
     tools: dict[str, list[str]] = Field(default_factory=dict)
     # The quota: block as the file has it (guards.py), kept like tools.
     quota: dict[str, Any] = Field(default_factory=dict)
+    # The budget: list as the file has it (budgets.py), kept like quota.
+    budget: list[Any] = Field(default_factory=list)
 
 
 class QueueDoc(BaseModel):
@@ -835,6 +837,7 @@ def doc_from(data: dict) -> ConfigDoc:
             **{k: getattr(a, k) for k in SWITCHES},
             tools=_tools_raw(data, a.name),
             quota=_quota_raw((data.get("agents") or {}).get(a.name)),
+            budget=_budget_raw((data.get("agents") or {}).get(a.name)),
         )
         for a in agents_from(data)
     ]
@@ -904,6 +907,12 @@ def _quota_raw(node: object) -> dict:
     writes it back unchanged, a block the reader refuses too."""
     raw = cast(dict, node).get("quota") if isinstance(node, dict) else None
     return json.loads(json.dumps(raw)) if isinstance(raw, dict) else {}
+
+
+def _budget_raw(node: object) -> list:
+    """An agent's budget: list as the file has it, kept like quota:."""
+    raw = cast(dict, node).get("budget") if isinstance(node, dict) else None
+    return json.loads(json.dumps(raw)) if isinstance(raw, list) else []
 
 
 def _mcp_raw(data: dict, name: str) -> list[str]:
@@ -1405,6 +1414,10 @@ def _set_agent(node: CommentedMap, a: AgentDoc) -> None:
         _put(node, "quota", a.quota)
     else:
         node.pop("quota", None)
+    if a.budget:
+        _put(node, "budget", a.budget)
+    else:
+        node.pop("budget", None)
     for k, default in SWITCHES.items():
         if getattr(a, k) != default:
             _put(node, k, getattr(a, k))

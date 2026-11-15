@@ -1172,7 +1172,7 @@ export class Settings {
       this.draw();
     }, "link danger");
     const fold = h("details", { className: "set-priming", open: !!a.priming }, h("summary", { textContent: a.priming ? "Priming" : "Add a priming" }), priming);
-    card.append(name, h("div", { className: "picks" }, harness, effort, permission), casc, h("div", { className: "set-card-foot" }, fold, this.keepFold(a), this.mcpFold(a), this.scopeFold(a), this.quotaFold(a.quota, "agents.*.quota"), this.productFold(a), this.exitFold(a), star, del));
+    card.append(name, h("div", { className: "picks" }, harness, effort, permission), casc, h("div", { className: "set-card-foot" }, fold, this.keepFold(a), this.mcpFold(a), this.scopeFold(a), this.quotaFold(a.quota, "agents.*.quota"), this.budgetFold(a), this.productFold(a), this.exitFold(a), star, del));
     if (isDefault) card.classList.add("is-default");
     return card;
   }
@@ -1254,6 +1254,20 @@ export class Settings {
     if (!lines.length) return null;
     const fold = h("details", { className: "set-priming set-quota" }, h("summary", { textContent: "Quota guard" }), ...lines, h("p", { className: "set-none", textContent: "Work waits, is refused or runs with a notice while the pool is over these lines. Edit quota: in .aegis.yaml; help: config, Guard an agent or a queue." }));
     fold.dataset.key = key;
+    return fold;
+  }
+
+  // An agent's budget: list (budgets.py, #1068), shown as the file has it; a
+  // save writes it back unchanged. It is edited in .aegis.yaml.
+  budgetFold(a) {
+    const caps = Array.isArray(a.budget) ? a.budget : [];
+    if (!caps.length) return null;
+    const lines = caps.map((c) => {
+      const m = "usd" in c ? `$${c.usd}` : `${c.tokens} tokens`;
+      return h("div", { className: "kv" }, h("span", { textContent: `per ${c.per}` }), h("span", { textContent: m }));
+    });
+    const fold = h("details", { className: "set-priming set-budget" }, h("summary", { textContent: "Budget" }), ...lines, h("p", { className: "set-none", textContent: "Past a cap its sessions are told to finish, and no turn a person did not start runs until the cap has room. Edit budget: in .aegis.yaml; help: config, Budget an agent." }));
+    fold.dataset.key = "agents.*.budget";
     return fold;
   }
 

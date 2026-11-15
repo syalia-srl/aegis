@@ -189,7 +189,7 @@ details[data-state=doing] summary .s{color:var(--accent)}
 <div class="verify"><b>verify</b> <code>uv run pytest tests/usage -q</code>: <code>aegis usage --split agent</code> groups by preset.</div>
 </details>
 
-<details class="task" id="task-13" data-state="pending" open><summary><span class="n">13</span><span class="t">The <code>budget:</code> key and the spend ledger</span><span class="s">pending</span><span class="f">src/aegis/budgets.py (new), src/aegis/agents.py, tests/test_budgets.py</span></summary>
+<details class="task" id="task-13" data-state="done" open><summary><span class="n">13</span><span class="t">The <code>budget:</code> key and the spend ledger</span><span class="s">pending</span><span class="f">src/aegis/budgets.py (new), src/aegis/agents.py, tests/test_budgets.py</span></summary>
 <ol>
   <li><code>budget:</code> is a list of <code>{usd|tokens, per: session | &lt;n&gt;h | &lt;n&gt;d}</code>; validated with doctor rows.</li>
   <li><code>spent(agent, cap, now)</code>: for <code>session</code>, the session and its descendants; for a window, every turn in the window whose session's chain (task 8) contains a session of that agent. <code>frees_at</code> for a window: when enough of the oldest spend ages out.</li>
