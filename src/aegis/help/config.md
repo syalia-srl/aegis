@@ -375,23 +375,30 @@ agents:
 ```
 
 Each cap is `usd` or `tokens` and a `per:`. `usd` is each turn's cost as the
-harness reports it, the API-equivalent cost on a subscription; `tokens` is
-input plus output tokens. `per: session` caps one session; a duration in
-hours or days (`24h`, `7d`, `30d`) caps a rolling window that ends now. A cap
-counts turns once they end, from the usage rows (usage,
+harness reports it, the API-equivalent cost on a subscription, a finite
+number above 0; `tokens` is a whole number of input plus output tokens, not
+cache reads or cache writes. `per: session` caps one session; a duration in
+hours or days up to `366d` (`24h`, `7d`, `30d`) caps a rolling window that
+ends now. A cap counts turns once they end, from the usage rows (usage,
 [Split by any dimension](usage#split-by-any-dimension)): aegis estimates
 nothing before a turn.
 
 Spend is charged by lineage. A session's turns count for its own agent and
 for every agent up its chain of starters: the session that enqueued it,
-spawned it or handed off to it, and so on, as for guards (a handoff onto
-another agent starts a new line). So a worker that `fair` enqueued on a queue
+spawned it or handed off to it, and so on. Unlike a guard's chain, a handoff
+onto another agent stays on the old line: the new session's turns count for
+the old session's caps, so `session_handoff(agent=...)` does not escape a
+cap. A starter that was archived long ago still counts: its usage rows name
+its agent and its starter. So a worker that `fair` enqueued on a queue
 of `deepseek` counts for `deepseek`'s caps and for `fair`'s: for the
 per-session cap of the session that enqueued it, and for `fair`'s windows.
 
 - A session cap sums the session and every session started from it. Once
   spent it never frees: an agent that keeps one session for weeks, such as a
-  feed reader, fits a window better.
+  feed reader, fits a window better. An enqueue from its line is refused with
+  queue_closed whatever the queue's `on_closed:` says, a task already
+  pending from it fails with the why, and a schedule run into it is skipped
+  with the why: none of them could ever start.
 - A window sums every session of the agent, and every session started from
   one, over the window. It has room again when enough of its oldest spend
   ages out, and aegis names that time.
@@ -401,7 +408,7 @@ agent, is told once by an aegis notice, its own row in the transcript. It
 rides on the next prompt or, mid-turn, on the next tool call:
 
 ```text
-> from aegis:notice · budget:spent:fair · warn · 2026-11-15T09:12:00Z
+> from aegis:notice · budget:spent:fair:7d · warn · 2026-11-15T09:12:00Z
 agent fair has spent $25.40 of $25 in the last 7d. Finish what you are doing as soon as possible and end your turn. aegis starts no turn here that a person did not start until it has room again, at Fri 14:05.
 ```
 
@@ -412,11 +419,18 @@ did not start, as under a guard's `on_closed: refuse`, whatever its own
 `on_closed:` says. A wake waits, a feed's batch stays in the feed, a schedule
 run is skipped, and a `peer_handoff` from an agent is refused. A person's
 message runs, with the notice. Its enqueues meet each queue's `on_closed:`, as
-under a closed guard. Only a guard's stop line outranks a budget. When a
-window has room again, `budget:spent:fair · clear` says so and what was held
-goes out. `notices: {budget: false}` turns the notice off and leaves the
+under a closed guard, past a window. Only a guard's stop line outranks a
+budget. When a window has room again, `budget:spent:fair:7d · clear` says so
+and what was held goes out; a session told of one cap is told again, with its
+own time, when another one names the gate.
+
+While usage is rebuilt or backfilled (`aegis journal rebuild`, an upgrade)
+the rows are not all there: each cap keeps what it last read, a capped line
+with nothing read yet stays closed with `usage is being rebuilt`, and no
+notice, clear or held work moves until the rows are back. `notices: {budget: false}` turns the notice off and leaves the
 caps. A wrong `budget:` stops the agent with the error `aegis doctor` shows,
-whose row also lists the caps. Settings shows them read-only.
+whose row also lists the caps. Settings shows them read-only, a wrong cap as
+invalid, and a save there writes `budget:` back as the file has it.
 
 ## The default agent
 
