@@ -82,6 +82,7 @@ function sentence(p, w, now) {
   let s = `${p.label}, ${w.label} window: ${Math.round(w.percent)}% used`;
   if (gone != null) s += `, ${Math.round(gone * 100)}% of the window gone`;
   if (w.projected != null) s += `, on pace for ${w.projected}% at reset`;
+  if (w.rate != null) s += ` at ${w.rate} %/h`;
   s += ".";
   if (w.resets_at != null) s += ` Resets ${clock(w.resets_at)}, in ${countdown(w.resets_at - now)}.`;
   if (p.state === "stale") s += ` This reading is ${age(now - p.read_at)} old: ${p.note}.`;

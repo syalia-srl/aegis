@@ -684,6 +684,8 @@ class App:
         self.quota.listeners.append(self.on_quota)
         self.quota.listeners.append(self.journal.quota)
         self.quota.history = self.journal.usual_spend
+        self.quota.rows = self.journal.quota_rows
+        self.quota.half_lives = lambda: self.config.current().quota["half_life"]
         reg.pause_hold = self.pause_hold
         reg.refuse = self.refuse_hold
         reg.guard_items = self.turn_items
@@ -3891,7 +3893,8 @@ class App:
         @r.op("quota.read", agent=True, read=True, access="read")
         async def quota_read(_, caller):
             """How much of each subscription window is left: per provider, each
-            window's percent used, severity, projected percent at reset and
+            window's percent used, severity, projected percent at reset, the rate
+            behind it (points per hour, or null for the window average) and
             reset time (epoch seconds). Reads the last reading; never asks the
             vendor, so calling it costs nothing."""
             return self.quota.snapshot()

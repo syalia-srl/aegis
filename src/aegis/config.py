@@ -70,7 +70,7 @@ TOP_KEYS = (
     "agents", "queues", "default_agent", "recap", "btw", "group_names", "context", "usage",
     "session_memory_max", "terminals", "terminal_memory_max", "park", "network",
     "host", "workflows", "harness_versions", "notices", "nudges",
-    "knowledge", "exit_via", "max_workers", "hosts", "mcp", "model_ranking",
+    "knowledge", "exit_via", "max_workers", "hosts", "mcp", "model_ranking", "quota",
 )  # fmt: skip
 # Read once at boot, before the server knows its name (cli.serve), so a host's
 # block cannot set them.
@@ -340,6 +340,54 @@ NUDGES_DEFAULTS: dict = {"silent_s": 2, "plan_min": 15}
 KNOWLEDGE_DEFAULTS: dict = {"embeddings": "off", "know_how": True}
 
 
+# The quota: block (quota/projection.py): how far back "the current rate" looks,
+# per window length. Absent lengths use the window's span / 28, at least 30 min.
+QUOTA_SPANS = {"5h": 5 * 3600, "week": 7 * 86400, "month": 30 * 86400}
+QUOTA_MIN_HALF_LIFE_S = 600
+_HALF_LIFE = re.compile(r"\s*(\d+(?:\.\d+)?)\s*([mhd])\s*")
+
+
+def quota_from(raw: object) -> dict:
+    """The ``quota:`` block: ``{"half_life": {"week": 21600.0, ...}}`` in seconds,
+    or ``{"half_life": "average"}`` for the whole-window average. A wrong block
+    keeps the defaults and carries ``error`` for aegis doctor."""
+    out: dict = {"half_life": {}}
+    if raw is None:
+        return out
+    spans = ", ".join(QUOTA_SPANS)
+    if not isinstance(raw, dict) or set(raw) - {"projection"}:
+        return out | {"error": "quota takes one key, projection"}
+    proj = cast(dict, raw).get("projection")
+    if proj is None:
+        return out
+    if not isinstance(proj, dict) or set(proj) - {"half_life"}:
+        return out | {"error": "quota.projection takes one key, half_life"}
+    hl = cast(dict, proj).get("half_life")
+    if hl is None:
+        return out
+    if hl == "average":
+        return {"half_life": "average"}
+    if not isinstance(hl, dict):
+        return out | {
+            "error": f"quota.projection.half_life must be average or a mapping of {spans}"
+        }
+    got = {}
+    for name, v in hl.items():
+        if name not in QUOTA_SPANS:
+            return out | {
+                "error": f"quota.projection.half_life has no key {name!r}; it takes {spans}"
+            }
+        m = _HALF_LIFE.fullmatch(str(v)) if isinstance(v, str) else None
+        secs = float(m[1]) * {"m": 60, "h": 3600, "d": 86400}[m[2]] if m else None
+        if secs is None or not QUOTA_MIN_HALF_LIFE_S <= secs <= QUOTA_SPANS[name]:
+            return out | {
+                "error": f"quota.projection.half_life.{name} {v!r} is not a duration"
+                f" from 10m to the window's length, as in 30m, 6h or 1d"
+            }
+        got[name] = secs
+    return {"half_life": got}
+
+
 def knowledge_from(raw: object) -> dict:
     """The ``knowledge:`` block over its defaults: ``embeddings``, off or a
     fastembed model's name (knowledge/embed.py), and ``know_how``, whether a
@@ -543,6 +591,12 @@ SECTIONS = {
         " models are ranked without a release. Off reads only the ranking"
         " packaged with this version.",
     ),
+    "quota": (
+        "Quota projection",
+        "How far back the current rate of a quota gauge looks, per window"
+        " length: a number and m, h or d. Shorter follows a stop sooner. Blank"
+        " keeps the default, the window's length / 28 and at least 30m.",
+    ),
     "embeddings": (
         "Search embeddings",
         "Embeddings: off, or a fastembed model fused with keyword search, such"
@@ -596,6 +650,8 @@ def fields() -> list[dict]:
             add("network", "network.anchors", "list", [_anchor(*a) for a in v])
         else:
             add("network", f"network.{k}", "bool" if k == "enabled" else "number", v)
+    for name, default in (("5h", "30m"), ("week", "6h"), ("month", "26h")):
+        add("quota", f"quota.projection.half_life.{name}", "text", default)
     add("embeddings", "knowledge.embeddings", "text", KNOWLEDGE_DEFAULTS["embeddings"])
     add("embeddings", "knowledge.know_how", "bool", KNOWLEDGE_DEFAULTS["know_how"])
     add("models", "model_ranking", "bool", True)
@@ -1047,6 +1103,7 @@ class Snapshot:
     notices: dict = field(default_factory=_notices_defaults)
     nudges: dict = field(default_factory=lambda: dict(NUDGES_DEFAULTS))
     knowledge: dict = field(default_factory=lambda: dict(KNOWLEDGE_DEFAULTS))
+    quota: dict = field(default_factory=lambda: {"half_life": {}})
     # Whether the server downloads the nightly model ranking (ranking.py).
     model_ranking: bool = True
     workflows: dict = field(default_factory=lambda: dict(WORKFLOWS_DEFAULTS))
@@ -1109,6 +1166,7 @@ class Snapshot:
             notices=notices_from(data.get("notices")),
             nudges=nudges_from(data.get("nudges")),
             knowledge=knowledge_from(data.get("knowledge")),
+            quota=quota_from(data.get("quota")),
             model_ranking=data.get("model_ranking") is not False,
             workflows=workflows_from(data.get("workflows")),
             park=park_from(data.get("park")),
@@ -1319,6 +1377,7 @@ def _validate_settings(doc: ConfigDoc, err: Callable[[str, str, str], None]) -> 
         "network": lambda v: network_from(v)[1],
         "host": lambda v: host_from(v)[1],
         "knowledge": lambda v: knowledge_from(v).get("error"),
+        "quota": lambda v: quota_from(v).get("error"),
         "model_ranking": lambda v: (
             None if isinstance(v, bool) else f"model_ranking {v!r} is not true or false"
         ),

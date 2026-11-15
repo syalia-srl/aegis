@@ -66,6 +66,7 @@ usage:
 harness_versions: {person: warn, agent: "off", startup: "off", accepted: {opencode: ["2.0.33"]}}
 nudges: {silent_s: false, plan_min: 20}
 knowledge: {embeddings: minishlab/potion-multilingual-128M, know_how: false}
+quota: {projection: {half_life: {5h: 45m, week: 12h, month: 2d}}}
 notices:
   disk: {on: 80, critical: 95, clear: 70}
   memory: {on: 85, critical: 92, clear: 80, psi_full: 10}
@@ -102,6 +103,7 @@ def reader_keys() -> list[str]:
         "context": list(config.CONTEXT_DEFAULTS),
         "nudges": list(config.NUDGES_DEFAULTS),
         "knowledge": list(config.KNOWLEDGE_DEFAULTS),
+        "quota": [f"projection.half_life.{n}" for n in config.QUOTA_SPANS],
         "network": list(NET_KEYS),
         "host": ["hide_mounts", "add_mounts"],
         "notices": notices,

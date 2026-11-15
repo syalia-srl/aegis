@@ -790,6 +790,27 @@ Settings → Search embeddings edits it.
 `know-how/` docs when it reaches that repository (help_read knowledge). Set it to
 false to turn that off. It is read when aegis starts.
 
+## Quota projection
+
+`quota:` sets how far back "the current rate" of a quota gauge looks
+(help_read usage#where-a-quota-gauge-says-it-will-land). Each window length
+takes a half-life: a shorter one follows a stop or a burst sooner, a longer one
+moves less with each pause.
+
+```yaml
+quota:
+  projection:
+    half_life:
+      5h: 30m      # the default: the window's length / 28, at least 30m
+      week: 6h
+      month: 1d
+```
+
+A value is a number and `m`, `h` or `d`, from 10 minutes to the window's
+length. `half_life: average` keeps the window's own average instead, for every
+window. A wrong block keeps the defaults, and `aegis doctor` says what is wrong.
+It is read on every reading, so a change takes effect without a restart.
+
 ## Exit through a link
 
 `exit_via:` names a link: what aegis starts reaches the internet from that
