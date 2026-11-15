@@ -109,7 +109,7 @@ details[data-state=doing] summary .s{color:var(--accent)}
 <div class="verify"><b>verify</b> <code>uv run pytest tests/test_policy_tools.py tests/test_ops.py tests/test_policy_spawn.py -q</code>: an agent with <code>deny: [workflows]</code> does not list <code>workflow_arm</code> and is refused calling it; an agent with <code>queues: [a]</code> is refused enqueuing on <code>b</code>.</div>
 </details>
 
-<details class="task" id="task-4" data-state="pending" open><summary><span class="n">4</span><span class="t">Trim the primer to the tools in scope</span><span class="s">pending</span><span class="f">src/aegis/mcp.py, tests/test_mcp*.py</span></summary>
+<details class="task" id="task-4" data-state="done" open><summary><span class="n">4</span><span class="t">Trim the primer to the tools in scope</span><span class="s">pending</span><span class="f">src/aegis/mcp.py, tests/test_mcp*.py</span></summary>
 <ol>
   <li>Split <code>PRIMER</code>'s paragraphs about monitors and feeds, queues and workers, workflows, schedules, spawning and handoffs, artifacts, browsers and secrets into named parts, as <code>BROWSERS</code> already is, and leave out each part whose tools the session's scope lacks.</li>
   <li>A session with the all-None scope gets exactly today's text (pin it with a test).</li>
