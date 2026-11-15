@@ -214,7 +214,13 @@ def test_a_queue_names_its_agent_and_a_priority_from_zero_up(tmp_path):
         "  below: {agent: opus, priority: -1}\n"
         "  word: {agent: opus, priority: high}\n",
     )
-    ok = {"agent": "opus", "quiet": True, "legacy": [], "guard": None, "max_pending": None}
+    ok = {
+        "agent": "opus",
+        "quiet": True,
+        "legacy": [],
+        "guard": None,
+        "max_pending": None,
+    }
     assert load_queues(root) == {
         "ok": ok | {"priority": 3},
         "plain": ok | {"priority": 1},
