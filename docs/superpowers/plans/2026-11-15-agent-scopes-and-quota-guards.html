@@ -162,7 +162,7 @@ details[data-state=doing] summary .s{color:var(--accent)}
 <div class="verify"><b>verify</b> <code>uv run pytest tests/test_queues.py -q</code>: the three actions, the cap, and two queues at equal priority where one is held and the other gets every slot.</div>
 </details>
 
-<details class="task" id="task-10" data-state="pending" open><summary><span class="n">10</span><span class="t">Agents: refuse or warn when a turn would start</span><span class="s">pending</span><span class="f">src/aegis/session.py, src/aegis/app.py, src/aegis/feeds.py, src/aegis/schedules.py, src/aegis/notices.py, tests/test_guards.py</span></summary>
+<details class="task" id="task-10" data-state="done" open><summary><span class="n">10</span><span class="t">Agents: refuse or warn when a turn would start</span><span class="s">pending</span><span class="f">src/aegis/session.py, src/aegis/app.py, src/aegis/feeds.py, src/aegis/schedules.py, src/aegis/notices.py, tests/test_guards.py</span></summary>
 <ol>
   <li>Find the point where a message (person, feed batch, schedule run, handoff, monitor, task callback) starts a turn and check the session's gate there.</li>
   <li><code>refuse</code>: a feed batch is held (<code>held_for: quota</code>) and delivered on open; a schedule run is skipped with why in its log; a handoff is refused to its sender with why; a person's message runs with the notice.</li>

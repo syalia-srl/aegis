@@ -1233,6 +1233,10 @@ def register_agent_ops(app: App) -> None:
             # A scope's agents: are the agents it may reach, not only start.
             check_name(reg.sessions[caller.log_id].spec.scope, "agents", to.spec.agent)
         to.check_lock()  # before an interrupt reaches it
+        if caller.is_agent and (why := app.refuse_hold(to)) is not None:
+            # Its guard refuses wakes from agents (guards.py): say so now,
+            # rather than hold the handoff where the sender cannot see it.
+            raise OpError("quota_closed", f"{to.handle} takes no handoff now: {why}")
         sender = (
             f"agent:{reg.sessions[caller.log_id].handle}"
             if caller.is_agent and caller.log_id in reg.sessions

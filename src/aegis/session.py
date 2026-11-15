@@ -188,6 +188,16 @@ class Host:
         or None when it may."""
         return None
 
+    def refuse_hold(self, session: "Session") -> str | None:
+        """Why the session's quota guard refuses a turn a person did not
+        start (guards.py, on_closed: refuse), or None when it does not."""
+        return None
+
+    def guard_notice(self, session: "Session") -> str | None:
+        """The aegis notice the session's next turn starts with: its quota
+        guard closed or opened again since the last one, or None."""
+        return None
+
     def workflow_lock(self, session: "Session") -> str | None:
         """Why nobody but the engine may prompt or interrupt the session (a
         node of a live workflow run, workflows.py), or None."""
@@ -1109,7 +1119,9 @@ class Session:
         if self.status == "working" or self._flushing:
             self._hold(msg)
             return "held"
-        if self._host.quota_hold(self) is not None:
+        if self._host.quota_hold(self) is not None or (
+            not by_person and self._host.refuse_hold(self) is not None
+        ):
             self._hold(msg | {"held_for": "quota"})
             return "held"
         await self._send(_inbox_text([msg]), by_person=by_person)
@@ -1204,6 +1216,9 @@ class Session:
             ]
             if extra := "\n\n".join(b for b in blocks if b):
                 text = f"{text}\n\n{extra}"
+        if not text.startswith("/") and (note := self._host.guard_notice(self)):
+            # Its first input: the agent reads it before what woke it (#1067).
+            text = f"{note}\n\n{text}"
         record: dict = {"kind": "send", "text": text}
         if attached:
             record |= {"typed": typed or "", "files": attached}
@@ -1622,7 +1637,10 @@ class Session:
 
     def _turn_over(self) -> None:
         """A turn ended: send what it held, unless the gate says no new turn."""
-        if self.held and self._host.quota_hold(self) is not None:
+        refused = not any(m.get("by_person") for m in self.held) and (
+            self.held and self._host.refuse_hold(self) is not None
+        )
+        if self.held and (self._host.quota_hold(self) is not None or refused):
             # The gate says no new turn: they wait for it to open.
             self.held = [m | {"held_for": "quota"} for m in self.held]
             self._metas.write_soon(self.log_id, self.meta)

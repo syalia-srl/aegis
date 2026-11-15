@@ -675,6 +675,8 @@ class App:
         # Sessions a pause or a continue is under way for, so a reading that
         # lands before it finishes does not start a second one.
         self._quota_busy: set[str] = set()
+        # Per session, the guard state its last notice told it (guard_notice).
+        self._guard_noticed: dict[str, str] = {}
         # Every session paused by the person, and the ones resumed since
         # (pause.py); read before boot, so a cut turn waits.
         self.paused = pause.read(roots.state_root)
@@ -683,6 +685,8 @@ class App:
         self.quota.listeners.append(self.journal.quota)
         self.quota.history = self.journal.usual_spend
         reg.pause_hold = self.pause_hold
+        reg.refuse = self.refuse_hold
+        reg.guard_note = self.guard_notice
         # Models that fell, and the one timer that releases held work when the
         # first of them is free again (cascade.py).
         self.cooling = Cooling()
@@ -1031,6 +1035,76 @@ class App:
         """The gate the guards set on a running session now."""
         return self.guard(s.spec, (s.worker or {}).get("queue"))
 
+    def _on_closed(self, s) -> str:
+        own = next(
+            (a for a in self.config.current().agents if a.name == s.spec.agent), None
+        )
+        return own.guard.on_closed if own is not None and own.guard else "warn"
+
+    def refuse_hold(self, s) -> str | None:
+        """Why a turn a person did not start may not start now: the guard
+        is stopped, or closed on an agent whose on_closed is refuse. A
+        person's message runs, with the notice (guard_notice)."""
+        g = self.session_guard(s)
+        if g.state == "stopped" or (
+            g.state == "closed" and self._on_closed(s) == "refuse"
+        ):
+            return g.why
+        return None
+
+    def guard_notice(self, s) -> str | None:
+        """The notice a turn starts with when the session's guard changed
+        state since the last one it got: closed, with what is closed and
+        when it opens, or open again. Never for a session with notices off."""
+        if not s.spec.notices:
+            return None
+        g = self.session_guard(s)
+        state = "open" if g.may_start else "closed"
+        if state == self._guard_noticed.get(s.log_id, "open"):
+            return None
+        self._guard_noticed[s.log_id] = state
+        head = f"> from aegis:notice · quota · {state} · {iso_now()}"
+        if state == "open":
+            return f"{head}\nYour agent's quota guard is open again. Work as usual."
+        own = next(
+            (a for a in self.config.current().agents if a.name == s.spec.agent), None
+        )
+        advice = own.guard.advice if own is not None and own.guard else None
+        lines = [f"Your agent's quota guard is closed: {g.why}."]
+        shut = self._closed_queues(s)
+        lines.append(
+            f"While it is closed: {'; '.join(shut)}. Start no long work."
+            if shut
+            else "While it is closed, start no long work."
+        )
+        lines.append(advice or guards.ADVICE)
+        if g.reopens and g.resets_at is not None:
+            at = time.strftime("%a %H:%M", time.localtime(g.resets_at))
+            lines.append(
+                f"It opens again when the window {g.reopens}, at the latest at"
+                f" the reset, {at}."
+            )
+        return "\n".join([head, *lines])
+
+    def _closed_queues(self, s) -> list[str]:
+        """The queues in the session's scope that reject or hold its tasks now."""
+        allowed = s.spec.scope.queues
+        out = []
+        for name, q in self.queues.queues.items():
+            if "error" in q or (allowed is not None and name not in allowed):
+                continue
+            g = self.queues.gate(name, q, s.log_id, str(s.spec.cwd), s.spec.owner)
+            if g.may_start or g.why == pause.WHY:
+                continue
+            guard = q.get("guard")
+            verb = (
+                "rejects new tasks"
+                if guard is not None and guard.on_closed == "reject"
+                else "holds new tasks until it opens"
+            )
+            out.append(f"queue {name} {verb}")
+        return out
+
     def start_spec(
         self, spec: SpawnSpec, queue: str | None = None, guarded: bool = True
     ) -> tuple[SpawnSpec, Gate]:
@@ -1113,7 +1187,7 @@ class App:
                     self._quota_task(s, self._stop(s, g.why))
                 continue
             holding = any(m.get("held_for") == "quota" for m in s.held)
-            if s.quota_paused or holding:
+            if s.quota_paused or (holding and self.refuse_hold(s) is None):
                 self._quota_task(s, self._continue(s))
         self._release_held()
 

@@ -179,6 +179,9 @@ class Registry(Host):
         self.version_policy: Callable[[], dict | None] = lambda: None
         # The person's pause of every session (pause.py): session -> why.
         self.pause_hold = None
+        # The app's refuse_hold and guard_notice (guards.py, #1067).
+        self.refuse = None
+        self.guard_note = None
         # The app's GroupNames.changed (#1047): a group key whose open members
         # changed. None names nothing, as a registry with no app does.
         self.group_changed: Callable[[str], None] | None = None
@@ -576,6 +579,12 @@ class Registry(Host):
         if self.pause_hold is not None and (why := self.pause_hold(session)):
             return why
         return session.quota_paused or None
+
+    def refuse_hold(self, session: Session) -> str | None:
+        return self.refuse(session) if self.refuse is not None else None
+
+    def guard_notice(self, session: Session) -> str | None:
+        return self.guard_note(session) if self.guard_note is not None else None
 
     def ensure_group(self, parent: Session) -> str:
         """The group a child of ``parent`` joins (#1039): the parent's own, or a

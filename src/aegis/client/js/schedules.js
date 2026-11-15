@@ -121,7 +121,7 @@ function duration(s) {
 function why(r) {
   if (r.kind === "quiet") return r.rc === 1 ? "exit 1: not yet" : "the same stdout as the last fire";
   if (r.kind === "held") return r.why === "quota" ? `held: ${r.line || "the quota gate is closed"}` : "held: a run is live";
-  if (r.kind === "skipped") return "dropped: a run was live";
+  if (r.kind === "skipped") return r.why === "quota" ? `skipped: ${r.line}` : "dropped: a run was live";
   if (r.kind === "error") return [r.rc != null ? `exit ${r.rc}` : "", r.err || ""].filter(Boolean).join(" · ");
   if (r.kind === "missed") return `${r.n} ticks missed while aegis was down or the machine slept; they fire once`;
   if (r.kind === "paused") return r.by === "errors" ? "paused after errors" : "paused";

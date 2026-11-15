@@ -28,6 +28,8 @@ from typing import Any
 from .quota_gate import Gate, lines_gate, quota_errors
 
 AGENT_ACTIONS = ("refuse", "warn")
+# The notice's third line when the agent gives no advice.
+ADVICE = "File what is asked as an issue or a task line and say it will be done later."
 QUEUE_ACTIONS = ("reject", "warn", "hold")
 
 

@@ -2,6 +2,7 @@
 up the chain of starters, what a queue and an agent do when one closes."""
 
 import asyncio
+import json
 
 import pytest
 
@@ -308,3 +309,102 @@ async def test_a_held_queue_leaves_every_slot_to_the_open_one(world, tmp_path):
     assert running == {"general"}
     for t in list(q.tasks.values()):
         await q.cancel(t)
+
+
+# -- agents ------------------------------------------------------------------------
+from .test_agents import mcp  # noqa: E402
+
+
+def sent(s) -> list[str]:
+    """Every text the session sent its harness, in order."""
+    recs = [json.loads(x) for x in s.store.path.read_text().splitlines() if x]
+    return [r["text"] for r in recs if r.get("kind") == "send"]
+
+
+async def test_a_warned_turn_starts_with_the_notice_once_then_the_open_notice(world):
+    s = await spawn(world)
+    gauge(world, 86, 104)
+    await turn(s, "a ticket came in")
+    first = sent(s)[-1]
+    assert first.startswith("> from aegis:notice · quota · closed · ")
+    assert (
+        "Your agent's quota guard is closed: agent fair: Claude weekly is at 86%"
+        in first
+    )
+    assert "queue fair-work holds new tasks until it opens" in first
+    assert "File what is asked as an issue" in first
+    assert "drops below 80% used and 90% projected" in first
+    assert first.index("aegis:notice") < first.index("a ticket came in")
+    await turn(s, "another ticket")
+    assert "aegis:notice" not in sent(s)[-1]
+    gauge(world, 10)
+    await turn(s, "a third")
+    assert sent(s)[-1].startswith("> from aegis:notice · quota · open · ")
+    await turn(s, "a fourth")
+    assert "aegis:notice" not in sent(s)[-1]
+
+
+@pytest.mark.parametrize("config", [("refuse", "reject")])
+async def test_a_refusing_agent_holds_a_wake_until_the_guard_opens(world):
+    s = await spawn(world)
+    await turn(s, "hello")
+    gauge(world, 86)
+    assert await s.deliver("> from feed:tickets · 1 new", "ticket 7") == "held"
+    assert s.held and s.held[0]["held_for"] == "quota" and s.status == "idle"
+    world.app.on_quota(world.app.quota.snapshot())
+    await asyncio.sleep(0.3)
+    assert s.held  # still closed
+    gauge(world, 10)
+    world.app.on_quota(world.app.quota.snapshot())
+    await until(lambda: not s.held and s.status == "idle", 8, "the held wake")
+    assert any("ticket 7" in t for t in sent(s))
+
+
+@pytest.mark.parametrize("config", [("refuse", "reject")])
+async def test_a_refusing_agent_refuses_a_handoff_and_runs_a_persons_message(world):
+    s = await spawn(world)
+    await turn(s, "hello")
+    boss = await spawn(world, "opus")
+    gauge(world, 86)
+    said = await turn(boss, mcp("peer_handoff", target=s.handle, context="do it"))
+    assert said.startswith("mcp error: quota_closed")
+    assert f"{s.handle} takes no handoff now: agent fair: Claude weekly" in said
+    await turn(s, "a person asks", by_person=True)
+    last = sent(s)[-1]
+    assert "quota · closed" in last and "queue fair-work rejects new tasks" in last
+
+
+async def test_an_agent_with_notices_off_gets_no_notice(world, tmp_path):
+    text = (GUARDED % ("warn", "hold")).replace(
+        "    permission: full\n    quota:",
+        "    permission: full\n    notices: false\n    quota:",
+    )
+    (tmp_path / ".aegis.yaml").write_text(text)
+    await until(
+        lambda: (
+            not next(
+                a for a in world.app.config.current().agents if a.name == "fair"
+            ).notices
+        ),
+        5,
+        "the config",
+    )
+    s = await spawn(world)
+    gauge(world, 86)
+    await turn(s, "hello")
+    assert "aegis:notice" not in sent(s)[-1]
+
+
+@pytest.mark.parametrize("config", [("refuse", "reject")])
+async def test_a_schedule_run_of_a_refusing_agent_is_skipped_with_why(world):
+    from .test_schedules_e2e import create, frozen, runs, tick
+
+    t = frozen(world)
+    gauge(world, 86)
+    create(world, "fair-sweep", "sweep", fire={"agent": "fair"}, quota={})
+    await tick(world, t)
+    (r,) = runs(world, "fair-sweep", "tick")
+    assert r["out"] == "skipped" and r["line"].startswith("agent fair: Claude weekly")
+    gauge(world, 10)
+    await tick(world, t)
+    assert len(runs(world, "fair-sweep", "fired")) == 1

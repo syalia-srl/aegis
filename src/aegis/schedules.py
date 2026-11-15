@@ -273,8 +273,22 @@ class Schedules:
             spec = self._spec(s)
         except OpError:
             return True  # the fire says what is wrong
-        spec, g = self._app.start_spec(spec)
+        spec, g = self._app.start_spec(spec, guarded=False)
         return g.may_start and self._line(s, spec.harness, spec.model) is None
+
+    def _refused(self, spec) -> str | None:
+        """Why the guard of a run's new session refuses its first turn: an
+        agent with on_closed: refuse, or a stop line (guards.py). The run is
+        skipped with the why; a warned agent's run fires with the notice."""
+        g = self._app.guard(spec)
+        agent = next(
+            (a for a in self._app.config.current().agents if a.name == spec.agent),
+            None,
+        )
+        refuse = agent is not None and agent.guard and agent.guard.on_closed == "refuse"
+        if g.state == "stopped" or (g.state == "closed" and refuse):
+            return g.why
+        return None
 
     def _line(self, s: Schedule, harness: str, model: str | None) -> str | None:
         """Why the schedule's own launch line for the pool a fire draws on
@@ -332,9 +346,13 @@ class Schedules:
             if w is not None:
                 check_named(cur, self._app.workflows._agents())  # before a spawn
             if s.d.fire.target == "new":
-                spec, g = self._app.start_spec(self._spec(s))
+                spec, g = self._app.start_spec(self._spec(s), guarded=False)
                 if not g.may_start:
                     return self._tick(name, tick, "held", why="quota", **extra)
+                if why := self._refused(spec):
+                    return self._tick(
+                        name, tick, "skipped", why="quota", line=why, **extra
+                    )
                 if line := self._line(s, spec.harness, spec.model):
                     return self._tick(
                         name, tick, "held", why="quota", line=line, **extra
@@ -354,6 +372,10 @@ class Schedules:
                 await ses.send(f"{head}\n{text}")
             else:
                 ses = self._target(s)
+                if why := self._app.refuse_hold(ses):
+                    return self._tick(
+                        name, tick, "skipped", why="quota", line=why, **extra
+                    )
                 if line := self._line(s, ses.spec.harness, ses.spec.model):
                     return self._tick(
                         name, tick, "held", why="quota", line=line, **extra
