@@ -1186,7 +1186,7 @@ class App:
             ]
             jobs = {k: self._budget_since(k) for k in dict.fromkeys(want)}
             got = await asyncio.to_thread(self.ledger.measure, jobs, time.time())
-            if self.journal.usage_progress():
+            if got is None or self.journal.usage_progress():
                 return  # a rebuild began: what is kept stands
             self.ledger.kept = got
             for s in live:

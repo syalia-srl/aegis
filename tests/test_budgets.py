@@ -86,6 +86,7 @@ class Usage:
         self.path = tmp_path / "journal.db"
         self.con, _ = db.connect(self.path)
         tables.ensure(self.con)
+        tables.complete_if(self.con, 0)  # ensure marks backfill 0: done
         self.rec = 0
 
     def add(self, log_id: str, ts: float, usd: float = 0.0, tokens: int = 0,
@@ -219,6 +220,14 @@ def test_while_usage_is_rebuilt_what_is_kept_stands(usage):
     assert led.over(ks, lambda k: None, NOW) == o
     # Past the time it frees, it is still what was kept until usage is back.
     assert led.over(ks, lambda k: None, o.frees_at + 1) == o and led.reads == 1
+    # A rebuild in another process: the file's own backfill mark says so.
+    busy[0] = False
+    tables.clear(usage.con, 5)
+    assert led.over(ks, lambda k: None, o.frees_at + 1) == o
+    assert (
+        budgets.Ledger(usage.path, lambda: False).over(ks, lambda k: None, NOW)
+        == "fair"
+    )
 
 
 def test_a_read_is_bounded_by_the_line_not_the_server(usage):

@@ -47,6 +47,7 @@ from .guards import LINKS
 from .journal import db
 from .quota_gate import Gate
 from .quota_gate import _clock as clock
+from .usage import tables
 
 # Its own notice row, off with notices: {budget: false}; its text is built
 # from facts and keeps its end.
@@ -259,6 +260,13 @@ def worst(found: list[Over]) -> Over | None:
     return max(found, key=lambda o: float("inf") if o.frees_at is None else o.frees_at)
 
 
+def _complete(con: sqlite3.Connection) -> bool:
+    try:
+        return tables.is_complete(con)
+    except sqlite3.Error:
+        return True  # no usage tables yet: nothing to rebuild
+
+
 class Ledger:
     """Each cap's last result, read from journal.db's usage rows.
 
@@ -300,7 +308,11 @@ class Ledger:
             stale = []
         if stale:
             got = self.measure({k: since(k) for k in stale}, now)
-            self.kept.update(got)
+            if got is None:  # rebuilt by another process: as busy
+                if missing := [k for k in stale if k not in self.kept]:
+                    return missing[0][1]
+            else:
+                self.kept.update(got)
         for k in ks:
             if (o := self.kept.get(k)) is not None:
                 found.append(o)
@@ -308,12 +320,17 @@ class Ledger:
 
     def measure(
         self, jobs: dict[Key, float | None], now: float
-    ) -> dict[Key, Over | None]:
+    ) -> dict[Key, Over | None] | None:
         """Read each cap of ``jobs`` (with its since) once; a cap not
-        readable yet, as before a backfill, has room. Thread-safe."""
+        readable yet, as before the first backfill, has room. None while
+        the file's backfill is not complete: a rebuild, perhaps by
+        ``aegis journal rebuild`` in another process, has not put every row
+        back. Thread-safe."""
         con = self._open()
         out: dict[Key, Over | None] = {}
         try:
+            if con is not None and not _complete(con):
+                return None
             for k, since in jobs.items():
                 self.reads += 1
                 try:
