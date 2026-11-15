@@ -1236,8 +1236,8 @@ export class Settings {
     const t = a.tools || {};
     const keys = ["allow", "deny", "queues", "agents"].filter((k) => k in t);
     if (!keys.length) return null;
-    const said = keys.map((k) => `${k} ${t[k].join(", ") || "none"}`).join("; ");
-    const fold = h("details", { className: "set-priming set-scope" }, h("summary", { textContent: `Scope: ${said}` }), h("p", { className: "set-none", textContent: "Its sessions use only these aegis tools, queues and agents. Edit tools: in .aegis.yaml; help: config, Scope an agent." }));
+    const lines = keys.map((k) => h("div", { className: "kv" }, h("span", { textContent: k }), h("span", { textContent: t[k].join(", ") || "none" })));
+    const fold = h("details", { className: "set-priming set-scope" }, h("summary", { textContent: "Scope" }), ...lines, h("p", { className: "set-none", textContent: "Its sessions use only these aegis tools, queues and agents. Edit tools: in .aegis.yaml; help: config, Scope an agent." }));
     fold.dataset.key = "agents.*.tools";
     return fold;
   }
