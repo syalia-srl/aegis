@@ -1268,12 +1268,17 @@ whole window, such as Phosphor's scanlines, is positioned against the root and
 never the viewport, because the landing page applies the same rules to a window
 that sits inside a page.
 
-**A quota projection reads history once per window.** `quota.core.window_pace`
-keeps what is spent and runs the time left at the posterior mean of a rate with
-a Gamma prior, centred on what finished windows of that kind spent.
-`Quota._usual_spend` reads that from `usage_quota` through
-`Journal.usual_spend` when a window's reset time changes, and keeps it, because
-a snapshot is taken every minute. No finished window yet means a usual of 100%.
+**A quota projection runs at the current rate.** `quota.projection.Projector`
+keeps, per billing and window kind, an exponentially weighted rate of the
+percent's rise, with a half-life per window length (`config.quota_from`). It
+moves only when a reading changes the percent or the reset, the same rows the
+journal keeps in `usage_quota`, so a projector seeds itself by replaying seven
+half-lives of them through `Journal.quota_rows` and lands on the rate a live one
+holds. The rate carries across resets; inside a window the percent is a running
+maximum. With less than one half-life of history, `quota.core.window_pace`
+answers instead: the time left at the posterior mean of a Gamma prior centred on
+what finished windows spent, which `Quota._usual_spend` reads through
+`Journal.usual_spend` once per window.
 
 **The session panel is rows that open cards.** Each section of the panel is a
 compact row (`.prow`) that holds its own card (`.pcard`) in the markup, so the

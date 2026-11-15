@@ -35,7 +35,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field, replace
 from io import StringIO
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 from pydantic import BaseModel, Field
 from ruamel.yaml import YAML, YAMLError
@@ -337,6 +337,54 @@ NUDGES_DEFAULTS: dict = {"silent_s": 2, "plan_min": 15}
 
 
 KNOWLEDGE_DEFAULTS: dict = {"embeddings": "off", "know_how": True}
+
+
+# The quota: block (quota/projection.py): how far back "the current rate" looks,
+# per window length. Absent lengths use the window's span / 28, at least 30 min.
+QUOTA_SPANS = {"5h": 5 * 3600, "week": 7 * 86400, "month": 30 * 86400}
+QUOTA_MIN_HALF_LIFE_S = 600
+_HALF_LIFE = re.compile(r"\s*(\d+(?:\.\d+)?)\s*([mhd])\s*")
+
+
+def quota_from(raw: object) -> dict:
+    """The ``quota:`` block: ``{"half_life": {"week": 21600.0, ...}}`` in seconds,
+    or ``{"half_life": "average"}`` for the whole-window average. A wrong block
+    keeps the defaults and carries ``error`` for aegis doctor."""
+    out: dict = {"half_life": {}}
+    if raw is None:
+        return out
+    spans = ", ".join(QUOTA_SPANS)
+    if not isinstance(raw, dict) or set(raw) - {"projection"}:
+        return out | {"error": "quota takes one key, projection"}
+    proj = cast(dict, raw).get("projection")
+    if proj is None:
+        return out
+    if not isinstance(proj, dict) or set(proj) - {"half_life"}:
+        return out | {"error": "quota.projection takes one key, half_life"}
+    hl = cast(dict, proj).get("half_life")
+    if hl is None:
+        return out
+    if hl == "average":
+        return {"half_life": "average"}
+    if not isinstance(hl, dict):
+        return out | {
+            "error": f"quota.projection.half_life must be average or a mapping of {spans}"
+        }
+    got = {}
+    for name, v in hl.items():
+        if name not in QUOTA_SPANS:
+            return out | {
+                "error": f"quota.projection.half_life has no key {name!r}; it takes {spans}"
+            }
+        m = _HALF_LIFE.fullmatch(str(v)) if isinstance(v, str) else None
+        secs = float(m[1]) * {"m": 60, "h": 3600, "d": 86400}[m[2]] if m else None
+        if secs is None or not QUOTA_MIN_HALF_LIFE_S <= secs <= QUOTA_SPANS[name]:
+            return out | {
+                "error": f"quota.projection.half_life.{name} {v!r} is not a duration"
+                f" from 10m to the window's length, as in 30m, 6h or 1d"
+            }
+        got[name] = secs
+    return {"half_life": got}
 
 
 def knowledge_from(raw: object) -> dict:
@@ -1017,6 +1065,7 @@ class Snapshot:
     notices: dict = field(default_factory=_notices_defaults)
     nudges: dict = field(default_factory=lambda: dict(NUDGES_DEFAULTS))
     knowledge: dict = field(default_factory=lambda: dict(KNOWLEDGE_DEFAULTS))
+    quota: dict = field(default_factory=lambda: {"half_life": {}})
     # Whether the server downloads the nightly model ranking (ranking.py).
     model_ranking: bool = True
     workflows: dict = field(default_factory=lambda: dict(WORKFLOWS_DEFAULTS))
@@ -1079,6 +1128,7 @@ class Snapshot:
             notices=notices_from(data.get("notices")),
             nudges=nudges_from(data.get("nudges")),
             knowledge=knowledge_from(data.get("knowledge")),
+            quota=quota_from(data.get("quota")),
             model_ranking=data.get("model_ranking") is not False,
             workflows=workflows_from(data.get("workflows")),
             park=park_from(data.get("park")),
