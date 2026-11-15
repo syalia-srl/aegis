@@ -242,6 +242,8 @@ class Journal:
             n = self._backfill(con, token)
             tables.ensure(con)
             token = _token()
+            # In progress before the rows go, so no budget reads them gone.
+            self._progress = {"done": 0, "total": 0}
             tables.clear(con, token)
             self._usage_backfill(con, token)
             return n

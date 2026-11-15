@@ -287,6 +287,8 @@ class Schedules:
             None,
         )
         refuse = agent is not None and agent.guard and agent.guard.on_closed == "refuse"
+        if budgets.never_frees(g):
+            return f"{g.why}; {budgets.NEVER}"
         if g.state == "stopped" or (
             g.state == "closed" and (refuse or budgets.is_budget(g))
         ):

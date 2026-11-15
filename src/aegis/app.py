@@ -689,7 +689,11 @@ class App:
         reg.guard_items = self.turn_items
         # Spend changed: a session past a budget is told mid-turn (budgets.py).
         self.journal.on_usage = self._usage_recorded
-        self._budget_seen: dict[str, tuple[tuple, Gate]] = {}
+        self.ledger = budgets.Ledger(
+            self.journal.path, lambda: bool(self.journal.usage_progress())
+        )
+        self._budget_task: asyncio.Task | None = None
+        self._budget_again = False
         # Models that fell, and the one timer that releases held work when the
         # first of them is free again (cascade.py).
         self.cooling = Cooling()
@@ -1069,7 +1073,8 @@ class App:
 
     def _budget_record(self, log_id: str) -> dict | None:
         """A session's record with its log id, handle and start, for
-        walking its line (budgets.line)."""
+        walking its line (budgets.line): a live one's, an archived one's
+        meta, else what its usage rows say (Ledger.record)."""
         s = self.sessions.sessions.get(log_id)
         if s is not None:
             return {
@@ -1079,65 +1084,68 @@ class App:
                 "created_at": s.created_at,
             }
         m = self.sessions.archived.get(log_id)
-        return {**m, "log_id": log_id} if m else None
+        return {**m, "log_id": log_id} if m else self.ledger.record(log_id)
+
+    def _budget_since(self, k: budgets.Key) -> float | None:
+        """When a session cap's session began; None reads from its first row."""
+        if k[0] != "session" or k[2] is None:
+            return None
+        at = (self._budget_record(k[2]) or {}).get("created_at")
+        return float(at) if at else None
+
+    def _budget_over(
+        self, rec: dict, log_id: str | None = None
+    ) -> budgets.Over | str | None:
+        """The spent cap over ``rec``'s line (budgets.py), None with room
+        or no cap, or the agent of a cap with no result while usage is
+        rebuilt."""
+        caps = self._budget_caps()
+        if not caps:
+            return None
+        own = budgets.line(rec, log_id, self._budget_record)
+        ks = budgets.keys(own, caps)
+        if not ks:
+            return None
+        return self.ledger.over(ks, self._budget_since, time.time())
 
     def budget(self, rec: dict, log_id: str | None = None) -> Gate:
         """The gate the budgets over ``rec``'s line set (budgets.py): closed
-        while any cap of its agent, or of an agent up its chain, is spent.
-        A running session's is read again when spend is recorded, or after
-        30 s for a window that ages out."""
-        caps = self._budget_caps()
-        if not caps:
+        while any cap of its agent, or of an agent up its chain, is spent,
+        and while usage is rebuilt for a cap with no result kept."""
+        o = self._budget_over(rec, log_id)
+        if o is None:
             return Gate("open")
-        own = budgets.line(rec, log_id, self._budget_record)
-        if not any(caps.get(str(a)) for _, a in own):
-            return Gate("open")
-        now = time.time()
-        key = (
-            self.journal.usage_snapshot()["at"],
-            int(now // 30),
-            tuple(sorted(caps.items())),
-            tuple(own),
-        )
-        if (
-            log_id is not None
-            and (hit := self._budget_seen.get(log_id))
-            and hit[0] == key
-        ):
-            return hit[1]
-        lines: dict[str, budgets.Line] = {}
-
-        def line_of(r: budgets.Row) -> budgets.Line:
-            if r.log_id not in lines:
-                got = self._budget_record(r.log_id) or {"agent": r.agent}
-                lines[r.log_id] = budgets.line(got, r.log_id, self._budget_record)
-            return lines[r.log_id]
-
-        def created(lid: str) -> float:
-            return float((self._budget_record(lid) or {}).get("created_at") or 0)
+        if isinstance(o, str):
+            return Gate(
+                "closed",
+                budgets.REBUILDING,
+                reopens=("usage is rebuilt",),
+                by=budgets.BY + o,
+            )
 
         def name(lid: str) -> str:
             return str((self._budget_record(lid) or {}).get("handle") or lid)
 
-        rows = budgets.read(
-            self.journal.path, budgets.since(own, caps, created, now) - 1
-        )
-        o = budgets.over(own, caps, rows, line_of, now)
-        g = Gate("open") if o is None else budgets.gate(o, log_id, name)
-        if log_id is not None:
-            self._budget_seen[log_id] = (key, g)
-        return g
+        return budgets.gate(o, log_id, name)
 
     def budget_items(self, s) -> None:
         """Tell a session past a budget to finish (source ``budget``): one
-        item while a cap is spent, told once, whose end says it has room."""
-        g = self.budget(s.spec.record(), s.log_id)
-        if g.state == "open":
+        item per spent cap that names the gate, told once, whose end says
+        that cap has room. Nothing changes while usage is rebuilt."""
+        if self.journal.usage_progress():
+            return
+        o = self._budget_over(s.spec.record(), s.log_id)
+        if o is None:
             self.notices.set(s.log_id, budgets.SOURCE, [])
             return
-        o = g.by.removeprefix(budgets.BY)
+        if isinstance(o, str):
+            return
+        g = self.budget(s.spec.record(), s.log_id)
         item = NoticeItem(
-            "spent:" + o, "warn", budgets.notice(g), clear=budgets.again(g)
+            f"spent:{o.agent}:{o.cap.per}",
+            "warn",
+            budgets.notice(g),
+            clear=budgets.again(o),
         )
         self.notices.set(s.log_id, budgets.SOURCE, [item])
 
@@ -1147,13 +1155,47 @@ class App:
         self.budget_items(s)
 
     def _usage_recorded(self) -> None:
-        """A turn's spend was recorded: tell each live session past a budget,
-        on its next prompt or tool result."""
-        if not self._budget_caps():
+        """A turn's spend was recorded: read the kept caps again, off the
+        loop, then tell each live session past a budget on its next prompt
+        or tool result. Nothing while usage is rebuilt or backfilled: its
+        rows are not all there yet."""
+        if not self._budget_caps() or self.journal.usage_progress():
             return
-        for s in list(self.sessions.sessions.values()):
-            if self._live(s):
-                self.budget_items(s)
+        if self._budget_task is not None and not self._budget_task.done():
+            self._budget_again = True
+            return
+        self._budget_task = asyncio.create_task(self._budget_refresh())
+        self._background.add(self._budget_task)
+        self._budget_task.add_done_callback(self._background.discard)
+
+    async def _budget_refresh(self) -> None:
+        """Read again the caps over every live session's line and each
+        window kept, dropping what no live line reads, then tell."""
+        while True:
+            self._budget_again = False
+            caps = self._budget_caps()
+            live = [s for s in list(self.sessions.sessions.values()) if self._live(s)]
+            want: list[budgets.Key] = []
+            for s in live:
+                own = budgets.line(s.spec.record(), s.log_id, self._budget_record)
+                want += budgets.keys(own, caps)
+            want += [
+                k
+                for k in self.ledger.kept
+                if k[0] == "agent" and k[3] in caps.get(k[1], ())
+            ]
+            jobs = {k: self._budget_since(k) for k in dict.fromkeys(want)}
+            got = await asyncio.to_thread(self.ledger.measure, jobs, time.time())
+            if self.journal.usage_progress():
+                return  # a rebuild began: what is kept stands
+            self.ledger.kept = got
+            for s in live:
+                if self._live(s):
+                    self.budget_items(s)
+            if any(t.status == "pending" for t in self.queues.tasks.values()):
+                await self.queues.dispatch()  # a spent session cap fails them
+            if not self._budget_again:
+                return
 
     def _on_closed(self, s) -> str:
         own = next(
@@ -1238,9 +1280,16 @@ class App:
         and its turns meet the agent's on_closed (guard_turn)."""
         if self.paused is not None:
             return spec, Gate("stopped", pause.WHY)
+        if guarded:
+            # A budget holds every model alike: read once, before the pick;
+            # only a stop line on the spec's model outranks it (guard).
+            b = self.budget(spec.record())
+            if b.state != "open":
+                q = self.quota_guard(spec, queue, spec.model)
+                return spec, q if q.state == "stopped" else b
 
         def gate(m: str) -> Gate:
-            return self.guard(spec, queue, m) if guarded else Gate("open")
+            return self.quota_guard(spec, queue, m) if guarded else Gate("open")
 
         if spec.model not in spec.cascade:
             return spec, gate(spec.model)
