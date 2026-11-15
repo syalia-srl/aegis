@@ -591,6 +591,12 @@ SECTIONS = {
         " models are ranked without a release. Off reads only the ranking"
         " packaged with this version.",
     ),
+    "quota": (
+        "Quota projection",
+        "How far back the current rate of a quota gauge looks, per window"
+        " length: a number and m, h or d. Shorter follows a stop sooner. Blank"
+        " keeps the default, the window's length / 28 and at least 30m.",
+    ),
     "embeddings": (
         "Search embeddings",
         "Embeddings: off, or a fastembed model fused with keyword search, such"
@@ -644,6 +650,8 @@ def fields() -> list[dict]:
             add("network", "network.anchors", "list", [_anchor(*a) for a in v])
         else:
             add("network", f"network.{k}", "bool" if k == "enabled" else "number", v)
+    for name, default in (("5h", "30m"), ("week", "6h"), ("month", "26h")):
+        add("quota", f"quota.projection.half_life.{name}", "text", default)
     add("embeddings", "knowledge.embeddings", "text", KNOWLEDGE_DEFAULTS["embeddings"])
     add("embeddings", "knowledge.know_how", "bool", KNOWLEDGE_DEFAULTS["know_how"])
     add("models", "model_ranking", "bool", True)
@@ -1356,6 +1364,7 @@ def _validate_settings(doc: ConfigDoc, err: Callable[[str, str, str], None]) -> 
         "network": lambda v: network_from(v)[1],
         "host": lambda v: host_from(v)[1],
         "knowledge": lambda v: knowledge_from(v).get("error"),
+        "quota": lambda v: quota_from(v).get("error"),
         "model_ranking": lambda v: (
             None if isinstance(v, bool) else f"model_ranking {v!r} is not true or false"
         ),
