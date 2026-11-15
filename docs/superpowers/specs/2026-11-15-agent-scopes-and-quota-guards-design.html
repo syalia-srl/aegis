@@ -248,7 +248,7 @@ agents:
   claude:
     weekly_all: {used: 80, projected: 90, stop: 97}
   on_closed: warn</pre>
-<p>The guard is closed when <code>used ≥ 80</code> or <code>projected ≥ 90</code>, and stopped at <code>used ≥ 97</code>, which interrupts running turns as the old token stop line did, and continues them when the window is back under the line. <code>80</code> means <code>{used: 80}</code> and <code>pace</code> means <code>{projected: 100}</code>, so a schedule's lines keep their meaning and may take the map form too. The stop line is on percent used: it is real spend, not an estimate. A reading older than 15 minutes closes and never stops. <code>projected</code> is the value #1065 defines.</p>
+<p>The guard is closed when <code>used ≥ 80</code> or <code>projected ≥ 90</code>, and stopped at <code>used ≥ 97</code>, which interrupts running turns as the old token stop line did, and continues them when a fresh reading finds the window back under the line. <code>80</code> means <code>{used: 80}</code>, and <code>pace</code> keeps its meaning, closed only above 100% projected, so a schedule's lines keep their meaning and may take the map form too (without <code>stop</code>, since a schedule only holds its fires). The stop line is on percent used: it is real spend, not an estimate. A reading older than 15 minutes closes and never stops. <code>projected</code> is the value #1065 defines.</p>
 
 <h3 id="combine">How guards combine</h3>
 <svg viewBox="0 0 720 170" width="720" role="img" aria-label="Three guards feed one decision: the most restrictive wins">
@@ -265,6 +265,7 @@ agents:
   </g>
 </svg>
 <p>The gate a start or a turn passes is the worst of: the agent's <code>quota:</code>; for a queue worker, the queue's <code>quota:</code>; and the guards of every session up its chain of starters (enqueue, spawn, handoff). A spent budget anywhere up that chain counts as closed. A guard missing at any level counts as open, so an agent with no <code>quota:</code> and no guarded starter behaves exactly as today. <code>App.gate</code>, which answers open since #958, becomes this combination. The <code>why</code> of the result names the level that closed it: "agent fair: Claude weekly is on pace for 104% at reset, launch line 90%".</p>
+<p>Each level is read on the pool its own agent draws on: the agent's and the queue's on the pool of the session being started, each starter's on the pool its own model draws on. A closed starter therefore closes its descendants on any pool: while fair's Claude line is closed, a worker it enqueues on an OpenCode queue is closed too, and that queue's <code>on_closed</code> answers the enqueue. A handoff counts as a starter only onto the same agent: a handoff onto another agent starts a new line, and scopes already limit which agents an agent may reach. A stop line never cuts a turn a person started, and a person's message to a stopped agent runs, with the notice.</p>
 
 <h3 id="queue-act">What a queue does when its guard is closed</h3>
 <table class="tbl">
@@ -283,11 +284,11 @@ agents:
   <li><b><code>refuse</code></b>: the turn does not start. A feed batch stays held and is delivered when the guard opens (the feed keeps its cursor). A schedule run is skipped with the why in its run log. A handoff from an agent is refused to that agent with the why. A person's message runs with the warn notice.</li>
   <li><b><code>warn</code></b>: the turn starts, and its first input is an aegis notice, built from the state. The agent reads it before the message it was woken for.</li>
 </ul>
-<div class="notice"><span class="lbl">sample · the notice a warned turn starts with</span>&gt; from aegis:notice · quota · closed · 2026-11-15T09:12:00Z
+<div class="notice"><span class="lbl">sample · the notice a warned turn starts with</span>&gt; from aegis:notice · guard:closed · warn · 2026-11-15T09:12:00Z
 Your agent's quota guard is closed: Claude weekly is at 86%, launch line 80%; projected 104% at reset.
 While it is closed: queue fair-work rejects new tasks. Start no long work.
 File what is asked as an issue or a task line and say it will be done later.
-It opens again when the window drops below 80% used and 90% projected, at the latest at the reset, Mon 02:00.</div>
+It opens again when Claude weekly drops below 80% used and is projected below 90% (agent fair), at the latest at Mon 02:00.</div>
 <p>The second line lists, from the agent's scope, the queues whose guard rejects or holds now, so the agent knows enqueuing is pointless. The third line is <code>advice:</code> from the preset when given, else this default. The notice is sent once per change of state, not every turn, and a second notice says when the guard opens again.</p>
 
 <h3 id="tester"><span class="try">try it</span>A guard tester</h3>
@@ -419,7 +420,7 @@ function render(){
   } else if (s.fair === 'stopped') {
     html = `<div class="notice err"><span class="lbl">${mode === 'feed' ? 'the batch is held' : 'the message waits'}</span>Stopped: ${s.why}. Running turns are interrupted; this is delivered when the window drops below the launch line.</div>`;
   } else {
-    html = `<div class="notice"><span class="lbl">the turn starts with this notice</span>&gt; from aegis:notice · quota · closed\nYour agent's quota guard is closed: ${s.why}.\nWhile it is closed: queue fair-work rejects new tasks. Start no long work.\nAnswer in the group in one short message and file the request as an issue.\nIt opens again when the window drops below 80% used and 90% projected, at the latest at the reset.</div>`;
+    html = `<div class="notice"><span class="lbl">the turn starts with this notice</span>&gt; from aegis:notice · guard:closed · warn\nYour agent's quota guard is closed: ${s.why}.\nWhile it is closed: queue fair-work rejects new tasks. Start no long work.\nAnswer in the group in one short message and file the request as an issue.\nIt opens again when the window drops below 80% used and 90% projected, at the latest at the reset.</div>`;
   }
   $('result').innerHTML = html;
 }

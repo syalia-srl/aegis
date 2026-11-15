@@ -6,7 +6,8 @@
   until the window is back under it. A queue's `on_closed` rejects with
   queue_closed, warns or holds, and `max_pending:` refuses with queue_full.
   An agent's `on_closed: refuse` holds wakes, skips schedule runs and refuses
-  handoffs; under `warn`, and for a person's message, the turn starts with an
-  aegis notice saying what is closed, which queues reject, and when it opens.
+  handoffs; under `warn`, and for a person's message, the session gets an
+  aegis notice (`guard:closed`) saying what is closed, which queues reject,
+  and when it opens. A stop line never cuts a turn a person started.
   Before, only schedules were ever held on the quota.
 help: config#guard-an-agent-or-a-queue
