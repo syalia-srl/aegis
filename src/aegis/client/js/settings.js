@@ -24,6 +24,10 @@ import { who } from "./me.js";
 import { deviceCopy } from "./appworker.js";
 import { installState, onInstallState, openInstallDialog } from "./install.js";
 import { onPushState, pushState, unsubscribePush } from "./pushpanel.js";
+import { ask as askShell, inShell, onAndroid } from "./shell.js";
+
+// The signed APK of the latest release (release.yml).
+const APK_URL = "https://github.com/syalia-srl/aegis/releases/latest/download/aegis.apk";
 import { markNeedsNet, offline } from "./net.js";
 import { ask } from "./dialog.js";
 import { MIN_SPEED } from "./speak.js";
@@ -242,7 +246,7 @@ export class Settings {
     const w = this.wire;
     // The title first, then what this browser keeps, then the servers; the
     // loading and no-config pages keep the same width and order.
-    const page = (...kids) => h("div", { className: "set-page" }, ...kids, this.browser(), this.knowledge(), this.servers(), this.chromeView());
+    const page = (...kids) => h("div", { className: "set-page" }, ...kids, this.browser(), this.knowledge(), this.servers(), this.chromeView(), this.phoneView());
     if (!w || !this.doc) return this.box.replaceChildren(page(h("p", { className: "notice", textContent: this.t("settings.loading") })));
     if (!w.exists && !this.dirty) return this.box.replaceChildren(page(this.empty()));
     const full = h(
@@ -253,6 +257,7 @@ export class Settings {
       this.knowledge(),
       this.servers(),
       this.chromeView(),
+      this.phoneView(),
       this.pauseView(),
       w.error && h("p", { className: "set-alert err", id: "set-error", textContent: `The file on disk does not parse, so aegis is still using the last version that did. ${w.error}` }),
       this.stale && this.staleAlert(),
@@ -458,7 +463,9 @@ export class Settings {
     } else app = h("span", { className: "set-app-v", textContent: this.t("settings.installMenu") });
     const copy = h("span", { className: "set-app-v", textContent: navigator.serviceWorker ? "downloading" : "not kept: needs https" });
     const push = pushState();
-    const note = !push.supported
+    const note = inShell()
+      ? "from the aegis app"
+      : !push.supported
       ? "not here: push needs https"
       : push.subscribed
         ? `push on · ${push.sources.length} sources · the bell chooses them`
@@ -656,6 +663,74 @@ export class Settings {
       this.chromeError = e.message;
     }
     this.draw();
+  }
+
+  // The aegis Android app (devices.py): inside it, pair this phone; on any
+  // other Android browser, a link to the APK; everywhere, the phones paired.
+  phoneView() {
+    if (this.phones === undefined) {
+      this.phones = [];
+      this.loadPhones();
+    }
+    const shell = inShell();
+    if (!shell && !onAndroid() && !this.phones.length) return null;
+    const rows = this.phones.map((d) =>
+      h(
+        "tr",
+        { className: "set-phone-device" },
+        h("td", {}, h("b", { textContent: d.name })),
+        h("td", { className: "m", textContent: [d.model, d.api && `Android API ${d.api}`, d.shell && `app ${d.shell}`].filter(Boolean).join(" · ") }),
+        h("td", {}, h("span", { className: `set-pill ${d.online ? "ok" : "bad"}`, textContent: d.online ? "connected" : "offline" })),
+        h("td", {}, button(this.t("settings.unpair"), null, () => this.unpairPhone(d.id))),
+      ),
+    );
+    const action = shell
+      ? button(this.t("settings.pairPhone"), "set-phone-pair", () => this.pairPhone(), "btn primary")
+      : h("a", { className: "btn", id: "set-phone-download", href: APK_URL, textContent: this.t("settings.getApp") });
+    return h(
+      "section",
+      { className: "set-phone", id: "set-phone" },
+      h("h3", { textContent: this.t("settings.phone") }),
+      h("p", {
+        className: "set-none",
+        textContent: shell
+          ? "Let your agents use this phone: read its sensors now, and later move files and install apps. The phone asks you before anything beyond its sensors, and you can unpair it here at any time."
+          : "The aegis app for Android runs this same page and lets your agents use the phone: its sensors, its files, and apps they build for it. Install it, open it, sign in, and pair it here.",
+      }),
+      rows.length ? h("table", { className: "tbl" }, ...rows) : h("p", { className: "set-none", id: "set-phone-none", textContent: "No phone is paired." }),
+      h("div", { className: "set-linkrow" }, action),
+      this.phoneError && h("p", { className: "err-text", id: "set-phone-error", textContent: this.phoneError }),
+    );
+  }
+
+  async loadPhones() {
+    try {
+      this.phones = await this.conn.call("device.mine");
+    } catch {
+      this.phones = [];
+    }
+    this.draw();
+  }
+
+  async pairPhone() {
+    this.phoneError = "";
+    try {
+      await askShell("pair");
+    } catch (e) {
+      this.phoneError = e.message;
+    }
+    // The phone's socket takes a moment to come up after pairing.
+    setTimeout(() => this.loadPhones(), 1500);
+    await this.loadPhones();
+  }
+
+  async unpairPhone(id) {
+    try {
+      await this.conn.call("device.remove", { id });
+    } catch (e) {
+      this.phoneError = e.message;
+    }
+    await this.loadPhones();
   }
 
   // Every session paused at once (pause.py): their processes end and nothing
