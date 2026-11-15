@@ -40,6 +40,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
+from ..guards import LINKS
 from ..quota.core import PACE_HISTORY_LONG, PACE_HISTORY_SHORT
 from ..transcript.store import read_store
 from ..usage import tables
@@ -116,8 +117,9 @@ class Journal:
         self.path = db_path or state_root / "journal.db"
         self._publish = publish
         self._derivers: dict[str, Deriver] = {}
-        # A session's meta (owner, kind, harness, continues) and the account
-        # each harness is logged in as, read when its usage deriver is made.
+        # A session's meta (owner, kind, harness, continues, agent, worker
+        # queue, starter) and the account each harness is logged in as, read
+        # when its usage deriver is made.
         self.meta_of = meta_of
         self.accounts = accounts
         self._usage: dict[str, UsageDeriver] = {}
@@ -358,6 +360,9 @@ class Journal:
             kind=_kind(meta),
             harness=str(meta.get("harness") or "claude-code"),
             continues=meta.get("continues") or None,
+            agent=meta.get("agent") or None,
+            queue=(meta.get("worker") or {}).get("queue") or None,
+            starter=next((meta[k] for k in LINKS if meta.get(k)), None),
             account=lambda harness: self.accounts().get(harness),
             replay_start=self._replay_start(con),
         )

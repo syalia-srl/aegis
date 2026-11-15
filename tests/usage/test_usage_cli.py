@@ -180,3 +180,31 @@ def test_split_context_with_whatif_prints_the_replay(tmp_path):
     assert "Handing off at 200k: 0 handoffs" in res.output
     bad = invoke("usage", "--root", str(root), "--whatif", "250k")
     assert bad.exit_code == 2 and "100k, 150k, 200k, 300k, 400k" in bad.output
+
+
+def test_split_agent_and_queue_group_by_preset_and_queue(tmp_path):
+    """A row carries its session's agent preset, queue and starter, as aegis
+    serve's meta gives them, so --split agent and --split queue group them."""
+    _recent(tmp_path)
+    metas = {
+        "20261020-120000-aaaaaa": {"agent": "fair"},
+        "20261020-120000-bbbbbb": {
+            "agent": "deepseek",
+            "worker": {"task_id": "t1", "queue": "fair-work"},
+            "started_by": "20261020-120000-aaaaaa",
+        },
+    }
+    state = tmp_path / ".aegis" / "state"
+    Journal(state, None, meta_of=lambda log_id: metas.get(log_id, {})).rebuild()
+    res = invoke("usage", "--root", str(tmp_path), "--since", "4w", "--split",
+                 "agent,queue", "--json")  # fmt: skip
+    assert res.exit_code == 0, res.output
+    rows = json.loads(res.output)["rows"]
+    assert {(r["agent"], r["queue"]): r["cost"] for r in rows} == {
+        ("fair", None): 0.4,
+        ("deepseek", "fair-work"): 0.1,
+    }
+    con = sqlite3.connect(state / "journal.db")
+    assert con.execute(
+        "SELECT starter FROM usage_turns WHERE log_id = '20261020-120000-bbbbbb'"
+    ).fetchall() == [("20261020-120000-aaaaaa",)]

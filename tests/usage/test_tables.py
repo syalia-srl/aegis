@@ -8,10 +8,11 @@ from aegis.usage.turns import Derived, PartRow, Settle, TurnRow, WaitRow
 
 COLUMNS = {
     "usage_turns": "log_id rec ts person kind harness model mode billing cost cost_kind"
-    " tok_in tok_out tok_cw tok_cr secs calls errors exits ctx_start ctx_peak continues",
+    " tok_in tok_out tok_cw tok_cr secs calls errors exits ctx_start ctx_peak continues"
+    " agent queue starter",
     "usage_parts": "log_id rec n ts repo purpose activity settled cost tokens secs"
     " calls errors exits person kind harness model mode billing cost_kind"
-    " turn",
+    " turn agent queue",
     "usage_waits": "log_id rec ts woke_by secs",
     "usage_ctx": "log_id rec band calls cost tok_cr",
     "usage_whatif": "log_id rec at handoffs saved rewrite",
