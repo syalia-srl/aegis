@@ -85,31 +85,26 @@ The older views still work: `--sessions` lists the costliest sessions,
 
 ## Where a quota gauge says it will land
 
-A gauge's arrow is where the window ends at its reset if you keep spending at
-the current rate. What is spent is the vendor's reading, so only what remains
-of the window is estimated:
+A gauge's arrow is where the window should end at its reset. What is spent is
+known, so only what remains of the window is estimated, at a rate between two:
+the window's own so far, and what your last finished windows of that kind
+usually spent (the last 20 for a 5-hour window, the last 4 for a week or a
+month, from this server's own readings).
 
 ```text
-landing = spent + rate × hours left
+landing = spent + remaining × (0.5 × usual + spent) / (0.5 + elapsed)
 ```
 
-The rate is how fast the percent has been rising lately, in points per hour: an
-average that halves the weight of each hour every half-life. For a week the
-half-life is 6 hours, for a 5-hour window 30 minutes, for a month about a day
-(the window's length divided by 28). When agents stop spending, the arrow falls
-toward what is spent within a few half-lives; when they start, it rises. The
-rate carries across a reset, so a new window starts from the current rate rather
-than from nothing. Hovering a gauge shows the rate.
+Spent and usual are percents of the quota; remaining and elapsed are fractions
+of the window. A new window therefore reads what your windows usually spend, or
+100% until one has finished, and the window's own rate counts for more as it
+goes on. Halfway through, the two weigh the same. An early burst moves the
+number without sending it to several hundred percent, and a quiet stretch brings
+it back down.
 
-Until this server has kept readings for one half-life, the gauge uses the
-window's own average, blended with what your last finished windows spent:
-`spent + remaining × (0.5 × usual + spent) / (0.5 + elapsed)`, with remaining
-and elapsed as fractions of the window. `quota_read` says which one it used in
-each window's `projection`, `rate` or `average`.
-
-A window warns when it lands over 100% with half of it spent, and a `pace` line
-holds new work while it lands over 100%. `quota.projection.half_life` in
-`.aegis.yaml` changes the half-lives (help_read config#quota-projection).
+A number near 100% at the start of a week means the week is going as your weeks
+usually go. A window warns when it lands over 100% with half of it spent, and a
+`pace` line holds new work while it lands over 100%.
 
 ## The usage page
 

@@ -7,8 +7,6 @@ import threading
 from datetime import datetime, timezone
 
 
-import pytest
-
 from aegis.quota import Quota, account_hash, cache_dir
 from aegis.quota.core import QuotaError, QuotaProvider, QuotaSnapshot, QuotaWindow
 
@@ -102,8 +100,6 @@ async def test_a_reading_goes_on_the_wire_decided(tmp_path):
         "percent": 71.0,
         "severity": "warning",
         "projected": 156,
-        "rate": None,  # no account to keep a rate under: the average
-        "projection": "average",
         "starts_at": round(WALL + 11160 - H5),
         "resets_at": round(WALL + 11160),
     }
@@ -272,7 +268,6 @@ async def test_history_is_read_once_per_window(tmp_path):
         return 24.0
 
     q.history = history
-    q.half_lives = lambda: "average"  # the history feeds the average only
     await q.tick()
     q.snapshot()
     assert asked.count("session") == 1
@@ -289,19 +284,3 @@ async def test_a_quota_without_a_journal_asks_nothing_and_uses_the_default(tmp_p
     q, _, _ = make(tmp_path, c, [(0.0, H5)], account="acct")
     await q.tick()
     assert q.snapshot()["providers"][0]["windows"][0]["projected"] == 100
-
-
-async def test_a_window_with_enough_history_projects_at_its_rate(tmp_path):
-    # One point every 181 s on a 5-hour window (half-life 30 min): about 20 %/h.
-    # After 72 minutes, 2.4 half-lives, the average has reached about 80% of it.
-    c = Clocks()
-    readings = [(float(i), H5 - 181 * i) for i in range(0, 25)]
-    q, _, _ = make(tmp_path, c, readings, account="acct")
-    for _ in range(25):  # the fake pops readings: do not loop over the list
-        await q.tick()
-        c.advance(181)
-    (w, _) = q.snapshot()["providers"][0]["windows"]
-    assert w["projection"] == "rate"
-    assert 12 < w["rate"] < 20
-    left_h = (w["resets_at"] - c.wall) / 3600
-    assert w["projected"] == pytest.approx(24 + w["rate"] * left_h, abs=1)

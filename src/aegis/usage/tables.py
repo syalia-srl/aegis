@@ -287,22 +287,6 @@ def quota(con: sqlite3.Connection, snapshot: dict) -> int:
     return len(rows)
 
 
-def quota_rows(
-    con: sqlite3.Connection, billing: str, window: str, since: float
-) -> list[tuple[float, float, float | None]]:
-    """The ``(ts, percent, resets_at)`` rows of one window kind from ``since``
-    on, led by the last row before it: the table keeps changes only, so that
-    row is the state the replay starts from (quota/projection.py)."""
-    q = "SELECT ts, percent, resets_at FROM usage_quota WHERE billing = ? AND window = ?"
-    head = con.execute(
-        q + " AND ts < ? ORDER BY ts DESC LIMIT 1", (billing, window, since)
-    ).fetchall()
-    rest = con.execute(
-        q + " AND ts >= ? ORDER BY ts", (billing, window, since)
-    ).fetchall()
-    return [(float(t), float(p), r) for t, p, r in head + rest]
-
-
 def usual_spend(
     con: sqlite3.Connection,
     billing: str,

@@ -29,6 +29,8 @@ from typing import Any
 from ruamel.yaml import YAML, YAMLError
 
 from .claude.process import PERMISSION_MODE, REPLACED_TOOLS
+from .guards import AGENT_ACTIONS, Guard
+from . import guards
 from .ops import OpError
 from . import scopes
 from .roots import CONFIG_FILE
@@ -90,6 +92,8 @@ class Agent:
     # the file writes it; the scope that allows everything without one.
     scope: Scope = scopes.ANY
     tools: dict = field(default_factory=dict)
+    # Its quota guard (guards.py, #1067); None: unguarded.
+    guard: Guard | None = None
 
     @property
     def enabled(self) -> bool:
@@ -151,6 +155,7 @@ def _agent(name: str, raw: Any) -> Agent:
     )
     mcp_error = None if mcp_ok else "mcp must be a list of MCP server names"
     scope, scope_error = scopes.parse(d.get("tools"))
+    guard, guard_error = guards.parse(d.get("quota"), AGENT_ACTIONS)
     switches = {k: d.get(k, default) for k, default in SWITCHES.items()}
     switch_error = next(
         (f"{k} must be true or false" for k, v in switches.items()
@@ -164,7 +169,12 @@ def _agent(name: str, raw: Any) -> Agent:
         keep_harness_tools=keep,
         exit=str(d.get("exit") or ""),
         mcp=tuple(mcp) if mcp_ok and mcp else (),
-        error=error or keep_error or mcp_error or switch_error or scope_error,
+        error=error
+        or keep_error
+        or mcp_error
+        or switch_error
+        or scope_error
+        or guard_error,
         models=models or ((values["model"],) if values["model"] else ()),
         repeated=repeated,
         harness_tools=_flag(switches, "harness_tools"),
@@ -173,6 +183,7 @@ def _agent(name: str, raw: Any) -> Agent:
         notices=_flag(switches, "notices"),
         scope=scope,
         tools=scopes.form(d.get("tools")),
+        guard=guard,
     )
 
 

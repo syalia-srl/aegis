@@ -183,19 +183,24 @@ own last `turn_end`.
 
 A fire waits while the pool it draws on is over the schedule's own launch
 line, and goes once, at most one tick, when it drops back under. `quota` maps
-a pool to its windows and each window to a percent from 0 to 99 or to
+a pool to its windows and each window to a percent from 0 to 99, to
 `"pace"`, which holds while the window is projected to pass 100% by its
-reset. The pool claude has the windows session and weekly_all, and the pool
+reset, or to a map of `used` and `projected` (either or both), which holds
+when either is reached. A schedule's line takes no `stop`: a schedule only
+holds its fires, and a stop line, which cuts running turns, belongs on an
+agent or a queue. The pool claude has the windows session and weekly_all, and the pool
 opencode-go has rolling, weekly and monthly. Without `quota` a
 schedule holds while either weekly window is off pace; `{}` sets no line.
 
 ```json
-{"claude": {"session": 60, "weekly_all": "pace"}}
+{"claude": {"session": 60, "weekly_all": {"used": 80, "projected": 90}}}
 ```
 
 The lines apply to a fire into an open session too. They only hold what has
-not started: a live run goes on. A pool aegis has never read sets no line, and
-a token's own quota gate still applies on top of them.
+not started: a live run goes on. A pool aegis has never read sets no line.
+Agents and queues take the same lines (config, [Guard an agent or a
+queue](config#guard-an-agent-or-a-queue)): a run whose agent's guard is
+closed with `on_closed: refuse` is skipped, with why in its run log.
 
 ## Change, pause and fire
 

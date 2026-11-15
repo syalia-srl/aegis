@@ -258,6 +258,97 @@ its own agent's scope met with its starter's: a worker of `fair-work` that
 `fair` enqueued cannot start workflows even if its own agent can. `aegis
 doctor` shows an agent's scope on its row.
 
+## Guard an agent or a queue
+
+An agent or a queue may carry `quota:`, which holds its work back while the
+pool it draws on is over a line. Without it the agent or queue is never held,
+as before.
+
+```yaml
+agents:
+  fair:
+    harness: claude-code
+    model: sonnet
+    effort: low
+    permission: full
+    quota:
+      claude: {weekly_all: {used: 80, projected: 90, stop: 97}}
+      on_closed: warn
+      advice: Answer in the group in one short message and file the request as an issue.
+queues:
+  fair-work:
+    agent: deepseek
+    max_pending: 50
+    quota:
+      opencode-go: {monthly: {projected: 95, stop: 99}}
+      on_closed: reject
+```
+
+`quota:` maps a pool to its windows, as a schedule's quota does (schedules,
+[Quota lines](schedules#quota-lines)): the pool claude has session and
+weekly_all, opencode-go has rolling, weekly and monthly. Each window takes a
+line: a percent, the launch line on the percent used; `pace`, closed while
+the window is projected to pass 100% by its reset; or a map of `used`,
+`projected` and `stop`, naming used, projected or both. A map is closed when
+either launch line is reached (`projected: 90` at 90%), and stopped at
+`stop`, which is on the percent used. A stop cuts the running turns it covers,
+and continues them once a fresh reading finds the guard open: a stale reading
+or none keeps them cut. A stop never cuts a turn a person started, and a
+person's message to a cut session runs. A pool aegis has never read sets no
+line, and a reading older than 15 minutes closes the guard and never stops it.
+A `quota:` with `on_closed:` or `advice:` and no pool is an error.
+
+Beside the pools sit `on_closed:` and, for an agent, `advice`:
+
+| | `on_closed:` | What happens while the guard is closed |
+|---|---|---|
+| agent | `warn` (default) | every turn starts with the notice below |
+| agent | `refuse` | a wake no person started (a monitor, a task's result, a workflow step in its session) waits until the guard opens; a feed's batch stays in the feed, which delivers it when the guard opens; a schedule run is skipped, with why in its run log; a `peer_handoff` from an agent is refused with quota_closed. A person's message runs, with the notice, and the wakes held with it keep waiting |
+| queue | `hold` (default) | `queue_enqueue` takes the task, which waits |
+| queue | `warn` | the task is taken and waits; the reply carries a `warning` with why and when it opens |
+| queue | `reject` | `queue_enqueue` is refused with queue_closed, why and when it opens |
+
+`max_pending:` on a queue, a whole number from 1 up, refuses with queue_full
+any task that would go past that many pending tasks, whatever the guard says.
+
+The gate a turn or a worker passes is the most restrictive of its agent's
+guard, its queue's for a worker, and the guards of the agents up its chain of
+starters (the session that enqueued or spawned it, and so on). The agent's
+and the queue's are read on the pool the session draws on, and each
+starter's on the pool that starter's own model draws on. So a guarded agent
+cannot spend through an open queue on any pool: while `fair`'s Claude line is
+closed, a worker it enqueued on an OpenCode queue is closed too, and that
+queue's `on_closed:` decides what `fair`'s enqueue gets. A handoff carries the
+old session's guards only when the new session runs the same agent. A held
+queue leaves its share of `max_workers:` to the others; a model that is
+cooling only ever holds a task, whatever `on_closed:` says. Guards are read
+from the file as it is now: a line tightened on disk applies to sessions
+already running.
+
+While its guard is closed, a session is told so by an aegis notice, its own
+row in the transcript. It rides on the next prompt or, mid-turn, on the next
+tool call:
+
+```text
+> from aegis:notice · guard:closed · warn · 2026-11-15T09:12:00Z
+Your agent's quota guard is closed: agent fair: Claude weekly is at 86%, launch line 80%.
+While it is closed: queue fair-work rejects new tasks. Start no long work.
+Answer in the group in one short message and file the request as an issue.
+It opens again when Claude weekly drops below 80% used (agent fair), at the latest at Mon 02:00.
+```
+
+The second line names the queues in the agent's scope that reject or hold its
+tasks now, the third is `advice` or a default, and the last names every
+window that holds the guard, with the part of its line that tripped, and the
+latest of their resets. A stopped guard says `critical`. The notice comes
+once per change: after the guard opens, `guard:closed · clear` says it is
+open again. While it is closed the session is not also sent the pool's own
+quota notice. `notices: {guard: false}` turns it off for every agent, and an
+agent with `notices: false` gets no notice at all: under `on_closed: warn`
+such an agent runs its turns as if unguarded, held back only by its queues
+and the stop line. A wrong `quota:` or `max_pending:` stops the agent or
+queue with the error `aegis doctor` shows, and Settings shows both read-only.
+
 ## The default agent
 
 `default_agent:` names the agent `session_spawn` starts from when it is given
@@ -278,6 +369,9 @@ gets two of them for each one a queue at priority 1 gets, and priority 0
 pauses a queue. Name queues by the goal their work serves (development,
 research, a client) rather than by the model that runs it, and move the
 priorities as the goals change: aegis reads the file again at once.
+
+`quota:` and `max_pending:` hold a queue's work back on the quota and bound
+its length; see [Guard an agent or a queue](#guard-an-agent-or-a-queue).
 
 `max_parallel:`, each queue's own bound before `max_workers:` existed, is ignored: a queue that
 still sets it runs, and `aegis doctor` warns. See the queues page for how
@@ -394,6 +488,7 @@ notices:
   feeds:    {wake: true}
   queues:   true
   held:     true
+  guard:    true
   status:   {lines: 5}
 ```
 
@@ -402,7 +497,7 @@ agent is warned. `monitors.stall_min` is the minutes a monitor's progress may
 sit still (and at least three intervals), `monitors.broken_checks` how many intervals a
 check may fail to run, and `monitors.overdue_min` how far past its ETA a monitor may
 run, before its owner is warned; with `wake: true` the warning wakes an idle
-owner. `feeds` warns a busy agent that a feed's items wait for its turn's end, and an idle one, with `wake: true`, that a feed paused after three failed reads. `held` warns a busy agent of each message held for its turn's end. `status.lines` caps the status block. Minutes may be fractions.
+owner. `feeds` warns a busy agent that a feed's items wait for its turn's end, and an idle one, with `wake: true`, that a feed paused after three failed reads. `held` warns a busy agent of each message held for its turn's end. `guard` tells an agent its quota guard is closed ([Guard an agent or a queue](#guard-an-agent-or-a-queue)). `status.lines` caps the status block. Minutes may be fractions.
 `false` in place of a source turns it off; `status: false` drops the status
 block and keeps the warnings. A name no installed source declares is ignored,
 and `aegis doctor` warns about it.
@@ -611,27 +706,6 @@ Settings → Search embeddings edits it.
 `knowledge.know_how`, true by default, tells a session about a repository's
 `know-how/` docs when it reaches that repository (help_read knowledge). Set it to
 false to turn that off. It is read when aegis starts.
-
-## Quota projection
-
-`quota:` sets how far back "the current rate" of a quota gauge looks
-(help_read usage#where-a-quota-gauge-says-it-will-land). Each window length
-takes a half-life: a shorter one follows a stop or a burst sooner, a longer one
-moves less with each pause.
-
-```yaml
-quota:
-  projection:
-    half_life:
-      5h: 30m      # the default: the window's length / 28, at least 30m
-      week: 6h
-      month: 1d
-```
-
-A value is a number and `m`, `h` or `d`, from 10 minutes to the window's
-length. `half_life: average` keeps the window's own average instead, for every
-window. A wrong block keeps the defaults, and `aegis doctor` says what is wrong.
-It is read on every reading, so a change takes effect without a restart.
 
 ## Exit through a link
 

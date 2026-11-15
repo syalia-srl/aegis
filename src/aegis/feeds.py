@@ -489,11 +489,19 @@ class Feeds:
                 f.open_batch = None
                 self._save()
             f.account(s, now)
+        if self._refused(s):
+            return
         for f in self.live(s.log_id):
             if f.pending:
                 self._deliver(f, s)
 
     # -- delivery ------------------------------------------------------------
+    def _refused(self, s: Session) -> bool:
+        """Its quota guard refuses wakes (guards.py, on_closed: refuse): the
+        items stay the feed's pending, unbatched, and the first poll after
+        the guard opens delivers them."""
+        return self._registry.refuse_hold(s) is not None
+
     def _deliver(self, f: Feed, s: Session) -> None:
         items = take(f.pending, f.max_items)
         if not items:
@@ -547,6 +555,13 @@ class Feeds:
         self._kick[key] = asyncio.Event()
         self._tasks[key] = asyncio.get_running_loop().create_task(self._watch(f))
 
+    def release(self) -> None:
+        """A gate may have opened: poll each feed with items waiting now,
+        so a refusing guard's held batch goes without waiting an interval."""
+        for f in self.items.values():
+            if f.pending and not f.paused:
+                self._wake(f)
+
     def _wake(self, f: Feed) -> None:
         if (ev := self._kick.get((f.owner, f.name))) is not None:
             ev.set()
@@ -587,7 +602,13 @@ class Feeds:
             if f.errors:
                 f.errors, f.last_error = 0, ""
         s = self._registry.sessions.get(f.owner)
-        if s is not None and f.due(time.time()) and not s.in_turn and not s.held:
+        if (
+            s is not None
+            and f.due(time.time())
+            and not s.in_turn
+            and not s.held
+            and not self._refused(s)
+        ):
             self._deliver(f, s)
         elif (len(f.pending), f.errors, f.paused) != before:
             self._save()

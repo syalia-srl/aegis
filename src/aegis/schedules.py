@@ -51,7 +51,7 @@ from .monitors import run_bash
 from .names import valid_handle
 from .ops import OpError
 from .scopes import Scope
-from .quota_gate import decide, pool_for
+from .quota_gate import lines_gate, pool_for
 from .workflow_lang import edit_diff, parse, rows as workflow_rows
 from .workflow_store import check_named
 from .schedule_log import (
@@ -273,8 +273,22 @@ class Schedules:
             spec = self._spec(s)
         except OpError:
             return True  # the fire says what is wrong
-        spec, g = self._app.start_spec(spec)
+        spec, g = self._app.start_spec(spec, guarded=False)
         return g.may_start and self._line(s, spec.harness, spec.model) is None
+
+    def _refused(self, spec) -> str | None:
+        """Why the guard of a run's new session refuses its first turn: an
+        agent with on_closed: refuse, or a stop line (guards.py). The run is
+        skipped with the why; a warned agent's run fires with the notice."""
+        g = self._app.guard(spec)
+        agent = next(
+            (a for a in self._app.config.current().agents if a.name == spec.agent),
+            None,
+        )
+        refuse = agent is not None and agent.guard and agent.guard.on_closed == "refuse"
+        if g.state == "stopped" or (g.state == "closed" and refuse):
+            return g.why
+        return None
 
     def _line(self, s: Schedule, harness: str, model: str | None) -> str | None:
         """Why the schedule's own launch line for the pool a fire draws on
@@ -283,21 +297,17 @@ class Schedules:
         and holding every tick would stop the schedule for good. A stale
         reading holds, as it does a token's gate."""
         pool = pool_for(harness, model)
-        lines = s.d.quota.get(pool or "")
-        snap = self._app.quota.snapshot()
-        read = any(
-            p.get("name") == pool and p.get("read_at") is not None
-            for p in snap.get("providers", [])
-        )
-        if not pool or not lines or not read:
-            return None
-        policy = {
-            pool: {
-                "mode": "lines",
-                "lines": {k: {"launch": v, "stop": 100} for k, v in lines.items()},
+        # A percent or pace line keeps the form it always had: a full
+        # window holds a fire (its stop at 100), and pace closes only above
+        # 100% projected (quota_gate._pace). A map line reads as written.
+        lines = {
+            p: {
+                k: v if isinstance(v, dict) else {"launch": v, "stop": 100}
+                for k, v in ws.items()
             }
+            for p, ws in s.d.lines().items()
         }
-        g = decide(policy, pool, snap, time.time())
+        g = lines_gate(lines, pool, self._app.quota.snapshot(), time.time())
         return None if g.may_start else g.why
 
     # -- the layers ---------------------------------------------------------------
@@ -346,9 +356,13 @@ class Schedules:
             if w is not None:
                 check_named(cur, self._app.workflows._agents())  # before a spawn
             if s.d.fire.target == "new":
-                spec, g = self._app.start_spec(self._spec(s))
+                spec, g = self._app.start_spec(self._spec(s), guarded=False)
                 if not g.may_start:
                     return self._tick(name, tick, "held", why="quota", **extra)
+                if why := self._refused(spec):
+                    return self._tick(
+                        name, tick, "skipped", why="quota", line=why, **extra
+                    )
                 if line := self._line(s, spec.harness, spec.model):
                     return self._tick(
                         name, tick, "held", why="quota", line=line, **extra
@@ -368,6 +382,10 @@ class Schedules:
                 await ses.send(f"{head}\n{text}")
             else:
                 ses = self._target(s)
+                if why := self._app.refuse_hold(ses):
+                    return self._tick(
+                        name, tick, "skipped", why="quota", line=why, **extra
+                    )
                 if line := self._line(s, ses.spec.harness, ses.spec.model):
                     return self._tick(
                         name, tick, "held", why="quota", line=line, **extra

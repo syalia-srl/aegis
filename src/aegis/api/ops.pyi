@@ -724,11 +724,11 @@ class _queue:
     ) -> Any:
         """A task's result from a linked server, for the agent here that enqueued it. Only that link may call it; the header is composed here from values checked here."""
     async def enqueue(self, *, queue: str, payload: str, callback: bool = ...) -> Any:
-        """Hand a self-contained task to a fresh worker on a queue. Returns at once with the task id; the worker's final message reaches your inbox when it finishes (with callback). Keep working meanwhile. `queue@server` enqueues on a linked server; the result still reaches your inbox, and the task id comes back as `task-id@server`."""
+        """Hand a self-contained task to a fresh worker on a queue. Returns at once with the task id; the worker's final message reaches your inbox when it finishes (with callback). Keep working meanwhile. `queue@server` enqueues on a linked server; the result still reaches your inbox, and the task id comes back as `task-id@server`. A queue past its max_pending refuses with queue_full; one whose quota guard is closed refuses with queue_closed, or takes the task with a warning that it waits."""
 
 class _quota:
     async def read(self) -> Any:
-        """How much of each subscription window is left: per provider, each window's percent used, severity, projected percent at reset, the rate behind it (points per hour, or null for the window average) and reset time (epoch seconds). Reads the last reading; never asks the vendor, so calling it costs nothing."""
+        """How much of each subscription window is left: per provider, each window's percent used, severity, projected percent at reset and reset time (epoch seconds). Reads the last reading; never asks the vendor, so calling it costs nothing."""
 
 class _recap:
     async def request(self, *, log_id: str, force: bool = ...) -> Any:
@@ -743,7 +743,7 @@ class _schedule:
         check: dict[str, Any] | None = ...,
         fire: dict[str, Any],
         prompt: str,
-        quota: dict[str, dict[str, int | Literal["pace"]]] = ...,
+        quota: dict[str, dict[str, int | Literal["pace"] | dict[str, Any]]] = ...,
         name: str,
     ) -> Any:
         """Fire a prompt on a clock: every 5m, a cron line, or once at a time, into a new session from an agent or into an existing session's inbox. With a bash check, a tick fires only when the check exits 0 with a stdout different from the last fire's, and that stdout is appended to the prompt. You own what you create; schedule_delete removes it. A schedule you create or change waits, paused, until a person approves it from the card under your call. `name@server` makes it on a linked server: it lives and ticks there, its runs start there, and a directory or a session in it is that server's."""
@@ -781,7 +781,7 @@ class _schedule:
         check: dict[str, Any] | None = ...,
         fire: dict[str, Any],
         prompt: str,
-        quota: dict[str, dict[str, int | Literal["pace"]]] = ...,
+        quota: dict[str, dict[str, int | Literal["pace"] | dict[str, Any]]] = ...,
         name: str,
     ) -> Any:
         """Replace a schedule you own with a new definition. It applies from the next tick; a live run is not touched. `name@server` is one on a linked server."""

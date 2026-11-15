@@ -1247,7 +1247,7 @@ export class Settings {
       this.draw();
     }, "link danger");
     const fold = h("details", { className: "set-priming", open: !!a.priming }, h("summary", { textContent: a.priming ? "Priming" : "Add a priming" }), priming);
-    card.append(name, h("div", { className: "picks" }, harness, effort, permission), casc, h("div", { className: "set-card-foot" }, fold, this.keepFold(a), this.mcpFold(a), this.scopeFold(a), this.productFold(a), this.exitFold(a), star, del));
+    card.append(name, h("div", { className: "picks" }, harness, effort, permission), casc, h("div", { className: "set-card-foot" }, fold, this.keepFold(a), this.mcpFold(a), this.scopeFold(a), this.quotaFold(a.quota, "agents.*.quota"), this.productFold(a), this.exitFold(a), star, del));
     if (isDefault) card.classList.add("is-default");
     return card;
   }
@@ -1314,6 +1314,21 @@ export class Settings {
     const lines = keys.map((k) => h("div", { className: "kv" }, h("span", { textContent: k }), h("span", { textContent: t[k].join(", ") || "none" })));
     const fold = h("details", { className: "set-priming set-scope" }, h("summary", { textContent: "Scope" }), ...lines, h("p", { className: "set-none", textContent: "Its sessions use only these aegis tools, queues and agents. Edit tools: in .aegis.yaml; help: config, Scope an agent." }));
     fold.dataset.key = "agents.*.tools";
+    return fold;
+  }
+
+  // An agent's or queue's quota: block (guards.py, #1067), shown as the file
+  // has it, with a queue's max_pending; a save writes both back unchanged.
+  quotaFold(quota, key, maxPending) {
+    const q = quota || {};
+    const fmt = (v) => (v !== null && typeof v === "object" ? Object.entries(v).map(([k, x]) => `${k} ${x}`).join(", ") : String(v));
+    const lines = Object.entries(q).flatMap(([k, v]) => (typeof v === "object" && v !== null && !Array.isArray(v) && !["on_closed", "advice"].includes(k)
+      ? Object.entries(v).map(([w, line]) => h("div", { className: "kv" }, h("span", { textContent: `${k} ${w}` }), h("span", { textContent: fmt(line) })))
+      : [h("div", { className: "kv" }, h("span", { textContent: k }), h("span", { textContent: fmt(v) }))]));
+    if (maxPending != null) lines.push(h("div", { className: "kv" }, h("span", { textContent: "max_pending" }), h("span", { textContent: String(maxPending) })));
+    if (!lines.length) return null;
+    const fold = h("details", { className: "set-priming set-quota" }, h("summary", { textContent: "Quota guard" }), ...lines, h("p", { className: "set-none", textContent: "Work waits, is refused or runs with a notice while the pool is over these lines. Edit quota: in .aegis.yaml; help: config, Guard an agent or a queue." }));
+    fold.dataset.key = key;
     return fold;
   }
 
@@ -1400,6 +1415,8 @@ export class Settings {
         this.draw();
       }, "link danger");
       row.append(h("div", { className: "set-queue-line" }, name, h("span", { textContent: "runs" }), agent, h("span", { textContent: "at priority" }), priority, quiet, del));
+      const guard = this.quotaFold(q.quota, "queues.*.quota queues.*.max_pending", q.max_pending);
+      if (guard) row.append(guard);
       return row;
     });
     const head = h("div", { className: "set-section-head" }, h("h3", { textContent: this.t("settings.queues") }), button(this.t("settings.addQueue"), "set-add-queue", () => {
