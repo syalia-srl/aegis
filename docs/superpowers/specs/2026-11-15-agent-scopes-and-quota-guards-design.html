@@ -151,19 +151,19 @@ pre .c{color:var(--faint)}
 <h2 id="delivers"><span class="n">01</span>What this delivers</h2>
 <div class="trio">
   <div class="card"><h4>1 · Agent scopes</h4><p>An agent preset lists which aegis tools its sessions get, which queues they may enqueue on and which agents they may start. A tool left out is not listed to the session and is refused if called. A session the agent starts can never have a wider scope than its parent.</p></div>
-  <div class="card"><h4>2 · Quota guards</h4><p>The quota policy that today exists only on a member's token can also sit on an agent and on a queue. Its lines compare both the percent used and the projected percent at reset. When a guard closes, a queue rejects, warns or holds, and an agent refuses the turn or runs it with a notice that says what is closed and why.</p></div>
+  <div class="card"><h4>2 · Quota guards</h4><p>Quota lines, which today only a schedule carries, can sit on an agent and on a queue. They compare both the percent used and the projected percent at reset. When a guard closes, a queue rejects, warns or holds, and an agent refuses the turn or runs it with a notice that says what is closed and why.</p></div>
   <div class="card"><h4>3 · Budgets</h4><p>Independent of the pool's gauges, an agent may carry spending caps: so many dollars or tokens per session, and per rolling window such as 24h or 7d. Spend is charged by lineage: what a worker or a spawned session spends also counts for the agent that started it. Past a cap the session is told to finish, and no new turn starts until the cap has room. Queues carry no budget.</p></div>
 </div>
 <div class="stats">
-  <div class="stat"><div class="v">0</div><div class="k">guards on an admin's sessions today: every background agent of the server's admin is always open</div></div>
+  <div class="stat"><div class="v">0</div><div class="k">quota checks on a session's work today outside schedules: every background agent and worker is always open</div></div>
   <div class="stat"><div class="v">98</div><div class="k">aegis tools every session is offered, whatever its agent</div></div>
   <div class="stat"><div class="v">0</div><div class="k">ways a queue can refuse a task today: no length cap, no rejection</div></div>
 </div>
 
 <h2 id="today"><span class="n">02</span>What aegis does today</h2>
 <ul>
-  <li><b>Quota policy is per principal.</b> <code>quota_gate.decide</code> takes the policy of the session's owner (a token). A pool maps to <code>closed</code>, <code>open</code> or <code>lines</code>; a line has a launch value (a percent, or <code>"pace"</code>, meaning projected at reset ≤ 100%) and a stop value. Admins have no policy and are always open (<code>multi-user.md</code> §5).</li>
-  <li><b>So background agents of the admin are never gated.</b> A ticket-feed agent, a group-chat agent and every queue worker started by the admin draw on the pool without a check. In the last week the only way to hold them back was a message sent to each agent by hand, which they had to remember and which a fresh worker never saw.</li>
+  <li><b>Only schedules have quota lines.</b> Multi-user mode left aegis with #958, and with it the per-token quota policy: <code>App.gate</code> now always answers open. The one line left is a schedule's <code>quota</code>: per pool, per window, a percent or <code>"pace"</code> (projected at reset over 100%), under which a fire waits (<code>schedules.py</code>, <code>_line</code>, through <code>quota_gate.decide</code>). The hold and continue machinery for sessions (<code>quota_paused</code>, messages <code>held_for: quota</code>, <code>on_quota</code>) is still in <code>app.py</code>.</li>
+  <li><b>So background agents are never gated.</b> A ticket-feed agent, a group-chat agent and every queue worker started by the admin draw on the pool without a check. In the last week the only way to hold them back was a message sent to each agent by hand, which they had to remember and which a fresh worker never saw.</li>
   <li><b>Tool scope exists only for embedders.</b> In <code>.aegis.yaml</code>, <code>permission:</code> (read, write, auto, full) gates writes, <code>keep_harness_tools</code> and <code>harness_tools:</code> pick harness tools, and every aegis tool is offered to every session. A program that embeds aegis can already narrow aegis's tools: its policy's <code>tools(who, session)</code> returns the names a harness gets, and the rest are hidden and refused (<code>library.md</code>, #983). <code>aegis serve</code> runs <code>StandalonePolicy</code>, which returns all. <code>ops.NO_SPAWN</code> blocks <code>session_spawn</code>, <code>session_handoff</code>, <code>queue_enqueue</code> and <code>schedule_create</code> only for a schedule run with <code>spawn: false</code>.</li>
   <li><b>Queues share one dispatcher.</b> The server runs at most <code>max_workers</code> workers in all. A free slot goes to the queue with the smallest (running + 1) / <code>priority</code>, so priority 2 runs two workers for each one at priority 1; priority 0 pauses a queue; a queue with nothing to start leaves its share to the others. A pending task waits silently while its owner's gate is closed. There is no maximum length, and the enqueuer is never told it will wait.</li>
   <li><b>Usage rows have no agent or queue.</b> <code>aegis usage --split</code> takes person, owner, repo, harness, model and others, so no budget per agent or queue can be computed from them yet.</li>
@@ -178,9 +178,9 @@ pre .c{color:var(--faint)}
 <tr><td>Where fences live <span class="who">maintainer</span></td><td>On the agent preset and on the queue, in <code>.aegis.yaml</code>.</td><td class="why">The agent is what a person hands to a group; the queue is the buffer it may feed. Both must hold whoever owns the session, the admin included.</td></tr>
 <tr><td>Scope form <span class="who q">proposed</span></td><td><code>tools:</code> with <code>allow</code> or <code>deny</code> over tool names and named groups, plus <code>queues:</code> and <code>agents:</code> lists.</td><td class="why">Groups (spawn, workflows, schedules…) keep a preset short and stay right when a tool is added to a group.</td></tr>
 <tr><td>Scope inheritance <span class="who q">proposed</span></td><td>A child session's scope is its own agent's scope intersected with its parent's.</td><td class="why">Otherwise an agent allowed one queue escapes through a worker whose agent is wider.</td></tr>
-<tr><td>Guard policy shape <span class="who q">proposed</span></td><td>The same policy object as a token's, under <code>quota:</code>.</td><td class="why">One validator, one editor, one <code>decide()</code>. Nothing new to learn.</td></tr>
+<tr><td>Guard line shape <span class="who q">proposed</span></td><td>A schedule's <code>quota</code> form, under <code>quota:</code>: pool, window, then a percent, <code>"pace"</code> or a map with <code>used</code>, <code>projected</code> and <code>stop</code>.</td><td class="why">One form for schedules, agents and queues, read by the same <code>decide()</code>.</td></tr>
 <tr><td>Lines on used and projected <span class="who">maintainer</span></td><td>A launch line may name <code>used</code>, <code>projected</code> or both; a window is over the line when either is reached.</td><td class="why">The maintainer wants "below 80% used and projected below 90%". Today <code>pace</code> only means projected ≤ 100.</td></tr>
-<tr><td>Combining guards <span class="who q">proposed</span></td><td>The most restrictive of owner, agent and queue wins.</td><td class="why">Each fence is a ceiling set by someone; none may lift another's.</td></tr>
+<tr><td>Combining guards <span class="who q">proposed</span></td><td>The most restrictive of the agent's, the queue's and those up the chain of starters wins.</td><td class="why">Each fence is a ceiling set by someone; none may lift another's.</td></tr>
 <tr><td>Priority agents <span class="who">maintainer</span></td><td>An agent or queue with no <code>quota:</code> is unguarded, as now.</td><td class="why">The maintainer's own sessions must never feel the quota.</td></tr>
 <tr><td>Queue on a closed guard <span class="who">maintainer</span></td><td><code>on_closed: reject | warn | hold</code>, default <code>hold</code>.</td><td class="why">Reject refuses the enqueue with why; warn accepts it and says it will wait and until when; hold is today's silent wait.</td></tr>
 <tr><td>Queue length <span class="who">maintainer</span></td><td><code>max_pending:</code>; an enqueue past it is rejected.</td><td class="why">A queue is a buffer and needs a bound.</td></tr>
@@ -240,22 +240,20 @@ agents:
 </ol>
 
 <h2 id="guards"><span class="n">05</span>Quota guards on agents and queues</h2>
-<p>An agent or a queue may carry <code>quota:</code>, the same policy object a token carries today: a map from a pool (<code>claude</code>, <code>opencode-go</code>, <code>codex</code>) to a mode. Two keys are added beside the pools: <code>on_closed</code> and, for an agent, <code>advice</code>.</p>
+<p>An agent or a queue may carry <code>quota:</code>, in the form a schedule's <code>quota</code> has: a map from a pool (<code>claude</code>, <code>opencode-go</code>) to its windows, each with a line. A pool or window with no line never holds, and neither does a pool aegis has never read. Two keys sit beside the pools: <code>on_closed</code> and, for an agent, <code>advice</code>.</p>
 
 <h3 id="lines">Lines on used and projected</h3>
-<p>A launch line today is a percent of the window used, or <code>"pace"</code>. It becomes a map with either key or both:</p>
+<p>A schedule's line is a percent of the window used, or <code>"pace"</code>. A line may also be a map with <code>used</code>, <code>projected</code> and an optional <code>stop</code>:</p>
 <pre>quota:
   claude:
-    mode: lines
-    lines:
-      weekly_all: {launch: {used: 80, projected: 90}, stop: 97}
+    weekly_all: {used: 80, projected: 90, stop: 97}
   on_closed: warn</pre>
-<p>The window is over its launch line when <code>used ≥ 80</code> or <code>projected ≥ 90</code>. <code>launch: 80</code> stays valid and means <code>{used: 80}</code>; <code>launch: pace</code> stays valid and means <code>{projected: 100}</code>, so every stored token policy keeps its meaning. The stop line stays on percent used: it is real spend, not an estimate. <code>projected</code> is the value #1065 defines.</p>
+<p>The guard is closed when <code>used ≥ 80</code> or <code>projected ≥ 90</code>, and stopped at <code>used ≥ 97</code>, which interrupts running turns as the old token stop line did, and continues them when the window is back under the line. <code>80</code> means <code>{used: 80}</code> and <code>pace</code> means <code>{projected: 100}</code>, so a schedule's lines keep their meaning and may take the map form too. The stop line is on percent used: it is real spend, not an estimate. A reading older than 15 minutes closes and never stops. <code>projected</code> is the value #1065 defines.</p>
 
 <h3 id="combine">How guards combine</h3>
 <svg viewBox="0 0 720 170" width="720" role="img" aria-label="Three guards feed one decision: the most restrictive wins">
   <g font-family="JBM, monospace" font-size="12">
-    <rect x="10" y="14" width="190" height="38" rx="6" fill="#191814" stroke="#2a2721"/><text x="24" y="38" fill="#f1ede2">owner's token policy</text>
+    <rect x="10" y="14" width="190" height="38" rx="6" fill="#191814" stroke="#2a2721"/><text x="24" y="38" fill="#f1ede2">starters' guards</text>
     <rect x="10" y="66" width="190" height="38" rx="6" fill="#191814" stroke="#2a2721"/><text x="24" y="90" fill="#f1ede2">agent's quota:</text>
     <rect x="10" y="118" width="190" height="38" rx="6" fill="#191814" stroke="#2a2721"/><text x="24" y="142" fill="#f1ede2">queue's quota:</text>
     <path d="M200 33 L290 85 M200 85 L290 85 M200 137 L290 85" stroke="#6f6b62" fill="none"/>
@@ -266,7 +264,7 @@ agents:
     <text x="530" y="118" fill="#d9806f">stopped: interrupt</text>
   </g>
 </svg>
-<p>The gate a start or a turn passes is the worst of three: the owner's token policy (none for an admin, so open), the agent's <code>quota:</code>, and, for a queue worker or a spawned session, the queue's <code>quota:</code> and the guards of every session up its chain of starters. A spent budget anywhere up that chain counts as closed. A guard missing at any level counts as open, so an admin's agent with no <code>quota:</code> behaves exactly as today. The <code>why</code> of the result names the level that closed it: "agent fair: Claude weekly is on pace for 104% at reset, launch line 90%".</p>
+<p>The gate a start or a turn passes is the worst of: the agent's <code>quota:</code>; for a queue worker, the queue's <code>quota:</code>; and the guards of every session up its chain of starters (enqueue, spawn, handoff). A spent budget anywhere up that chain counts as closed. A guard missing at any level counts as open, so an agent with no <code>quota:</code> and no guarded starter behaves exactly as today. <code>App.gate</code>, which answers open since #958, becomes this combination. The <code>why</code> of the result names the level that closed it: "agent fair: Claude weekly is on pace for 104% at reset, launch line 90%".</p>
 
 <h3 id="queue-act">What a queue does when its guard is closed</h3>
 <table class="tbl">
@@ -340,7 +338,7 @@ It opens again when the window drops below 80% used and 90% projected, at the la
     permission: full
     tools: {deny: [spawn, workflows, schedules], queues: [fair-work], agents: []}
     quota:
-      claude: {mode: lines, lines: {weekly_all: {launch: {used: 80, projected: 90}, stop: 97}}}
+      claude: {weekly_all: {used: 80, projected: 90, stop: 97}}
       on_closed: warn
       advice: Answer in the group in one short message and file the request as an issue.
     budget: [{usd: 2, per: session}, {usd: 25, per: 7d}]
@@ -350,22 +348,21 @@ queues:
     priority: 1
     max_pending: 50
     quota:
-      claude: {mode: open}
-      opencode-go: {mode: lines, lines: {monthly: {launch: {projected: 95}, stop: 99}}}
+      opencode-go: {monthly: {projected: 95, stop: 99}}
       on_closed: reject</pre>
 <p>With Claude at 86% used, <code>fair</code> wakes on a ticket with the notice of section 05, answers in the group, files the issue and does not enqueue, because the notice says <code>fair-work</code> rejects. When Claude drops back, the next turn gets the "open again" notice and the agent resumes normal work. Nobody wrote to it.</p>
 
 <h2 id="delivery"><span class="n">08</span>Delivery</h2>
 <ol>
   <li><b>Slice 1, agent scopes (#1066).</b> <code>tools:</code> in <code>config.py</code> and <code>agents.py</code>, the groups, <code>StandalonePolicy.tools</code> returning the scope, <code>queues:</code> and <code>agents:</code> checks in <code>ops.py</code> with the <code>out_of_scope</code> refusal, inheritance on spawn, handoff and worker start, the primer trim. Closes the config half of #983. Help: <code>config.md</code> (agents), <code>queues.md</code>.</li>
-  <li><b>Slice 2, guards (#1067).</b> Launch lines on <code>used</code>/<code>projected</code> in <code>quota_gate.py</code>, keeping old forms; <code>quota:</code> on agents and queues; the most-restrictive combination in <code>App.gate</code>; <code>on_closed</code> and <code>max_pending</code> on queues; <code>on_closed</code> and the notice on agents, through the paths listed in section 05. Waits for #1065 so <code>projected</code> means the new value. Help: <code>config.md</code>, <code>queues.md</code>, <code>multi-user.md</code> (a token policy also reads the new lines).</li>
+  <li><b>Slice 2, guards (#1067).</b> The map line form (<code>used</code>, <code>projected</code>, <code>stop</code>) in <code>quota_gate.py</code>, shared with schedules and keeping their forms; <code>quota:</code> on agents and queues; the most-restrictive combination in <code>App.gate</code>, reusing the hold and continue machinery <code>on_quota</code> still has; <code>on_closed</code> and <code>max_pending</code> on queues; <code>on_closed</code> and the notice on agents, through the paths listed in section 05. Reads <code>projected</code> as the quota reading gives it, so #1065 changes its value without touching this slice. Help: <code>config.md</code>, <code>queues.md</code>, <code>schedules.md</code> (the map form).</li>
   <li><b>Slice 3, budgets (#1068).</b> <code>agent</code>, <code>queue</code> and <code>starter</code> on usage rows, <code>agent</code> and <code>queue</code> as splits, the starter chain on every session, then <code>budget:</code> on agents with session and rolling-window caps, the mid-turn notice and the refusal after <code>turn_end</code>.</li>
 </ol>
 <p>The Settings page shows the new keys read-only in slices 1 and 2; editing them there is a follow-up.</p>
 
 <h2 id="testing"><span class="n">09</span>Testing</h2>
 <ul>
-  <li>Unit: <code>decide()</code> on every line form, old and new; the combination over owner, agent and queue; scope intersection; every refusal message.</li>
+  <li>Unit: <code>decide()</code> on every line form, old and new; the combination over agent, queue and starters; scope intersection; every refusal message.</li>
   <li>Server: an agent with <code>deny: [workflows]</code> does not see <code>workflow_arm</code> in its MCP listing, and <code>aegis call workflow_arm</code> from its shell is refused. A worker started by it is refused too.</li>
   <li>Budgets: a worker's spend counts for its starter's caps; a session past its cap gets the notice once and refuses a fed turn after <code>turn_end</code>; a 24h window frees when its oldest row ages out.</li>
   <li>Queues: <code>reject</code>, <code>warn</code>, <code>hold</code> and <code>max_pending</code> against a fake quota snapshot.</li>
