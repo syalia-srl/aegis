@@ -58,9 +58,17 @@ limit. Column ids are `[a-z][a-z0-9_]{0,31}`; omitted ids are `c0`, `c1`, …
 ## Page behaviour
 
 - Search box filters rows (case-insensitive substring across cells).
-- Per-column filter inputs when there are few columns; otherwise search alone.
+- Per-column filter inputs toggled from the Filters button; a Clear-filters
+  chip in the footer resets search and column filters at once.
+- A Columns menu shows/hides columns (always keeps at least one).
+- Columns whose non-empty values are all numbers are right-aligned, set in the
+  mono face, and sort numerically.
+- Copy button writes the visible rows as a Markdown table to the clipboard,
+  falling back to a selectable textarea when the sandbox blocks it.
 - Click a header to sort; again to reverse; again to clear.
-- Editable cells are inputs; structural buttons appear only for allowed ops.
+- Editable cells read as plain text until clicked; Tab, Enter and the arrow
+  keys move between them; an Undo button steps back the last change.
+- Structural buttons (+ Row, + Column, remove ×) appear only for allowed ops.
 - Phone: tools stack; the table scrolls sideways with the first column pinned
   when wide (same idea as transcript tables).
 
