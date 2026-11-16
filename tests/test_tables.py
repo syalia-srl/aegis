@@ -95,7 +95,12 @@ def test_typed_columns_keep_their_input_and_options():
             "Notes",
         ]
     )
-    assert cols[0] == {"id": "model", "label": "Model", "input": "select", "options": ["a", "b"]}
+    assert cols[0] == {
+        "id": "model",
+        "label": "Model",
+        "input": "select",
+        "options": ["a", "b"],
+    }
     assert cols[1] == {"id": "score", "label": "Score", "input": "number"}
     assert cols[2] == {"id": "notes", "label": "Notes"}  # plain text stays bare
 
@@ -124,7 +129,10 @@ def test_initial_cells_must_fit_their_input():
             {"label": "Score", "input": "number"},
         ]
     )
-    assert tables.normalize_rows([["pro", "12.5"], ["", ""]], cols) == [["pro", "12.5"], ["", ""]]
+    assert tables.normalize_rows([["pro", "12.5"], ["", ""]], cols) == [
+        ["pro", "12.5"],
+        ["", ""],
+    ]
     for bad in (["mini", "1"], ["pro", "twelve"], ["pro", "1,5"]):
         with pytest.raises(TableError) as e:
             tables.normalize_rows([bad], cols)

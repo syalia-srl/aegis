@@ -161,7 +161,8 @@ def _check_cell(i: int, col: dict[str, Any], v: str) -> None:
         )
     if kind == "select" and v not in col["options"]:
         raise TableError(
-            "bad_params", f"rows[{i}] {col['label']!r} takes one of its options, not {v!r}"
+            "bad_params",
+            f"rows[{i}] {col['label']!r} takes one of its options, not {v!r}",
         )
 
 
