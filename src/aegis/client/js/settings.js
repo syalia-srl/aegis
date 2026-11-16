@@ -273,6 +273,7 @@ export class Settings {
       this.harnesses(),
       this.workflows(),
       this.usage(),
+      this.fieldSection("quota"),
       this.fieldSection("embeddings"),
       this.fieldSection("network"),
       this.fieldSection("host"),
@@ -1172,7 +1173,7 @@ export class Settings {
       this.draw();
     }, "link danger");
     const fold = h("details", { className: "set-priming", open: !!a.priming }, h("summary", { textContent: a.priming ? "Priming" : "Add a priming" }), priming);
-    card.append(name, h("div", { className: "picks" }, harness, effort, permission), casc, h("div", { className: "set-card-foot" }, fold, this.keepFold(a), this.mcpFold(a), this.productFold(a), this.exitFold(a), star, del));
+    card.append(name, h("div", { className: "picks" }, harness, effort, permission), casc, h("div", { className: "set-card-foot" }, fold, this.keepFold(a), this.mcpFold(a), this.scopeFold(a), this.quotaFold(a.quota, "agents.*.quota"), this.budgetFold(a), this.productFold(a), this.exitFold(a), star, del));
     if (isDefault) card.classList.add("is-default");
     return card;
   }
@@ -1227,6 +1228,56 @@ export class Settings {
     });
     const fold = h("details", { className: "set-priming set-mcp", open: on.length > 0 }, summary, h("p", { className: "set-none", textContent: "Its sessions get these servers beside aegis's own, and call their tools without asking." }), h("div", { className: "set-tools" }, ...toggles));
     fold.dataset.key = "agents.*.mcp";
+    return fold;
+  }
+
+  // The agent's tools: block (scopes.py, #1066), shown as the file has it; a
+  // save writes it back unchanged. It is edited in .aegis.yaml.
+  scopeFold(a) {
+    const t = a.tools || {};
+    const keys = ["allow", "deny", "queues", "agents"].filter((k) => k in t);
+    if (!keys.length) return null;
+    const lines = keys.map((k) => h("div", { className: "kv" }, h("span", { textContent: k }), h("span", { textContent: t[k].join(", ") || "none" })));
+    const fold = h("details", { className: "set-priming set-scope" }, h("summary", { textContent: "Scope" }), ...lines, h("p", { className: "set-none", textContent: "Its sessions use only these aegis tools, queues and agents. Edit tools: in .aegis.yaml; help: config, Scope an agent." }));
+    fold.dataset.key = "agents.*.tools";
+    return fold;
+  }
+
+  // An agent's or queue's quota: block (guards.py, #1067), shown as the file
+  // has it, with a queue's max_pending; a save writes both back unchanged.
+  quotaFold(quota, key, maxPending) {
+    const q = quota || {};
+    const fmt = (v) => (v !== null && typeof v === "object" ? Object.entries(v).map(([k, x]) => `${k} ${x}`).join(", ") : String(v));
+    const lines = Object.entries(q).flatMap(([k, v]) => (typeof v === "object" && v !== null && !Array.isArray(v) && !["on_closed", "advice"].includes(k)
+      ? Object.entries(v).map(([w, line]) => h("div", { className: "kv" }, h("span", { textContent: `${k} ${w}` }), h("span", { textContent: fmt(line) })))
+      : [h("div", { className: "kv" }, h("span", { textContent: k }), h("span", { textContent: fmt(v) }))]));
+    if (maxPending != null) lines.push(h("div", { className: "kv" }, h("span", { textContent: "max_pending" }), h("span", { textContent: String(maxPending) })));
+    if (!lines.length) return null;
+    const fold = h("details", { className: "set-priming set-quota" }, h("summary", { textContent: "Quota guard" }), ...lines, h("p", { className: "set-none", textContent: "Work waits, is refused or runs with a notice while the pool is over these lines. Edit quota: in .aegis.yaml; help: config, Guard an agent or a queue." }));
+    fold.dataset.key = key;
+    return fold;
+  }
+
+  // An agent's budget: node (budgets.py, #1068), shown as the file has it,
+  // whatever its shape; a save writes it back unchanged. A cap budgets.parse
+  // would refuse shows as invalid, with what the file says.
+  budgetFold(a) {
+    if (a.budget == null) return null;
+    const raw = Array.isArray(a.budget) ? a.budget : [a.budget];
+    if (!raw.length) return null;
+    const span = /^[1-9][0-9]*[hd]$/;
+    const lines = raw.map((c) => {
+      const named = c && typeof c === "object" && !Array.isArray(c) ? ["usd", "tokens"].filter((k) => k in c) : [];
+      const v = named.length === 1 ? c[named[0]] : null;
+      const ok = Array.isArray(a.budget) && named.length === 1 && Object.keys(c).every((k) => k === named[0] || k === "per")
+        && typeof v === "number" && Number.isFinite(v) && v > 0 && (named[0] === "usd" || Number.isInteger(v))
+        && (c.per === "session" || (typeof c.per === "string" && span.test(c.per)));
+      if (!ok) return h("div", { className: "kv" }, h("span", { textContent: "invalid" }), h("span", { textContent: JSON.stringify(c) }));
+      const m = named[0] === "usd" ? `$${v}` : `${v} tokens`;
+      return h("div", { className: "kv" }, h("span", { textContent: `per ${c.per}` }), h("span", { textContent: m }));
+    });
+    const fold = h("details", { className: "set-priming set-budget" }, h("summary", { textContent: "Budget" }), ...lines, h("p", { className: "set-none", textContent: "Past a cap its sessions are told to finish, and no turn a person did not start runs until the cap has room. Edit budget: in .aegis.yaml; help: config, Budget an agent." }));
+    fold.dataset.key = "agents.*.budget";
     return fold;
   }
 
@@ -1313,6 +1364,8 @@ export class Settings {
         this.draw();
       }, "link danger");
       row.append(h("div", { className: "set-queue-line" }, name, h("span", { textContent: "runs" }), agent, h("span", { textContent: "at priority" }), priority, quiet, del));
+      const guard = this.quotaFold(q.quota, "queues.*.quota queues.*.max_pending", q.max_pending);
+      if (guard) row.append(guard);
       return row;
     });
     const head = h("div", { className: "set-section-head" }, h("h3", { textContent: this.t("settings.queues") }), button(this.t("settings.addQueue"), "set-add-queue", () => {

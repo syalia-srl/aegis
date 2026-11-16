@@ -96,8 +96,12 @@ def test_the_primer_names_the_root_paths_are_quoted_from(tmp_path):
 
     from aegis.mcp import primer
 
+    from aegis.scopes import ANY
+
     s = SimpleNamespace(
-        handle="ana-b", harness=SimpleNamespace(tool_prefix="mcp__aegis__")
+        handle="ana-b",
+        harness=SimpleNamespace(tool_prefix="mcp__aegis__"),
+        spec=SimpleNamespace(scope=ANY),
     )
     text = primer(s, "lab", tmp_path)
     assert (

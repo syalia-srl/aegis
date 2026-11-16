@@ -15,6 +15,9 @@ import copy
 from dataclasses import dataclass
 
 _SOURCES: dict[str, dict] = {}
+# Sources whose items keep their text whole, line breaks included, instead of
+# the one line of TEXT_MAX notices.py cuts every other item to.
+_UNCUT: set[str] = set()
 
 
 @dataclass(frozen=True)
@@ -31,11 +34,20 @@ class Item:
     wake: bool = False
 
 
-def declare(name: str, defaults: dict) -> None:
+def declare(name: str, defaults: dict, *, cut: bool = True) -> None:
     """Declare ``name`` with its keys and their defaults. A bool default
     takes a bool, a number default a number above 0 (an int an int). An
-    empty dict declares a source that is only on or off."""
+    empty dict declares a source that is only on or off. ``cut`` False keeps
+    its items' text whole: a core source whose text aegis builds from facts
+    and must not lose its end."""
     _SOURCES[name] = dict(defaults)
+    if not cut:
+        _UNCUT.add(name)
+
+
+def cuts(name: str) -> bool:
+    """Whether ``name``'s item texts are cut to one short line."""
+    return name not in _UNCUT
 
 
 def declared() -> dict[str, dict]:

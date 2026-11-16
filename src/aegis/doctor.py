@@ -46,7 +46,7 @@ from .config import (
 )
 from .harness import harness_for
 from .links import LinkStore
-from . import mcp_servers
+from . import mcp_servers, scopes
 from .ops import OpError
 from .policy import McpServer
 from .harness_versions import OUTSIDE, VERSION_TIMEOUT_S, judge
@@ -333,7 +333,13 @@ def _agent(a: Agent, f: Found | None) -> list[Finding]:
         Finding(
             "ok",
             row,
-            f"{a.harness} {a.model}, effort {a.effort}, permission {a.permission}",
+            f"{a.harness} {a.model}, effort {a.effort}, permission {a.permission}"
+            + (f"; tools: {scopes.describe(a.tools)}" if a.tools else "")
+            + (
+                f"; budget: {', '.join(c.describe() for c in a.budget)}"
+                if a.budget
+                else ""
+            ),
             row,
         )
     ]
@@ -682,6 +688,8 @@ async def doctor(
     if "error" in snap.usage:
         out.append(Finding("error", "usage", snap.usage["error"]))
     out += _notices(snap.notices)
+    if "error" in snap.quota:
+        out.append(Finding("error", "quota", snap.quota["error"]))
     if "error" in snap.nudges:
         out.append(Finding("error", "nudges", snap.nudges["error"]))
     out.append(_park(snap.park))

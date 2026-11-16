@@ -290,7 +290,7 @@ class PageParams(_Strict):
 # The page's controls: what each offers.
 WINDOWS = (1, 4, 12, 26)
 PAGE_SPLITS = ("purpose", "repo", "owner", "mode", "model", "harness", "activity",
-               "person", "server")  # fmt: skip
+               "person", "agent", "queue", "server")  # fmt: skip
 
 
 def page_of(

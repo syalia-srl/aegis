@@ -30,10 +30,10 @@ FULL = """\
 default_agent: opus
 exit_via: far
 agents:
-  opus: {exit: "off", harness: claude-code, model: opus, effort: high, permission: full, priming: Be brief., keep_harness_tools: [Agent], mcp: [notes, phone], harness_tools: false, isolated: true, primer: false, notices: false}
+  opus: {exit: "off", harness: claude-code, model: opus, effort: high, permission: full, priming: Be brief., keep_harness_tools: [Agent], mcp: [notes, phone], harness_tools: false, isolated: true, primer: false, notices: false, tools: {deny: [workflows], queues: [general], agents: [quick]}, quota: {claude: {weekly_all: {used: 80, projected: 90, stop: 97}}, on_closed: refuse, advice: File it.}, budget: [{usd: 2, per: session}, {tokens: 2000000, per: 24h}]}
   quick: {harness: claude-code, models: [haiku, sonnet], effort: low, permission: read}
 queues:
-  general: {agent: opus, priority: 3, quiet: false}
+  general: {agent: opus, priority: 3, quiet: false, quota: {opencode-go: {weekly: pace}, on_closed: reject}, max_pending: 50}
 max_workers: 7
 model_ranking: false
 recap: {agent: quick}
@@ -66,6 +66,7 @@ usage:
 harness_versions: {person: warn, agent: "off", startup: "off", accepted: {opencode: ["2.0.33"]}}
 nudges: {silent_s: false, plan_min: 20}
 knowledge: {embeddings: minishlab/potion-multilingual-128M, know_how: false}
+quota: {projection: {half_life: {5h: 45m, week: 12h, month: 2d}}}
 notices:
   disk: {on: 80, critical: 95, clear: 70}
   memory: {on: 85, critical: 92, clear: 80, psi_full: 10}
@@ -77,6 +78,8 @@ notices:
   plan: {stale_min: 5}
   queues: false
   held: false
+  guard: false
+  budget: false
 """
 
 
@@ -100,6 +103,7 @@ def reader_keys() -> list[str]:
         "context": list(config.CONTEXT_DEFAULTS),
         "nudges": list(config.NUDGES_DEFAULTS),
         "knowledge": list(config.KNOWLEDGE_DEFAULTS),
+        "quota": [f"projection.half_life.{n}" for n in config.QUOTA_SPANS],
         "network": list(NET_KEYS),
         "host": ["hide_mounts", "add_mounts"],
         "notices": notices,
@@ -140,6 +144,9 @@ def paths(node: object, prefix: str = "") -> set[str]:
             "usage.owners",
             "usage.owner_names",
             "usage.subscriptions",
+            "agents.*.tools",
+            "agents.*.quota",
+            "queues.*.quota",
         ) or (p.startswith(("terminals.*.", "mcp.*.")) and p.count(".") == 2)
         out |= {p} if leaf else paths(v, p)
     return out

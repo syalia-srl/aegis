@@ -40,6 +40,7 @@ QUIET = "quiet"
 # its launch line. The default keeps a forgotten schedule from spending the
 # week; {} sets no line.
 Launch = Annotated[int, Field(ge=0, le=99)] | Literal["pace"]
+
 DEFAULT_QUOTA: dict[str, dict[str, Launch]] = {
     "claude": {"weekly_all": "pace"},
     "opencode-go": {"weekly": "pace"},
@@ -48,6 +49,34 @@ DEFAULT_QUOTA: dict[str, dict[str, Launch]] = {
 
 class _Strict(BaseModel):
     model_config = {"extra": "forbid"}
+
+
+class LineMap(_Strict):
+    """A line on percent used, projected at reset, or both
+    (quota_gate.line_of). A schedule only holds its fires, so its line takes
+    no stop: that interrupts turns, and only an agent's or a queue's does."""
+
+    used: Annotated[int, Field(ge=0, le=100)] | None = None
+    projected: Annotated[int, Field(ge=1, le=1000)] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _no_stop(cls, v: object) -> object:
+        if isinstance(v, dict) and "stop" in v:
+            raise ValueError(
+                "a schedule's line takes no stop: a schedule only holds its "
+                "fires; a stop line belongs on an agent's or a queue's quota"
+            )
+        return v
+
+    @model_validator(mode="after")
+    def _some(self) -> "LineMap":
+        if self.used is None and self.projected is None:
+            raise ValueError("a line names used, projected or both")
+        return self
+
+
+Line = Launch | LineMap
 
 
 class Check(_Strict):
@@ -84,12 +113,19 @@ class Definition(_Strict):
     check: Check | None = None
     fire: Fire
     prompt: str = Field(min_length=1)
-    quota: dict[str, dict[str, Launch]] = Field(
-        default_factory=lambda: {k: dict(v) for k, v in DEFAULT_QUOTA.items()},
+    quota: dict[str, dict[str, Line]] = Field(
+        default_factory=lambda: {
+            k: dict[str, Line](v) for k, v in DEFAULT_QUOTA.items()
+        },
         description="Launch lines by pool and window: a percent under which a "
-        'tick may fire, or "pace" (projected at most 100% at reset). A pool not '
-        "named has no line; {} sets none. Default: the weekly window on pace.",
+        'tick may fire, "pace" (projected below 100% at reset), or a map '
+        "{used, projected, stop} naming either or both. A pool not named has "
+        "no line; {} sets none. Default: the weekly window on pace.",
     )
+
+    def lines(self) -> dict[str, dict]:
+        """``quota`` as plain values, each line a percent, pace or a map."""
+        return self.model_dump(exclude_none=True)["quota"]
 
     @model_validator(mode="after")
     def _valid(self) -> "Definition":

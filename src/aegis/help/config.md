@@ -1,7 +1,7 @@
 ---
 title: Configuration
 kind: concept
-when: adding or changing agents, settings that differ per server (hosts:), the default agent, queues, recaps, side notes, the per-session memory cap, notices about disk, memory, CPU and quota, an agent's status and stalled monitors, when aegis nudges a silent agent, parking idle sessions, untested harness versions, search embeddings for skills and memories, the disks the Host rows list or the network readings in .aegis.yaml, or picking a theme
+when: adding or changing agents, an agent's spending budget, settings that differ per server (hosts:), the default agent, queues, recaps, side notes, the per-session memory cap, notices about disk, memory, CPU and quota, an agent's status and stalled monitors, when aegis nudges a silent agent, parking idle sessions, untested harness versions, search embeddings for skills and memories, the disks the Host rows list or the network readings in .aegis.yaml, or picking a theme
 hints:
   - Add an agent with its own harness, model and effort in .aegis.yaml. #add-an-agent
   - A cascade starts on a cheap model and moves up when the task needs it. #cascades
@@ -200,6 +200,238 @@ agents:
 A name that is not on that list stops the agent with an error rather than
 keeping nothing. Like the priming, the list is fixed when a session starts.
 
+## Scope an agent
+
+An agent may carry `tools:`, which fences what its sessions use of aegis.
+Without it the agent gets every aegis tool, as before.
+
+```yaml
+agents:
+  fair:
+    harness: claude-code
+    model: sonnet
+    effort: low
+    permission: full
+    tools:
+      deny: [spawn, workflows, schedules]
+      queues: [fair-work]          # queue_enqueue only here
+      agents: []                   # may start no session of any agent
+  helper:
+    harness: claude-code
+    model: haiku
+    effort: low
+    permission: write
+    tools:
+      allow: [turn_end, plan_update, toast, file_send, queue_enqueue, task_status, help]
+      queues: [helper]
+```
+
+`allow:` names the tools the agent keeps, `deny:` the ones it loses; give one
+of them, not both. Each takes tool names and these groups:
+
+| Group | Tools |
+|---|---|
+| `spawn` | session_spawn, session_handoff, peer_handoff, session_close |
+| `queues` | queue_enqueue, task_status, task_cancel, task_resume |
+| `workflows` | every workflow_* tool |
+| `schedules` | every schedule_* tool |
+| `browser` | every browser_* tool, signin_open |
+| `secrets` | secret_send, secret_request |
+| `config` | config_suggest, layout_set, skill_save, skill_delete, notice_announce |
+| `help` | help_search, help_read, meta |
+
+`turn_end` is always kept: a session without it cannot hand back its turn.
+`queues:` lists the queues `queue_enqueue` may name, and `agents:` the agents
+`session_spawn` and `session_handoff` may start and `peer_handoff` may reach;
+leaving either out means any, and `[]` means none. A `session_handoff` that
+continues on the session's own agent is always allowed, so a scoped agent can
+still hand off when its context fills. A name aegis does not know
+stops the agent with an error rather than leaving a tool open.
+
+A session lists only the tools in its scope, and its workplace prompt leaves
+out the paragraphs about the others. A call to a tool outside it, as a tool or
+through `aegis call`, is refused with out_of_scope and what the scope
+allows. The scope is fixed when the session starts, so editing the agent never
+widens a running session. A session started by another one (a spawn, a
+handoff, a queue worker, a workflow node, a schedule run made by an agent) gets
+its own agent's scope met with its starter's: a worker of `fair-work` that
+`fair` enqueued cannot start workflows even if its own agent can. `aegis
+doctor` shows an agent's scope on its row.
+
+## Guard an agent or a queue
+
+An agent or a queue may carry `quota:`, which holds its work back while the
+pool it draws on is over a line. Without it the agent or queue is never held,
+as before.
+
+```yaml
+agents:
+  fair:
+    harness: claude-code
+    model: sonnet
+    effort: low
+    permission: full
+    quota:
+      claude: {weekly_all: {used: 80, projected: 90, stop: 97}}
+      on_closed: warn
+      advice: Answer in the group in one short message and file the request as an issue.
+queues:
+  fair-work:
+    agent: deepseek
+    max_pending: 50
+    quota:
+      opencode-go: {monthly: {projected: 95, stop: 99}}
+      on_closed: reject
+```
+
+`quota:` maps a pool to its windows, as a schedule's quota does (schedules,
+[Quota lines](schedules#quota-lines)): the pool claude has session and
+weekly_all, opencode-go has rolling, weekly and monthly. Each window takes a
+line: a percent, the launch line on the percent used; `pace`, closed while
+the window is projected to pass 100% by its reset; or a map of `used`,
+`projected` and `stop`, naming used, projected or both. A map is closed when
+either launch line is reached (`projected: 90` at 90%), and stopped at
+`stop`, which is on the percent used. A stop cuts the running turns it covers,
+and continues them once a fresh reading finds the guard open: a stale reading
+or none keeps them cut. A stop never cuts a turn a person started, and a
+person's message to a cut session runs. A pool aegis has never read sets no
+line, and a reading older than 15 minutes closes the guard and never stops it.
+A `quota:` with `on_closed:` or `advice:` and no pool is an error.
+
+Beside the pools sit `on_closed:` and, for an agent, `advice`:
+
+| | `on_closed:` | What happens while the guard is closed |
+|---|---|---|
+| agent | `warn` (default) | every turn starts with the notice below |
+| agent | `refuse` | a wake no person started (a monitor, a task's result, a workflow step in its session) waits until the guard opens; a feed's batch stays in the feed, which delivers it when the guard opens; a schedule run is skipped, with why in its run log; a `peer_handoff` from an agent is refused with quota_closed. A person's message runs, with the notice, and the wakes held with it keep waiting |
+| queue | `hold` (default) | `queue_enqueue` takes the task, which waits |
+| queue | `warn` | the task is taken and waits; the reply carries a `warning` with why and when it opens |
+| queue | `reject` | `queue_enqueue` is refused with queue_closed, why and when it opens |
+
+`max_pending:` on a queue, a whole number from 1 up, refuses with queue_full
+any task that would go past that many pending tasks, whatever the guard says.
+
+The gate a turn or a worker passes is the most restrictive of its agent's
+guard, its queue's for a worker, and the guards of the agents up its chain of
+starters (the session that enqueued or spawned it, and so on). The agent's
+and the queue's are read on the pool the session draws on, and each
+starter's on the pool that starter's own model draws on. So a guarded agent
+cannot spend through an open queue on any pool: while `fair`'s Claude line is
+closed, a worker it enqueued on an OpenCode queue is closed too, and that
+queue's `on_closed:` decides what `fair`'s enqueue gets. A handoff carries the
+old session's guards only when the new session runs the same agent. A held
+queue leaves its share of `max_workers:` to the others; a model that is
+cooling only ever holds a task, whatever `on_closed:` says. Guards are read
+from the file as it is now: a line tightened on disk applies to sessions
+already running.
+
+While its guard is closed, a session is told so by an aegis notice, its own
+row in the transcript. It rides on the next prompt or, mid-turn, on the next
+tool call:
+
+```text
+> from aegis:notice · guard:closed · warn · 2026-11-15T09:12:00Z
+Your agent's quota guard is closed: agent fair: Claude weekly is at 86%, launch line 80%.
+While it is closed: queue fair-work rejects new tasks. Start no long work.
+Answer in the group in one short message and file the request as an issue.
+It opens again when Claude weekly drops below 80% used (agent fair), at the latest at Mon 02:00.
+```
+
+The second line names the queues in the agent's scope that reject or hold its
+tasks now, the third is `advice` or a default, and the last names every
+window that holds the guard, with the part of its line that tripped, and the
+latest of their resets. A stopped guard says `critical`. The notice comes
+once per change: after the guard opens, `guard:closed · clear` says it is
+open again. While it is closed the session is not also sent the pool's own
+quota notice. `notices: {guard: false}` turns it off for every agent, and an
+agent with `notices: false` gets no notice at all: under `on_closed: warn`
+such an agent runs its turns as if unguarded, held back only by its queues
+and the stop line. A wrong `quota:` or `max_pending:` stops the agent or
+queue with the error `aegis doctor` shows, and Settings shows both read-only.
+
+## Budget an agent
+
+An agent may carry `budget:`, a list of spending caps. Unlike `quota:`, which
+reads the pool's gauges, a budget counts what the agent's own sessions spent.
+Without it the agent spends without limit, as before.
+
+```yaml
+agents:
+  fair:
+    harness: claude-code
+    model: sonnet
+    effort: low
+    permission: full
+    budget:
+      - {usd: 2, per: session}
+      - {usd: 25, per: 7d}
+      - {tokens: 2000000, per: 24h}
+  deepseek:
+    harness: opencode
+    model: opencode-go/deepseek-v4-pro
+    effort: high
+    permission: full
+    budget: [{usd: 1, per: session}]   # bounds every task of a queue it runs
+```
+
+Each cap is `usd` or `tokens` and a `per:`. `usd` is each turn's cost as the
+harness reports it, the API-equivalent cost on a subscription, a finite
+number above 0; `tokens` is a whole number of input plus output tokens, not
+cache reads or cache writes. `per: session` caps one session; a duration in
+hours or days up to `366d` (`24h`, `7d`, `30d`) caps a rolling window that
+ends now. A cap counts turns once they end, from the usage rows (usage,
+[Split by any dimension](usage#split-by-any-dimension)): aegis estimates
+nothing before a turn.
+
+Spend is charged by lineage. A session's turns count for its own agent and
+for every agent up its chain of starters: the session that enqueued it,
+spawned it or handed off to it, and so on. Unlike a guard's chain, a handoff
+onto another agent stays on the old line: the new session's turns count for
+the old session's caps, so `session_handoff(agent=...)` does not escape a
+cap. A starter that was archived long ago still counts: its usage rows name
+its agent and its starter. So a worker that `fair` enqueued on a queue
+of `deepseek` counts for `deepseek`'s caps and for `fair`'s: for the
+per-session cap of the session that enqueued it, and for `fair`'s windows.
+
+- A session cap sums the session and every session started from it. Once
+  spent it never frees: an agent that keeps one session for weeks, such as a
+  feed reader, fits a window better. An enqueue from its line is refused with
+  queue_closed whatever the queue's `on_closed:` says, a task already
+  pending from it fails with the why, and a schedule run into it is skipped
+  with the why: none of them could ever start.
+- A window sums every session of the agent, and every session started from
+  one, over the window. It has room again when enough of its oldest spend
+  ages out, and aegis names that time.
+
+Past a cap, the session, and every running session whose chain holds the
+agent, is told once by an aegis notice, its own row in the transcript. It
+rides on the next prompt or, mid-turn, on the next tool call:
+
+```text
+> from aegis:notice · budget:spent:fair:7d · warn · 2026-11-15T09:12:00Z
+agent fair has spent $25.40 of $25 in the last 7d. Finish what you are doing as soon as possible and end your turn. aegis starts no turn here that a person did not start until it has room again, at Fri 14:05.
+```
+
+A Claude Code session reads it mid-turn on any tool call. OpenCode, Codex,
+Cursor and Pi sessions read it on their next aegis tool call, or with their
+next prompt. When that turn ends, the session starts no turn that a person
+did not start, as under a guard's `on_closed: refuse`, whatever its own
+`on_closed:` says. A wake waits, a feed's batch stays in the feed, a schedule
+run is skipped, and a `peer_handoff` from an agent is refused. A person's
+message runs, with the notice. Its enqueues meet each queue's `on_closed:`, as
+under a closed guard, past a window. Only a guard's stop line outranks a
+budget. When a window has room again, `budget:spent:fair:7d · clear` says so
+and what was held goes out; a session told of one cap is told again, with its
+own time, when another one names the gate.
+
+While usage is rebuilt or backfilled (`aegis journal rebuild`, an upgrade)
+the rows are not all there: each cap keeps what it last read, a capped line
+with nothing read yet stays closed with `usage is being rebuilt`, and no
+notice, clear or held work moves until the rows are back. `notices: {budget: false}` turns the notice off and leaves the
+caps. A wrong `budget:` stops the agent with the error `aegis doctor` shows,
+whose row also lists the caps. Settings shows them read-only, a wrong cap as
+invalid, and a save there writes `budget:` back as the file has it.
+
 ## The default agent
 
 `default_agent:` names the agent `session_spawn` starts from when it is given
@@ -220,6 +452,9 @@ gets two of them for each one a queue at priority 1 gets, and priority 0
 pauses a queue. Name queues by the goal their work serves (development,
 research, a client) rather than by the model that runs it, and move the
 priorities as the goals change: aegis reads the file again at once.
+
+`quota:` and `max_pending:` hold a queue's work back on the quota and bound
+its length; see [Guard an agent or a queue](#guard-an-agent-or-a-queue).
 
 `max_parallel:`, each queue's own bound before `max_workers:` existed, is ignored: a queue that
 still sets it runs, and `aegis doctor` warns. See the queues page for how
@@ -336,6 +571,7 @@ notices:
   feeds:    {wake: true}
   queues:   true
   held:     true
+  guard:    true
   status:   {lines: 5}
 ```
 
@@ -344,7 +580,7 @@ agent is warned. `monitors.stall_min` is the minutes a monitor's progress may
 sit still (and at least three intervals), `monitors.broken_checks` how many intervals a
 check may fail to run, and `monitors.overdue_min` how far past its ETA a monitor may
 run, before its owner is warned; with `wake: true` the warning wakes an idle
-owner. `feeds` warns a busy agent that a feed's items wait for its turn's end, and an idle one, with `wake: true`, that a feed paused after three failed reads. `held` warns a busy agent of each message held for its turn's end. `status.lines` caps the status block. Minutes may be fractions.
+owner. `feeds` warns a busy agent that a feed's items wait for its turn's end, and an idle one, with `wake: true`, that a feed paused after three failed reads. `held` warns a busy agent of each message held for its turn's end. `guard` tells an agent its quota guard is closed ([Guard an agent or a queue](#guard-an-agent-or-a-queue)). `status.lines` caps the status block. Minutes may be fractions.
 `false` in place of a source turns it off; `status: false` drops the status
 block and keeps the warnings. A name no installed source declares is ignored,
 and `aegis doctor` warns about it.
@@ -553,6 +789,27 @@ Settings → Search embeddings edits it.
 `knowledge.know_how`, true by default, tells a session about a repository's
 `know-how/` docs when it reaches that repository (help_read knowledge). Set it to
 false to turn that off. It is read when aegis starts.
+
+## Quota projection
+
+`quota:` sets how far back "the current rate" of a quota gauge looks
+(help_read usage#where-a-quota-gauge-says-it-will-land). Each window length
+takes a half-life: a shorter one follows a stop or a burst sooner, a longer one
+moves less with each pause.
+
+```yaml
+quota:
+  projection:
+    half_life:
+      5h: 30m      # the default: the window's length / 28, at least 30m
+      week: 6h
+      month: 1d
+```
+
+A value is a number and `m`, `h` or `d`, from 10 minutes to the window's
+length. `half_life: average` keeps the window's own average instead, for every
+window. A wrong block keeps the defaults, and `aegis doctor` says what is wrong.
+It is read on every reading, so a change takes effect without a restart.
 
 ## Exit through a link
 
