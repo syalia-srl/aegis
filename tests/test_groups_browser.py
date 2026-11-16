@@ -149,19 +149,17 @@ def test_popped_out_members_per_mark(server, page):  # noqa: F811
     def meta(key, mark):
         return m(key, 1, g, group_name="brisk-backus", mark=mark)
 
-    for mark in ("needs_you", "review", "done", "error"):
-        metas = [meta("a", "working"), meta("b", mark)]
-        assert popped(page, metas, f"{g}@alpha") == ["b"], mark
-    for mark in ("working", "waiting"):
+    # A folded block keeps every member inside, whatever its mark (#1076).
+    for mark in ("needs_you", "review", "done", "error", "working", "waiting"):
         metas = [meta("a", "working"), meta("b", mark)]
         assert popped(page, metas, f"{g}@alpha") == [], mark
     # An unfolded block pops nothing, and a lone tab never does.
     metas = [meta("a", "working"), meta("b", "needs_you")]
     assert popped(page, metas, f"{g}@alpha", folded=False) == []
     assert popped(page, [m("d", 4)], "d@alpha") == []
-    # The member in view pops out whatever its mark.
+    # Only the member in view pops out, whatever its mark.
     metas = [meta("a", "working"), meta("b", "needs_you"), meta("c", "working")]
-    assert popped(page, metas, f"{g}@alpha", focus="c") == ["b", "c"]
+    assert popped(page, metas, f"{g}@alpha", focus="c") == ["c"]
     assert popped(page, metas, f"{g}@alpha", focus="b") == ["b"]
     assert page.errors == []
 
@@ -563,7 +561,7 @@ def test_the_member_in_view_stays_popped_out_and_the_group_folded(server, page):
     assert page.errors == []
 
 
-def test_a_folded_member_that_needs_you_pops_out_and_goes_back(server, page):  # noqa: F811
+def test_a_folded_member_that_needs_you_stays_inside(server, page):  # noqa: F811
     page.goto(server.url)
     page.wait_for_selector("#a2[data-view=fleet]")
     a = spawn(page, "hello")
@@ -577,17 +575,15 @@ def test_a_folded_member_that_needs_you_pops_out_and_goes_back(server, page):  #
     page.evaluate("delete document.hasFocus")
     page.click(".tab.named .cnt")
     page.wait_for_function("document.querySelectorAll('.tblock.grp .tab').length === 1")
+    # In view, it is drawn beside the folded block.
     page.wait_for_selector(f".tab.out[data-id='{b}']")
-    [[head, hidden], *outs] = bar(page)
-    assert head == key and hidden == []
-    assert ["out", [b]] in outs
-    # Its next turn starts and the person looks elsewhere: the popped-out tab
-    # goes back inside (while in view it stays out, whatever its mark).
-    page.fill("#input", '/script [["sleep", 3]]')
-    page.press("#input", "Enter")
+    # Looking elsewhere, it goes back inside although it still needs you: the
+    # group's tab carries its mark and the count chip turns alert (#1076).
     page.goto(page.url.split("#")[0] + "#fleet")
     page.wait_for_function(f"!document.querySelector(\".tab.out[data-id='{b}']\")")
-    assert ["out", [b]] not in bar(page)
+    assert bar(page) == [[key, []]]
+    page.wait_for_selector(".tab.named .cnt.alert")
+    assert page.locator(".tab.named svg.ic.need").count() == 1
     assert page.errors == []
 
 
