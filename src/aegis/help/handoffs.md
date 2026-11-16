@@ -5,6 +5,7 @@ when: reading another session, giving it work or context, or starting one to wor
 hints:
   - An agent can read another session and hand it work without you copying text. #hand-work-over
   - Near the end of a long context, continue in a fresh session with a brief. #continue-in-a-fresh-session
+  - Start a line with @ and a handle or an agent to send it there instead. #mention-from-the-composer
 ---
 
 Sessions on one server can see each other. An agent can list the open
@@ -59,6 +60,40 @@ The reply says what happened: `landed at <handle>` (it was idle), `held for
 
 A handoff does not report back. If you need the answer, say in the context
 how to give it to you, for example by handing off back to your handle.
+
+## Mention from the composer
+
+A person's line that starts with `@name` goes somewhere other than the tab
+it was typed in. Typing `@` at the start of the box lists the agents and the
+open sessions; in the middle of a line it lists the sessions, and picking one
+only puts its handle into the text.
+
+- `@handle text` sends `text` to that session as a note, the way
+  `peer_handoff` does: at once if it is idle, held until its turn ends if it
+  is busy. `@!handle` reaches a busy session at its next tool step instead.
+  The tab you typed in neither waits nor starts a turn. `handle@server`
+  reaches a session on a linked server.
+- `@agent text` runs `text` once with that agent, as a task on the built-in
+  `mention` queue. The worker gets the question, the last turns of your tab
+  and your tab's handle for `peer_read`; its final message is the answer.
+- Two or more names make a committee: `@opus @deepseek @ben-ci review this
+  plan`. Every member answers, and once the last one has, or after 30
+  minutes, your tab's agent gets one message headed `> from committee ·
+  mention#<id>` with every answer, and merges them. The mention's block has
+  a Skip merge button while it waits.
+
+Each mention is one block in your tab: the line, a chip per member and each
+answer as it comes. The agent in your tab does not see a single answer when
+it lands; your next message to the tab carries it, quoted after your text.
+
+`@@` sends a line that starts with a literal `@`. An agent's name wins over a
+session with the same handle; `@s:handle` names the session. A mention takes
+no attached files.
+
+A session that gets a note answers it, when the note asks for an answer,
+with `mention_reply`: `id` (the `mention#` id the note names) and `text`. The
+answer shows in the asking tab and starts no turn anywhere. A note that asks
+nothing needs no reply, and a session that was not asked cannot reply.
 
 ## Start a peer
 
