@@ -158,7 +158,7 @@ figcaption{font-family:var(--font-mono);font-size:11px;color:var(--faint);margin
 <li><strong>No head.</strong> A group is headed by its name, never by a session, so archiving, handing off or moving any member changes nothing about who leads. The <code>leads</code> flag and the handoff's adoption of children (#641) go away.</li>
 <li><strong>The person edits membership.</strong> Drag a tab onto a block or use the tab menu, and it joins; drag it out, and it stands alone. The group's name is generated and a double click edits it.</li>
 <li><strong>The group's page is a Fleet.</strong> Clicking a group's tab shows the Fleet filtered to its members, ranked the way the Fleet ranks today: needs you first, then everything else.</li>
-<li><strong>A member that needs you pops out.</strong> While its group is folded, a member whose turn ends needs_you, review, done or error shows its own tab beside the block, as a quiet session's tab comes back today. It goes back inside when its next turn starts.</li>
+<li><strong>A folded group keeps its members inside.</strong> While its group is folded, a member that needs you stays in the block; the group's tab shows its mark and the count chip turns alert. Only the member in view is drawn beside the block. (Until #1076 a member whose turn ended needs_you, review, done or error popped out; folded groups filled the bar again.)</li>
 <li><strong>Flat.</strong> A group holds sessions, never groups, and a session is in one group at a time.</li>
 </ul>
 
@@ -171,7 +171,7 @@ figcaption{font-family:var(--font-mono);font-size:11px;color:var(--faint);margin
 <tr><td>Spawn default</td><td>What a session spawns or enqueues joins its group. <span class="who">maintainer</span></td><td class="why">Keeps what #586 does today: a chain of work stays together without anyone grouping it.</td></tr>
 <tr><td>No head</td><td>A group is headed by its name; no session leads it. <span class="who">maintainer</span></td><td class="why">With no leader there is no rule for who takes over when the head is archived or handed off.</td></tr>
 <tr><td>Flat</td><td>A group holds sessions only; a session is in one group. <span class="who">maintainer</span></td><td class="why">Nesting adds a tree to a bar that has no room for one.</td></tr>
-<tr><td>Pop out</td><td>A folded group's member whose turn ends needs_you, review, done or error shows its own tab beside the block. <span class="who">maintainer</span></td><td class="why">The person sees what needs them without opening the group.</td></tr>
+<tr><td>Pop out</td><td>A folded group's members stay inside it; only the member in view is drawn beside the block (#1076). <span class="who">maintainer</span></td><td class="why">The person folds a group to stop seeing its members; the group's tab and its alert chip still say that one needs them.</td></tr>
 <tr><td>Group page</td><td>The group's tab opens the Fleet filtered to its members, in the Fleet's own ranking. <span class="who">maintainer</span></td><td class="why">The Fleet "grouped as it happens today", not a new view.</td></tr>
 <tr><td>First spawn makes the group</td><td>A session in no group that spawns or enqueues gets a new group, and joins it with the child. <span class="who ag">agent</span></td><td class="why">The same result as today's implicit group keyed by the parent's log id, but as a record that outlives the parent.</td></tr>
 <tr><td>A person's /spawn</td><td>Joins the group of the tab it was typed in, making one if that tab has none. <span class="who ag">agent</span></td><td class="why">What #586 does today, kept under the one rule.</td></tr>
@@ -186,7 +186,7 @@ figcaption{font-family:var(--font-mono);font-size:11px;color:var(--faint);margin
 </table>
 
 <h2 id="try"><span class="n">03</span>Try it</h2>
-<p><span class="try">try it</span>Sample sessions. <em>Spawn from selected</em> starts a child from the tab in view: from a tab in no group it makes a new named group, from a member it joins that group. Click tabs to select them (dashed), then <em>Group selected</em> to group them by hand; with a group's page open, it adds the selected tabs to that group. Double click a group's name to rename it. Click the count to fold. <em>Simulate: needs you</em> ends a random member's turn on needs_you; with its group folded, its tab pops out. Clicking the group's name shows its Fleet below.</p>
+<p><span class="try">try it</span>Sample sessions. <em>Spawn from selected</em> starts a child from the tab in view: from a tab in no group it makes a new named group, from a member it joins that group. Click tabs to select them (dashed), then <em>Group selected</em> to group them by hand; with a group's page open, it adds the selected tabs to that group. Double click a group's name to rename it. Click the count to fold. <em>Simulate: needs you</em> ends a random member's turn on needs_you; with its group folded, its tab pops out (this demo predates #1076, which keeps it inside). Clicking the group's name shows its Fleet below.</p>
 <div class="bar" id="bar"></div>
 <div class="pane" id="pane"></div>
 <div class="ctl">
@@ -227,7 +227,7 @@ figcaption{font-family:var(--font-mono);font-size:11px;color:var(--faint);margin
 <li>Dragging the group's tab moves the whole block.</li>
 </ul>
 <h3>Pop out</h3>
-<p>While a block is folded, a member whose turn ended needs_you, review, done or error is drawn as its own tab right after the block, in the group's colour. It goes back inside when its next turn starts, the same trigger that takes a quiet session's tab away. The rule is computed in the client from each meta's <code>mark</code>, so it needs no server state. A folded block whose member is in view draws that member popped out rather than unfolding.</p>
+<p>While a block is folded, its members stay inside it whatever their mark: the group's tab shows the most urgent one and the count chip turns alert while a member needs you (#1076). A folded block whose member is in view draws that member as its own tab right after the block, in the group's colour, rather than unfolding. The rule is computed in the client, so it needs no server state.</p>
 <h3>Fleet</h3>
 <p>The main Fleet draws every group as a stack (<code>fleet.js</code> <code>unit</code>), with the group's name on the stack instead of a head session's handle. Quiet sessions and queue workers are drawn inside their group's stack, dimmed as today, instead of as cards apart.</p>
 

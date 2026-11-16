@@ -2,8 +2,8 @@
 // every browser; their order is this browser's own, kept in localStorage as a
 // list of log ids. Gone ids drop out, new sessions go at the end. A group (a
 // named record over sessions, groups.js) is drawn as one block headed by the
-// group's name, which can fold it to one tab (#1039). A folded block draws the
-// members that need the person as their own tabs beside it.
+// group's name, which can fold it to one tab (#1039). A folded block draws
+// only the member in view beside it (#1076).
 
 import { labelsFor, stateLabel } from "./labels.js";
 import { iconText, PANE_ICON } from "./glyphs.js";
@@ -102,8 +102,8 @@ export function renderTabs(list, metas, focusId, actions) {
       });
       head.append(cnt);
       box.append(head, ...(folded ? [] : b.members.map((m) => tab(m, focusId, actions, "member"))));
-      // The members that need the person, drawn as their own tabs right after
-      // the folded block, in the group's colour (#1039).
+      // The member in view, drawn as its own tab right after the folded block,
+      // in the group's colour (#1076).
       const out = poppedOut(b, folded, focusId).map((m) => {
         const beside = document.createElement("div");
         beside.className = "tblock out";
@@ -124,7 +124,7 @@ export function renderTabs(list, metas, focusId, actions) {
 export function patchTab(list, m, focusId, actions) {
   const old = list.querySelector(`.tab[data-id="${CSS.escape(m.key)}"]`);
   if (!old) {
-    // A folded member has no tab of its own, but its mark may pop it out.
+    // A folded member has no tab of its own, but its mark changes the group's tab.
     const key = groupKey(m, actions.here || "");
     return !list.querySelector(`.tblock.grp[data-group="${CSS.escape(key)}"]`);
   }

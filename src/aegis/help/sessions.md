@@ -361,11 +361,11 @@ To edit a group by hand:
   in that group, handles alone make them leave, and a group and name with no
   handles rename it.
 
-While a block is folded, a member whose turn ends needs_you, review, done or
-error shows its own tab beside the block, in the group's colour, so you see
-it without unfolding. Its next turn starts and the tab goes back inside. The
-member you are looking at also stays drawn beside the block, whatever its
-mark, and the block stays folded.
+While a block is folded, its members stay inside it, whatever their mark: the
+group's tab shows the most urgent mark among them, and its `+N` chip turns
+alert while one needs you. Unfold the block to see which. The member you are
+looking at is the one exception: it stays drawn beside the block, in the
+group's colour, and the block stays folded.
 
 Alt+Shift+[ and Alt+Shift+] move the tab in front one place left or right, by
 the same rules, from the message box too: a member within its group, a lone
