@@ -1,0 +1,2 @@
+- **An Android app that lets agents use your phone.** The aegis app for Android runs the same web client as the browser, loaded from your server, and pairs the phone with one button in Settings → Phone app. Your agents then call `device_list` and `device_call` to read its sensors and compass, and the phone shows sessions that need you, errors and toasts as notifications. The phone holds a key in its Keystore and decides what each call may do; Unpair in Settings cuts it off.
+help: devices
