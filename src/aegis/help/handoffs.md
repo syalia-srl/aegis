@@ -63,37 +63,35 @@ how to give it to you, for example by handing off back to your handle.
 
 ## Mention from the composer
 
-A person's line that starts with `@name` goes somewhere other than the tab
-it was typed in. Typing `@` at the start of the box lists the agents and the
-open sessions; in the middle of a line it lists the sessions, and picking one
-only puts its handle into the text.
+A line that starts with `@name` goes to another session or agent instead of
+this tab. At the start of the box, `@` lists the agents and the open
+sessions; mid-line it lists the sessions and only puts a handle in the text.
 
-- `@handle text` sends `text` to that session as a note, the way
-  `peer_handoff` does: at once if it is idle, held until its turn ends if it
-  is busy. `@!handle` reaches a busy session at its next tool step instead.
-  The tab you typed in neither waits nor starts a turn. `handle@server`
-  reaches a session on a linked server.
-- `@agent text` runs `text` once with that agent, as a task on the built-in
-  `mention` queue. The worker gets the question, the last turns of your tab
-  and your tab's handle for `peer_read`; its final message is the answer.
-- Two or more names make a committee: `@opus @deepseek @ben-ci review this
-  plan`. Every member answers, and once the last one has, or after 30
-  minutes, your tab's agent gets one message headed `> from committee ·
-  mention#<id>` with every answer, and merges them. The mention's block has
-  a Skip merge button while it waits.
+- `@handle text` sends a note, as `peer_handoff` does: held until the turn
+  ends when that session is busy, or at its next tool step with `@!handle`.
+  `handle@server` reaches a linked server. This tab neither waits nor starts
+  a turn.
+- `@agent text` runs `text` once with that agent on the built-in `mention`
+  queue. The worker gets the question, your tab's last turns and its handle
+  for `peer_read`.
 
-Each mention is one block in your tab: the line, a chip per member and each
-answer as it comes. The agent in your tab does not see a single answer when
-it lands; your next message to the tab carries it, quoted after your text.
+Each mention is one block in your tab with each answer. Your next message
+carries a single answer to the tab's agent, quoted after your text. `@@`
+starts a line with a literal `@`; `@s:handle` picks a session over an agent
+of the same name.
 
-`@@` sends a line that starts with a literal `@`. An agent's name wins over a
-session with the same handle; `@s:handle` names the session. A mention takes
-no attached files.
+## Convene a committee
 
-A session that gets a note answers it, when the note asks for an answer,
-with `mention_reply`: `id` (the `mention#` id the note names) and `text`. The
-answer shows in the asking tab and starts no turn anywhere. A note that asks
-nothing needs no reply, and a session that was not asked cannot reply.
+Two or more names make a committee: `@opus @deepseek @ben-ci review this
+plan`. Once every member answered, or after 30 minutes, this tab's agent gets
+one message headed `> from committee · mention#<id>` with every answer and
+merges them. The block's Skip merge button cancels that while it waits.
+
+## Answer a mention
+
+A note that asks for an answer names its id. Answer with `mention_reply`:
+`id` and `text`. The answer shows in the asking tab and starts no turn. A
+session that was not asked cannot reply.
 
 ## Start a peer
 
