@@ -2305,6 +2305,40 @@ const RENDERERS = {
     return r;
   },
 
+  // An @ mention (mentions.py): the line, a chip per member, each answer as
+  // it lands and, for a committee, its merge and the button that skips it.
+  mention(e, opts = {}) {
+    const t = opts.t || en;
+    const det = e.detail || {};
+    const body = el("div", "body");
+    const hd = el("div", "hd");
+    hd.append(el("span", null, t(det.committee ? "entries.mention.committee" : "entries.mention.label")), el("span", "q", det.body));
+    const chips = el("div", "chips");
+    for (const m of det.members || []) chips.append(el("span", `chip ${m.state}`, `${m.name} · ${t(`entries.mention.state.${m.state}`)}`));
+    body.append(hd, chips);
+    for (const m of det.members || []) {
+      if (m.state === "answered") {
+        const a = el("div", "ans");
+        const md = markdown(m.answer, { t });
+        a.append(el("div", "who", m.name), md);
+        body.append(a);
+      } else if (m.state === "failed") body.append(el("div", "why", t("entries.mention.failed", { name: m.name, why: m.why })));
+    }
+    if (det.committee) {
+      const ft = el("div", "ft");
+      ft.append(el("span", null, t(det.merge === "sent" ? "entries.mention.merged" : det.merge === "skipped" ? "entries.mention.skipped" : "entries.mention.waiting")));
+      if (!det.merge) {
+        const skip = el("button", "btn link", t("entries.mention.skip"));
+        skip.dataset.mentionSkip = det.id;
+        ft.append(skip);
+      }
+      body.append(ft);
+    }
+    const r = row(e, "mention", body);
+    r.querySelector(".g").replaceChildren(icon("swap"));
+    return r;
+  },
+
   error(e) {
     const body = el("div", "body", e.summary);
     if (e.detail?.tail) body.append(el("pre", "out", e.detail.tail));

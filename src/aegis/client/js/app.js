@@ -22,7 +22,7 @@ import { installKeys, renderKeys } from "./keys.js";
 import { Palette } from "./palette.js";
 import { HeaderPart } from "./parts/header.js";
 import { SidebarPart } from "./parts/sidebar.js";
-import { CommandsPart } from "./parts/commands.js";
+import { CommandsPart, mentionable } from "./parts/commands.js";
 import { DictationPart } from "./parts/dictation.js";
 import { SpawnPart } from "./parts/spawn.js";
 import { FleetPart } from "./parts/fleet.js";
@@ -2006,6 +2006,11 @@ async function askRecap(force) {
   if (force && why && app.state.shown === id) toast(why, { kind });
 }
 $("entries").addEventListener("click", (ev) => {
+  const skip = ev.target.closest("[data-mention-skip]");
+  if (skip && app.state.shown) {
+    app.callFor(app.state.shown, "mention.skip", { id: skip.dataset.mentionSkip }).catch((e) => toast(e.message, { kind: "error" }));
+    return;
+  }
   const cancel = ev.target.closest("[data-btw-cancel]");
   if (cancel && app.state.shown) {
     app.callFor(app.state.shown, "btw.cancel", { id: cancel.dataset.btwCancel }).catch((e) => toast(e.message, { kind: "error" }));
@@ -2914,13 +2919,16 @@ const menu = new CommandsPart(app, $("composer"), {
   fetch: loadCommands,
   run: (line) => sendLine(line, false),
   getLine: () => input.value,
-  setLine: (v) => {
+  setLine: (v, caret) => {
     input.value = v;
     autosize();
     if (app.state.shown) localStorage.setItem(`aegis.draft.${app.state.shown}`, v);
     input.focus();
+    if (caret !== undefined) input.setSelectionRange(caret, caret);
   },
   meta: () => focused(),
+  getCaret: () => input.selectionStart ?? input.value.length,
+  sessions: () => mentionable(app.state.sessions, app.state.shown),
 });
 
 for (const [id, cmd] of [
@@ -3062,12 +3070,13 @@ input.addEventListener("input", async () => {
   if (app.state.shown) localStorage.setItem(`aegis.draft.${app.state.shown}`, input.value);
   if (!input.value.trim()) spoken.delete(`aegis.draft.${app.state.shown}`); // a box emptied by hand starts over
   const v = input.value;
-  if (v.startsWith("/") && !v.startsWith("//")) {
+  if ((v.startsWith("/") && !v.startsWith("//")) || menu.mentioning()) {
     if (menu.isOpen) menu.refresh();
     else await menu.openInline(); // the outline below needs the catalog it loads
   } else if (menu.isOpen) menu.close();
   const now = input.value;
-  $("composer").classList.toggle("bad", now.startsWith("/") && !now.startsWith("//") && !menu.known(now));
+  const checked = (now.startsWith("/") && !now.startsWith("//")) || (now.startsWith("@") && !now.startsWith("@@"));
+  $("composer").classList.toggle("bad", checked && !menu.known(now));
 });
 input.addEventListener("keydown", (ev) => {
   if (menu.onKey(ev)) return;

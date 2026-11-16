@@ -25,7 +25,7 @@ import { workflowLocked, workflowTitle } from "../entries.js";
 import { factIcon, icon } from "../glyphs.js";
 import { idleFor } from "../lifecycle.js";
 import { forKey, keyOf } from "../mount.js";
-import { CommandsPart, catalogFor } from "./commands.js";
+import { CommandsPart, catalogFor, mentionable } from "./commands.js";
 import { DictationPart } from "./dictation.js";
 import { toast } from "../toast.js";
 
@@ -135,13 +135,16 @@ export class ComposerPart {
       fetch: (key) => catalogFor(this.mount, key),
       run: (line) => this.sendLine(line, false),
       getLine: () => this.input.value,
-      setLine: (v) => {
+      setLine: (v, caret) => {
         this.input.value = v;
         this.autosize();
         if (this.key) localStorage.setItem(`aegis.draft.${this.key}`, v);
         this.input.focus();
+        if (caret !== undefined) this.input.setSelectionRange(caret, caret);
       },
       meta: () => this.meta(),
+      getCaret: () => this.input.selectionStart ?? this.input.value.length,
+      sessions: () => mentionable(this.mount.state.sessions, this.key),
     });
   }
 
@@ -354,13 +357,14 @@ export class ComposerPart {
     if (!this.input.value.trim() && this.key) this.spoken.delete(`aegis.draft.${this.key}`);
     if (this.menu) {
       const v = this.input.value;
-      if (v.startsWith("/") && !v.startsWith("//")) {
+      if ((v.startsWith("/") && !v.startsWith("//")) || this.menu.mentioning()) {
         if (this.menu.isOpen) this.menu.refresh();
         else this.menu.openInline();
       } else if (this.menu.isOpen) this.menu.close();
     }
     const now = this.input.value;
-    this.el.classList.toggle("bad", now.startsWith("/") && !now.startsWith("//") && !(this.menu?.known(now) ?? true));
+    const checked = (now.startsWith("/") && !now.startsWith("//")) || (now.startsWith("@") && !now.startsWith("@@"));
+    this.el.classList.toggle("bad", checked && !(this.menu?.known(now) ?? true));
   }
 
   onKey(ev) {
