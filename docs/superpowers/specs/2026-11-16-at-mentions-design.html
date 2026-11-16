@@ -156,7 +156,7 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)} pre .s{color:var(--ok)}
 <div class="chrome">
   <span>aegis</span>
   <span class="tab">spec · @ mentions</span>
-  <span class="st"><span class="pill acc">draft</span><span class="pill">2026-11-16</span></span>
+  <span class="st"><span class="pill acc">approved</span><span class="pill">#1083</span><span class="pill">2026-11-16</span></span>
 </div>
 
 <div class="wrap">
@@ -173,7 +173,7 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)} pre .s{color:var(--ok)}
   <a href="#fits">How it fits</a>
   <a href="#testing">Testing</a>
   <a href="#nongoals">Non-goals</a>
-  <a href="#open">Open questions</a>
+  <a href="#open">Settled questions</a>
 </nav>
 
 <main>
@@ -214,7 +214,7 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)} pre .s{color:var(--ok)}
 <tr><td>name clash</td><td>an agent name wins, and <code>@s:handle</code> forces the session</td><td class="why">Handles are free-form, so one could equal an agent name. Agent names are few and fixed in config.</td></tr>
 <tr><td>busy session</td><td>a note is held until that session's turn ends. <code>@!handle</code> delivers it as urgent, at its next tool step</td><td class="why">A note should not derail work in progress. Urgent exists for a correction.</td></tr>
 <tr><td>answers</td><td>every answer lands in the asking tab as a block, through a new agent tool <code>mention_reply</code></td><td class="why">The person reads it where they asked. A <code>peer_handoff</code> reply would start a turn in the asking tab.</td></tr>
-<tr><td>a single answer</td><td>one block. It travels with the person's next message to that tab, quoted, and starts no turn</td><td class="why">The tab's agent stays coherent with what the person saw, and no turn is spent. See open question 1.</td></tr>
+<tr><td>a single answer</td><td>one block. It travels with the person's next message to that tab, quoted, and starts no turn</td><td class="why">The tab's agent stays coherent with what the person saw, and no turn is spent. Cut at 2,000 characters.</td></tr>
 <tr><td>synthesis</td><td>the asking tab's own agent merges a committee's answers in one turn</td><td class="why">It has the full context and needs no extra agent. A busy tab gets the message when its turn ends.</td></tr>
 <tr><td>member memory</td><td>each <code>@agent</code> run starts fresh. No hidden per-agent session is kept</td><td class="why">Kept sessions would pile up, one per agent per tab, with nowhere to show them.</td></tr>
 <tr><td>context for an agent</td><td>the question, a <code>btw.window()</code> tail of the asking tab, and the tab's handle for <code>peer_read</code></td><td class="why">Free (no model call). The member can pull more when the tail is not enough.</td></tr>
@@ -362,11 +362,11 @@ where they differ and why, and what you recommend.
   <li>Expanding aspects (<code>@fable criticize the {safety, feasibility, cost}</code>). The aspects trade off against each other, and one run sees that while separate runs do not. Braces are common in pasted code. An aspect that needs deep work of its own belongs in <code>/enqueue</code> or a workflow's fan-out.</li>
 </ul>
 
-<h2 id="open"><span class="n">13</span>Open questions</h2>
+<h2 id="open"><span class="n">13</span>Settled questions</h2>
 <ol>
-  <li>A single answer rides with the next person message. The alternative is that the tab's agent never sees it, as with <code>/btw</code>. Riding along keeps the agent's picture complete, but makes the next prompt longer.</li>
-  <li>Should a committee's merge be skippable, for when the person only wants the separate answers? For example, a trailing <code>--raw</code>, or a button on the <code>mention</code> line that cancels the merge before it goes out.</li>
-  <li>Should the worker's tail size be fixed (<code>btw.window()</code> defaults), or set per agent? A small model has less room for it.</li>
+  <li>A single answer travels with the person's next message to the tab, once, and is cut at 2,000 characters with a note that the full text is in the tab's mention block. If the agent never saw it, "do what it said" would mean nothing to it. <span class="who">maintainer</span></li>
+  <li>A committee's merge can be skipped with a "skip merge" control on the <code>mention</code> line, until the last answer arrives. There is no syntax for it. The default stays merge. <span class="who">maintainer</span></li>
+  <li>Every member gets the same <code>btw.window()</code> tail at its default size. A member that needs more uses <code>peer_read</code>. <span class="who">maintainer</span></li>
 </ol>
 </main>
 </div>
