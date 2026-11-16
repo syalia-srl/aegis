@@ -358,6 +358,8 @@ where they differ and why, and what you recommend.
   <li>Saved committees with names (<code>@reviewers</code>). A later version could add them as a list in <code>.aegis.yaml</code>.</li>
   <li>Members that remember earlier mentions.</li>
   <li>A separate synthesizer agent.</li>
+  <li>Copies of one agent (<code>@fable:3</code>). Runs of one model on one prompt mostly repeat each other, so three copies give one view at three times the cost. Different models give different views, and a committee of them already exists. Copies that differ through seeded prompts are personas, which belong in config as named committees.</li>
+  <li>Expanding aspects (<code>@fable criticize the {safety, feasibility, cost}</code>). The aspects trade off against each other, and one run sees that while separate runs do not. Braces are common in pasted code. An aspect that needs deep work of its own belongs in <code>/enqueue</code> or a workflow's fan-out.</li>
 </ul>
 
 <h2 id="open"><span class="n">13</span>Open questions</h2>
