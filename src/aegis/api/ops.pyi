@@ -55,6 +55,8 @@ class Ops:
     def mcp(self) -> _mcp: ...
     @property
     def memory(self) -> _memory: ...
+    @property
+    def mention(self) -> _mention: ...
     async def meta(self) -> Any:
         """How aegis works for you, and its tools."""
     @property
@@ -585,6 +587,12 @@ class _memory:
         """Save a memory: one fact that later sessions should know, such as who the person is, how they want you to work, or where something runs. Saving an existing name replaces that memory. Set asked: true when the person's message that began this turn asked you to remember it; it is then saved at once, with a card that lets them undo it. Otherwise a new memory is proposed: a card in your transcript asks the person to approve it, and it is not hinted until then; a change to an approved one applies at once, and its card lets the person undo it."""
     async def search(self, *, query: str, limit: int = ...) -> Any:
         """Search your memories (facts about the person, their projects and how they want you to work) with your own words. Returns the best names with their description, score, status and flags; read one with memory_read. Proposed and expired memories are included and marked."""
+
+class _mention:
+    async def reply(self, *, id: str, text: str) -> Any:
+        """Answer an @ mention that asked you: a note whose last line names `mention_reply id=...`. The person reads your text in the session they typed the note in, and a committee waits for it there; it starts no turn anywhere."""
+    async def skip(self, *, log_id: str, id: str) -> Any:
+        """Skip a committee's merge before it goes out; its answers stay."""
 
 class _models:
     async def list(self) -> Any:
