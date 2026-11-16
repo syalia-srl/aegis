@@ -585,7 +585,7 @@ SECTIONS = {
         "What the Net, Exit and Speed readings reach, and how often, in seconds."
         " A speed_interval of 0 turns the speed test off.",
     ),
-    "models": (
+    "ranking": (
         "Model ranking",
         "Download the nightly Artificial Analysis ranking once a day, so new"
         " models are ranked without a release. Off reads only the ranking"
@@ -654,7 +654,7 @@ def fields() -> list[dict]:
         add("quota", f"quota.projection.half_life.{name}", "text", default)
     add("embeddings", "knowledge.embeddings", "text", KNOWLEDGE_DEFAULTS["embeddings"])
     add("embeddings", "knowledge.know_how", "bool", KNOWLEDGE_DEFAULTS["know_how"])
-    add("models", "model_ranking", "bool", True)
+    add("ranking", "model_ranking", "bool", True)
     for k, v in host_from(None)[0].items():
         add("host", f"host.{k}", "list", v)
     return out

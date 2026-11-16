@@ -264,7 +264,7 @@ export class Settings {
       this.checks(),
       this.agents(),
       this.modelsView(),
-      this.fieldSection("models"),
+      this.fieldSection("ranking"),
       this.queues(),
       this.fieldSection("generators"),
       this.terminals(),

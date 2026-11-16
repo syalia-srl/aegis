@@ -148,6 +148,8 @@ def test_ask_and_ask_aside_with_a_draft(btw_server, page):  # noqa: F811
     page.wait_for_selector(".row.btw .hd .q", timeout=8000)
     # textContent: innerText reads a row content-visibility skips as "" (#359).
     assert "kiwi" in page.locator(".row.btw .hd .q").text_content()
+    # The answer redraws the row and drops a selection made before it.
+    page.wait_for_selector(".row.btw:not(:has(.ans.wait))")
     # Copy takes the clean text; with Shift, the quote.
     select(page, REPLY, "kiwi")
     page.click(".sbar [data-id=copy]")
@@ -532,7 +534,7 @@ def test_a_row_link_in_the_shown_session_reveals_it_and_tabs_still_cycle(server,
     assert page.errors == []
 
 
-def test_a_linked_servers_rows_open_no_file_and_spawn_there(
+def test_a_linked_servers_rows_open_their_file_and_spawn_there(
     linked,  # noqa: F811
     browser,  # noqa: F811
     page,
@@ -547,7 +549,8 @@ def test_a_linked_servers_rows_open_no_file_and_spawn_there(
     turns_done(page, 1)
     cwd = page.locator("#s-cwd").inner_text()
     page.click(".row.tool .line", button="right")
-    assert menu_ids(page) == ["copyout", "reply", "link"]
+    # #1044: the file opens through the link, from the server that has it.
+    assert menu_ids(page) == ["open", "copyout", "reply", "link"]
     page.keyboard.press("Escape")
     select(page, REPLY, "Read")
     page.click(".sbar [data-id=new]")
