@@ -21,9 +21,6 @@ export function hueOf(key) {
   return h % 4;
 }
 
-// The marks a folded block pops out of it, in the order they matter (#1039).
-export const POP = ["needs_you", "review", "done", "error"];
-
 // The marks a block's head shows, most urgent first: tabs.js's order, with
 // done last for a group whose every member has finished.
 const URGENT = ["needs_you", "error", "review", "working", "waiting", "done"];
@@ -68,10 +65,10 @@ export function blocksOf(metas, here) {
   });
 }
 
-// What a folded block draws beside itself: the members whose turn ended on a
-// mark that needs the person, until their next turn starts, and the member in
-// view (`focusId`), whatever its mark, so the block stays folded (#1039).
+// What a folded block draws beside itself: only the member in view
+// (`focusId`), so the block stays folded. A member that needs the person stays
+// inside; the group's tab shows its mark and the count chip turns alert (#1076).
 export function poppedOut(block, folded, focusId) {
   if (!folded || block.head.kind !== "group") return [];
-  return block.members.filter((m) => POP.includes(m.mark) || m.key === focusId);
+  return block.members.filter((m) => m.key === focusId);
 }
