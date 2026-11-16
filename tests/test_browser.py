@@ -1970,27 +1970,25 @@ ACTS = """bs => bs.map(b => {
 })"""
 
 
-def test_the_actions_are_two_rows_of_equal_cells_with_icons(server, page):
+def test_the_actions_are_one_row_of_equal_icon_cells(server, page):
+    """#1022: the live actions are icons only, one row edge to edge, at any
+    panel width; each button's title names it."""
     page.goto(server.url)
     page.wait_for_selector("#a2[data-view=fleet]")
     spawn(page)
-    box = page.locator(".side-acts.live-only").bounding_box()
-    cells = page.eval_on_selector_all(".side-acts.live-only .act", ACTS)
-    # Sleep, Quiet (#386), Autoclose (#691); Continue, Restart, Archive.
-    assert [c["icon"] for c in cells] == [True] * 6
-    widths = [c["width"] for c in cells]
-    assert max(widths) - min(widths) < 1, widths
-    # Each row of three is covered edge to edge.
-    for row in (cells[:3], cells[3:]):
-        assert abs(row[0]["left"] - box["x"]) < 1
-        assert abs(row[-1]["right"] - (box["x"] + box["width"])) < 1
-    assert all(c["label"] != "none" for c in cells)
-    # A narrow panel keeps the rows and drops the labels.
-    drag_panel(page, 205)
-    cells = page.eval_on_selector_all(".side-acts.live-only .act", ACTS)
-    widths = [c["width"] for c in cells]
-    assert max(widths) - min(widths) < 1, widths
-    assert all(c["label"] == "none" for c in cells)
+    # Sleep, Quiet (#386), Autoclose (#691), Autohandoff (#1019); Continue,
+    # Restart, Archive.
+    for width in (None, 205):
+        if width:
+            drag_panel(page, width)
+        box = page.locator(".side-acts.live-only").bounding_box()
+        cells = page.eval_on_selector_all(".side-acts.live-only .act", ACTS)
+        assert [c["icon"] for c in cells] == [True] * 7
+        assert all(c["label"] == "none" for c in cells)
+        widths = [c["width"] for c in cells]
+        assert max(widths) - min(widths) < 1, widths
+        assert abs(cells[0]["left"] - box["x"]) < 1
+        assert abs(cells[-1]["right"] - (box["x"] + box["width"])) < 1, (cells, box)
     assert page.errors == []
 
 
@@ -3433,6 +3431,16 @@ def enqueue(pg, payload: str) -> None:
     pg.press("#input", "Enter")
 
 
+def fleet_unfolded(pg) -> None:
+    """The Fleet, with every group open: a worker joins the group of the
+    session that enqueued it, and a group is one folded stack until clicked."""
+    pg.click("#tab-fleet")
+    pg.wait_for_selector("#a2[data-view=fleet]")
+    while pg.locator("#cards .stack").count():
+        pg.click("#cards .stack >> nth=0")
+        pg.wait_for_selector("#cards .gopen")
+
+
 def test_a_session_waiting_on_a_worker_names_it_and_opens_it(queue_server, page):
     """#420: a session waiting on its queue task read a bare "waiting"."""
     page.goto(queue_server.url)
@@ -3444,7 +3452,7 @@ def test_a_session_waiting_on_a_worker_names_it_and_opens_it(queue_server, page)
     row = page.wait_for_selector("#s-wait-sec:not([hidden]) .kv.wait.go")
     handle = row.query_selector("span").text_content()
     assert row.query_selector(".r").text_content() == "queue q · running"
-    page.click("#tab-fleet")
+    fleet_unfolded(page)
     page.wait_for_selector(
         f"#cards .card[data-id='{boss}'] .s >> text=waiting · {handle}"
     )
@@ -3478,13 +3486,13 @@ def test_a_finished_worker_fades_and_sinks_below_the_live_cards_and_an_errored_o
     boss = spawn(page, "hello")
     enqueue(page, "/exit 4")
     turns_done(page, 2)
-    page.click("#tab-fleet")
+    fleet_unfolded(page)
     page.wait_for_selector("#cards .card.at-error .badge >> text=worker · q")
     failed = page.get_attribute("#cards .card.at-error", "data-id")
-    page.click("#tab-fleet")
+    fleet_unfolded(page)
     page.click(f"#tablist .tab[data-id='{boss}']")
     enqueue(page, "/busy 4")
-    page.click("#tab-fleet")
+    fleet_unfolded(page)
     page.wait_for_selector("#cards .card:not(.at-error) .badge >> text=worker · q")
     worker = page.get_attribute("#cards .card:not(.at-error):has(.badge)", "data-id")
     # Live: not finished, but quiet (#386): dimmed, last, with no tab.
@@ -3501,10 +3509,14 @@ def test_a_finished_worker_fades_and_sinks_below_the_live_cards_and_an_errored_o
     page.click(f"#arch-list tr[data-id='{worker}'] .btn.reopen")
     page.wait_for_selector("#a2[data-view=session][data-mode=live]")
     live = spawn(page, "still going")
-    page.click("#tab-fleet")
+    fleet_unfolded(page)
     page.wait_for_selector(f"#cards .card[data-id='{worker}'].finished")
-    # A live card above it, whatever the order the tabs are in.
-    assert card_ids(page) == [failed, boss, live, worker]
+    # A live card above it, whatever the order the tabs are in. The worker is
+    # in its enqueuer's group, which keeps its members together: it sinks to
+    # the bottom of the group, below the boss and the errored worker.
+    ids = card_ids(page)
+    assert sorted(ids) == sorted([failed, boss, live, worker])
+    assert ids.index(worker) > max(ids.index(boss), ids.index(failed))
     assert page.locator(f"#cards .card[data-id='{failed}'].finished").count() == 0
     assert card_opacity(page, failed) == "1"
     assert card_opacity(page, worker) == "0.5"
@@ -3520,7 +3532,7 @@ def test_a_finished_worker_fades_and_sinks_below_the_live_cards_and_an_errored_o
     # An errored turn is not faded, though the task behind it is over.
     page.fill("#input", "/exit 4")
     page.press("#input", "Enter")
-    page.click("#tab-fleet")
+    fleet_unfolded(page)
     page.wait_for_selector(f"#cards .card[data-id='{worker}'].at-error")
     assert page.locator(f"#cards .card[data-id='{worker}'].finished").count() == 0
     assert card_opacity(page, worker) == "1"
@@ -3543,7 +3555,7 @@ def test_the_session_panel_names_the_server_and_marks_a_queue_worker(
     # its open panel goes back to the Fleet, which a slow runner reached
     # before the badge was checked when the task took 4 s.
     enqueue(page, "/busy 60")
-    page.click("#tab-fleet")
+    fleet_unfolded(page)
     page.wait_for_selector("#cards .card .badge >> text=worker · q")
     page.click("#cards .card:has(.badge)")
     page.wait_for_selector("#a2[data-view=session]")
@@ -3587,7 +3599,7 @@ def test_a_click_on_a_quiet_card_opens_it_when_a_patch_overtakes_the_unquiet(
     page.wait_for_selector("#a2[data-view=fleet]")
     spawn(page, "hello")
     enqueue(page, "/stream 400")  # a card patch every few hundred ms
-    page.click("#tab-fleet")
+    fleet_unfolded(page)
     page.wait_for_selector("#cards .card.quiet .badge >> text=worker · q")
     worker = page.get_attribute("#cards .card:has(.badge)", "data-id")
     gate["worker"] = worker
@@ -6723,8 +6735,13 @@ def test_a_phone_header_is_one_row_with_the_tabs_beside_the_menu(
     assert rows == [["hdr-burger", "tablist", "tab-more", "tab-add"]], rows
     header = page.locator("#a2 > .tabs").bounding_box()
     assert header["height"] <= 52, header
+    # The tabs take the whole row the menu, the count (its "3 ▾") and + leave.
     tabs = page.locator("#tablist").bounding_box()
-    assert tabs["width"] > width - 140, tabs
+    burger = page.locator("#hdr-burger").bounding_box()
+    more = page.locator("#tab-more").bounding_box()
+    assert tabs["x"] - (burger["x"] + burger["width"]) < 8, (burger, tabs)
+    assert more["x"] - (tabs["x"] + tabs["width"]) < 12, (tabs, more)
+    assert tabs["width"] > width - 160, tabs
     assert page.evaluate(WIDER) == []
     assert errors == []
 
