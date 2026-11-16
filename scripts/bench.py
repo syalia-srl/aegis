@@ -690,15 +690,19 @@ def usage_query() -> dict:
             log_id = f"s{k // 40}"
             turns.append((log_id, k, ts, "ana", "foreground", "claude-code",
                           "claude-opus-5-5", "person", "api", 0.1, "billed", 1, 2, 3,
-                          4, 5.0, 3, 0, 0, 1000, 2000, None))  # fmt: skip
+                          4, 5.0, 3, 0, 0, 1000, 2000, None, None, None, None))  # fmt: skip
             for n in range(3 + (k % 13 == 0)):
                 parts.append((log_id, k, n, ts, rnd.choice(repos), rnd.choice(purposes),
                               rnd.choice(acts), 1, 0.03, 100, 1.0, 1, 0, 0, "ana",
                               "foreground", "claude-code", "claude-opus-5-5", "person",
-                              "api", "billed", k + 1))  # fmt: skip
+                              "api", "billed", k + 1, None, None))  # fmt: skip
         con.execute("BEGIN")
-        con.executemany(f"INSERT INTO usage_turns VALUES({','.join('?' * 22)})", turns)
-        con.executemany(f"INSERT INTO usage_parts VALUES({','.join('?' * 22)})", parts)
+        con.executemany(
+            f"INSERT INTO usage_turns VALUES({','.join('?' * len(turns[0]))})", turns
+        )
+        con.executemany(
+            f"INSERT INTO usage_parts VALUES({','.join('?' * len(parts[0]))})", parts
+        )
         con.execute("COMMIT")
         con.execute("ANALYZE")
         q = UsageQuery(since=now - 28 * 86400, until=now, split=("repo", "purpose"))
