@@ -258,9 +258,11 @@ def test_a_cards_menu_follows_its_state_and_acts_on_that_card(server, page, brow
         "rename",
         "autoclose",
         "autohandoff",
+        "moveto-new",
         "archive",
     ]
-    assert page.locator(".cmenu .grp").count() == 3
+    # The move to a group (#1039) is a group of its own.
+    assert page.locator(".cmenu .grp").count() == 4
     page.click(".cmenu [data-id=interrupt]")
     page.wait_for_selector(card(busy) + ":not(.working)")
     assert page.locator(card(idle)).count() == 1

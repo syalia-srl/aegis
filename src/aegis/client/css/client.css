@@ -813,8 +813,8 @@
 /* the actions: one row of equal cells, labels dropped on a narrow panel */
 .aegis .side-acts{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:6px;margin-top:auto}
 .aegis .side-acts.read-only{grid-template-columns:minmax(0,1fr)}
-/* Six live actions: two rows of three, so each label fits (#691). */
-.aegis .side-acts.live-only{grid-auto-flow:row;grid-template-columns:repeat(auto-fit,minmax(28px,1fr));gap:4px}
+/* The live actions: one row of equal icon cells at any panel width (#1022). */
+.aegis .side-acts.live-only{gap:4px}
 /* Icons only (#1022): each button's title names it, so the row stays one line. */
 .aegis .side-acts.live-only .act{padding:7px 0}
 .aegis .side-acts.live-only .act span{display:none}
