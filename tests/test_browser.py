@@ -3431,14 +3431,18 @@ def enqueue(pg, payload: str) -> None:
     pg.press("#input", "Enter")
 
 
-def fleet_unfolded(pg) -> None:
-    """The Fleet, with every group open: a worker joins the group of the
-    session that enqueued it, and a group is one folded stack until clicked."""
+def fleet_unfolded(pg, until: str, timeout: float = 30) -> None:
+    """The Fleet, opening groups until `until` shows: a worker joins the group
+    of the session that enqueued it a moment after the enqueue, and a group is
+    one folded stack until clicked."""
     pg.click("#tab-fleet")
     pg.wait_for_selector("#a2[data-view=fleet]")
-    while pg.locator("#cards .stack").count():
-        pg.click("#cards .stack >> nth=0")
-        pg.wait_for_selector("#cards .gopen")
+    end = time.monotonic() + timeout
+    while not pg.locator(until).first.is_visible():
+        assert time.monotonic() < end, f"no {until} in the Fleet"
+        if pg.locator("#cards .stack").count():
+            pg.click("#cards .stack >> nth=0")
+        pg.wait_for_timeout(200)
 
 
 def test_a_session_waiting_on_a_worker_names_it_and_opens_it(queue_server, page):
@@ -3452,9 +3456,8 @@ def test_a_session_waiting_on_a_worker_names_it_and_opens_it(queue_server, page)
     row = page.wait_for_selector("#s-wait-sec:not([hidden]) .kv.wait.go")
     handle = row.query_selector("span").text_content()
     assert row.query_selector(".r").text_content() == "queue q · running"
-    fleet_unfolded(page)
-    page.wait_for_selector(
-        f"#cards .card[data-id='{boss}'] .s >> text=waiting · {handle}"
+    fleet_unfolded(
+        page, f"#cards .card[data-id='{boss}'] .s >> text=waiting · {handle}"
     )
     page.click(f"#cards .card[data-id='{boss}']")
     page.click("#s-waiting .kv.wait.go")
@@ -3486,14 +3489,12 @@ def test_a_finished_worker_fades_and_sinks_below_the_live_cards_and_an_errored_o
     boss = spawn(page, "hello")
     enqueue(page, "/exit 4")
     turns_done(page, 2)
-    fleet_unfolded(page)
-    page.wait_for_selector("#cards .card.at-error .badge >> text=worker · q")
+    fleet_unfolded(page, "#cards .card.at-error .badge >> text=worker · q")
     failed = page.get_attribute("#cards .card.at-error", "data-id")
-    fleet_unfolded(page)
+    page.click("#tab-fleet")
     page.click(f"#tablist .tab[data-id='{boss}']")
     enqueue(page, "/busy 4")
-    fleet_unfolded(page)
-    page.wait_for_selector("#cards .card:not(.at-error) .badge >> text=worker · q")
+    fleet_unfolded(page, "#cards .card:not(.at-error) .badge >> text=worker · q")
     worker = page.get_attribute("#cards .card:not(.at-error):has(.badge)", "data-id")
     # Live: not finished, but quiet (#386): dimmed, last, with no tab.
     assert page.locator(f"#cards .card[data-id='{worker}'].finished").count() == 0
@@ -3509,8 +3510,7 @@ def test_a_finished_worker_fades_and_sinks_below_the_live_cards_and_an_errored_o
     page.click(f"#arch-list tr[data-id='{worker}'] .btn.reopen")
     page.wait_for_selector("#a2[data-view=session][data-mode=live]")
     live = spawn(page, "still going")
-    fleet_unfolded(page)
-    page.wait_for_selector(f"#cards .card[data-id='{worker}'].finished")
+    fleet_unfolded(page, f"#cards .card[data-id='{worker}'].finished")
     # A live card above it, whatever the order the tabs are in. The worker is
     # in its enqueuer's group, which keeps its members together: it sinks to
     # the bottom of the group, below the boss and the errored worker.
@@ -3532,8 +3532,7 @@ def test_a_finished_worker_fades_and_sinks_below_the_live_cards_and_an_errored_o
     # An errored turn is not faded, though the task behind it is over.
     page.fill("#input", "/exit 4")
     page.press("#input", "Enter")
-    fleet_unfolded(page)
-    page.wait_for_selector(f"#cards .card[data-id='{worker}'].at-error")
+    fleet_unfolded(page, f"#cards .card[data-id='{worker}'].at-error")
     assert page.locator(f"#cards .card[data-id='{worker}'].finished").count() == 0
     assert card_opacity(page, worker) == "1"
     assert page.errors == []
@@ -3555,8 +3554,7 @@ def test_the_session_panel_names_the_server_and_marks_a_queue_worker(
     # its open panel goes back to the Fleet, which a slow runner reached
     # before the badge was checked when the task took 4 s.
     enqueue(page, "/busy 60")
-    fleet_unfolded(page)
-    page.wait_for_selector("#cards .card .badge >> text=worker · q")
+    fleet_unfolded(page, "#cards .card .badge >> text=worker · q")
     page.click("#cards .card:has(.badge)")
     page.wait_for_selector("#a2[data-view=session]")
     page.wait_for_selector("#s-worker:visible >> text=worker · q")
@@ -3599,8 +3597,7 @@ def test_a_click_on_a_quiet_card_opens_it_when_a_patch_overtakes_the_unquiet(
     page.wait_for_selector("#a2[data-view=fleet]")
     spawn(page, "hello")
     enqueue(page, "/stream 400")  # a card patch every few hundred ms
-    fleet_unfolded(page)
-    page.wait_for_selector("#cards .card.quiet .badge >> text=worker · q")
+    fleet_unfolded(page, "#cards .card.quiet .badge >> text=worker · q")
     worker = page.get_attribute("#cards .card:has(.badge)", "data-id")
     gate["worker"] = worker
     page.click(f"#cards .card[data-id='{worker}']")

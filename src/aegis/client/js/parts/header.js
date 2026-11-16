@@ -258,7 +258,10 @@ export class HeaderPart {
   // One session's tab redrawn where it stands. False when the tab is inside a
   // group, whose head and count depend on its members: then the bar redraws.
   patch(meta, focusId = null) {
-    return patchTab(this.list, meta, focusId, this.tabActions);
+    const done = patchTab(this.list, meta, focusId, this.tabActions);
+    // A patch can move .on to a tab out of reach, with no render to scroll it.
+    if (done && focusId) this.focus();
+    return done;
   }
 
   // -- renaming a group in place (#1039) -------------------------------------

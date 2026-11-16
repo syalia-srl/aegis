@@ -697,8 +697,12 @@ def usage_query() -> dict:
                               "foreground", "claude-code", "claude-opus-5-5", "person",
                               "api", "billed", k + 1, None, None))  # fmt: skip
         con.execute("BEGIN")
-        con.executemany(f"INSERT INTO usage_turns VALUES({','.join('?' * len(turns[0]))})", turns)
-        con.executemany(f"INSERT INTO usage_parts VALUES({','.join('?' * len(parts[0]))})", parts)
+        con.executemany(
+            f"INSERT INTO usage_turns VALUES({','.join('?' * len(turns[0]))})", turns
+        )
+        con.executemany(
+            f"INSERT INTO usage_parts VALUES({','.join('?' * len(parts[0]))})", parts
+        )
         con.execute("COMMIT")
         con.execute("ANALYZE")
         q = UsageQuery(since=now - 28 * 86400, until=now, split=("repo", "purpose"))
