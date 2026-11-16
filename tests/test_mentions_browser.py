@@ -87,3 +87,21 @@ def test_a_committee_merge_can_be_skipped(server, page):
     page.wait_for_selector('.row.mention .ft:has-text("merge skipped")')
     assert not page.query_selector(".row.mention [data-mention-skip]")
     assert page.errors == []
+
+
+MENTIONABLE = """import('/static/js/parts/commands.js').then((m) => m.mentionable(new Map([
+  ["me", {handle: "me", state: "idle"}],
+  ["a", {handle: "ana", title: "docs", state: "working"}],
+  ["w", {handle: "run-1", state: "working", worker: {task_id: "t"}}],
+  ["t", {handle: "sh", kind: "term"}],
+  ["x", {handle: "old", archived: true}],
+  ["lab/b", {handle: "ben", state: "idle"}],
+]), "me"))"""
+
+
+def test_the_menu_offers_neither_itself_workers_tools_nor_far_sessions(server, page):
+    page.goto(server.url)
+    page.wait_for_selector("#a2[data-view=fleet]")
+    assert page.evaluate(MENTIONABLE) == [
+        {"handle": "ana", "title": "docs", "busy": True}
+    ]

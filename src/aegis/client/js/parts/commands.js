@@ -40,11 +40,12 @@ export async function catalogFor(mount, key) {
 }
 
 // The sessions an @ in the box of session `key` completes: the open agent
-// sessions on its server but itself (mentions.py refuses a mention of itself).
+// sessions on its server but itself (mentions.py refuses a mention of itself)
+// and queue workers, whose task owns them.
 export function mentionable(sessions, key) {
   const server = key ? forKey(key).server : null;
   return [...sessions.entries()]
-    .filter(([k, m]) => k !== key && m.handle && !m.archived && m.kind !== "term" && m.kind !== "browser" && forKey(k).server === server)
+    .filter(([k, m]) => k !== key && m.handle && !m.archived && !m.worker && m.kind !== "term" && m.kind !== "browser" && forKey(k).server === server)
     .map(([, m]) => ({ handle: m.handle, title: m.title, busy: m.state === "working" }));
 }
 
