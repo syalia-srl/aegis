@@ -1,10 +1,10 @@
 // Built-in table artifact (#928). State shape from tables.build_state:
 // {columns:[{id,label}], rows:[[...]], edit:null|{cells,add_rows,...},
-//  submit_label, q, sort:{id,dir}|null}. The page adds, and persists, two
-// view keys: hidden (column ids the person hid) and colq (per-column filter
-// text). Search, per-column filters, column show/hide and sort are always on;
-// cell edits and add/remove of rows and columns only when edit allows them.
-// Live changes go through aegis.state; Done submits {columns, rows}.
+//  submit_label, q, sort:{id,dir}|null}. The page keeps two view keys too:
+// hidden (column ids the person hid) and colq (per-column filter text). Search,
+// filters, column show/hide, sort and copy are always on; cell edits and
+// add/remove of rows and columns only when edit allows them. Live changes go
+// through aegis.state; Done submits {columns, rows}.
 (() => {
   const el = (tag, cls, ...kids) => {
     const n = document.createElement(tag);
@@ -27,8 +27,8 @@
   };
 
   // A column reads as numeric when it has values and every non-empty one is a
-  // number: then its cells are right-aligned and set in the mono face, and it
-  // sorts numerically.
+  // number: then its cells are right-aligned and set in the mono face, its
+  // filter takes comparisons, and it sorts numerically.
   function numericCols(state) {
     return state.columns.map((_, j) => {
       let any = false;
@@ -68,16 +68,60 @@
     });
   }
 
-  function rowMatches(state, cells) {
+  // -- filters ----------------------------------------------------------
+  // The filter follows the column's type. A numeric column takes a comparison
+  // (>80, <=90, =85), a range (80..90 or 80-90) or a plain number (equal). Any
+  // column takes /regex/ (case-insensitive unless flags are given) or, failing
+  // those, a case-insensitive substring. A broken regex filters nothing and is
+  // marked on its field.
+  const CMP = /^(<=|>=|==|=|<|>)\s*(-?\d+(?:\.\d+)?)$/;
+  const RANGE = /^(-?\d+(?:\.\d+)?)\s*(?:\.\.|-)\s*(-?\d+(?:\.\d+)?)$/;
+  const NUM = /^-?\d+(?:\.\d+)?$/;
+  const RX = /^\/(.+)\/([a-z]*)$/i;
+
+  // A RegExp for /pattern/flags, null for plain text, undefined for a broken one.
+  function regexOf(f) {
+    const m = RX.exec(f);
+    if (!m) return null;
+    try {
+      return new RegExp(m[1], m[2].replace(/[gy]/g, "") || "i");
+    } catch {
+      return undefined;
+    }
+  }
+
+  function cellMatches(raw, value, num) {
+    const f = String(raw || "").trim();
+    if (!f) return true;
+    const v = String(value ?? "").trim();
+    if (num) {
+      const c = CMP.exec(f);
+      if (c) {
+        if (!NUM.test(v)) return false;
+        const x = Number(v), n = Number(c[2]);
+        return { "<": x < n, "<=": x <= n, ">": x > n, ">=": x >= n, "=": x === n, "==": x === n }[c[1]];
+      }
+      const r = RANGE.exec(f);
+      if (r) {
+        if (!NUM.test(v)) return false;
+        const x = Number(v), lo = Number(r[1]), hi = Number(r[2]);
+        return x >= Math.min(lo, hi) && x <= Math.max(lo, hi);
+      }
+      if (NUM.test(f)) return NUM.test(v) && Number(v) === Number(f);
+    }
+    const re = regexOf(f);
+    if (re === undefined) return true;
+    if (re) return re.test(v);
+    return v.toLowerCase().includes(f.toLowerCase());
+  }
+
+  function rowMatches(state, cells, numeric) {
     const q = (state.q || "").trim().toLowerCase();
-    if (q && !cells.some((c) => String(c ?? "").toLowerCase().includes(q)))
-      return false;
+    if (q && !cells.some((c) => String(c ?? "").toLowerCase().includes(q))) return false;
     for (const [cid, raw] of Object.entries(state.colq || {})) {
-      const t = String(raw || "").trim().toLowerCase();
-      if (!t) continue;
       const j = state.columns.findIndex((c) => c.id === cid);
       if (j < 0) continue;
-      if (!String(cells[j] ?? "").toLowerCase().includes(t)) return false;
+      if (!cellMatches(raw, cells[j], numeric[j])) return false;
     }
     return true;
   }
@@ -85,7 +129,7 @@
   function visibleRows(state, numeric) {
     let rows = state.rows
       .map((cells, i) => ({ i, cells }))
-      .filter(({ cells }) => rowMatches(state, cells));
+      .filter(({ cells }) => rowMatches(state, cells, numeric));
     const s = state.sort;
     if (s && s.id) {
       const col = state.columns.findIndex((c) => c.id === s.id);
@@ -105,17 +149,109 @@
     return rows;
   }
 
-  function toMarkdown(state) {
-    const cols = shownColumns(state);
+  // -- copy and export ----------------------------------------------------
+  // What a copy shows: the visible columns and rows, in view order.
+  function exportModel(state) {
     const numeric = numericCols(state);
-    const esc = (v) => String(v ?? "").replace(/\|/g, "\\|").replace(/\n/g, " ");
-    const head = `| ${cols.map((c) => esc(c.label)).join(" | ")} |`;
-    const sep = `| ${cols.map((c) => (numeric[c.j] ? "---:" : "---")).join(" | ")} |`;
-    const body = visibleRows(state, numeric).map(
-      ({ cells }) => `| ${cols.map((c) => esc(cells[c.j])).join(" | ")} |`,
-    );
-    return [head, sep, ...body].join("\n");
+    const cols = shownColumns(state);
+    const rows = visibleRows(state, numeric).map((r) => r.cells);
+    return { cols, numeric, rows };
   }
+
+  const cellOf = (cells, c) => String(cells[c.j] ?? "");
+  // A cell as a literal in JSON, YAML and TOML: a plain number stays a number,
+  // anything else is a double-quoted string (JSON's escapes are valid there).
+  const LIT = /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/;
+  const lit = (v) => (LIT.test(v) ? v : JSON.stringify(v));
+  const TEX = {
+    "\\": "\\textbackslash{}", "{": "\\{", "}": "\\}", $: "\\$", "&": "\\&",
+    "#": "\\#", "^": "\\textasciicircum{}", _: "\\_", "%": "\\%", "~": "\\textasciitilde{}",
+  };
+
+  const FORMATS = {
+    Markdown: (m) => {
+      const esc = (v) => v.replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
+      const head = `| ${m.cols.map((c) => esc(c.label)).join(" | ")} |`;
+      const sep = `| ${m.cols.map((c) => (m.numeric[c.j] ? "---:" : "---")).join(" | ")} |`;
+      const body = m.rows.map((cells) => `| ${m.cols.map((c) => esc(cellOf(cells, c))).join(" | ")} |`);
+      return [head, sep, ...body].join("\n");
+    },
+    CSV: (m) => {
+      const q = (v) => (/[",\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+      return [
+        m.cols.map((c) => q(c.label)),
+        ...m.rows.map((cells) => m.cols.map((c) => q(cellOf(cells, c)))),
+      ]
+        .map((r) => r.join(","))
+        .join("\r\n");
+    },
+    LaTeX: (m) => {
+      const tex = (v) => v.replace(/\r?\n/g, " ").replace(/[\\{}$&#^_%~]/g, (ch) => TEX[ch]);
+      const line = (cells) => `${cells.map(tex).join(" & ")} \\\\`;
+      return [
+        `\\begin{tabular}{${m.cols.map((c) => (m.numeric[c.j] ? "r" : "l")).join("")}}`,
+        "\\hline",
+        line(m.cols.map((c) => c.label)),
+        "\\hline",
+        ...m.rows.map((cells) => line(m.cols.map((c) => cellOf(cells, c)))),
+        "\\hline",
+        "\\end{tabular}",
+      ].join("\n");
+    },
+    JSON: (m) =>
+      JSON.stringify(
+        m.rows.map((cells) => Object.fromEntries(m.cols.map((c) => [c.id, JSON.parse(lit(cellOf(cells, c)))]))),
+        null,
+        2,
+      ),
+    YAML: (m) =>
+      m.rows.length
+        ? m.rows
+            .map((cells) =>
+              m.cols.map((c, i) => `${i ? "  " : "- "}${c.id}: ${lit(cellOf(cells, c))}`).join("\n"),
+            )
+            .join("\n")
+        : "[]",
+    TOML: (m) =>
+      m.rows
+        .map((cells) => ["[[rows]]", ...m.cols.map((c) => `${c.id} = ${lit(cellOf(cells, c))}`)].join("\n"))
+        .join("\n\n"),
+  };
+
+  // A sandboxed frame may not write the clipboard itself. A copy made from a
+  // click may use the page's copy command, though: a hidden field carries the
+  // text and is removed at once. Called first, synchronously, from the click.
+  function copyText(text) {
+    const ta = el("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.cssText = "position:fixed;top:0;left:0;opacity:0;pointer-events:none";
+    document.body.append(ta);
+    ta.select();
+    let ok = false;
+    try {
+      ok = document.execCommand("copy");
+    } catch {
+      ok = false;
+    }
+    ta.remove();
+    return ok;
+  }
+
+  async function copyTo(text) {
+    if (copyText(text)) return true;
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  const fit = (ta) => {
+    ta.style.height = "auto";
+    ta.style.height = `${ta.scrollHeight}px`;
+  };
 
   function mount(state) {
     const tools = document.getElementById("tools");
@@ -133,17 +269,20 @@
     state.colq = state.colq || {};
 
     // View-only toggles, kept on the page (not persisted): the filter row
-    // opens itself when a column filter is already set, and the column menu
-    // is closed until asked for.
+    // opens itself when a filter is already set; one menu at a time.
     let showFilters = Object.values(state.colq).some((v) => String(v || "").trim());
     let colMenuOpen = false;
+    let copyMenuOpen = false;
+    let copyMsg = "";
+    let copyTimer = 0;
 
-    // Undo stack of {columns, rows} snapshots for structural and cell edits.
+    // Undo stack of {columns, rows} snapshots, taken before each change.
     const undo = [];
-    const snapshot = () => {
-      undo.push(JSON.stringify({ columns: state.columns, rows: state.rows }));
+    const pushUndo = (json) => {
+      undo.push(json);
       if (undo.length > 50) undo.shift();
     };
+    const current = () => JSON.stringify({ columns: state.columns, rows: state.rows });
     const restore = () => {
       if (!undo.length) return;
       const s = JSON.parse(undo.pop());
@@ -154,12 +293,26 @@
     };
 
     const focusCell = (vr, cj) => {
-      const sel = `.tbl-data tbody input[data-pos="${vr}:${cj}"]`;
-      const n = wrap.querySelector(sel);
+      const n = wrap.querySelector(`.tbl-data tbody textarea[data-pos="${vr}:${cj}"]`);
       if (n) {
         n.focus();
-        n.select?.();
+        n.select();
       }
+    };
+
+    const fitAll = () => wrap.querySelectorAll("textarea.tbl-cell").forEach(fit);
+    window.addEventListener("resize", fitAll);
+
+    const copyAs = async (name) => {
+      const ok = await copyTo(FORMATS[name](exportModel(state)));
+      copyMenuOpen = false;
+      copyMsg = ok ? `Copied ${name}` : "Copy blocked";
+      draw();
+      clearTimeout(copyTimer);
+      copyTimer = setTimeout(() => {
+        copyMsg = "";
+        draw();
+      }, 1600);
     };
 
     const draw = () => {
@@ -196,39 +349,24 @@
       };
       tools.append(filtersBtn);
 
-      const colsBtn = el("button", "secondary tbl-tool", `Columns`);
+      const colsBtn = el("button", "secondary tbl-tool", "Columns");
       colsBtn.type = "button";
       colsBtn.setAttribute("aria-expanded", String(colMenuOpen));
       colsBtn.onclick = () => {
         colMenuOpen = !colMenuOpen;
+        copyMenuOpen = false;
         draw();
       };
       tools.append(colsBtn);
 
-      const copyBtn = el("button", "secondary tbl-tool", "Copy");
+      const copyBtn = el("button", "secondary tbl-tool", copyMsg || "Copy \u25be");
       copyBtn.type = "button";
-      copyBtn.title = "Copy the visible rows as a Markdown table";
-      copyBtn.onclick = async () => {
-        const md = toMarkdown(state);
-        let ok = false;
-        try {
-          await navigator.clipboard.writeText(md);
-          ok = true;
-        } catch {
-          ok = false;
-        }
-        if (ok) {
-          copyBtn.textContent = "Copied";
-          setTimeout(() => (copyBtn.textContent = "Copy"), 1200);
-        } else {
-          // Sandboxed frames can block the clipboard: offer the text to copy.
-          const ta = el("textarea", "tbl-copybox");
-          ta.readOnly = true;
-          ta.value = md;
-          foot.replaceChildren(ta);
-          ta.focus();
-          ta.select();
-        }
+      copyBtn.title = "Copy the visible rows in a format";
+      copyBtn.setAttribute("aria-expanded", String(copyMenuOpen));
+      copyBtn.onclick = () => {
+        copyMenuOpen = !copyMenuOpen;
+        colMenuOpen = false;
+        draw();
       };
       tools.append(copyBtn);
 
@@ -240,52 +378,56 @@
         tools.append(undoBtn);
       }
       if (state.edit?.add_rows) {
-        tools.append(
-          (() => {
-            const b = el("button", "tbl-tool", "+ Row");
-            b.type = "button";
-            b.onclick = () => {
-              snapshot();
-              state.rows.push(state.columns.map(() => ""));
-              state.sort = null;
-              persist(state);
-              draw();
-              focusCell(visibleRows(state, numericCols(state)).length - 1, cols[0]?.j ?? 0);
-            };
-            return b;
-          })(),
-        );
+        const b = el("button", "tbl-tool", "+ Row");
+        b.type = "button";
+        b.onclick = () => {
+          pushUndo(current());
+          state.rows.push(state.columns.map(() => ""));
+          state.sort = null;
+          persist(state);
+          draw();
+          focusCell(visibleRows(state, numericCols(state)).length - 1, cols[0]?.j ?? 0);
+        };
+        tools.append(b);
       }
       if (state.edit?.add_columns) {
-        tools.append(
-          (() => {
-            const b = el("button", "tbl-tool", "+ Column");
-            b.type = "button";
-            b.onclick = () => {
-              snapshot();
-              let n = state.columns.length;
-              let id = `c${n}`;
-              while (state.columns.some((c) => c.id === id)) id = `c${++n}`;
-              state.columns.push({ id, label: `Column ${n + 1}` });
-              state.rows = state.rows.map((r) => r.concat([""]));
-              if (Array.isArray(state.edit.cells)) state.edit.cells.push(id);
-              persist(state);
-              draw();
-            };
-            return b;
-          })(),
-        );
+        const b = el("button", "tbl-tool", "+ Column");
+        b.type = "button";
+        b.onclick = () => {
+          pushUndo(current());
+          let n = state.columns.length;
+          let id = `c${n}`;
+          while (state.columns.some((c) => c.id === id)) id = `c${++n}`;
+          state.columns.push({ id, label: `Column ${n + 1}` });
+          state.rows = state.rows.map((r) => r.concat([""]));
+          if (Array.isArray(state.edit.cells)) state.edit.cells.push(id);
+          persist(state);
+          draw();
+        };
+        tools.append(b);
+      }
+
+      // -- copy menu -----------------------------------------------------
+      if (copyMenuOpen) {
+        const menu = el("div", "tbl-colmenu tbl-copymenu");
+        for (const name of Object.keys(FORMATS)) {
+          const b = el("button", "secondary tbl-fmt", name);
+          b.type = "button";
+          b.title = `Copy the visible rows as ${name}`;
+          b.onclick = () => copyAs(name);
+          menu.append(b);
+        }
+        wrap.append(menu);
       }
 
       // -- column show/hide menu ----------------------------------------
       if (colMenuOpen) {
         const menu = el("div", "tbl-colmenu");
         for (const c of state.columns) {
-          const hidden = state.hidden.includes(c.id);
           const lbl = el("label");
           const cb = el("input");
           cb.type = "checkbox";
-          cb.checked = !hidden;
+          cb.checked = !state.hidden.includes(c.id);
           cb.onchange = () => {
             if (cb.checked) state.hidden = state.hidden.filter((x) => x !== c.id);
             else if (shownColumns(state).length > 1) state.hidden = [...state.hidden, c.id];
@@ -293,7 +435,7 @@
             persist(state);
             draw();
           };
-          lbl.append(cb, document.createTextNode(" " + c.label));
+          lbl.append(cb, document.createTextNode(` ${c.label}`));
           menu.append(lbl);
         }
         wrap.append(menu);
@@ -322,7 +464,7 @@
         if (state.edit?.remove_columns && state.columns.length > 1)
           th.append(
             icon("\u00d7", `Remove column ${col.label}`, () => {
-              snapshot();
+              pushUndo(current());
               const ix = state.columns.findIndex((c) => c.id === col.id);
               if (ix < 0) return;
               state.columns.splice(ix, 1);
@@ -344,13 +486,19 @@
         const fr = el("tr", "tbl-filters");
         for (const col of cols) {
           const th = el("th");
+          const num = numeric[col.j];
           const inp = el("input");
           inp.type = "search";
-          inp.placeholder = "Filter";
+          inp.placeholder = num ? "> 80, 8..9" : "text or /re/";
+          inp.title = num
+            ? "Numbers: >80, <=90, =85, or a range 80..90. Also /regex/ or text."
+            : "Text: part of the cell. /regex/ for a pattern, e.g. /^mimo/i";
           inp.setAttribute("aria-label", `Filter ${col.label}`);
           inp.value = state.colq[col.id] || "";
+          inp.classList.toggle("bad", regexOf(inp.value.trim()) === undefined);
           inp.addEventListener("input", () => {
             state.colq = { ...state.colq, [col.id]: inp.value };
+            inp.classList.toggle("bad", regexOf(inp.value.trim()) === undefined);
             persist(state);
             drawBodyOnly();
           });
@@ -367,12 +515,13 @@
       table.append(tbody);
       scroller.append(table);
       wrap.append(scroller);
+      fitAll();
 
       drawFoot(shown.length);
     };
 
-    // Re-render only the body and the count: a keystroke in search or a
-    // column filter does not rebuild the toolbar, so the field keeps focus.
+    // Re-render only the body and the count: typing in search or a column
+    // filter does not rebuild the toolbar, so the field keeps focus.
     const drawBodyOnly = () => {
       const numeric = numericCols(state);
       const cols = shownColumns(state);
@@ -381,6 +530,7 @@
       if (tbody) {
         tbody.replaceChildren();
         drawRows(tbody, cols, numeric, shown);
+        fitAll();
       }
       drawFoot(shown.length);
     };
@@ -402,26 +552,33 @@
           const td = el("td");
           if (numeric[j]) td.className = "num";
           if (cellEditable(state.edit, col.id)) {
-            const inp = el("input", "tbl-cell");
-            inp.type = "text";
-            inp.value = cells[j] ?? "";
-            inp.dataset.pos = `${vr}:${j}`;
-            inp.setAttribute("aria-label", `${col.label}, row ${i + 1}`);
-            inp.addEventListener("focus", () => snapshot(), { once: true });
-            inp.addEventListener("input", () => {
-              state.rows[i][j] = inp.value;
+            // A textarea wraps long text; Enter moves down a row, Shift+Enter
+            // starts a new line in the cell, Tab moves across.
+            const ta = el("textarea", "tbl-cell");
+            ta.rows = 1;
+            ta.value = cells[j] ?? "";
+            ta.dataset.pos = `${vr}:${j}`;
+            ta.setAttribute("aria-label", `${col.label}, row ${i + 1}`);
+            let before = null; // the state before this focus's first change
+            ta.addEventListener("focus", () => {
+              before = current();
+            });
+            ta.addEventListener("input", () => {
+              if (before !== null) {
+                pushUndo(before);
+                before = null;
+              }
+              state.rows[i][j] = ta.value;
+              fit(ta);
               persist(state);
             });
-            inp.addEventListener("keydown", (ev) => {
-              if (ev.key === "Enter" || ev.key === "ArrowDown") {
+            ta.addEventListener("keydown", (ev) => {
+              if (ev.key === "Enter" && !ev.shiftKey) {
                 ev.preventDefault();
                 focusCell(vr + 1, j);
-              } else if (ev.key === "ArrowUp") {
-                ev.preventDefault();
-                focusCell(vr - 1, j);
               }
             });
-            td.append(inp);
+            td.append(ta);
           } else {
             td.textContent = cells[j] ?? "";
           }
@@ -431,7 +588,7 @@
           const td = el("td", "tbl-acts");
           td.append(
             icon("\u00d7", `Remove row ${i + 1}`, () => {
-              snapshot();
+              pushUndo(current());
               state.rows.splice(i, 1);
               persist(state);
               draw();

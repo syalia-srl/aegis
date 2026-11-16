@@ -52,14 +52,18 @@ Markdown table in the reply — call `table_send` instead of writing a page by
 hand. Pass title and either columns with rows, a GFM markdown table, or an
 HTML table string. The person always gets a search box, per-column filters, a
 column show/hide menu, column sort, numeric columns aligned and in the mono
-face, and a copy-as-Markdown button. Omit edit (or pass false) for a view-only
-table; pass true, or an object, to let them change what you allow:
+face, and a copy menu that writes the visible rows as Markdown, CSV, LaTeX,
+JSON, YAML or TOML. A numeric column filters by comparison (>80, <=90, or a
+range 80..90); any column takes text, or a regular expression between slashes.
+Omit edit (or pass false) for a view-only table; pass true, or an object, to
+let them change what you allow:
 
 - cells: true (every cell), false (none), or a list of column ids
 - add_rows / remove_rows / add_columns / remove_columns: booleans
 
-Editable cells read as plain text until clicked; Tab, Enter and the arrow keys
-move between them, and an Undo button steps back the last change. Done submits
+Editable cells read as plain text until clicked, and long text wraps in them.
+Tab moves across, Enter moves down, Shift+Enter starts a new line in a cell, and
+an Undo button steps back the last change. Done submits
 `{columns, rows}` and collapses the card to submit_label
 (default Done). The reply is the same shape as `artifact_send`; use
 `artifact_read`, `artifact_update` and `artifact_close` on the returned id.

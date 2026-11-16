@@ -60,14 +60,20 @@ limit. Column ids are `[a-z][a-z0-9_]{0,31}`; omitted ids are `c0`, `c1`, …
 - Search box filters rows (case-insensitive substring across cells).
 - Per-column filter inputs toggled from the Filters button; a Clear-filters
   chip in the footer resets search and column filters at once.
+- Filters follow the column type. A numeric column takes comparisons (>80,
+  <=90, =85) and ranges (80..90); any column takes /regex/ or, failing that, a
+  case-insensitive substring. A broken regex filters nothing and is marked.
 - A Columns menu shows/hides columns (always keeps at least one).
 - Columns whose non-empty values are all numbers are right-aligned, set in the
   mono face, and sort numerically.
-- Copy button writes the visible rows as a Markdown table to the clipboard,
-  falling back to a selectable textarea when the sandbox blocks it.
+- A Copy menu writes the visible rows as Markdown, CSV, LaTeX, JSON, YAML or
+  TOML. A sandboxed frame cannot use the async clipboard API, so the copy uses
+  the page's copy command from a hidden field, made inside the click; the
+  async API is only a second try.
 - Click a header to sort; again to reverse; again to clear.
-- Editable cells read as plain text until clicked; Tab, Enter and the arrow
-  keys move between them; an Undo button steps back the last change.
+- Editable cells read as plain text until clicked and wrap long text. Tab moves
+  across, Enter moves down, Shift+Enter starts a new line in the cell; an Undo
+  button steps back the last change.
 - Structural buttons (+ Row, + Column, remove ×) appear only for allowed ops.
 - Phone: tools stack; the table scrolls sideways with the first column pinned
   when wide (same idea as transcript tables).

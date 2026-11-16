@@ -45,11 +45,15 @@ button.tbl-tool,button.secondary.tbl-tool{border-radius:var(--r)}
 .tbl-data tbody tr:hover td{background:var(--raised)}
 .tbl-data tbody tr:last-child td{border-bottom:0}
 .tbl-empty td{color:var(--muted);text-align:center;padding:16px}
-.tbl-data td:has(>input.tbl-cell){padding:0}
-.tbl-cell{width:100%;min-width:7ch;padding:5px 10px;border:1px solid transparent;border-radius:0;background:transparent;color:inherit}
+.tbl-data td:not(.num){overflow-wrap:anywhere}
+.tbl-data td:has(>textarea.tbl-cell){padding:0}
+.tbl-cell{display:block;width:100%;min-width:7ch;box-sizing:border-box;margin:0;padding:5px 10px;border:1px solid transparent;border-radius:0;background:transparent;color:inherit;font:inherit;line-height:1.45;resize:none;overflow:hidden;white-space:pre-wrap;overflow-wrap:anywhere}
 .tbl-data td.num .tbl-cell{text-align:right;font-family:var(--font-mono)}
 .tbl-cell:hover{background:var(--surface)}
 .tbl-cell:focus{outline:0;border-color:var(--accent);background:var(--bg);box-shadow:0 0 0 1px var(--accent) inset}
+.tbl-copymenu{align-items:center}
+.tbl-fmt{padding:4px 12px;font-size:13px}
+.tbl-data tr.tbl-filters input.bad{border-color:#c0392b;box-shadow:0 0 0 1px #c0392b inset}
 .tbl-sort{font:inherit;font-weight:600;padding:0;border:0;background:none;color:inherit;cursor:pointer}
 .tbl-sort[data-dir=asc]::after{content:" ↑";color:var(--accent)}
 .tbl-sort[data-dir=desc]::after{content:" ↓";color:var(--accent)}
