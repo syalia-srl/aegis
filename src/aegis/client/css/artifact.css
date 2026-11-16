@@ -51,6 +51,12 @@ button.tbl-tool,button.secondary.tbl-tool{border-radius:var(--r)}
 .tbl-data td.num .tbl-cell{text-align:right;font-family:var(--font-mono)}
 .tbl-cell:hover{background:var(--surface)}
 .tbl-cell:focus{outline:0;border-color:var(--accent);background:var(--bg);box-shadow:0 0 0 1px var(--accent) inset}
+.tbl-data td:has(>.tbl-pick){padding:0}
+.tbl-pick{position:relative}
+.tbl-opts{position:fixed;z-index:5;margin:0;padding:4px 0;list-style:none;max-height:220px;overflow:auto;background:var(--bg);border:1px solid var(--rule);border-radius:var(--r);box-shadow:0 6px 18px rgba(0,0,0,.12)}
+.tbl-opts li{padding:5px 10px;cursor:pointer;white-space:nowrap}
+.tbl-opts li.on,.tbl-opts li:hover{background:var(--raised)}
+.tbl-cell.bad{color:#c0392b}
 .tbl-copymenu{align-items:center}
 .tbl-fmt{padding:4px 12px;font-size:13px}
 .tbl-data tr.tbl-filters input.bad{border-color:#c0392b;box-shadow:0 0 0 1px #c0392b inset}

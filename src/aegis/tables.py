@@ -52,13 +52,53 @@ def _slug(label: str, i: int, used: set[str]) -> str:
     return name
 
 
-def normalize_columns(columns: list[Any]) -> list[dict[str, str]]:
+INPUTS = ("text", "number", "select")
+NUMBER = re.compile(r"^-?\d+(?:\.\d+)?$")
+OPTIONS_MAX = 200
+OPTION_MAX = 80
+
+
+def _input_of(c: dict[str, Any], i: int) -> dict[str, Any]:
+    """The input kind and, for select, its options; {} for plain text."""
+    kind = c.get("input") or "text"
+    if kind not in INPUTS:
+        raise TableError(
+            "bad_params", f"columns[{i}].input {kind!r}: use text, number or select"
+        )
+    if kind != "select":
+        if c.get("options") is not None:
+            raise TableError(
+                "bad_params", f"columns[{i}].options goes with input select"
+            )
+        return {} if kind == "text" else {"input": kind}
+    opts = c.get("options")
+    if not isinstance(opts, list) or not opts:
+        raise TableError(
+            "bad_params", f"columns[{i}]: select needs options, a non-empty list"
+        )
+    if len(opts) > OPTIONS_MAX:
+        raise TableError("bad_params", f"columns[{i}]: at most {OPTIONS_MAX} options")
+    clean: list[str] = []
+    for o in opts:
+        s = _cell(o).strip()
+        if not s or len(s) > OPTION_MAX or "\n" in s:
+            raise TableError(
+                "bad_params",
+                f"columns[{i}]: each option is one line of 1 to {OPTION_MAX} characters",
+            )
+        clean.append(s)
+    if len(set(clean)) != len(clean):
+        raise TableError("bad_params", f"columns[{i}]: options repeat")
+    return {"input": "select", "options": clean}
+
+
+def normalize_columns(columns: list[Any]) -> list[dict[str, Any]]:
     if not columns:
         raise TableError("bad_params", "columns must not be empty")
     if len(columns) > 64:
         raise TableError("bad_params", "at most 64 columns")
     used: set[str] = set()
-    out: list[dict[str, str]] = []
+    out: list[dict[str, Any]] = []
     for i, c in enumerate(columns):
         if isinstance(c, str):
             label = c.strip() or f"Column {i + 1}"
@@ -82,18 +122,18 @@ def normalize_columns(columns: list[Any]) -> list[dict[str, str]]:
             if cid in used:
                 raise TableError("bad_params", f"columns[{i}].id {cid!r} is repeated")
             used.add(cid)
-        out.append({"id": cid, "label": label or cid})
+        out.append({"id": cid, "label": label or cid, **_input_of(c, i)})
     return out
 
 
-def normalize_rows(rows: list[Any], columns: list[dict[str, str]]) -> list[list[str]]:
+def normalize_rows(rows: list[Any], columns: list[dict[str, Any]]) -> list[list[str]]:
     if len(rows) > 2000:
         raise TableError("bad_params", "at most 2000 rows")
     ids = [c["id"] for c in columns]
     out: list[list[str]] = []
     for i, row in enumerate(rows):
         if isinstance(row, dict):
-            out.append([_cell(row.get(cid, "")) for cid in ids])
+            cells = [_cell(row.get(cid, "")) for cid in ids]
         elif isinstance(row, list | tuple):
             if len(row) > len(ids):
                 raise TableError(
@@ -102,10 +142,27 @@ def normalize_rows(rows: list[Any], columns: list[dict[str, str]]) -> list[list[
                 )
             cells = [_cell(v) for v in row]
             cells.extend([""] * (len(ids) - len(cells)))
-            out.append(cells)
         else:
             raise TableError("bad_params", f"rows[{i}] must be a list or an object")
+        for col, v in zip(columns, cells, strict=True):
+            _check_cell(i, col, v)
+        out.append(cells)
     return out
+
+
+def _check_cell(i: int, col: dict[str, Any], v: str) -> None:
+    """An initial cell must fit its column's input: a number, or one option."""
+    if v == "":
+        return
+    kind = col.get("input")
+    if kind == "number" and not NUMBER.match(v):
+        raise TableError(
+            "bad_params", f"rows[{i}] {col['label']!r} takes a number, not {v!r}"
+        )
+    if kind == "select" and v not in col["options"]:
+        raise TableError(
+            "bad_params", f"rows[{i}] {col['label']!r} takes one of its options, not {v!r}"
+        )
 
 
 def _cell(v: Any) -> str:
@@ -118,7 +175,7 @@ def _cell(v: Any) -> str:
     return str(v)
 
 
-def normalize_edit(edit: Any, columns: list[dict[str, str]]) -> dict[str, Any] | None:
+def normalize_edit(edit: Any, columns: list[dict[str, Any]]) -> dict[str, Any] | None:
     if edit is None:
         return None
     if edit is False:
@@ -180,7 +237,7 @@ def normalize_edit(edit: Any, columns: list[dict[str, str]]) -> dict[str, Any] |
     return out
 
 
-def parse_markdown(text: str) -> tuple[list[dict[str, str]], list[list[str]]]:
+def parse_markdown(text: str) -> tuple[list[dict[str, Any]], list[list[str]]]:
     lines = [ln.rstrip() for ln in text.strip().splitlines() if ln.strip()]
     # Find the first GFM table block.
     start = None
@@ -272,7 +329,7 @@ class _TableHTML(HTMLParser):
             self.cell.append(data)
 
 
-def parse_html(text: str) -> tuple[list[dict[str, str]], list[list[str]]]:
+def parse_html(text: str) -> tuple[list[dict[str, Any]], list[list[str]]]:
     p = _TableHTML()
     try:
         p.feed(text)
@@ -374,10 +431,10 @@ def write_draft(state_root: Path, id: str, title: str) -> Path:
     return p
 
 
-def columns_as_dicts(state: dict[str, Any]) -> list[dict[str, str]]:
+def columns_as_dicts(state: dict[str, Any]) -> list[dict[str, Any]]:
     return [{"id": c["id"], "label": c["label"]} for c in state["columns"]]
 
 
-def rows_as_objects(state: dict[str, Any]) -> list[dict[str, str]]:
+def rows_as_objects(state: dict[str, Any]) -> list[dict[str, Any]]:
     ids = [c["id"] for c in state["columns"]]
     return [{cid: row[i] for i, cid in enumerate(ids)} for row in state["rows"]]

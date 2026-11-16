@@ -85,3 +85,60 @@ def test_page_html_passes_artifact_check(tmp_path):
 def test_too_many_rows_refused():
     with pytest.raises(TableError, match="2000"):
         tables.normalize_rows([["x"]] * 2001, tables.normalize_columns(["a"]))
+
+
+def test_typed_columns_keep_their_input_and_options():
+    cols = tables.normalize_columns(
+        [
+            {"id": "model", "label": "Model", "input": "select", "options": ["a", "b"]},
+            {"id": "score", "label": "Score", "input": "number"},
+            "Notes",
+        ]
+    )
+    assert cols[0] == {"id": "model", "label": "Model", "input": "select", "options": ["a", "b"]}
+    assert cols[1] == {"id": "score", "label": "Score", "input": "number"}
+    assert cols[2] == {"id": "notes", "label": "Notes"}  # plain text stays bare
+
+
+@pytest.mark.parametrize(
+    "col",
+    [
+        {"label": "x", "input": "date"},
+        {"label": "x", "input": "select"},
+        {"label": "x", "input": "select", "options": []},
+        {"label": "x", "input": "select", "options": ["a", "a"]},
+        {"label": "x", "input": "select", "options": ["a\nb"]},
+        {"label": "x", "input": "text", "options": ["a"]},
+    ],
+)
+def test_bad_input_specs_refused(col):
+    with pytest.raises(TableError) as e:
+        tables.normalize_columns([col])
+    assert e.value.code == "bad_params"
+
+
+def test_initial_cells_must_fit_their_input():
+    cols = tables.normalize_columns(
+        [
+            {"label": "Model", "input": "select", "options": ["flash", "pro"]},
+            {"label": "Score", "input": "number"},
+        ]
+    )
+    assert tables.normalize_rows([["pro", "12.5"], ["", ""]], cols) == [["pro", "12.5"], ["", ""]]
+    for bad in (["mini", "1"], ["pro", "twelve"], ["pro", "1,5"]):
+        with pytest.raises(TableError) as e:
+            tables.normalize_rows([bad], cols)
+        assert e.value.code == "bad_params"
+
+
+def test_build_state_carries_inputs_into_the_state():
+    st = tables.build_state(
+        columns=[{"label": "Model", "input": "select", "options": ["flash", "pro"]}],
+        rows=[["pro"]],
+        markdown=None,
+        html_src=None,
+        edit={"cells": False, "add_rows": True},
+        submit_label="Done",
+    )
+    assert st["columns"][0]["options"] == ["flash", "pro"]
+    assert st["edit"]["add_rows"] is True

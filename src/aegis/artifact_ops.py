@@ -91,7 +91,7 @@ class TableSend(_Strict):
     )
     columns: list[Any] | None = Field(
         None,
-        description="Column labels, or {id, label} objects. With rows; not with markdown/html.",
+        description="Column labels, or {id, label, input, options} objects: input is text (default), number or select; select takes options, a list of one-line strings. With rows; not with markdown/html.",
     )
     rows: list[Any] | None = Field(
         None,

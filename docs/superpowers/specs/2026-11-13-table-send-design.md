@@ -75,6 +75,10 @@ limit. Column ids are `[a-z][a-z0-9_]{0,31}`; omitted ids are `c0`, `c1`, …
   across, Enter moves down, Shift+Enter starts a new line in the cell; an Undo
   button steps back the last change.
 - Structural buttons (+ Row, + Column, remove ×) appear only for allowed ops.
+- Typed columns: `input` is text (default), number or select; select takes
+  `options` and shows a fuzzy-search list. Initial rows are checked against the
+  input (a number, or one option) in `tables.normalize_rows`.
+- A row the person adds is editable in every column, whatever `cells` says.
 - Phone: tools stack; the table scrolls sideways with the first column pinned
   when wide (same idea as transcript tables).
 

@@ -55,8 +55,12 @@ column show/hide menu, column sort, numeric columns aligned and in the mono
 face, and a copy menu that writes the visible rows as Markdown, CSV, LaTeX,
 JSON, YAML or TOML. A numeric column filters by comparison (>80, <=90, or a
 range 80..90); any column takes text, or a regular expression between slashes.
-Omit edit (or pass false) for a view-only table; pass true, or an object, to
-let them change what you allow:
+A column can be typed: pass it as an object with id, label and input. Input is
+text (the default), number, or select with options, a list of one-line strings;
+a select takes one of its options and a number takes digits. Rows the person
+adds are editable in every column, so a new row can be filled whatever the
+edit policy says about the rest. Omit edit (or pass false) for a view-only
+table; pass true, or an object, to let them change what you allow:
 
 - cells: true (every cell), false (none), or a list of column ids
 - add_rows / remove_rows / add_columns / remove_columns: booleans

@@ -253,6 +253,25 @@
     ta.style.height = `${ta.scrollHeight}px`;
   };
 
+  // Fuzzy match for the select's list: the query's letters, in order, inside
+  // the option. A hit at a word start or next to the last hit scores more.
+  // Returns -1 for no match.
+  function fuzzyScore(q, opt) {
+    if (!q) return 0;
+    const s = opt.toLowerCase();
+    let qi = 0;
+    let score = 0;
+    let last = -2;
+    for (let i = 0; i < s.length && qi < q.length; i++) {
+      if (s[i] !== q[qi]) continue;
+      score += i === last + 1 ? 3 : 1;
+      if (i === 0 || " -_./".includes(s[i - 1])) score += 2;
+      last = i;
+      qi++;
+    }
+    return qi === q.length ? score : -1;
+  }
+
   function mount(state) {
     const tools = document.getElementById("tools");
     const wrap = document.getElementById("wrap");
@@ -276,6 +295,19 @@
     let copyMsg = "";
     let copyTimer = 0;
 
+    // Rows the person added in this page. Every cell of such a row is
+    // editable, whatever the edit policy says about the rest of the table: a
+    // new row is theirs to fill. The set holds the row arrays themselves, so
+    // a column change must carry each one over to its replacement.
+    const fresh = new Set();
+    const remapRows = (fn) => {
+      state.rows = state.rows.map((r) => {
+        const n = fn(r);
+        if (fresh.delete(r)) fresh.add(n);
+        return n;
+      });
+    };
+
     // Undo stack of {columns, rows} snapshots, taken before each change.
     const undo = [];
     const pushUndo = (json) => {
@@ -293,7 +325,7 @@
     };
 
     const focusCell = (vr, cj) => {
-      const n = wrap.querySelector(`.tbl-data tbody textarea[data-pos="${vr}:${cj}"]`);
+      const n = wrap.querySelector(`.tbl-data tbody [data-pos="${vr}:${cj}"]`);
       if (n) {
         n.focus();
         n.select();
@@ -302,6 +334,10 @@
 
     const fitAll = () => wrap.querySelectorAll("textarea.tbl-cell").forEach(fit);
     window.addEventListener("resize", fitAll);
+    // The open select list of the focused cell; a scroll of the table closes
+    // it, since its position was taken when it opened.
+    let closeOpen = () => {};
+    wrap.addEventListener("scroll", () => closeOpen(), true);
 
     const copyAs = async (name) => {
       const ok = await copyTo(FORMATS[name](exportModel(state)));
@@ -382,7 +418,9 @@
         b.type = "button";
         b.onclick = () => {
           pushUndo(current());
-          state.rows.push(state.columns.map(() => ""));
+          const row = state.columns.map(() => "");
+          state.rows.push(row);
+          fresh.add(row);
           state.sort = null;
           persist(state);
           draw();
@@ -399,7 +437,7 @@
           let id = `c${n}`;
           while (state.columns.some((c) => c.id === id)) id = `c${++n}`;
           state.columns.push({ id, label: `Column ${n + 1}` });
-          state.rows = state.rows.map((r) => r.concat([""]));
+          remapRows((r) => r.concat([""]));
           if (Array.isArray(state.edit.cells)) state.edit.cells.push(id);
           persist(state);
           draw();
@@ -468,7 +506,7 @@
               const ix = state.columns.findIndex((c) => c.id === col.id);
               if (ix < 0) return;
               state.columns.splice(ix, 1);
-              state.rows = state.rows.map((r) => r.filter((_, j) => j !== ix));
+              remapRows((r) => r.filter((_, j) => j !== ix));
               if (state.sort?.id === col.id) state.sort = null;
               if (Array.isArray(state.edit.cells))
                 state.edit.cells = state.edit.cells.filter((x) => x !== col.id);
@@ -535,6 +573,160 @@
       drawFoot(shown.length);
     };
 
+    // One editable cell, by its column's input. A text column is a textarea,
+    // which wraps: Enter moves down, Shift+Enter starts a line. A number column
+    // is a field that flags what is not a number. A select column is a field
+    // with a fuzzy list of its options and takes only one of them; Escape or
+    // leaving the field puts back the value it had.
+    const editCell = (col, i, vr, cells) => {
+      const j = col.j;
+      const label = `${col.label}, row ${i + 1}`;
+      let before = null; // the state before this focus's first change
+      const begin = () => {
+        before = current();
+      };
+      const commit = (value) => {
+        if (before !== null) {
+          pushUndo(before);
+          before = null;
+        }
+        state.rows[i][j] = value;
+        persist(state);
+      };
+
+      if (col.input === "number") {
+        const inp = el("input", "tbl-cell");
+        inp.type = "text";
+        inp.inputMode = "decimal";
+        inp.value = cells[j] ?? "";
+        inp.dataset.pos = `${vr}:${j}`;
+        inp.setAttribute("aria-label", label);
+        const check = () => {
+          const v = inp.value.trim();
+          inp.classList.toggle("bad", v !== "" && !NUM.test(v));
+        };
+        check();
+        inp.addEventListener("focus", begin);
+        inp.addEventListener("input", () => {
+          commit(inp.value);
+          check();
+        });
+        inp.addEventListener("keydown", (ev) => {
+          if (ev.key === "Enter") {
+            ev.preventDefault();
+            focusCell(vr + 1, j);
+          }
+        });
+        return inp;
+      }
+
+      if (col.input === "select") {
+        const box = el("div", "tbl-pick");
+        const inp = el("input", "tbl-cell");
+        const list = el("ul", "tbl-opts");
+        inp.type = "text";
+        inp.autocomplete = "off";
+        inp.value = cells[j] ?? "";
+        inp.dataset.pos = `${vr}:${j}`;
+        inp.setAttribute("aria-label", label);
+        inp.setAttribute("role", "combobox");
+        list.setAttribute("role", "listbox");
+        list.hidden = true;
+        let open = false;
+        let shown = [];
+        let active = 0;
+        const paint = () => {
+          const q = inp.value.trim().toLowerCase();
+          shown = col.options
+            .map((o) => ({ o, s: fuzzyScore(q, o.toLowerCase()) }))
+            .filter((x) => x.s >= 0)
+            .sort((a, b) => b.s - a.s)
+            .map((x) => x.o);
+          active = Math.min(active, Math.max(0, shown.length - 1));
+          list.replaceChildren(
+            ...shown.map((o, k) => {
+              const li = el("li", k === active ? "on" : null, o);
+              li.setAttribute("role", "option");
+              li.onmousedown = (ev) => {
+                ev.preventDefault(); // keep the field focused
+                pick(o);
+              };
+              return li;
+            }),
+          );
+          list.hidden = !open || shown.length === 0;
+          if (!list.hidden) {
+            // Fixed, so the table's scroll box does not clip it: placed under the field.
+            const r = inp.getBoundingClientRect();
+            list.style.left = `${r.left}px`;
+            list.style.top = `${r.bottom}px`;
+            list.style.width = `${r.width}px`;
+          }
+        };
+        closeOpen = () => {
+          open = false;
+          list.hidden = true;
+        };
+        const pick = (o) => {
+          open = false;
+          inp.value = o;
+          list.hidden = true;
+          commit(o);
+        };
+        inp.addEventListener("focus", () => {
+          begin();
+          open = true;
+          paint();
+        });
+        inp.addEventListener("input", () => {
+          open = true;
+          active = 0;
+          paint();
+        });
+        inp.addEventListener("blur", () => {
+          open = false;
+          list.hidden = true;
+          inp.value = cells[j] ?? "";
+        });
+        inp.addEventListener("keydown", (ev) => {
+          if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+            if (list.hidden) return;
+            ev.preventDefault();
+            active = Math.max(0, Math.min(shown.length - 1, active + (ev.key === "ArrowDown" ? 1 : -1)));
+            paint();
+          } else if (ev.key === "Enter") {
+            ev.preventDefault();
+            if (!list.hidden && shown.length) pick(shown[active]);
+            focusCell(vr + 1, j);
+          } else if (ev.key === "Escape") {
+            open = false;
+            list.hidden = true;
+            inp.value = cells[j] ?? "";
+          }
+        });
+        box.append(inp, list);
+        return box;
+      }
+
+      const ta = el("textarea", "tbl-cell");
+      ta.rows = 1;
+      ta.value = cells[j] ?? "";
+      ta.dataset.pos = `${vr}:${j}`;
+      ta.setAttribute("aria-label", label);
+      ta.addEventListener("focus", begin);
+      ta.addEventListener("input", () => {
+        commit(ta.value);
+        fit(ta);
+      });
+      ta.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter" && !ev.shiftKey) {
+          ev.preventDefault();
+          focusCell(vr + 1, j);
+        }
+      });
+      return ta;
+    };
+
     const drawRows = (tbody, cols, numeric, shown) => {
       if (!shown.length) {
         const tr = el("tr", "tbl-empty");
@@ -551,34 +743,9 @@
           const j = col.j;
           const td = el("td");
           if (numeric[j]) td.className = "num";
-          if (cellEditable(state.edit, col.id)) {
-            // A textarea wraps long text; Enter moves down a row, Shift+Enter
-            // starts a new line in the cell, Tab moves across.
-            const ta = el("textarea", "tbl-cell");
-            ta.rows = 1;
-            ta.value = cells[j] ?? "";
-            ta.dataset.pos = `${vr}:${j}`;
-            ta.setAttribute("aria-label", `${col.label}, row ${i + 1}`);
-            let before = null; // the state before this focus's first change
-            ta.addEventListener("focus", () => {
-              before = current();
-            });
-            ta.addEventListener("input", () => {
-              if (before !== null) {
-                pushUndo(before);
-                before = null;
-              }
-              state.rows[i][j] = ta.value;
-              fit(ta);
-              persist(state);
-            });
-            ta.addEventListener("keydown", (ev) => {
-              if (ev.key === "Enter" && !ev.shiftKey) {
-                ev.preventDefault();
-                focusCell(vr + 1, j);
-              }
-            });
-            td.append(ta);
+          if (numeric[j] || col.input === "number") td.classList.add("num");
+          if (cellEditable(state.edit, col.id) || fresh.has(cells)) {
+            td.append(editCell(col, i, vr, cells));
           } else {
             td.textContent = cells[j] ?? "";
           }
@@ -589,6 +756,7 @@
           td.append(
             icon("\u00d7", `Remove row ${i + 1}`, () => {
               pushUndo(current());
+              fresh.delete(state.rows[i]);
               state.rows.splice(i, 1);
               persist(state);
               draw();
