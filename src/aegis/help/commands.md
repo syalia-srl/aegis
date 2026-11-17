@@ -19,6 +19,9 @@ survives a restart, where the harness's would end with its process.
 Type / in a session's box to open the menu of every command, aegis's first;
 Tab or Enter picks one. Alt+/ opens the same menu over a draft.
 
+A line that starts with `@` instead goes to another session or agent: see
+[mentions](handoffs#mention-from-the-composer).
+
 After the command, the menu completes every argument that comes from a list:
 the model, effort and permission, the tutorial page, the saved workflow, and
 for `/spawn` and `/handoff` the agent, the flags and their values. `/spawn ` lists this

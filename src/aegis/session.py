@@ -1430,6 +1430,7 @@ class Session:
             "layout",
             "btw",
             "btw_answer",
+            "mention_carried",
             "park",
         ):
             # aegis talking to the person, not the session doing anything; nor
