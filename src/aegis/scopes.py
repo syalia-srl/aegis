@@ -29,7 +29,8 @@ TOOLS = frozenset(
     browser_type config_doctor config_suggest feed_cancel feed_list feed_pause
     feed_resume feed_start file_send help_read help_search journal_note
     journal_search knowledge_import knowledge_stats layout_read layout_set
-    memory_delete memory_read memory_save memory_search meta models_list
+    memory_delete memory_read memory_save memory_search mention_reply meta
+    models_list
     monitor_cancel monitor_list monitor_sessions monitor_start notice_announce
     peer_handoff peer_read plan_update queue_enqueue quota_read schedule_create
     schedule_delete schedule_fire schedule_list schedule_pause schedule_resume

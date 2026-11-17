@@ -39,6 +39,16 @@ export async function catalogFor(mount, key) {
   return { ...cat, agents, tutorials: pages.filter((p) => p.kind === "tutorial") };
 }
 
+// The sessions an @ in the box of session `key` completes: the open agent
+// sessions on its server but itself (mentions.py refuses a mention of itself)
+// and queue workers, whose task owns them.
+export function mentionable(sessions, key) {
+  const server = key ? forKey(key).server : null;
+  return [...sessions.entries()]
+    .filter(([k, m]) => k !== key && m.handle && !m.archived && !m.worker && m.kind !== "term" && m.kind !== "browser" && forKey(k).server === server)
+    .map(([, m]) => ({ handle: m.handle, title: m.title, busy: m.state === "working" }));
+}
+
 export class CommandsPart {
   // host: the composer element that holds [data-slot=menu].
   // fetch(key): Promise<catalog> for a session; run(line): send a line the
@@ -65,6 +75,8 @@ export class CommandsPart {
       setLine: (v) => opts.setLine(v),
       meta: () => opts.meta(),
       t: this.t,
+      getCaret: opts.getCaret,
+      sessions: opts.sessions,
     });
   }
 
@@ -100,6 +112,11 @@ export class CommandsPart {
   // overlay writes its filter and an inline menu the box).
   setLine(v) {
     this.menu.setText(v);
+  }
+
+  // Whether the caret is in an @ word the menu completes (commands.js).
+  mentioning() {
+    return !!this.menu.mention();
   }
 
   // A session's catalog changed under it (/model changes the efforts).

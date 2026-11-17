@@ -1,7 +1,7 @@
 ---
 title: Reading a transcript
 kind: concept
-when: reading what an agent did, its tool rows and replies, the files it sent and the paths it named
+when: reading what an agent did, its tool rows and replies, the files it sent and the paths it named, or where to dock a file or a page beside it
 hints:
   - Fold the tool rows to read only the agent's replies. #folding
   - Click a path in a reply to open that file at that line. #paths-in-replies

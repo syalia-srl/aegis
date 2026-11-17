@@ -46,6 +46,10 @@ NOT_AN_ID: dict[tuple[str, str], str] = {
     ("device.remove", "id"): "a paired phone (devices.py), checked against its owner",
     ("journal.rows", "session"): "a filter on rows; lists are task 5's",
     ("journal.search", "session"): "a filter on rows; lists are task 5's",
+    (
+        "mention.reply",
+        "id",
+    ): "an @ mention's id; mentions.py checks the caller was asked",
     **{
         (op, "from_agent"): "provenance from a linked server, never authorization"
         for op in (

@@ -81,6 +81,15 @@ FOLD_LEVEL = {
 }
 
 
+def _mention_status(det: dict) -> str:
+    settled = all(m["state"] in ("answered", "failed") for m in det["members"])
+    if det["committee"]:
+        return "ok" if det["merge"] else "running"
+    if det["members"] and det["members"][0]["kind"] == "agent":
+        return "ok" if settled else "running"
+    return "ok"
+
+
 def _entry(
     id: str,
     kind: str,
@@ -238,6 +247,7 @@ class Fold:
         self._recaps: list[str] = []  # recap entry ids no send has folded yet
         self.last_recap_upto: int | None = None
         self._btws: dict[str, str] = {}  # side note id -> entry id
+        self._mentions: dict[str, str] = {}  # @ mention id -> entry id
 
     def _dockable_copies(self, records: list[dict]) -> list[dict]:
         """Stored copies that are not ``file_send`` records, with stable pane ids.
@@ -510,6 +520,77 @@ class Fold:
         return [{"remove": id}]
 
     # -- what aegis itself did ---------------------------------------
+    def _mention(self, kind: str, rec: dict, i: int, ts: float | None) -> list[dict]:
+        """An @ mention's line, its members and their answers, as one entry
+        (mentions.py). Waiting while an answer it expects or its committee's
+        merge has not come; a note alone expects none."""
+        if kind == "mention":
+            mid = str(rec.get("id"))
+            self._mentions[mid] = f"e{i}"
+            members = [
+                {
+                    "name": str(m.get("name") or ""),
+                    "kind": m.get("kind") if m.get("kind") == "agent" else "session",
+                    "state": m.get("state") if m.get("state") == "held" else "asked",
+                    "answer": "",
+                    "why": "",
+                }
+                for m in rec.get("members") or []
+                if isinstance(m, dict)
+            ]
+            det = {
+                "id": mid,
+                "body": str(rec.get("body") or ""),
+                "committee": bool(rec.get("committee")),
+                "members": members,
+                "merge": None,
+                "carried": False,
+            }
+            return self._upsert(
+                _entry(
+                    f"e{i}",
+                    "mention",
+                    _mention_status(det),
+                    ts,
+                    d.MENTION_GLYPH,
+                    title="mention",
+                    summary=det["body"],
+                    detail=det,
+                )
+            )
+        if kind == "mention_carried":
+            ops = []
+            for mid in rec.get("ids") or []:
+                prev = self._entries.get(self._mentions.get(str(mid), ""))
+                if prev is not None:
+                    det = {**prev["detail"], "carried": True}
+                    ops += self._upsert({**prev, "detail": det})
+            return ops
+        prev = self._entries.get(self._mentions.get(str(rec.get("id")), ""))
+        if prev is None:
+            return []  # its line is missing: a damaged store
+        det = dict(prev["detail"])
+        if kind == "mention_merge":
+            how = rec.get("how")
+            det["merge"] = how if how in ("sent", "skipped") else "sent"
+        else:
+            who = str(rec.get("member") or "")
+            ok = rec.get("status") == "ok"
+            det["members"] = [
+                {
+                    **m,
+                    "state": "answered" if ok else "failed",
+                    "answer": str(rec.get("answer") or "") if ok else "",
+                    "why": "" if ok else str(rec.get("why") or ""),
+                }
+                if m["name"] == who
+                else m
+                for m in det["members"]
+            ]
+            if not det["committee"]:
+                det["carried"] = False  # a new answer the agent has not seen
+        return self._upsert({**prev, "status": _mention_status(det), "detail": det})
+
     def _settle_btws(self, why: str, fold: bool) -> list[dict]:
         """Fail every side note still running; with ``fold``, fold them all.
         One runs at a time per session, so a new question means any earlier
@@ -665,6 +746,8 @@ class Fold:
             if status == "cancelled":
                 detail["folded"] = True
             return self._upsert({**prev, "status": status, "detail": detail})
+        if kind in ("mention", "mention_answer", "mention_merge", "mention_carried"):
+            return self._mention(kind, rec, i, ts)
         if kind == "recap":
             # A refresh replaces the recap on screen: one full box, never two.
             folded = []

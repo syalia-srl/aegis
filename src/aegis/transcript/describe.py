@@ -57,6 +57,7 @@ KNOWLEDGE_GLYPH = "book"
 COMMAND_GLYPH = "slash"
 RECAP_GLYPH = "sparkle"
 BTW_GLYPH = "btw"
+MENTION_GLYPH = "swap"
 
 # How much of a result the one-line verdict may carry.
 DIGEST_MAX = 200
