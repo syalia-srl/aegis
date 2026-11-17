@@ -94,6 +94,11 @@ class Task:
     # The enqueuer's scope when it enqueued (scopes.py, #1066), in its record
     # form; {} for any. The worker's scope is its agent's met with it.
     scope: dict = field(default_factory=dict)
+    # The agent that runs it, over its queue's: an @agent run (mentions.py).
+    agent: str | None = None
+    # The @ mention it answers, as {id, log_id, member}: its result goes to
+    # that mention, not to an inbox (mentions.py).
+    mention: dict | None = None
 
     def public(self) -> dict:
         d = asdict(self)
@@ -165,6 +170,27 @@ def _guard_error(q: dict) -> str | None:
     )
 
 
+# The queue @agent runs take (mentions.py): built in, so a mention needs no
+# configuration; a ``mention:`` entry in .aegis.yaml replaces it.
+MENTION_QUEUE = "mention"
+
+
+def mention_queue(default_agent: str | None) -> dict:
+    return {
+        "agent": default_agent or "claude",
+        "priority": DEFAULT_PRIORITY,
+        "quiet": True,
+        "legacy": [],
+        "guard": None,
+        "max_pending": None,
+    }
+
+
+def with_agent(t: Task, q: dict) -> dict:
+    """``q`` as ``t`` runs on it: with the task's own agent, if it names one."""
+    return {**q, "agent": t.agent} if t.agent else q
+
+
 def load_queues(config_root: Path) -> dict[str, dict]:
     try:
         raw = read_config(config_root).get("queues")
@@ -180,6 +206,8 @@ class Queues:
         # Sends a task's result back to an agent on a server linked with
         # trust (app.py sets it).
         self.far_callback: Callable[[Task, str, str], Awaitable[None]] | None = None
+        # Takes the result of an @agent run (mentions.py; app.py sets it).
+        self.on_mention: Callable[[Task, str, str], Awaitable[None]] | None = None
         self._registry = registry
         self._monitors = monitors
         self._path = path
@@ -198,8 +226,13 @@ class Queues:
 
     @property
     def queues(self) -> dict[str, dict]:
-        """The queues in .aegis.yaml as it is now (config.py)."""
-        return self._config.current().queues
+        """The queues in .aegis.yaml as it is now (config.py), and the built-in
+        ``mention`` queue the @agent runs take unless the file sets its own
+        (mentions.py); each of its tasks names its agent."""
+        snap = self._config.current()
+        if MENTION_QUEUE in snap.queues:
+            return snap.queues
+        return {**snap.queues, MENTION_QUEUE: mention_queue(snap.default_agent)}
 
     # -- the log --------------------------------------------------------------
     def _log(self, t: Task, event: str) -> None:
@@ -309,8 +342,12 @@ class Queues:
         owner: str | None = None,
         far_enqueuer: dict | None = None,
         scope: dict | None = None,
+        agent: str | None = None,
+        mention: dict | None = None,
     ) -> Task:
         t = Task(
+            agent=agent,
+            mention=mention,
             id=f"task-{secrets.token_hex(4)}",
             queue=queue,
             payload=payload,
@@ -397,7 +434,7 @@ class Queues:
         skipped, never failed, so the next one starts, and a queue with none
         to start leaves its share of max_workers to the others; the gate's
         next reading dispatches it (app.on_quota)."""
-        g = self.gate(t.queue, q, t.enqueuer, t.cwd, t.owner)
+        g = self.gate(t.queue, with_agent(t, q), t.enqueuer, t.cwd, t.owner)
         return None if g.may_start else g.why
 
     def gate(
@@ -482,6 +519,7 @@ class Queues:
         return f"the task waits until the gate opens: {text}"
 
     async def _start(self, t: Task, q: dict) -> None:
+        q = with_agent(t, q)
         try:
             agents = list(self._config.current().agents)
             # A worker joins its enqueuer's group (#1039), making one if the
@@ -650,6 +688,13 @@ class Queues:
         loop.create_task(self.dispatch())
 
     async def _callback(self, t: Task, outcome: str, body: str) -> None:
+        if t.mention is not None:
+            if self.on_mention is not None:
+                try:
+                    await self.on_mention(t, outcome, body)
+                except Exception:
+                    log.exception("aegis: could not answer the mention of %s", t.id)
+            return
         if t.callback and t.far_enqueuer and self.far_callback is not None:
             try:
                 await self.far_callback(t, outcome, body)

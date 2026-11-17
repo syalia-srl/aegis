@@ -5,6 +5,7 @@ when: reading another session, giving it work or context, or starting one to wor
 hints:
   - An agent can read another session and hand it work without you copying text. #hand-work-over
   - Near the end of a long context, continue in a fresh session with a brief. #continue-in-a-fresh-session
+  - Start a line with @ and a handle or an agent to send it there instead. #mention-from-the-composer
 ---
 
 Sessions on one server can see each other. An agent can list the open
@@ -59,6 +60,38 @@ The reply says what happened: `landed at <handle>` (it was idle), `held for
 
 A handoff does not report back. If you need the answer, say in the context
 how to give it to you, for example by handing off back to your handle.
+
+## Mention from the composer
+
+A line that starts with `@name` goes to another session or agent instead of
+this tab. At the start of the box, `@` lists the agents and the open
+sessions; mid-line it lists the sessions and only puts a handle in the text.
+
+- `@handle text` sends a note, as `peer_handoff` does: held until the turn
+  ends when that session is busy, or at its next tool step with `@!handle`.
+  `handle@server` reaches a linked server. This tab neither waits nor starts
+  a turn.
+- `@agent text` runs `text` once with that agent on the built-in `mention`
+  queue. The worker gets the question, your tab's last turns and its handle
+  for `peer_read`.
+
+Each mention is one block in your tab with each answer. Your next message
+carries a single answer to the tab's agent, quoted after your text. `@@`
+starts a line with a literal `@`; `@s:handle` picks a session over an agent
+of the same name.
+
+## Convene a committee
+
+Two or more names make a committee: `@opus @deepseek @ben-ci review this
+plan`. Once every member answered, or after 30 minutes, this tab's agent gets
+one message headed `> from committee · mention#<id>` with every answer and
+merges them. The block's Skip merge button cancels that while it waits.
+
+## Answer a mention
+
+A note that asks for an answer names its id. Answer with `mention_reply`:
+`id` and `text`. The answer shows in the asking tab and starts no turn. A
+session that was not asked cannot reply.
 
 ## Start a peer
 
