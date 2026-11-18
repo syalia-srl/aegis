@@ -1,7 +1,7 @@
 {
   "source": "Artificial Analysis",
   "url": "https://artificialanalysis.ai",
-  "refreshed": "2026-11-17",
+  "refreshed": "2026-11-18",
   "models": {
     "fable": {
       "aa": "claude-fable-5-2",
@@ -108,13 +108,6 @@
       "price_in": 0.15,
       "price_out": 0.6
     },
-    "opencode/minimax-m3.1-flash-free": {
-      "aa": "minimax-m3-1-flash",
-      "coding": null,
-      "intelligence": 29.1,
-      "price_in": 0.15,
-      "price_out": 0.6
-    },
     "opencode-go/gpt-6-luna": {
       "aa": "gpt-6-luna",
       "coding": null,
@@ -175,7 +168,7 @@
       "aa": "nemotron-3-5-super-vl",
       "coding": null,
       "intelligence": 13.6,
-      "price_in": 0.2,
+      "price_in": 0.15,
       "price_out": 0.5
     },
     "opencode/nemotron-3.5-lightning-free": {
