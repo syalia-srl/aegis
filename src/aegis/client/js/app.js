@@ -1910,7 +1910,7 @@ function drawComposerHint(s) {
       ? "Asleep; your next message wakes it."
       : touch.matches
         ? ""
-        : "Message the agent. Enter sends, Shift+Enter adds a line, / for commands, Esc interrupts.";
+        : "Message the agent. Enter sends, Shift+Enter adds a line, / for commands, Esc Esc interrupts.";
   if (input.placeholder !== placeholder) {
     input.placeholder = placeholder;
     autosize();
@@ -1936,8 +1936,21 @@ function tokenCount(n) {
   return n < 1000 ? String(Math.round(n)) : `${(n / 1000).toFixed(1)}k`;
 }
 const callTitle = new CallTitle();
+// One Esc closes a dialog. The interrupt is the next Esc within this long,
+// so a press while typing does not stop the turn (#912).
+const ESC_AGAIN_MS = 1000;
+let escArmedAt = 0;
+function drawEscHint() {
+  const key = Date.now() - escArmedAt < ESC_AGAIN_MS ? "transcript.working.escapeAgain" : "transcript.working.escape";
+  const node = document.querySelector("#working .wesc [data-t]");
+  if (node && node.dataset.t !== key) {
+    node.dataset.t = key;
+    node.textContent = app.t(key);
+  }
+}
 function tickWorking() {
   if (workingSince == null) return;
+  drawEscHint();
   $("working-s").textContent = Math.round((Date.now() - workingSince) / 1000);
   ["working-in", "working-out"].forEach((id, k) => {
     const gap = workingTokens[k] - workingShown[k];
@@ -2290,12 +2303,19 @@ const offKeys = installKeys(
       } else menu.openOverlay();
     },
     escape() {
+      const armed = escArmedAt;
+      escArmedAt = 0;
       if (dictation.discard() || cancelAsk() || closeInstallDialog() || closePushPanel()) return;
       if (header.close()) return;
       if (root.dataset.side === "open") return closeSide();
       if (!keymap.hidden) help(false);
       else if (cmenu.close() || cmenu.unbar() || viewer.close() || find.close() || closeMonitorCard() || closeFeedCard() || sidebar?.closeCard()) return;
-      else if (route().view === "session" && !sidebar?.isEditing()) interrupt();
+      else if (route().view === "session" && !sidebar?.isEditing() && focused()?.state === "working") {
+        // One Esc arms the interrupt, the second within ESC_AGAIN_MS sends it.
+        if (armed && Date.now() - armed < ESC_AGAIN_MS) interrupt();
+        else escArmedAt = Date.now();
+        drawEscHint();
+      }
     },
     help: () => help(),
     side: () => toggleSide(),
