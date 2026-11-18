@@ -9,9 +9,9 @@ resolves a ``/`` line first, ``commands.py``), ``session.read``,
 ``quota.read``, ``transcript.detail``, ``transcript.search``, ``transcript.output``, and ``config.read``, ``config.write``,
 ``config.detect``, ``config.doctor`` and ``config.propose`` (``config_ops.py``),
 and ``artifact.create``, ``artifact.send``, ``artifact.read``,
-``artifact.update``, ``artifact.close``, ``artifact.state``, ``artifact.emit``,
-``artifact.submit``, ``artifact.error`` and ``artifact.probed``
-(``artifact_ops.py``),
+``artifact.update``, ``artifact.close``, ``table.send``, ``artifact.state``,
+``artifact.emit``, ``artifact.submit``, ``artifact.error`` and
+``artifact.probed`` (``artifact_ops.py``),
 and ``journal.search``, ``journal.note`` and ``journal.rows`` (``journal/ops.py``),
 and ``help.search``, ``help.read`` and ``help.pages`` (``help_ops.py``),
 and ``schedule.list``, ``schedule.runs``, ``schedule.create``,

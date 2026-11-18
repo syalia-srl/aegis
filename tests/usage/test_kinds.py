@@ -51,6 +51,7 @@ from aegis.usage.kinds import (
         ("Task", {}, "other agents"),
         ("mcp__aegis__file_send", {}, "showing"),
         ("mcp__aegis__artifact_send", {}, "showing"),
+        ("mcp__aegis__table_send", {}, "showing"),
         ("mcp__aegis__toast", {}, "showing"),
         ("mcp__aegis__turn_end", {}, "bookkeeping"),
         ("mcp__aegis__help_search", {}, "bookkeeping"),

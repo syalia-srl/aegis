@@ -4,6 +4,7 @@ kind: howto
 when: showing the person a page they can click, tune or answer, instead of asking in prose
 hints:
   - Ask an agent to show you a page to choose from instead of a question in prose. #write-and-send-one
+  - Ask an agent to send a filterable table with table_send instead of a Markdown table. #send-a-table
   - A page an agent sent can stay docked beside the transcript while you work. #pages-that-stay-in-view
 ---
 
@@ -43,6 +44,35 @@ fixed width or on hover alone.
 A send is refused when the page lost the script tag, or never calls
 `aegis.submit`, `aegis.emit` or `aegis.state`, since then no answer could ever
 reach you.
+
+## Send a table
+
+When the person should filter, search or edit tabular data — not read a static
+Markdown table in the reply — call `table_send` instead of writing a page by
+hand. Pass title and either columns with rows, a GFM markdown table, or an
+HTML table string. The person always gets a search box, per-column filters, a
+column show/hide menu, column sort, numeric columns aligned and in the mono
+face, and a copy menu that writes the visible rows as Markdown, CSV, LaTeX,
+JSON, YAML or TOML. A numeric column filters by comparison (>80, <=90, or a
+range 80..90); any column takes text, or a regular expression between slashes.
+A column can be typed: pass it as an object with id, label and input. Input is
+text (the default), number, or select with options, a list of one-line strings;
+a select takes one of its options and a number takes digits. Rows the person
+adds are editable in every column, so a new row can be filled whatever the
+edit policy says about the rest. Omit edit (or pass false) for a view-only
+table; pass true, or an object, to let them change what you allow:
+
+- cells: true (every cell), false (none), or a list of column ids
+- add_rows / remove_rows / add_columns / remove_columns: booleans
+
+Editable cells read as plain text until clicked, and long text wraps in them.
+Tab moves across, Enter moves down, Shift+Enter starts a new line in a cell, and
+an Undo button steps back the last change. Done submits
+`{columns, rows}` and collapses the card to submit_label
+(default Done). The reply is the same shape as `artifact_send`; use
+`artifact_read`, `artifact_update` and `artifact_close` on the returned id.
+caption and dock work as on other artifacts. Prefer this over pasting a
+large table into the reply when the person needs to work the data.
 
 ## What the page can call
 
