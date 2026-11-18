@@ -377,6 +377,12 @@ class Sender:
         if not self._running:
             return  # not started, or stopped
         now = time.monotonic()
+        devices = getattr(self.app, "devices", None)
+        if devices is not None and source in DEFAULT_SOURCES:
+            # The Android app hears through its own socket: a WebView has no
+            # Web Push (devices.py).
+            owner = self.app.owner_of(payload["key"]) or self.app.user
+            asyncio.create_task(devices.notify(owner, payload))
         for row in self.push.subscriptions.list():
             if source not in row.get("sources", ()):
                 continue
