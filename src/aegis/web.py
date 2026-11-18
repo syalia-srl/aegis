@@ -66,8 +66,7 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from . import exit as exit_
 from . import chrome as chrome_
-from . import devices as devices_
-from . import files, fs_paths
+from . import files, fs_paths, pdfjs
 from .app import App
 from .channels import Sub
 from .links import BOTH_WAYS_SINCE, PROTO, Backlink
@@ -283,6 +282,19 @@ def sign_in_cookie(
         secure=secure,
     )
     return response
+
+
+class PdfjsFiles(StaticFiles):
+    """Mozilla's viewer, or a 404 that says how to get it. Plain StaticFiles
+    answers 500 while its directory does not exist (check_config)."""
+
+    async def __call__(self, scope, receive, send) -> None:
+        if not pdfjs.installed():
+            response = PlainTextResponse(
+                "pdf.js is not installed: run `aegis pdfjs install`", 404
+            )
+            return await response(scope, receive, send)
+        return await super().__call__(scope, receive, send)
 
 
 class ClientFiles(StaticFiles):
@@ -842,6 +854,8 @@ def build_web(
                 # sends it only to a server that says this.
                 "groups": True,
                 "native": desktop,
+                # Whether PDFs open in Mozilla's viewer, with annotations (pdfjs.py).
+                "pdfjs": pdfjs.installed(),
                 "me": {
                     "name": principal.name,
                 },
@@ -1095,99 +1109,6 @@ def build_web(
         finally:
             app.chrome.disconnected(did, send)
 
-    async def device_pair(request):
-        """Pair a phone (devices.py): the aegis app posts its public key with
-        the session cookie its WebView signed in with. JSON only, so a form on
-        another site cannot post here with the cookie."""
-        if (
-            request.headers.get("content-type", "").split(";")[0].strip()
-            != "application/json"
-        ):
-            return JSONResponse({"error": "bad_request"}, status_code=415)
-        given = request.cookies.get(cookie)
-        try:
-            principal = await app.identify(Credential(given or "", "http"))
-        except Refused:
-            principal = None
-        if not given or principal is None:
-            return JSONResponse({"error": "signed_out"}, status_code=401)
-        try:
-            body = await request.json()
-        except ValueError:
-            body = None
-        if not isinstance(body, dict) or not isinstance(body.get("public_key"), str):
-            return JSONResponse({"error": "bad_request"}, status_code=400)
-        try:
-            row = app.devices.pair(
-                principal.name, str(body.get("name") or ""), body["public_key"]
-            )
-        except ValueError as e:
-            return JSONResponse(
-                {"error": "bad_key", "message": str(e)}, status_code=400
-            )
-        return JSONResponse({"id": row["id"], "name": row["name"]})
-
-    async def device_socket(websocket: WebSocket) -> None:
-        """A paired phone's socket: it signs the nonce sent first, then
-        answers calls (devices.py)."""
-        host = websocket.headers.get("host", "")
-        if host not in allowed_hosts and host not in public:
-            await websocket.close(code=BAD_ORIGIN)
-            return
-        await websocket.accept()
-        nonce = secrets.token_bytes(32)
-        try:
-            await websocket.send_json({"t": "challenge", "nonce": devices_.b64e(nonce)})
-            hello = await asyncio.wait_for(websocket.receive_json(), HELLO_TIMEOUT_S)
-        except (TimeoutError, ValueError, WebSocketDisconnect):
-            with contextlib.suppress(Exception):
-                await websocket.close(code=NO_HELLO)
-            return
-        ok = (
-            isinstance(hello, dict)
-            and hello.get("t") == "hello"
-            and isinstance(hello.get("id"), str)
-            and isinstance(hello.get("sig"), str)
-            and app.devices.verify(hello["id"], nonce, hello["sig"])
-        )
-        if not ok:
-            await websocket.close(code=BAD_TOKEN)
-            return
-        did = hello["id"]
-        loop = asyncio.get_running_loop()
-
-        async def send(msg: dict) -> None:
-            await websocket.send_json(msg)
-
-        def close() -> None:
-            async def shut() -> None:
-                with contextlib.suppress(Exception):
-                    await websocket.close(code=BAD_TOKEN)
-
-            loop.create_task(shut())
-
-        live = app.devices.attach(did, hello, send, close)
-        if live is None:
-            await websocket.close(code=BAD_TOKEN)
-            return
-        row = app.devices.get(did) or {}
-        await send(
-            {
-                "t": "welcome",
-                "name": row.get("name"),
-                "latest_shell": devices_.LATEST_SHELL,
-            }
-        )
-        try:
-            while True:
-                msg = await websocket.receive_json()
-                if isinstance(msg, dict) and msg.get("t") == "reply":
-                    app.devices.on_reply(live, msg)
-        except (WebSocketDisconnect, ValueError, RuntimeError):
-            pass
-        finally:
-            app.devices.detach(did, live)
-
     async def chrome_extension(request):
         """The unpacked extension, zipped, to load in chrome://extensions."""
         return Response(
@@ -1206,6 +1127,10 @@ def build_web(
         Route("/sw.js", service_worker),
         Route("/client-files.json", files_list),
         Mount("/static", ClientFiles(directory=CLIENT_DIR)),
+        # Mozilla's viewer, once `aegis pdfjs install` put it there (pdfjs.py).
+        # Outside /static, so the service worker does not cache it with the app
+        # shell. Checked per request: an install needs no restart.
+        Mount("/pdfjs", PdfjsFiles(directory=pdfjs.root(), check_dir=False)),
         Route("/files/{file_id}/{name}", sent_file),
         Route("/fs/{ticket}/{name}", fs_file),
         Route("/via/{server}/files/{file_id}/{name}", via_file),
@@ -1216,8 +1141,6 @@ def build_web(
         Route("/chrome/pair", chrome_pair, methods=["POST", "OPTIONS"]),
         Route("/chrome/extension.zip", chrome_extension),
         WebSocketRoute("/chrome/socket", chrome_socket),
-        Route("/api/devices/pair", device_pair, methods=["POST"]),
-        WebSocketRoute("/device", device_socket),
     ]
     if mcp:
         # Only the Server's own loopback listener serves these; a host's
