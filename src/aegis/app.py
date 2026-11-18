@@ -173,7 +173,6 @@ from .session import PUBLISH_EVERY_S, SpawnSpec
 from .term_ops import register_term_ops
 from .browser_ops import register_browser_ops
 from .chrome_ops import register_chrome_ops
-from .device_ops import register_device_ops
 from .terminals import Terminals
 from .browsers import Browsers
 from .version import Versions
@@ -751,7 +750,6 @@ class App:
         register_term_ops(self)
         register_browser_ops(self)
         self.chrome = register_chrome_ops(self)
-        self.devices = register_device_ops(self)
         self.push = register_push_ops(self)
         register_journal_ops(self)
         register_usage_ops(self)
@@ -3902,7 +3900,6 @@ class App:
             devices stop hearing pushes (push.py)."""
             token = self.principals.revoke(p.name)
             self.push.subscriptions.remove_owner(p.name)
-            self.devices.remove_owner(p.name)
             return {"token": token}
 
         @r.op("server.version", access="read")
