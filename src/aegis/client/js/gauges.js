@@ -4,6 +4,7 @@
 // the share of the window already gone, and the countdown to its reset.
 
 import { icon } from "./glyphs.js";
+import { serverNow } from "./clock.js";
 
 export const PROJECT_FROM = 80; // the projection prints from here, as quota's PACE_WARN_AT
 
@@ -36,7 +37,7 @@ export function age(seconds) {
 function clock(ts) {
   const d = new Date(ts * 1000);
   const hm = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  return ts - Date.now() / 1000 > 86400 ? `${d.toLocaleDateString([], { weekday: "short" })} ${hm}` : hm;
+  return ts - serverNow() > 86400 ? `${d.toLocaleDateString([], { weekday: "short" })} ${hm}` : hm;
 }
 
 // The share of the window already gone, clamped to the bar; null draws no tick.
@@ -51,10 +52,7 @@ export function hostSeverity(pct) {
   return pct >= 95 ? "critical" : pct >= 80 ? "warning" : "normal";
 }
 
-// `lines` are a member's own quota lines on this window ({launch, stop}, as
-// its policy holds them, quota_gate.py): a green tick and a red one. A pace
-// launch line is the elapsed tick already drawn.
-function bar(kind, pct, severity, tick, lines = null) {
+function bar(kind, pct, severity, tick) {
   const b = el("div", `bar ${kind} ${severity}`);
   const fill = el("i");
   fill.style.width = `${Math.min(100, Math.max(0, pct))}%`;
@@ -62,13 +60,6 @@ function bar(kind, pct, severity, tick, lines = null) {
   if (tick != null) {
     const t = el("span", "tick");
     t.style.left = `${tick * 100}%`;
-    b.append(t);
-  }
-  for (const [which, at] of [["l", lines?.launch], ["s", lines?.stop]]) {
-    if (typeof at !== "number") continue;
-    const t = el("span", `tick lim ${which}`);
-    t.style.left = `${at}%`;
-    t.title = `${which === "l" ? "launch" : "stop"} line ${at}%`;
     b.append(t);
   }
   return b;
@@ -91,6 +82,7 @@ function sentence(p, w, now) {
   let s = `${p.label}, ${w.label} window: ${Math.round(w.percent)}% used`;
   if (gone != null) s += `, ${Math.round(gone * 100)}% of the window gone`;
   if (w.projected != null) s += `, on pace for ${w.projected}% at reset`;
+  if (w.rate != null) s += ` at ${w.rate} %/h`;
   s += ".";
   if (w.resets_at != null) s += ` Resets ${clock(w.resets_at)}, in ${countdown(w.resets_at - now)}.`;
   if (p.state === "stale") s += ` This reading is ${age(now - p.read_at)} old: ${p.note}.`;
@@ -111,7 +103,7 @@ export function quotaRow(p, w, now) {
   return g;
 }
 
-export function quotaSideRow(p, w, now, lines = null) {
+export function quotaSideRow(p, w, now) {
   const stale = p.state === "stale";
   const r = el("div", `qrow ${w.severity}${stale ? " stale" : ""}`);
   r.dataset.kind = w.kind;
@@ -124,7 +116,7 @@ export function quotaSideRow(p, w, now, lines = null) {
   const dim = el("div", "kv dim");
   if (w.resets_at != null)
     dim.append(el("span", null, `resets in ${countdown(w.resets_at - now)}`), el("span", null, clock(w.resets_at)));
-  r.append(kv, bar("q", w.percent, w.severity, elapsed(w, now), lines), dim);
+  r.append(kv, bar("q", w.percent, w.severity, elapsed(w, now)), dim);
   return r;
 }
 
@@ -140,10 +132,10 @@ export function hostRow(label, pct, tail) {
 
 // One row per disk the host mounts, named by its mount point when there are
 // several. A linked server older than #541 sends only `disk`.
-export function diskRows(h) {
+export function diskRows(h, t = (k) => k) {
   const disks = h.disks || (h.disk ? [h.disk] : []);
   return disks.map((d) => {
-    const row = hostRow(disks.length > 1 ? d.mount : "Disk", d.pct, `${d.used_gb} / ${d.total_gb} GB`);
+    const row = hostRow(disks.length > 1 ? d.mount : t("gauges.disk"), d.pct, `${d.used_gb} / ${d.total_gb} GB`);
     if (d.mount) row.firstChild.title = d.mount;
     return row;
   });

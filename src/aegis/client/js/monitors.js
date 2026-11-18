@@ -9,6 +9,7 @@
 // survives and a clicked-open command stays open.
 
 import { age } from "./gauges.js";
+import { serverNow } from "./clock.js";
 
 const CARD_W = 392;
 const OPEN_AFTER_MS = 220;
@@ -17,7 +18,7 @@ const narrow = matchMedia("(max-width: 760px)");
 // after its click, which would close the card it just opened.
 const byMouse = (fn) => (ev) => ev.pointerType === "mouse" && fn();
 const CLOSE_AFTER_MS = 160;
-const nowS = () => Date.now() / 1000;
+const nowS = serverNow;
 
 function h(tag, cls, ...kids) {
   const n = document.createElement(tag);
@@ -309,7 +310,7 @@ function place() {
   const r = rows.get(openId)?.el.getBoundingClientRect();
   const side = document.querySelector("#a2 .side")?.getBoundingClientRect();
   if (!r || !side || !r.height) return closeMonitorCard();
-  // A phone has no room beside the drawer: base.css draws the card as a sheet.
+  // A phone has no room beside the drawer: client.css draws the card as a sheet.
   if (narrow.matches) {
     cardEl.style.removeProperty("left");
     cardEl.style.removeProperty("top");

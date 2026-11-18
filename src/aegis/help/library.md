@@ -34,7 +34,9 @@ asyncio.run(main())
 `.aegis.yaml` (required, since a library never guesses from the working
 directory), `port` (0, the default, takes a free one),
 `host`, `name`, and the harness binaries (`claude`, `opencode`, `codex`,
-`cursor`). Entering the block runs the startup checks, boots aegis and
+`cursor`). `mcp` takes a name-to-`McpServer` map: an agent attaches one by
+name in its `mcp:` list, as it attaches the file's (see
+[config](config#mcp-servers)). Entering the block runs the startup checks, boots aegis and
 listens. Leaving it shuts aegis down as a stopped `aegis serve` does.
 
 - It always listens, on loopback unless you pass `host`. The agents it
@@ -143,3 +145,118 @@ agents get: dicts, lists and strings.
 The signatures are in `src/aegis/api/ops.pyi`, so an editor completes them
 and a type checker checks them. After changing an operation's parameters,
 run `make ops-stubs` and commit the file. A test fails while it is stale.
+
+## Host policy
+
+A program that embeds aegis decides who may do what through a host policy:
+`Server(root, policy=MyPolicy())`, where `MyPolicy` subclasses
+`aegis.HostPolicy` and overrides the hooks it needs. Each hook's default
+allows. `aegis serve` runs `StandalonePolicy`: one caller, the holder of the
+server's token, who may do everything, and linked servers as before.
+
+aegis calls each hook with a `who`: the object your `identify` returned, kept
+as it is and never read. For an agent's call, `who` is the person whose
+session it is. `who` is `None` for the server's own caller: its token, `srv`
+without `srv.as_who(...)`, and aegis's own work.
+
+| Hook | When aegis asks |
+|---|---|
+| `identify(cred)` | A browser's hello, an HTTP request or a linked server's hello brings a token aegis does not read itself. Return a who, or raise `Refused`. The server's own token and a token from `srv.token_for(...)` never reach it, except over a link. The default refuses links. |
+| `key(who)`, `restore(key)` | aegis stores `key(who)` wherever it keeps an owner (sessions, schedules, queue tasks, workflow runs), and calls `restore` to get the who back with nobody connected, such as after a restart. A `restore` that raises `Refused` stops that work with your message. |
+| `guard(op, who, caller)` | Before every operation. The default keeps aegis's own checks (operations closed to agents, read-permission sessions, schedule runs with `spawn: false`, operations closed to links); call `super().guard(...)` to keep them. |
+| `can(who, action, session)` | `action` is `"list"`, `"read"`, `"write"` or `"spawn"`. Before a session appears in the tab bar, `session_list`, the archive or the journal; before its transcript is read or subscribed to; before a sent file of its is served; and before anything is sent to it or changed on it. For an operation that names no session, `session` is `None`: `"spawn"` before one that starts work (a spawn, a queue task, a schedule fire or resume, a workflow run, a monitor, a browser, a script, a shell, a sign-in, a server resume or update), and `"read"` or `"write"` before the rest. |
+| `catalog(who)` | What the pickers offer: agents, harnesses, models, efforts, permissions, folders. A start outside it is refused. |
+| `spawn(who, req)` | Before any session starts: a spawn, a handoff, a queue worker, a schedule or workflow run, and a stopped session waking. Return the `SpawnRequest` to run, rewritten with `req.replace(...)`, or raise `Refused`. On a wake only model, effort and permission change. `env` reaches the process and is never written to disk. |
+| `tools(who, session)` | When a harness starts: the names of the aegis tools it gets, or `None` for all. The rest are hidden from its tool list and refused when called. |
+| `mcp(who, session)` | When a harness starts: a list of `McpServer.http(name, url, headers)` or `McpServer.stdio(name, command, args, env)` it gets after its agent's own. `${VAR}` is read from aegis's environment; a name another source also uses refuses the start. |
+| `around(op, who, params, call)` | Around every operation, after the checks above: refuse, change `params`, call `await call(params)`, change the result. |
+| `on_event(who, event)` | After a session starts, writes an entry, ends a turn, stops, closes or sends a file. Events arrive in order, and a slow or failing hook never holds up a turn. |
+
+A session the caller may not read answers as missing, with the code a
+session, task or run that does not exist gets, so nobody learns it exists; one they may read but not
+change answers `refused`. A session carries `tags`, strings your `spawn` sets
+with `req.replace(tags=...)`; every session it starts inherits them, so `can`
+can decide from the session alone.
+
+`srv.token_for(who, ttl=3600)` mints a signed token for your page to hand the
+client: it holds the caller's key and an expiry, needs no table, and survives
+a restart until it expires. `srv.as_who(who)` is the same API acting as that
+person: `await srv.as_who(who).sessions.spawn()` starts a session of theirs.
+
+Some operations act on the whole server rather than on a session: the
+config, links, the Files view, terminals, harness sign-ins, usage, Pause all
+and updates. `HostPolicy.guard` refuses them to every caller you identified,
+and only the server's own caller keeps them; override `guard` to open one.
+A schedule belongs to the person who made it, and others neither see nor
+change it.
+
+Your `key(who)` must differ from the server's own key (the user `aegis serve`
+runs as), which stands for the server itself; aegis refuses a caller whose key
+is that. aegis asks `restore` once per key and process, and keeps the who
+until a restart.
+
+Memories, skills and help state are kept per key; dictation, saved workflow
+definitions and harness sign-ins are the server's.
+
+## The chat in your page
+
+aegis's web client is a set of mounts: your page names an element and a
+session, and `mount()` draws aegis inside it, in your own colours and under your
+own prefix. The whole contract — the options, the three layouts, the events and
+calls, renderers, theming, the manifest and sign-in — is on
+[embedding](embedding).
+
+A Python host runs the server and mounts its web app at the prefix the page
+uses:
+
+```python
+from starlette.applications import Starlette
+from starlette.responses import HTMLResponse
+from starlette.routing import Mount, Route
+
+async with Server("./proj", prefix="/aegis", policy=MyPolicy(),
+                  origins=["https://app.example.com"]) as srv:
+    token = srv.token_for(ana)        # whose the page acts as
+
+    async def index(request):
+        return srv.sign_in(HTMLResponse(PAGE.replace("__TOKEN__", token)), token)
+
+    app = Starlette(routes=[Route("/", index), Mount("/aegis", srv.asgi)])
+```
+
+The loopback listener keeps the MCP tools at the app's root, and the app you
+mount does not serve them. [embedding](embedding) shows the page's import and
+call, and every option the mount takes.
+
+## Product agents
+
+An agent your program runs for its own users can be closed to everything but
+the MCP servers you give it. Four fields of `SpawnRequest`, set in `spawn`,
+each off by default:
+
+| Field | What it does |
+|---|---|
+| `harness_tools=False` | None of the harness's own tools: no shell, file tools, web fetch, subagents or skills. MCP tools stay. |
+| `isolated=True` | The harness reads none of the machine's config: its own config dir holding only the sign-in, and an empty working folder outside any project. |
+| `primer=False` | aegis's workplace prompt is dropped; the session's prompt is the agent's `priming` and your `system_prompt=` text. `meta` answers with it. |
+| `notices=False` | aegis sends no nudges, notices or notes of its own. A turn a restart cut still continues, under `> continue`. |
+
+```python
+class ProductPolicy(HostPolicy):
+    async def spawn(self, who, req):
+        return req.replace(system_prompt=BRIEF, harness_tools=False,
+                           isolated=True, primer=False, notices=False)
+
+    def tools(self, who, session):
+        return set()          # none of aegis's tools either
+
+    def mcp(self, who, session):
+        return [McpServer.http("sandbox", URL, {"Authorization": f"Bearer {tok}"})]
+```
+
+Claude Code and OpenCode keep `harness_tools=False` and `isolated=True`; Codex, pi and
+Cursor refuse a start that asks for either, rather than starting less closed.
+On OpenCode, give the servers over HTTP: OpenCode keeps a stdio server's
+tools behind its Code Mode `execute` tool, which `harness_tools=False` denies.
+Every call to your servers streams as a tool entry with its name, input and
+result. `tests/test_live_product_agent.py` runs each harness this way.

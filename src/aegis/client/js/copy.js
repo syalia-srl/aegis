@@ -17,23 +17,35 @@
 // keyboard copies with `c` on the selected row (copyRow, keys.js).
 
 import { icon } from "./glyphs.js";
+import { labelsFor } from "./labels.js";
+
+// The table a button reads when its caller passes none: the standalone page
+// until b9; a mount's part passes its own.
+const en = labelsFor("en");
 
 // The kinds whose row is a message, copied as the Markdown it was written in.
 const MESSAGES = new Set(["user", "prose", "inbox"]);
 const SHOWN_MS = 1400;
 
 // `what` names the text it copies: "message", "code", "table" or "output".
-export function copyButton(what) {
+export function copyButton(what, t = en) {
   const b = document.createElement("button");
   b.type = "button";
   b.className = "copy";
   b.tabIndex = -1;
   b.dataset.copy = what;
   b.dataset.chrome = ""; // not part of the text a selection quotes (quote.js)
-  b.title = `Copy the ${what}`;
+  b._t = t; // the table its click confirmation speaks
+  b.title = copyTitle(what, t);
   b.setAttribute("aria-label", b.title);
   b.append(icon("copy"), document.createElement("span"));
   return b;
+}
+
+// "Copy the message": the noun is a key of its own so a language can put its
+// article there ("Copiar el mensaje").
+function copyTitle(what, t) {
+  return t("copy.copy", { what: t(`copy.what.${what}`) });
 }
 
 // deps: entry(id) -> the entry; output(id) -> Promise of a tool's whole
@@ -113,14 +125,15 @@ async function put(v) {
 }
 
 async function run(b, value) {
+  const t = b._t || en;
   clearTimeout(b._copyTimer);
   try {
     await put(value);
-    show(b, "done", "copied", "Copied");
+    show(b, "done", t("copy.done"), t("copy.copied"));
   } catch (err) {
-    show(b, "err", "failed", `Copy failed: ${err.message || err}`);
+    show(b, "err", t("copy.failedWord"), t("copy.failed", { error: err.message || err }));
   }
-  b._copyTimer = setTimeout(() => show(b, null, "", `Copy the ${b.dataset.copy}`), SHOWN_MS);
+  b._copyTimer = setTimeout(() => show(b, null, "", copyTitle(b.dataset.copy, t)), SHOWN_MS);
 }
 
 function show(b, state, word, title) {

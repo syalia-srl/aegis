@@ -5,6 +5,7 @@ when: reading another session, giving it work or context, or starting one to wor
 hints:
   - An agent can read another session and hand it work without you copying text. #hand-work-over
   - Near the end of a long context, continue in a fresh session with a brief. #continue-in-a-fresh-session
+  - Start a line with @ and a handle or an agent to send it there instead. #mention-from-the-composer
 ---
 
 Sessions on one server can see each other. An agent can list the open
@@ -16,17 +17,20 @@ one, and close the ones it started. A person can do the same from the browser.
 `session_list` returns the open sessions on this server: each one's handle,
 state, what it needs from the person (its attention and line), what it waits
 on, its plan, what it is doing now, its model and its spend. Then it lists the
-sessions of every linked server that is up as `handle@server`, with their
-state alone, or in full over a [trusted link](links#trusted-links).
+sessions of every linked server that is up, in full, as `handle@server`
+([links](links#what-agents-can-do-across-a-link)).
 `agents_list` shows the agents you can start sessions from.
 
 ## Read a peer
 
 `peer_read` with `target` (a handle) returns up to the last 30 lines of that
 session's transcript, or up to 200 with `last=200`. Tool calls are left out unless you pass `tools=true`. Reading
-changes nothing and wakes nobody. A session on a linked server cannot be read
-by an agent; a person reads it in the browser. Over a trusted link,
-`handle@server` reads it.
+changes nothing and wakes nobody. `handle@server` reads a session on a linked
+server.
+
+An archived session reads the same way, by its handle or its id, including
+one whose transcript `aegis gc` packed. When an open session took the same
+handle, `peer_read` reads the open one; name the archived one by its id.
 
 ## Hand work over
 
@@ -52,11 +56,42 @@ changes. Two flags change the timing:
 
 The reply says what happened: `landed at <handle>` (it was idle), `held for
 <handle>` (with the reason when its harness cannot take an urgent message), or
-`steered into <handle>`. A handoff to an archived session is refused, and a
-member's agent can hand off only to sessions its owner owns.
+`steered into <handle>`. A handoff to an archived session is refused.
 
 A handoff does not report back. If you need the answer, say in the context
 how to give it to you, for example by handing off back to your handle.
+
+## Mention from the composer
+
+A line that starts with `@name` goes to another session or agent instead of
+this tab. At the start of the box, `@` lists the agents and the open
+sessions; mid-line it lists the sessions and only puts a handle in the text.
+
+- `@handle text` sends a note, as `peer_handoff` does: held until the turn
+  ends when that session is busy, or at its next tool step with `@!handle`.
+  `handle@server` reaches a linked server. This tab neither waits nor starts
+  a turn.
+- `@agent text` runs `text` once with that agent on the built-in `mention`
+  queue. The worker gets the question, your tab's last turns and its handle
+  for `peer_read`.
+
+Each mention is one block in your tab with each answer. Your next message
+carries a single answer to the tab's agent, quoted after your text. `@@`
+starts a line with a literal `@`; `@s:handle` picks a session over an agent
+of the same name.
+
+## Convene a committee
+
+Two or more names make a committee: `@opus @deepseek @ben-ci review this
+plan`. Once every member answered, or after 30 minutes, this tab's agent gets
+one message headed `> from committee · mention#<id>` with every answer and
+merges them. The block's Skip merge button cancels that while it waits.
+
+## Answer a mention
+
+A note that asks for an answer names its id. Answer with `mention_reply`:
+`id` and `text`. The answer shows in the asking tab and starts no turn. A
+session that was not asked cannot reply.
 
 ## Start a peer
 
@@ -102,29 +137,57 @@ An agent does the same with `session_handoff`, passing `msg` and optionally
 that call on, and the new session starts when its turn ends. An agent that asks
 in a turn that then fails, or whose process dies, keeps its session.
 
-Every way in is refused while the session works, and while a monitor, a
-background task or a queue task would wake it. An agent's call may come during
-its turn, and is refused while messages wait for its next one. The refusal lists them, so you
-can cancel them or wait. A workflow the session owns follows the new session.
+Every way in is refused while the session works, and while a background task
+of the harness would wake it: the task dies with the old process. An agent's
+call may come during its turn, and is refused while messages wait for its next
+one. The refusal lists them, so you can cancel them or wait.
+
+What else would wake the old session follows the new one: its monitors, its
+feeds with their cursor, the queue tasks it enqueued, the schedules that fire
+into it and a workflow it owns. They wake the new session from then on, and its
+first message lists them. If the new session fails before it answers, or you
+close it, they go back to the old one. A handoff across a link carries none of
+them and is refused while any is live.
+
+Each tab shows the handoff as a line. The old one reads "continued in" and the
+new session's handle, and the new one reads "continued from" and the old
+session's handle. Both lines list what moved, such as "carrying 1 monitor", or
+say "nothing to carry". The person's `/autohandoff`, `/autoclose` and quiet
+settings follow the new session too, and the lines list them.
 
 The new session takes the old one's place in its group of tabs: it joins the
-group, and heads it when the old one did. Its first message names the sessions
+group, and the block keeps its name and its place. Its first message names the
+sessions
 the old one started that are still open, and asks it to tell each one with
 `peer_handoff` that it continues the work. Once the old session is archived,
 those sessions count as started by the new one: its card lists them, and it
 waits on them as their parent.
 
+## Autohandoff
+
+`/autohandoff` makes the continuation happen on its own. Alone it uses the
+configured `handoff_at:` (`context:` in `.aegis.yaml`); `/autohandoff 200000`
+sets the size for this session; `/autohandoff off` turns it off. The
+Autohandoff button in the sidebar toggles it, and its tooltip shows the size.
+
+Past that size, every `turn_end` of the agent asks it for a brief. The
+`turn_end` that carries one locks the session, and when that turn ends a fresh
+session starts with the brief, the last turns and everything the old one
+waited on, as in [Continue in a fresh session](#continue-in-a-fresh-session).
+While a background task of the harness is live, `turn_end` says the handoff
+waits for it, and the next `turn_end` with a brief tries again. When it
+fires, the old tab shows a line such as "autohandoff at 213k tokens (from
+200k)". The new session keeps the setting, so a long task goes on handing off. A queue
+worker cannot turn it on: its task owns it.
+
 ## Peers on a linked server
 
-A session on a server this one links is addressed `handle@server`. An agent
-can reach it in two ways: `peer_handoff` to `handle@server`, and
-`session_spawn` with `agent@server`, which that server's quota policy for the
-link decides. Reading, sending to and enqueueing on another server are for
-people, in the browser. Nothing on a linked server can reach a session here:
-a link only goes one way, unless it is trusted ([links](links#trusted-links)):
-then agents on both servers spawn, hand off to, read, wait on and close each
-other's sessions and enqueue on each other's queues. A handoff from
-another server arrives headed `> from agent:<handle>@<server> (<user>)`.
+A session on a server this one links is addressed `handle@server`. A link goes
+both ways, and agents on both servers spawn (`session_spawn` with
+`agent@server`, which that server's quota gate decides), hand off to, read,
+wait on and close each other's sessions and enqueue on each other's queues
+([links](links#what-agents-can-do-across-a-link)). A handoff from another
+server arrives headed `> from agent:<handle>@<server> (<user>)`.
 
 ## Close a session
 

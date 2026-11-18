@@ -15,20 +15,28 @@ first and writes nothing on a problem, and edits the document in place in
 ruamel's round-trip mode, so comments, key order, each agent's form
 (``harness:``, ``provider:`` or a nested ``provider:`` map) and keys aegis does
 not read survive.
+
+``hosts:`` holds what differs per server, under each server's name (``overlay``).
+The file is shared through git by every server that checks the repository out,
+so a server's own settings live in it, committed, rather than as an edit no
+commit may touch: a git command that resets the tree for a moment used to drop
+them. The runtime fields read the merged mapping; ``doc``, what Settings edits,
+stays the shared layer, so a save never copies one server's values into all.
 """
 
 from __future__ import annotations
 
+import json
 import asyncio
 import contextlib
 import logging
 import os
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field, replace
 from io import StringIO
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, Field
 from ruamel.yaml import YAML, YAMLError
@@ -37,6 +45,7 @@ from ruamel.yaml.scalarstring import LiteralScalarString
 from ruamel.yaml.util import load_yaml_guess_indent
 
 from .agents import EFFORTS, HARNESSES, PERMISSION_ORDER, Agent, agents_from
+from .session import SWITCHES
 from .claude.process import REPLACED_TOOLS
 
 # Imported for their notice sources' declarations (notice_sources.py), so
@@ -47,27 +56,31 @@ from . import notice_sources
 from .cgroups import DEFAULT_MEMORY_MAX, parse_size
 from .net.config import KEYS as NET_KEYS
 from .host import host_from
+from .mcp_servers import parse as mcp_from
 from .net.config import NetConfig, network_from
 from .ops import OpError
 from .queues import queues_from
 from .roots import CONFIG_FILE
 from .term_profiles import RESTARTS, terminals_from
-from .users import MultiUser, multi_user_from
 
 log = logging.getLogger("aegis.config")
 
 WATCH_EVERY_S = 1.0
 TOP_KEYS = (
-    "agents", "queues", "default_agent", "recap", "btw", "context", "usage",
+    "agents", "queues", "default_agent", "recap", "btw", "group_names", "context", "usage",
     "session_memory_max", "terminals", "terminal_memory_max", "park", "network",
-    "host", "workflows", "harness_versions", "notices", "nudges", "multi_user",
-    "knowledge", "exit_via",
+    "host", "workflows", "harness_versions", "notices", "nudges",
+    "knowledge", "exit_via", "max_workers", "hosts", "mcp", "model_ranking", "quota",
 )  # fmt: skip
+# Read once at boot, before the server knows its name (cli.serve), so a host's
+# block cannot set them.
+NOT_PER_HOST = ("hosts",)
 AGENT_KEYS = (
     "harness", "provider", "model", "models", "effort", "permission", "priming",
-    "keep_harness_tools", "exit",
+    "keep_harness_tools", "exit", "mcp",
+    "harness_tools", "isolated", "primer", "notices", "tools", "quota", "budget",
 )  # fmt: skip
-QUEUE_KEYS = ("agent", "max_parallel", "quiet")
+QUEUE_KEYS = ("agent", "priority", "quiet", "quota", "max_pending")
 
 Stamp = tuple[int, int, int]
 
@@ -271,6 +284,20 @@ def _positive(v: object) -> bool:
     return isinstance(v, int) and not isinstance(v, bool) and v >= 1
 
 
+# How many queue workers run at once on this server, every queue together
+# (queues.py, #927).
+DEFAULT_MAX_WORKERS = 4
+
+
+def max_workers_from(raw: object) -> tuple[int, str | None]:
+    """``max_workers`` over its default, and why a wrong value is not in force."""
+    if raw is None:
+        return DEFAULT_MAX_WORKERS, None
+    if isinstance(raw, int) and not isinstance(raw, bool) and raw >= 1:
+        return raw, None
+    return DEFAULT_MAX_WORKERS, f"max_workers {raw!r} is not a positive integer"
+
+
 def workflows_from(raw: object) -> dict:
     """The ``workflows:`` block over its defaults. ``max_agents`` is
     ``{total: N, <agent>: M, ...}``, or a bare N for ``{total: N}``; a
@@ -311,6 +338,54 @@ NUDGES_DEFAULTS: dict = {"silent_s": 2, "plan_min": 15}
 
 
 KNOWLEDGE_DEFAULTS: dict = {"embeddings": "off", "know_how": True}
+
+
+# The quota: block (quota/projection.py): how far back "the current rate" looks,
+# per window length. Absent lengths use the window's span / 28, at least 30 min.
+QUOTA_SPANS = {"5h": 5 * 3600, "week": 7 * 86400, "month": 30 * 86400}
+QUOTA_MIN_HALF_LIFE_S = 600
+_HALF_LIFE = re.compile(r"\s*(\d+(?:\.\d+)?)\s*([mhd])\s*")
+
+
+def quota_from(raw: object) -> dict:
+    """The ``quota:`` block: ``{"half_life": {"week": 21600.0, ...}}`` in seconds,
+    or ``{"half_life": "average"}`` for the whole-window average. A wrong block
+    keeps the defaults and carries ``error`` for aegis doctor."""
+    out: dict = {"half_life": {}}
+    if raw is None:
+        return out
+    spans = ", ".join(QUOTA_SPANS)
+    if not isinstance(raw, dict) or set(raw) - {"projection"}:
+        return out | {"error": "quota takes one key, projection"}
+    proj = cast(dict, raw).get("projection")
+    if proj is None:
+        return out
+    if not isinstance(proj, dict) or set(proj) - {"half_life"}:
+        return out | {"error": "quota.projection takes one key, half_life"}
+    hl = cast(dict, proj).get("half_life")
+    if hl is None:
+        return out
+    if hl == "average":
+        return {"half_life": "average"}
+    if not isinstance(hl, dict):
+        return out | {
+            "error": f"quota.projection.half_life must be average or a mapping of {spans}"
+        }
+    got = {}
+    for name, v in hl.items():
+        if name not in QUOTA_SPANS:
+            return out | {
+                "error": f"quota.projection.half_life has no key {name!r}; it takes {spans}"
+            }
+        m = _HALF_LIFE.fullmatch(str(v)) if isinstance(v, str) else None
+        secs = float(m[1]) * {"m": 60, "h": 3600, "d": 86400}[m[2]] if m else None
+        if secs is None or not QUOTA_MIN_HALF_LIFE_S <= secs <= QUOTA_SPANS[name]:
+            return out | {
+                "error": f"quota.projection.half_life.{name} {v!r} is not a duration"
+                f" from 10m to the window's length, as in 30m, 6h or 1d"
+            }
+        got[name] = secs
+    return {"half_life": got}
 
 
 def knowledge_from(raw: object) -> dict:
@@ -510,6 +585,18 @@ SECTIONS = {
         "What the Net, Exit and Speed readings reach, and how often, in seconds."
         " A speed_interval of 0 turns the speed test off.",
     ),
+    "ranking": (
+        "Model ranking",
+        "Download the nightly Artificial Analysis ranking once a day, so new"
+        " models are ranked without a release. Off reads only the ranking"
+        " packaged with this version.",
+    ),
+    "quota": (
+        "Quota projection",
+        "How far back the current rate of a quota gauge looks, per window"
+        " length: a number and m, h or d. Shorter follows a stop sooner. Blank"
+        " keeps the default, the window's length / 28 and at least 30m.",
+    ),
     "embeddings": (
         "Search embeddings",
         "Embeddings: off, or a fastembed model fused with keyword search, such"
@@ -538,6 +625,7 @@ def fields() -> list[dict]:
 
     add("generators", "recap.agent", "agent", None)
     add("generators", "btw.agent", "agent", None)
+    add("generators", "group_names.agent", "agent", None)
     add("memory", "session_memory_max", "size", DEFAULT_MEMORY_MAX)
     add("memory", "terminal_memory_max", "size", DEFAULT_MEMORY_MAX)
     for k, v in CONTEXT_DEFAULTS.items():
@@ -562,8 +650,11 @@ def fields() -> list[dict]:
             add("network", "network.anchors", "list", [_anchor(*a) for a in v])
         else:
             add("network", f"network.{k}", "bool" if k == "enabled" else "number", v)
+    for name, default in (("5h", "30m"), ("week", "6h"), ("month", "26h")):
+        add("quota", f"quota.projection.half_life.{name}", "text", default)
     add("embeddings", "knowledge.embeddings", "text", KNOWLEDGE_DEFAULTS["embeddings"])
     add("embeddings", "knowledge.know_how", "bool", KNOWLEDGE_DEFAULTS["know_how"])
+    add("ranking", "model_ranking", "bool", True)
     for k, v in host_from(None)[0].items():
         add("host", f"host.{k}", "list", v)
     return out
@@ -613,6 +704,41 @@ def stamp_from(token: str | None) -> Stamp | None:
     return (a, b, c)
 
 
+def _merge(base: dict, over: dict) -> dict:
+    out = dict(base)
+    for k, v in over.items():
+        if v is None:
+            out.pop(k, None)
+        elif isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = _merge(out[k], v)
+        else:
+            out[k] = v
+    return out
+
+
+def host_block(data: dict, name: str | None) -> tuple[dict | None, str | None]:
+    """The block under ``hosts.<name>``, or None; and why ``hosts:`` cannot be
+    applied, or None."""
+    hosts = data.get("hosts")
+    if hosts is None or name is None:
+        return None, None
+    if not isinstance(hosts, dict) or not all(
+        isinstance(b, dict) or b is None for b in hosts.values()
+    ):
+        return None, "hosts: must map each server's name to a mapping of settings"
+    block = hosts.get(name)
+    if block and (bad := [k for k in NOT_PER_HOST if k in block]):
+        return None, f"hosts.{name}: {', '.join(bad)} cannot differ per server"
+    return block or None, None
+
+
+def overlay(data: dict, name: str | None) -> dict:
+    """``data`` with this server's ``hosts:`` block applied: a mapping merges
+    key by key, any other value replaces, and a null removes the shared key."""
+    block, error = host_block(data, name)
+    return data if block is None or error else _merge(data, block)
+
+
 def load(path: Path) -> tuple[dict | None, str | None]:
     """The file's top-level mapping, or why it has none."""
     try:
@@ -654,15 +780,34 @@ class AgentDoc(BaseModel):
     keep_harness_tools: list[str] = Field(default_factory=list)
     # A linked server to exit through, or "off"; blank: the server's exit_via.
     exit: str = ""
+    mcp: list[str] = Field(default_factory=list)
+    # A product agent's switches (session.SWITCHES, #983).
+    harness_tools: bool = True
+    isolated: bool = False
+    primer: bool = True
+    notices: bool = True
+    # The tools: block as the file has it (scopes.py); the form shows it and
+    # a save writes it back unchanged.
+    tools: dict[str, list[str]] = Field(default_factory=dict)
+    # The quota: block as the file has it (guards.py), kept like tools.
+    quota: dict[str, Any] = Field(default_factory=dict)
+    # The budget: node as the file has it (budgets.py), whatever its shape:
+    # a save writes it back unchanged, a wrong one too; None: no budget:.
+    budget: Any = None
 
 
 class QueueDoc(BaseModel):
     model_config = {"extra": "forbid"}
     name: str
     agent: str = ""
-    max_parallel: int | None = None
+    # None: the file leaves it out, which reads as 1.
+    priority: int | None = None
     # None: the file leaves it out, which reads as true.
     quiet: bool | None = None
+    # The quota: block as the file has it (guards.py), kept like an agent's.
+    quota: dict[str, Any] = Field(default_factory=dict)
+    # None: the file leaves it out, which bounds nothing.
+    max_pending: int | None = None
 
 
 class TerminalDoc(BaseModel):
@@ -673,6 +818,16 @@ class TerminalDoc(BaseModel):
     restart: str = ""  # blank: left out, which reads as no
     env: dict[str, str] = Field(default_factory=dict)
     access: dict[str, str] = Field(default_factory=dict)
+
+
+class McpDoc(BaseModel):
+    model_config = {"extra": "forbid"}
+    name: str
+    url: str = ""
+    headers: dict[str, str] = Field(default_factory=dict)
+    command: str = ""
+    args: list[str] = Field(default_factory=list)
+    env: dict[str, str] = Field(default_factory=dict)
 
 
 class HarnessVersionsDoc(BaseModel):
@@ -698,6 +853,8 @@ class ConfigDoc(BaseModel):
     default_agent: str | None = None
     exit_via: str | None = None
     queues: list[QueueDoc] = Field(default_factory=list)
+    # None: the file leaves max_workers out, which reads as its default.
+    max_workers: int | None = None
     park: dict[str, int] = Field(default_factory=dict)
     # The workflows: block's max_agents: total and a bound per agent alias;
     # empty when the file has no block, or one the reader refuses.
@@ -706,6 +863,7 @@ class ConfigDoc(BaseModel):
     # one the reader refuses.
     harness_versions: HarnessVersionsDoc = Field(default_factory=HarnessVersionsDoc)
     terminals: list[TerminalDoc] = Field(default_factory=list)
+    mcp: list[McpDoc] = Field(default_factory=list)
     # The usage: block; empty when the file has none, or one the reader refuses.
     usage: UsageDoc = Field(default_factory=UsageDoc)
     # Each key of fields() the file sets, by its dotted path; a switch only
@@ -732,6 +890,11 @@ def doc_from(data: dict) -> ConfigDoc:
             priming=a.priming,
             keep_harness_tools=_keep_raw(data, a.name),
             exit=a.exit,
+            mcp=_mcp_raw(data, a.name),
+            **{k: getattr(a, k) for k in SWITCHES},
+            tools=_tools_raw(data, a.name),
+            quota=_quota_raw((data.get("agents") or {}).get(a.name)),
+            budget=_budget_raw((data.get("agents") or {}).get(a.name)),
         )
         for a in agents_from(data)
     ]
@@ -739,14 +902,16 @@ def doc_from(data: dict) -> ConfigDoc:
     raw = data.get("queues")
     for name, q in (raw if isinstance(raw, dict) else {}).items():
         q = q if isinstance(q, dict) else {}
-        limit = q.get("max_parallel")
-        ok = isinstance(limit, int) and not isinstance(limit, bool)
+        priority = q.get("priority")
+        ok = isinstance(priority, int) and not isinstance(priority, bool)
         queues.append(
             QueueDoc(
                 name=str(name),
                 agent=str(q.get("agent") or ""),
-                max_parallel=limit if ok else None,
+                priority=priority if ok else None,
                 quiet=q["quiet"] if isinstance(q.get("quiet"), bool) else None,
+                quota=_quota_raw(q),
+                max_pending=mp if _positive(mp := q.get("max_pending")) else None,
             )
         )
     d = data.get("default_agent")
@@ -759,12 +924,14 @@ def doc_from(data: dict) -> ConfigDoc:
         default_agent=str(d) if d else None,
         exit_via=_exit_via(data),
         queues=queues,
+        max_workers=mw if _positive(mw := data.get("max_workers")) else None,
         park={k: v for k, v in park_from(data.get("park")).items() if k != "error"},
         max_agents={} if w is None or "error" in pool else pool["max_agents"],
         harness_versions=HarnessVersionsDoc(
             **{k: v for k, v in hv.items() if k != "error"}
         ),
         terminals=_terminals_doc(data.get("terminals")),
+        mcp=_mcp_doc(data.get("mcp")),
         usage=UsageDoc() if "error" in usage else UsageDoc(**usage),
         settings=_settings_doc(data),
     )
@@ -780,6 +947,73 @@ def _keep_raw(data: dict, name: str) -> list[str]:
     if isinstance(provider, dict) and "keep_harness_tools" in provider:
         raw = provider["keep_harness_tools"]
     return [str(t) for t in raw] if isinstance(raw, list) else []
+
+
+def _tools_raw(data: dict, name: str) -> dict[str, list[str]]:
+    """The agent's tools: block as the file has it, kept like keep_harness_tools
+    so a save does not drop a block the reader refuses."""
+    node = (data.get("agents") or {}).get(name)
+    raw = node.get("tools") if isinstance(node, dict) else None
+    if not isinstance(raw, dict):
+        return {}
+    return {str(k): [str(n) for n in v] for k, v in raw.items() if isinstance(v, list)}
+
+
+def _quota_raw(node: object) -> dict:
+    """An agent's or queue's quota: block as the file has it, so a save
+    writes it back unchanged, a block the reader refuses too."""
+    raw = cast(dict, node).get("quota") if isinstance(node, dict) else None
+    return json.loads(json.dumps(raw)) if isinstance(raw, dict) else {}
+
+
+def _budget_raw(node: object) -> Any:
+    """An agent's budget: node as the file has it, whatever its shape, so a
+    wrong one is shown wrong and written back, never dropped; None when the
+    agent has none."""
+    if not isinstance(node, dict) or "budget" not in node:
+        return None
+    return json.loads(json.dumps(cast(dict, node)["budget"], default=str))
+
+
+def _mcp_raw(data: dict, name: str) -> list[str]:
+    """The agent's mcp list as the file has it, kept like keep_harness_tools."""
+    node = (data.get("agents") or {}).get(name)
+    raw = node.get("mcp") if isinstance(node, dict) else None
+    return [str(n) for n in raw] if isinstance(raw, list) else []
+
+
+def _mcp_doc(raw: object) -> list[McpDoc]:
+    """Every entry of the mcp: map as the form edits it, a broken one too, so
+    a save keeps it on its row with its error."""
+    out = []
+    for name, entry in (raw if isinstance(raw, dict) else {}).items():
+        e = {str(k): v for k, v in entry.items()} if isinstance(entry, dict) else {}
+
+        def strs(k: str) -> dict[str, str]:
+            m = e.get(k)
+            return {str(a): str(b) for a, b in m.items()} if isinstance(m, dict) else {}
+
+        args = e.get("args")
+        out.append(
+            McpDoc(
+                name=str(name),
+                url=str(e.get("url") or ""),
+                headers=strs("headers"),
+                command=str(e.get("command") or ""),
+                args=[str(a) for a in args] if isinstance(args, list) else [],
+                env=strs("env"),
+            )
+        )
+    return out
+
+
+def mcp_raw(m: McpDoc) -> dict:
+    """``m`` as the file holds it: only the fields it sets."""
+    raw: dict = {}
+    for k in ("url", "headers", "command", "args", "env"):
+        if v := getattr(m, k):
+            raw[k] = v
+    return raw
 
 
 def _terminals_doc(raw: object) -> list[TerminalDoc]:
@@ -860,6 +1094,8 @@ class Snapshot:
     default_agent: str | None = None
     exit_via: str | None = None
     queues: dict[str, dict] = field(default_factory=dict)
+    max_workers: int = DEFAULT_MAX_WORKERS
+    max_workers_error: str | None = None
     unknown_keys: tuple[str, ...] = ()
     doc: ConfigDoc = field(default_factory=ConfigDoc)
     context: dict = field(default_factory=lambda: dict(CONTEXT_DEFAULTS))
@@ -867,6 +1103,9 @@ class Snapshot:
     notices: dict = field(default_factory=_notices_defaults)
     nudges: dict = field(default_factory=lambda: dict(NUDGES_DEFAULTS))
     knowledge: dict = field(default_factory=lambda: dict(KNOWLEDGE_DEFAULTS))
+    quota: dict = field(default_factory=lambda: {"half_life": {}})
+    # Whether the server downloads the nightly model ranking (ranking.py).
+    model_ranking: bool = True
     workflows: dict = field(default_factory=lambda: dict(WORKFLOWS_DEFAULTS))
     park: dict = field(default_factory=dict)
     harness_versions: dict = field(default_factory=_hv_defaults)
@@ -874,20 +1113,26 @@ class Snapshot:
     session_memory_error: str | None = None
     terminals: dict[str, dict] = field(default_factory=dict)
     terminals_error: str | None = None
+    # The mcp: map's servers, and the error of each entry that has one (#960).
+    mcp: dict = field(default_factory=dict)
+    mcp_errors: dict[str, str] = field(default_factory=dict)
     terminal_memory_max: object = DEFAULT_MEMORY_MAX
     terminal_memory_error: str | None = None
     network: NetConfig = field(default_factory=NetConfig)
     network_error: str | None = None
     host: dict = field(default_factory=lambda: host_from(None)[0])
     host_error: str | None = None
-    # The multi-user mode (users.py); read once, at boot (cli.serve).
-    multi_user: MultiUser | None = None
+    # A multi_user block, which aegis 3.0 removed (#958): the server refuses
+    # to start until it is gone.
     multi_user_error: str | None = None
     # Why the file on disk is not the one in force, when it does not parse.
     error: str | None = None
 
     @classmethod
-    def parse(cls, path: Path, stamp: Stamp | None, data: dict) -> Snapshot:
+    def parse(
+        cls, path: Path, stamp: Stamp | None, data: dict, server: str | None = None
+    ) -> Snapshot:
+        raw, data = data, overlay(data, server)
         d = data.get("default_agent")
         mem, mem_error = session_memory_max_from(data.get("session_memory_max"))
         terms, terms_error = terminals_from(data.get("terminals"))
@@ -896,7 +1141,14 @@ class Snapshot:
         )
         network, network_error = network_from(data.get("network"))
         host, host_error = host_from(data.get("host"))
-        multi_user, multi_user_error = multi_user_from(data)
+        multi_user_error = (
+            "multi_user in .aegis.yaml: aegis 3.0 removed the multi-user mode; "
+            "delete the block"
+            if "multi_user" in data
+            else None
+        )
+        workers, workers_error = max_workers_from(data.get("max_workers"))
+        mcp, mcp_errors = mcp_from(data.get("mcp"))
         return cls(
             path=path,
             exists=True,
@@ -905,13 +1157,17 @@ class Snapshot:
             default_agent=str(d) if d else None,
             exit_via=_exit_via(data),
             queues=queues_from(data.get("queues")),
+            max_workers=workers,
+            max_workers_error=workers_error,
             unknown_keys=tuple(str(k) for k in data if k not in TOP_KEYS),
-            doc=doc_from(data),
+            doc=doc_from(raw),
             context=context_from(data.get("context")),
             usage=usage_from(data.get("usage")),
             notices=notices_from(data.get("notices")),
             nudges=nudges_from(data.get("nudges")),
             knowledge=knowledge_from(data.get("knowledge")),
+            quota=quota_from(data.get("quota")),
+            model_ranking=data.get("model_ranking") is not False,
             workflows=workflows_from(data.get("workflows")),
             park=park_from(data.get("park")),
             harness_versions=harness_versions_from(data.get("harness_versions")),
@@ -919,13 +1175,14 @@ class Snapshot:
             session_memory_error=mem_error,
             terminals=terms,
             terminals_error=terms_error,
+            mcp=mcp,
+            mcp_errors=mcp_errors,
             terminal_memory_max=tmem,
             terminal_memory_error=tmem_error,
             network=network,
             network_error=network_error,
             host=host,
             host_error=host_error,
-            multi_user=multi_user,
             multi_user_error=multi_user_error,
         )
 
@@ -946,6 +1203,7 @@ class Snapshot:
                 "restarts": list(RESTARTS),
             },
             "schema": fields(),
+            "max_workers_default": DEFAULT_MAX_WORKERS,
             "sections": {k: {"title": t, "note": n} for k, (t, n) in SECTIONS.items()},
         }
 
@@ -955,8 +1213,10 @@ class Config:
         self,
         config_root: Path,
         on_change: Callable[[Snapshot], None] = lambda s: None,
+        host: str | None = None,
     ) -> None:
         self.path = config_root / CONFIG_FILE
+        self.host = host
         self._on_change = on_change
         self._snap = self._read(stamp_of(self.path), Snapshot(self.path))
 
@@ -966,7 +1226,7 @@ class Config:
         data, error = load(self.path)
         if data is None:
             return replace(last, exists=True, stamp=stamp, error=error)
-        return Snapshot.parse(self.path, stamp, data)
+        return Snapshot.parse(self.path, stamp, data, self.host)
 
     def current(self) -> Snapshot:
         """The config in force: one ``stat``, and a re-read when it moved."""
@@ -985,17 +1245,21 @@ class Config:
                 log.exception("reading %s", self.path)
 
 
-def validate(doc: ConfigDoc) -> list[Finding]:
-    """What stops ``doc`` being written: each a Finding on its Settings row."""
+def validate(doc: ConfigDoc, extra_mcp: Iterable[str] = ()) -> list[Finding]:
+    """What stops ``doc`` being written: each a Finding on its Settings row.
+    ``extra_mcp``: the names a program passes as ``Server(mcp=...)``, which an
+    agent may attach as it attaches the file's."""
     out: list[Finding] = []
 
     def err(row: str, where: str, message: str) -> None:
         out.append(Finding("error", where, message, row))
 
     _validate_terminals(doc, err)
+    _validate_mcp(doc, err)
     _validate_settings(doc, err)
 
     names = [a.name for a in doc.agents]
+    servers = {m.name for m in doc.mcp} | set(extra_mcp)
     for a in doc.agents:
         row = f"agents.{a.name}"
         if not a.name.strip():
@@ -1013,6 +1277,12 @@ def validate(doc: ConfigDoc) -> list[Finding]:
         (agent,) = agents_from({"agents": {a.name: raw}})
         if agent.error:
             err(row, row, agent.error)
+        elif unknown := [n for n in a.mcp if n not in servers]:
+            err(
+                row,
+                f"{row}.mcp",
+                f"mcp names {', '.join(unknown)}, which the mcp: map does not define",
+            )
     queues = [q.name for q in doc.queues]
     for q in doc.queues:
         row = f"queues.{q.name}"
@@ -1026,8 +1296,10 @@ def validate(doc: ConfigDoc) -> list[Finding]:
                 f"{row}.agent",
                 f"no agent named {q.agent!r}" if q.agent else "agent is missing",
             )
-        if q.max_parallel is None or q.max_parallel < 1:
-            err(row, f"{row}.max_parallel", "max_parallel is not a positive integer")
+        if q.priority is not None and q.priority < 0:
+            err(row, f"{row}.priority", "priority is not a whole number from 0 up")
+    if doc.max_workers is not None and (e := max_workers_from(doc.max_workers)[1]):
+        err("max_workers", "max_workers", e)
     if doc.default_agent and doc.default_agent not in names:
         err("default_agent", "default_agent", f"no agent named {doc.default_agent!r}")
     if "error" in (p := park_from(doc.park or None)):
@@ -1069,6 +1341,18 @@ def _validate_terminals(doc: ConfigDoc, err: Callable[[str, str, str], None]) ->
             err(row, row, error)
 
 
+def _validate_mcp(doc: ConfigDoc, err: Callable[[str, str, str], None]) -> None:
+    names = [m.name for m in doc.mcp]
+    for m in doc.mcp:
+        row = f"mcp.{m.name}"
+        if not m.name.strip():
+            err(row, row, "an MCP server needs a name")
+        elif names.count(m.name) > 1:
+            err(row, row, f"two MCP servers are named {m.name!r}")
+        elif error := mcp_from({m.name: mcp_raw(m)})[1].get(m.name):
+            err(row, row, error)
+
+
 def _profile_raw(t: TerminalDoc) -> dict:
     raw: dict = {"cmd": t.cmd, "cwd": t.cwd}
     if t.restart:
@@ -1093,12 +1377,16 @@ def _validate_settings(doc: ConfigDoc, err: Callable[[str, str, str], None]) -> 
         "network": lambda v: network_from(v)[1],
         "host": lambda v: host_from(v)[1],
         "knowledge": lambda v: knowledge_from(v).get("error"),
+        "quota": lambda v: quota_from(v).get("error"),
+        "model_ranking": lambda v: (
+            None if isinstance(v, bool) else f"model_ranking {v!r} is not true or false"
+        ),
     }
     for block, error_of in readers.items():
         if block in b and (e := error_of(b[block])):
             err(block, block, str(e))
     agents = {a.name: a for a in doc.agents}
-    for key in ("recap", "btw"):
+    for key in ("recap", "btw", "group_names"):
         name = doc.settings.get(f"{key}.agent")
         if not name:
             continue
@@ -1177,6 +1465,27 @@ def _set_agent(node: CommentedMap, a: AgentDoc) -> None:
         _put(node, "exit", a.exit)
     else:
         node.pop("exit", None)
+    if a.mcp:
+        _put(node, "mcp", list(a.mcp))
+    else:
+        node.pop("mcp", None)
+    if a.tools:
+        _put(node, "tools", a.tools)
+    else:
+        node.pop("tools", None)
+    if a.quota:
+        _put(node, "quota", a.quota)
+    else:
+        node.pop("quota", None)
+    if a.budget is not None:
+        _put(node, "budget", a.budget)
+    else:
+        node.pop("budget", None)
+    for k, default in SWITCHES.items():
+        if getattr(a, k) != default:
+            _put(node, k, getattr(a, k))
+        else:
+            node.pop(k, None)
 
 
 def _apply(data: CommentedMap, doc: ConfigDoc) -> None:
@@ -1198,13 +1507,25 @@ def _apply(data: CommentedMap, doc: ConfigDoc) -> None:
         queues = _entries(data, "queues", [q.name for q in doc.queues])
         for q in doc.queues:
             _put(queues[q.name], "agent", q.agent)
-            _put(queues[q.name], "max_parallel", q.max_parallel)
+            if q.priority is None:
+                queues[q.name].pop("priority", None)
+            else:
+                _put(queues[q.name], "priority", q.priority)
             if q.quiet is None:
                 queues[q.name].pop("quiet", None)
             else:
                 _put(queues[q.name], "quiet", q.quiet)
+            for k, v in (("quota", q.quota), ("max_pending", q.max_pending)):
+                if v:
+                    _put(queues[q.name], k, v)
+                else:
+                    queues[q.name].pop(k, None)
     else:
         data.pop("queues", None)
+    if doc.max_workers is None:
+        data.pop("max_workers", None)
+    else:
+        _put(data, "max_workers", doc.max_workers)
     if doc.park:
         park = _section(data, "park")
         for h in list(park):
@@ -1225,6 +1546,7 @@ def _apply(data: CommentedMap, doc: ConfigDoc) -> None:
     _apply_harness_versions(data, doc.harness_versions)
     _apply_usage(data, doc.usage)
     _apply_terminals(data, doc.terminals)
+    _apply_mcp(data, doc.mcp)
     _apply_settings(data, doc.settings)
 
 
@@ -1247,6 +1569,32 @@ def _apply_terminals(data: CommentedMap, terminals: list[TerminalDoc]) -> None:
                 node.pop(k, None)
             elif dict(node.get(k) or {}) != want:
                 node[k] = dict(want)
+
+
+def _apply_mcp(data: CommentedMap, servers: list[McpDoc]) -> None:
+    if not servers:
+        data.pop("mcp", None)
+        return
+    section = _entries(data, "mcp", [m.name for m in servers])
+    for m in servers:
+        node, want = section[m.name], mcp_raw(m)
+        for k in [k for k in node if k not in want]:
+            del node[k]
+        for k, v in want.items():
+            held = node.get(k)
+            if isinstance(v, dict) and isinstance(held, dict):
+                # In place, so the map keeps its flow style and comments.
+                for name in [n for n in held if n not in v]:
+                    del held[name]
+                for name, x in v.items():
+                    _put(held, name, x)
+            elif isinstance(v, list):
+                if list(held or ()) != v:
+                    node[k] = list(v)
+            elif isinstance(v, dict):
+                node[k] = dict(v)
+            else:
+                _put(node, k, v)
 
 
 def _apply_settings(data: CommentedMap, settings: dict) -> None:
@@ -1339,12 +1687,14 @@ def _apply_harness_versions(data: CommentedMap, hv: HarnessVersionsDoc) -> None:
         node.pop("accepted", None)
 
 
-def write(path: Path, doc: ConfigDoc, expected: Stamp | None) -> list[Finding]:
+def write(
+    path: Path, doc: ConfigDoc, expected: Stamp | None, extra_mcp: Iterable[str] = ()
+) -> list[Finding]:
     """Write ``doc`` to ``path``. Returns the problems that stopped it; an
-    empty list means it was written."""
+    empty list means it was written. ``extra_mcp``: as validate's."""
     if stamp_of(path) != expected:
         raise OpError("stale", f"{path} changed on disk since it was read; reload it")
-    if problems := validate(doc):
+    if problems := validate(doc, extra_mcp):
         return problems
     if expected is not None and (error := load(path)[1]):
         # The writer refuses what the reader refuses: a list at the top, a tag
@@ -1377,6 +1727,42 @@ def write(path: Path, doc: ConfigDoc, expected: Stamp | None) -> list[Finding]:
     tmp.write_text(buf.getvalue())
     os.replace(tmp, path)
     return []
+
+
+def write_host(
+    path: Path, host: str, key: str, value: object, expected: Stamp | None
+) -> None:
+    """Make ``key`` read as ``value`` on ``host`` alone, in its ``hosts:``
+    block. None clears it there: the block's entry goes, or becomes a null
+    when the shared layer sets the key. The shared key is never touched, since
+    every other server reads it. Names may hold dots, so this walks the
+    mappings rather than ``_set_at``'s dotted path."""
+    if stamp_of(path) != expected:
+        raise OpError("stale", f"{path} changed on disk since it was read; reload it")
+    if error := load(path)[1]:
+        raise OpError("bad_config", f"{error}; fix it in an editor first")
+    rt = YAML()
+    rt.preserve_quotes = True
+    data = rt.load(path.read_text())
+    if value is None and data.get(key) is None:
+        hosts = data.get("hosts")
+        if isinstance(hosts, dict) and isinstance(hosts.get(host), dict):
+            hosts[host].pop(key, None)
+            if not hosts[host]:
+                del hosts[host]
+            if not hosts:
+                del data["hosts"]
+    else:
+        if not isinstance(data.get("hosts"), dict):
+            data["hosts"] = CommentedMap()
+        if not isinstance(data["hosts"].get(host), dict):
+            data["hosts"][host] = CommentedMap()
+        data["hosts"][host][key] = value
+    buf = StringIO()
+    rt.dump(data, buf)
+    tmp = path.with_name(f".{path.name}.tmp")
+    tmp.write_text(buf.getvalue())
+    os.replace(tmp, path)
 
 
 def write_text(path: Path, text: str, expected: Stamp | None) -> list[Finding]:

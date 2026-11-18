@@ -1,6 +1,6 @@
 """Every file access in the modules that serve a person's files is accounted
-for (#555): it runs on the runner of the person's place (as_user.py), or it
-touches only the server's own state. A new one fails here until it is put in
+for (#555): it runs in a thread on the caller's place, or it touches only the
+server's own state. A new one fails here until it is put in
 one of the two tables, which is the moment to decide which it is."""
 
 from __future__ import annotations
@@ -85,7 +85,17 @@ ON_RUNNER = {
 # Functions that touch only the server's state, or run outside the mode.
 SERVER = {
     "fs_ops.py": {"register_fs_ops.log", "open_"},
-    "files.py": {"store", "store_all", "find", "open_natively", "headers", "classify"},
+    "files.py": {
+        "store",
+        "store_all",
+        "find",
+        "session_of",
+        "open_natively",
+        "headers",
+        "classify",
+    },
+    # A dropped snapshot's file and the record of its session (#959).
+    "artifact_ops.py": {"register_artifact_ops.land"},
     "attachments.py": {
         "_staged",
         "_file",
@@ -106,6 +116,10 @@ SERVER = {
         "service_worker",
         "client_files",
         "index",
+        # The manifest's hashes and the entry module a host imports (#961).
+        "_file_hash",
+        "build_web.listing",
+        "build_web.entry_module",
     },
 }
 

@@ -75,6 +75,7 @@ async def test_doctor_detect_and_propose(app, monkeypatch):
         "opencode",
         "codex",
         "cursor",
+        "pi",
     ]
     doc = await app.registry.call("config.propose", {})
     assert doc["default_agent"] == "opus"

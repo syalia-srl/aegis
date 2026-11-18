@@ -125,6 +125,7 @@ def test_model_suggestions_are_the_models_agents_name_without_duplicates(tmp_pat
         "opencode": ["opencode-go/x"],
         "codex": [],
         "cursor": [],
+        "pi": [],
     }
 
 
@@ -201,20 +202,33 @@ def test_bad_agent_says_what_is_wrong(agents, tmp_path):
         resolve(agents, None, "broken", none(), tmp_path)
 
 
-def test_a_queue_names_its_agent_and_max_parallel(tmp_path):
+def test_a_queue_names_its_agent_and_a_priority_from_zero_up(tmp_path):
     root = write(
         tmp_path,
         "queues:\n"
-        "  ok: {agent: opus, max_parallel: 3}\n"
-        "  nolimit: {agent: opus}\n"
+        "  ok: {agent: opus, priority: 3}\n"
+        "  plain: {agent: opus}\n"
+        "  paused: {agent: opus, priority: 0}\n"
+        "  old: {agent: opus, max_parallel: 2}\n"
         "  bare: {}\n"
-        "  zero: {agent: opus, max_parallel: 0}\n",
+        "  below: {agent: opus, priority: -1}\n"
+        "  word: {agent: opus, priority: high}\n",
     )
+    ok = {
+        "agent": "opus",
+        "quiet": True,
+        "legacy": [],
+        "guard": None,
+        "max_pending": None,
+    }
     assert load_queues(root) == {
-        "ok": {"agent": "opus", "max_parallel": 3, "quiet": True},
-        "nolimit": {"error": "max_parallel is missing"},
-        "bare": {"error": "agent, max_parallel are missing"},
-        "zero": {"error": "max_parallel 0 is not a positive integer"},
+        "ok": ok | {"priority": 3},
+        "plain": ok | {"priority": 1},
+        "paused": ok | {"priority": 0},
+        "old": ok | {"priority": 1, "legacy": ["max_parallel"]},
+        "bare": {"error": "agent is missing"},
+        "below": {"error": "priority -1 is not a whole number from 0 up"},
+        "word": {"error": "priority 'high' is not a whole number from 0 up"},
     }
 
 
@@ -230,3 +244,25 @@ def test_an_opencode_agent_names_provider_and_model(tmp_path):
         == "an OpenCode model is provider/model, such as opencode-go/deepseek-v4-pro"
     )
     assert not a.enabled
+
+
+PRODUCT = (
+    "agents:\n"
+    "  product: {harness: claude-code, model: opus, effort: high, permission: full,\n"
+    "            harness_tools: false, isolated: true, primer: false, notices: false}\n"
+    "  bad: {harness: claude-code, model: opus, effort: high, permission: full,\n"
+    "        isolated: 'yes'}\n"
+)
+
+
+def test_the_product_switches_parse_and_reach_the_spec(tmp_path):
+    agents = load_agents(write(tmp_path, PRODUCT))
+    spec = resolve(agents, None, "product", none(), tmp_path)
+    assert (spec.harness_tools, spec.isolated, spec.primer, spec.notices) == (
+        False,
+        True,
+        False,
+        False,
+    )
+    bad = {a.name: a for a in agents}["bad"]
+    assert bad.error == "isolated must be true or false" and not bad.enabled

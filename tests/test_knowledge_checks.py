@@ -13,10 +13,10 @@ from aegis.knowledge import checks
 
 from .conftest import until
 from .knowledge_samples import mem
-from .test_acts_for import BEN, recorded  # noqa: F401
+from .one_person import BEN, recorded  # noqa: F401
 from .test_agents import mcp, turn, world  # noqa: F401  (fixture)
-from .test_member_view import homes, spawn  # noqa: F401
-from .test_member_view import world as members  # noqa: F401
+from .one_person import homes, spawn  # noqa: F401
+from .one_person import world as members  # noqa: F401
 
 TODAY = date(2026, 10, 24)
 
@@ -188,39 +188,6 @@ async def test_stats_filters_by_flag(world):
     assert await names(flag="expired") == ["old"]
     assert await names(flag="stale") == ["m"]
     assert await names() == ["fine", "m", "old"]
-
-
-async def test_a_members_paths_are_checked_as_the_member_in_their_home(members, homes):
-    app = members.app
-    ben = app.sessions.sessions[await spawn(members, BEN)]
-    home = homes["ben"].pw_dir
-    (__import__("pathlib").Path(home) / "plan.md").write_text("x")
-    threads = []
-    real = app.knowledge.exists
-
-    def exists(p):
-        threads.append(threading.current_thread().name)
-        return real(p)
-
-    app.knowledge.exists = exists
-    got = ok(
-        await turn(
-            ben,
-            mcp(
-                "memory_save",
-                name="ben-plan",
-                description="Ben keeps his plan in one file",
-                body="It is `plan.md`; the old one was `old/plan.md`.",
-                asked=True,
-            ),
-            by_person=True,
-        )
-    )
-    assert got["saved"] == "ben-plan"
-    await until(
-        lambda: app.knowledge.flags_of("ben", "ben-plan") == ["stale:old/plan.md"]
-    )
-    assert threads and all(t.startswith("as-ben") for t in threads)
 
 
 async def test_the_daily_pass_does_not_run_on_the_event_loop(world):

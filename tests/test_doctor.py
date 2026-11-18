@@ -13,7 +13,7 @@ agents:
   opus: {harness: claude-code, model: opus, effort: high, permission: full}
   pro: {harness: opencode, model: opencode-go/fake-pro, effort: high, permission: full}
 queues:
-  general: {agent: opus, max_parallel: 3}
+  general: {agent: opus, priority: 2}
 """
 
 
@@ -114,7 +114,7 @@ async def test_an_effort_the_model_does_not_take_is_a_warning(
 async def test_default_and_queue_problems_are_errors(
     tmp_path, fake_claude, fake_opencode
 ):
-    text = "agents:\n  a: {harness: claude-code, model: opus, effort: high, permission: full}\nqueues:\n  q: {agent: ghost, max_parallel: 1}\n"
+    text = "agents:\n  a: {harness: claude-code, model: opus, effort: high, permission: full}\nqueues:\n  q: {agent: ghost}\n"
     found = await run(tmp_path, text, fake_claude, fake_opencode)
     assert at(found, "default_agent")[0].level == "error"
     assert at(found, "queues.q.agent")[0].level == "error"
@@ -169,7 +169,7 @@ async def test_legacy_state_is_an_error_and_the_doctor_writes_nothing(
 async def test_detect_finds_both_fakes_with_their_models(
     tmp_path, fake_claude, fake_opencode
 ):
-    claude, opencode, codex, cursor = await detect(
+    claude, opencode, codex, cursor, _pi = await detect(
         tmp_path, bins(fake_claude, fake_opencode)
     )
     assert codex.error == "codex-not-installed is not on PATH"
@@ -186,7 +186,7 @@ async def test_detect_finds_both_fakes_with_their_models(
 async def test_detect_probes_an_installed_cursor(
     tmp_path, fake_claude, fake_opencode, fake_cursor
 ):
-    _, _, _, cursor = await detect(
+    _, _, _, cursor, _ = await detect(
         tmp_path, bins(fake_claude, fake_opencode, cursor=fake_cursor)
     )
     assert cursor.error is None and cursor.bin == fake_cursor
@@ -267,9 +267,9 @@ def test_propose_with_claude_adds_free_beside_opus_and_a_light_queue():
         ("free", "opencode", "o/a", "high", "full"),
     ]
     assert doc.default_agent == "opus"
-    assert [(q.name, q.agent, q.max_parallel) for q in doc.queues] == [
-        ("general", "opus", 3),
-        ("light", "free", 3),
+    assert [(q.name, q.agent, q.priority) for q in doc.queues] == [
+        ("general", "opus", None),
+        ("light", "free", None),
     ]
 
 
@@ -358,167 +358,10 @@ async def test_a_cascade_out_of_ranking_order_warns(
     assert at(found, "agents.ordered.models") == []
 
 
-async def test_a_failing_version_read_warns_unknown_and_still_lists_models(
-    tmp_path, fake_claude, fake_opencode, monkeypatch
-):
-    """A harness whose --version fails is judged unknown, as a launch judges it,
-    and its models are still read (#454)."""
-    monkeypatch.setenv("AEGIS_FAKE_HARNESS_VERSION", "")
-    found = await run(tmp_path, GOOD, fake_claude, fake_opencode)
-    claude = at(found, "harness.claude-code")
-    assert [f.level for f in claude] == ["warn"], claude
-    assert "could not be read" in claude[0].message
-    assert "--version` failed" in claude[0].message
-
-
-# -- multi-user mode ------------------------------------------------------------
-import os  # noqa: E402
-import pwd  # noqa: E402
-
-from aegis import users  # noqa: E402
-from aegis.doctor import _multi_user  # noqa: E402
-
 FULL_UNIT = {
     "AmbientCapabilities": "CAP_SETUID CAP_SETGID CAP_SETPCAP",
     "CapabilityBoundingSet": "CAP_SETUID CAP_SETGID CAP_SETPCAP",
 }
-
-
-def mu_roots(tmp_path):
-    roots = make_roots(tmp_path, tmp_path)
-    roots.state_root.mkdir(parents=True, mode=0o700)
-    return roots
-
-
-def other_user():
-    me = os.getuid()
-    for pw in pwd.getpwall():
-        if users.uid_min() <= pw.pw_uid < 60000 and pw.pw_uid != me:
-            return pw.pw_name
-    pytest.skip("no regular user other than the test user on this host")
-
-
-def rows(findings, prefix):
-    return [f for f in findings if f.where.startswith(prefix)]
-
-
-def test_the_unit_must_carry_the_three_capabilities(tmp_path):
-    roots = mu_roots(tmp_path)
-    ok_ = _multi_user(roots, users.MultiUser(), [], FULL_UNIT, {})
-    assert [f.level for f in rows(ok_, "multi_user.unit")] == ["ok"]
-    half = {"AmbientCapabilities": "CAP_SETUID CAP_SETGID"}
-    (bad,) = rows(
-        _multi_user(roots, users.MultiUser(), [], half, {}), "multi_user.unit"
-    )
-    assert bad.level == "error" and all(
-        line in bad.message for line in users.UNIT_LINES
-    )
-    (none,) = rows(
-        _multi_user(roots, users.MultiUser(), [], None, {}), "multi_user.unit"
-    )
-    assert none.level == "warn" and "no installed unit" in none.message
-
-
-def test_member_tokens_need_an_allowed_user(tmp_path):
-    roots = mu_roots(tmp_path)
-    good = other_user()
-    entries = [
-        {"name": "ok", "role": "member", "linux_user": good},
-        {"name": "old", "role": "member"},
-        {"name": "gone", "role": "member", "linux_user": "aegis-no-such-user"},
-        {"name": "rooted", "role": "member", "linux_user": "root"},
-        {"name": "srv", "role": "admin"},
-    ]
-    found = rows(
-        _multi_user(roots, users.MultiUser(), entries, FULL_UNIT, {}),
-        "multi_user.tokens",
-    )
-    errors = {f.where: f.message for f in found if f.level == "error"}
-    assert set(errors) == {
-        "multi_user.tokens.old",
-        "multi_user.tokens.gone",
-        "multi_user.tokens.rooted",
-    }
-    assert "no Linux user" in errors["multi_user.tokens.old"]
-    assert "root" in errors["multi_user.tokens.rooted"]
-
-
-def test_the_state_must_be_0700(tmp_path):
-    roots = mu_roots(tmp_path)
-    roots.state_root.chmod(0o755)
-    (f,) = rows(
-        _multi_user(roots, users.MultiUser(), [], FULL_UNIT, {}), "multi_user.state"
-    )
-    assert f.level == "error" and "0700" in f.message
-    roots.state_root.chmod(0o700)
-    (f,) = rows(
-        _multi_user(roots, users.MultiUser(), [], FULL_UNIT, {}), "multi_user.state"
-    )
-    assert f.level == "ok"
-
-
-def test_the_pool_file_is_checked_and_its_values_never_shown(tmp_path):
-    roots = mu_roots(tmp_path)
-    pool = tmp_path / "pool.env"
-    pool.write_text("SECRET=hunter2\nOTHER=x\n")
-    pool.chmod(0o644)
-    (f,) = rows(
-        _multi_user(roots, users.MultiUser(pool), [], FULL_UNIT, {}),
-        "multi_user.env_file",
-    )
-    assert f.level == "error" and "0600" in f.message
-    pool.chmod(0o600)
-    (f,) = rows(
-        _multi_user(roots, users.MultiUser(pool), [], FULL_UNIT, {}),
-        "multi_user.env_file",
-    )
-    assert f.level == "ok" and "2 variables" in f.message and "hunter2" not in f.message
-    gone = users.MultiUser(tmp_path / "gone.env")
-    (f,) = rows(_multi_user(roots, gone, [], FULL_UNIT, {}), "multi_user.env_file")
-    assert f.level == "error"
-
-
-def test_a_harness_every_user_cannot_run_is_an_error(tmp_path):
-    import shutil as sh
-    import tempfile
-
-    roots = mu_roots(tmp_path)
-    # pytest's own tmp dirs sit under a 0700 directory: use one under /tmp.
-    base = Path(tempfile.mkdtemp(dir="/tmp"))
-    base.chmod(0o755)
-    shut = base / "shut"
-    shut.mkdir(mode=0o750)
-    exe = shut / "claude"
-    exe.write_text("#!/bin/sh\n")
-    exe.chmod(0o755)
-    (f,) = rows(
-        _multi_user(roots, users.MultiUser(), [], FULL_UNIT, {"claude": str(exe)}),
-        "multi_user.harnesses",
-    )
-    assert f.level == "error" and str(shut) in f.message
-    shut.chmod(0o755)
-    (f,) = rows(
-        _multi_user(roots, users.MultiUser(), [], FULL_UNIT, {"claude": str(exe)}),
-        "multi_user.harnesses",
-    )
-    assert f.level == "ok"
-    sh.rmtree(base)
-
-
-async def test_a_doctor_without_the_mode_has_no_multi_user_rows(
-    tmp_path, fake_claude, fake_opencode
-):
-    found = await run(tmp_path, "agents: {}\n", fake_claude, fake_opencode)
-    assert rows(found, "multi_user") == []
-
-
-def test_multi_user_names_a_machine_it_cannot_switch_files_on(tmp_path):
-    roots = mu_roots(tmp_path)
-    found = _multi_user(roots, users.MultiUser(), [], FULL_UNIT, {}, "riscv64")
-    (row,) = rows(found, "multi_user.files")
-    assert row.level == "error" and "riscv64" in row.message
-    found = _multi_user(roots, users.MultiUser(), [], FULL_UNIT, {}, "x86_64")
-    assert not rows(found, "multi_user.files")
 
 
 def test_knowledge_in_use_without_git_warns(tmp_path, monkeypatch):
@@ -532,3 +375,16 @@ def test_knowledge_in_use_without_git_warns(tmp_path, monkeypatch):
     assert (f.level, f.where) == ("warn", "knowledge") and "git" in f.message
     monkeypatch.setattr("aegis.doctor.shutil.which", lambda b: "/usr/bin/git")
     assert _knowledge(roots) == []
+
+
+async def test_a_failing_version_read_warns_unknown_and_still_lists_models(
+    tmp_path, fake_claude, fake_opencode, monkeypatch
+):
+    """A harness whose --version fails is judged unknown, as a launch judges it,
+    and its models are still read (#454)."""
+    monkeypatch.setenv("AEGIS_FAKE_HARNESS_VERSION", "")
+    found = await run(tmp_path, GOOD, fake_claude, fake_opencode)
+    claude = at(found, "harness.claude-code")
+    assert [f.level for f in claude] == ["warn"], claude
+    assert "could not be read" in claude[0].message
+    assert "--version` failed" in claude[0].message

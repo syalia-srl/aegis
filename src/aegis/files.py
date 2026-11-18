@@ -17,8 +17,6 @@ under that policy, and its viewer cannot reach the page's storage.
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
 import mimetypes
 import os
 import re
@@ -27,18 +25,19 @@ import shlex
 import shutil
 import subprocess
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote
 
 from . import launch
-from .as_user import Runner
 
 MAX_BYTES = 100 * 1024 * 1024
 EXCERPT_LINES = 40
 EXCERPT_BYTES = 4096
 SNIFF_BYTES = 4096
 
+# The session each sent file came from, by file id (session_of); beside the
+# files store, so a file's own folder holds only that file.
+SESSIONS = "file-sessions"
 _ID = re.compile(r"[A-Za-z0-9_-]{16,64}")
 _TEXT_APPS = ("json", "yaml", "xml", "javascript", "toml", "x-sh", "sql")
 
@@ -149,78 +148,35 @@ def check(src: Path) -> int:
     return size
 
 
-@dataclass
-class Opened:
-    """A file opened by someone else's runner (as_user.py), with what the
-    store needs from it that would take reading it by path."""
-
-    src: Path
-    fd: int
-    mime: str
-    preview: str
-
-
-def open_all(srcs: list[Path]) -> list[Opened]:
-    """Every one of ``srcs`` checked, then opened: run on the runner of the
-    user whose access decides, so the store can copy them as the server."""
-    for src in srcs:
-        check(src)
-    out: list[Opened] = []
-    try:
-        for src in srcs:
-            fd = os.open(src, os.O_RDONLY | os.O_CLOEXEC)
-            out.append(Opened(src, fd, *classify(src)))
-    except OSError as e:
-        for o in out:
-            os.close(o.fd)
-        raise FileError("unreadable", f"cannot read {src}: {e}", src) from e
-    return out
-
-
-async def store_as(state_root: Path, srcs: list[Path], run: Runner) -> list[dict]:
-    """``store_all``, with each file read with ``run``'s access and copied
-    into the state root with the server's."""
-    if run.user is None:
-        return await asyncio.to_thread(store_all, state_root, srcs)
-    opened = await run(open_all, srcs)
-    return await asyncio.to_thread(store_all, state_root, srcs, opened)
-
-
 def store_all(
-    state_root: Path, srcs: list[Path], opened: list[Opened] | None = None
+    state_root: Path, srcs: list[Path], log_id: str | None = None
 ) -> list[dict]:
     """Copy every one of ``srcs``, or none: all are checked before the first
     copy, and a copy that fails anyway removes the ones made before it, so a
-    failed send leaves nothing in the state root. ``opened`` are the same
-    files already checked and opened (``open_all``); this closes them."""
-    if opened is None:
-        for src in srcs:
-            check(src)
+    failed send leaves nothing in the state root."""
+    for src in srcs:
+        check(src)
     done: list[dict] = []
     try:
-        for i, src in enumerate(srcs):
-            done.append(store(state_root, src, got=opened[i] if opened else None))
+        for src in srcs:
+            done.append(store(state_root, src, log_id=log_id))
     except FileError:
         for rec in done:
             shutil.rmtree(state_root / "files" / rec["file_id"], ignore_errors=True)
+            (state_root / SESSIONS / rec["file_id"]).unlink(missing_ok=True)
         raise
-    finally:
-        for o in (opened or [])[len(done) :]:
-            if o.fd >= 0:
-                with contextlib.suppress(OSError):
-                    os.close(o.fd)
     return done
 
 
 def store(
-    state_root: Path, src: Path, name: str | None = None, got: Opened | None = None
+    state_root: Path, src: Path, name: str | None = None, log_id: str | None = None
 ) -> dict:
     """Copy ``src`` under a fresh id, as ``name`` (its own name by default); the
-    store record's body, without caption. With ``got``, from its descriptor,
-    which this closes."""
-    size = check(src) if got is None else os.fstat(got.fd).st_size
+    store record's body, without caption. ``log_id``, the session that sent it,
+    is kept in ``<state>/file-sessions`` (session_of), for the host policy (#959)."""
+    size = check(src)
     name = name or src.name
-    mime, preview = classify(src) if got is None else (got.mime, got.preview)
+    mime, preview = classify(src)
     file_id = secrets.token_urlsafe(16)
     root = state_root / "files"
     root.mkdir(parents=True, exist_ok=True)
@@ -229,18 +185,16 @@ def store(
     # included, can be served.
     part = root / f".{file_id}.part"
     try:
-        if got is None:
-            shutil.copyfile(src, part)
-        else:
-            f = os.fdopen(got.fd, "rb")
-            got.fd = -1  # f closes it now; store_all must not close it again
-            with f, part.open("wb") as out:
-                shutil.copyfileobj(f, out)
+        shutil.copyfile(src, part)
     except OSError as e:
         part.unlink(missing_ok=True)
         raise FileError("unreadable", f"cannot read {src}: {e}", src) from e
     folder = root / file_id
     folder.mkdir()
+    if log_id:
+        sessions = state_root / SESSIONS
+        sessions.mkdir(exist_ok=True)
+        (sessions / file_id).write_text(log_id)
     dest = folder / name
     os.replace(part, dest)
     return {
@@ -252,6 +206,16 @@ def store(
         "preview": preview,
         "excerpt": excerpt(dest) if preview in ("markdown", "text") else None,
     }
+
+
+def session_of(state_root: Path, file_id: str) -> str | None:
+    """The session that sent a file; None for one sent before aegis 3.0."""
+    if not _ID.fullmatch(file_id):
+        return None
+    try:
+        return (state_root / SESSIONS / file_id).read_text() or None
+    except OSError:
+        return None
 
 
 def find(state_root: Path, file_id: str, name: str) -> Path | None:
@@ -318,4 +282,4 @@ def open_natively(path: Path) -> subprocess.Popen:
     cmd = opener()
     if cmd is None:
         raise FileError("no_desktop", "this server has no desktop to open files on")
-    return launch.detach([*cmd, str(path)], user=None)
+    return launch.detach([*cmd, str(path)])

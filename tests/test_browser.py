@@ -4,6 +4,7 @@ started as a real process, with the fake claude behind it."""
 import json
 import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -142,8 +143,7 @@ def server(tmp_path: Path, fake_claude: str, fake_opencode: str):
 class Linked:
     """Two servers, alpha linked to beta through `aegis link add`."""
 
-    def __init__(self, root: Path, claude: str, opencode: str, trusted: bool = False):
-        self.trusted = trusted
+    def __init__(self, root: Path, claude: str, opencode: str):
         self.beta = Server(root / "beta", claude, opencode)
         self.alpha = Server(root / "alpha", claude, opencode)
         for s, name in ((self.beta, "beta"), (self.alpha, "alpha")):
@@ -157,8 +157,7 @@ class Linked:
         base = f"http://127.0.0.1:{self.beta.port}"
         link = subprocess.run(
             [sys.executable, "-m", "aegis", "link", "add", "beta", base,
-             "--root", str(self.alpha.root), "--as", "alpha",
-             *(["--trusted"] if self.trusted else [])],
+             "--root", str(self.alpha.root), "--as", "alpha"],
             input=token + "\n", capture_output=True, text=True, timeout=30,
         )  # fmt: skip
         assert link.returncode == 0, link.stdout + link.stderr
@@ -981,6 +980,10 @@ def test_a_session_from_spawn_to_close(server, page):
     page.press("#input", "Enter")
     busy = page.locator(".row.tool.running").get_attribute("data-id")
     page.keyboard.press("Escape")
+    # One Esc only arms the interrupt (#912): the turn runs on and says so.
+    page.wait_for_selector("#working .wesc >> text=Esc again to interrupt")
+    assert page.is_visible(".row.tool.running"), "one Esc interrupted"
+    page.keyboard.press("Escape")
     turns_done(page, 3)
     # textContent, not inner_text: a row below the fold is skipped by
     # content-visibility:auto, and Chromium's innerText reads it as '' (#693).
@@ -1220,15 +1223,21 @@ def test_quiet_hides_the_tab_and_a_click_on_its_card_brings_it_back(server, page
     assert page.errors == []
 
 
-def test_quiet_is_disabled_on_an_idle_session(server, page):
-    # The panel draws a session's change on the next frame, the transcript's
-    # "done in" at once: slow frames make the test wait for the panel.
-    page.add_init_script(SLOW_FRAMES)
+def test_quiet_takes_an_idle_session_and_a_click_on_its_card_ends_it(server, page):
+    """#1025: quiet works in any state; the card's click ends the mode."""
     page.goto(server.url)
     page.wait_for_selector("#a2[data-view=fleet]")
-    spawn(page, "hello")
+    b = spawn(page, "hello")
     page.wait_for_selector("#s-status.at-done")
-    assert page.is_disabled("#quiet-session")
+    page.wait_for_selector("#quiet-session[aria-pressed=false]:not([disabled])")
+    page.click("#quiet-session")
+    page.wait_for_selector(f".card.quiet[data-id='{b}']")
+    assert tab_ids(page) == []
+    page.click(f".card.quiet[data-id='{b}']")
+    page.wait_for_function("id => location.hash === '#s=' + id", arg=b)
+    page.wait_for_selector("#quiet-session[aria-pressed=false]")
+    assert tab_ids(page) == [b]
+    assert page.errors == []
 
 
 def test_the_autoclose_button_toggles_and_the_agent_must_then_close(server, page):
@@ -1248,20 +1257,22 @@ def test_the_autoclose_button_toggles_and_the_agent_must_then_close(server, page
     assert page.errors == []
 
 
-def test_alt_q_quiets_a_working_session_and_leaves_an_idle_one(server, page):
+def test_alt_q_quiets_an_idle_session_and_a_working_one(server, page):
     page.goto(server.url)
     page.wait_for_selector("#a2[data-view=fleet]")
     a = spawn(page, "stays")
     page.wait_for_selector("#s-status.at-done")
-    page.keyboard.press("Alt+q")
-    assert tab_ids(page) == [a]
     b = spawn(page, HOLD)
     page.wait_for_function("!document.querySelector('#quiet-session').disabled")
     page.focus("#input")
     page.keyboard.press("Alt+q")
     page.wait_for_function("id => location.hash === '#s=' + id", arg=a)
     assert tab_ids(page) == [a]
+    page.keyboard.press("Alt+q")
+    page.wait_for_function("() => !location.hash.startsWith('#s=')")
+    assert tab_ids(page) == []
     page.click("#tab-fleet")
+    page.wait_for_selector(f".card.quiet[data-id='{a}']")
     page.wait_for_selector(f".card.quiet[data-id='{b}']")
     assert page.errors == []
 
@@ -1963,27 +1974,25 @@ ACTS = """bs => bs.map(b => {
 })"""
 
 
-def test_the_actions_are_two_rows_of_equal_cells_with_icons(server, page):
+def test_the_actions_are_one_row_of_equal_icon_cells(server, page):
+    """#1022: the live actions are icons only, one row edge to edge, at any
+    panel width; each button's title names it."""
     page.goto(server.url)
     page.wait_for_selector("#a2[data-view=fleet]")
     spawn(page)
-    box = page.locator(".side-acts.live-only").bounding_box()
-    cells = page.eval_on_selector_all(".side-acts.live-only .act", ACTS)
-    # Sleep, Quiet (#386), Autoclose (#691); Continue, Restart, Archive.
-    assert [c["icon"] for c in cells] == [True] * 6
-    widths = [c["width"] for c in cells]
-    assert max(widths) - min(widths) < 1, widths
-    # Each row of three is covered edge to edge.
-    for row in (cells[:3], cells[3:]):
-        assert abs(row[0]["left"] - box["x"]) < 1
-        assert abs(row[-1]["right"] - (box["x"] + box["width"])) < 1
-    assert all(c["label"] != "none" for c in cells)
-    # A narrow panel keeps the rows and drops the labels.
-    drag_panel(page, 205)
-    cells = page.eval_on_selector_all(".side-acts.live-only .act", ACTS)
-    widths = [c["width"] for c in cells]
-    assert max(widths) - min(widths) < 1, widths
-    assert all(c["label"] == "none" for c in cells)
+    # Sleep, Quiet (#386), Autoclose (#691), Autohandoff (#1019); Continue,
+    # Restart, Archive.
+    for width in (None, 205):
+        if width:
+            drag_panel(page, width)
+        box = page.locator(".side-acts.live-only").bounding_box()
+        cells = page.eval_on_selector_all(".side-acts.live-only .act", ACTS)
+        assert [c["icon"] for c in cells] == [True] * 7
+        assert all(c["label"] == "none" for c in cells)
+        widths = [c["width"] for c in cells]
+        assert max(widths) - min(widths) < 1, widths
+        assert abs(cells[0]["left"] - box["x"]) < 1
+        assert abs(cells[-1]["right"] - (box["x"] + box["width"])) < 1, (cells, box)
     assert page.errors == []
 
 
@@ -3414,9 +3423,7 @@ def test_a_question_marks_the_tab_card_and_band_and_the_fleet_groups_it(server, 
 
 @pytest.fixture
 def queue_server(tmp_path: Path, fake_claude: str, fake_opencode: str):
-    (tmp_path / ".aegis.yaml").write_text(
-        CONFIG + "queues:\n  q: {agent: opus, max_parallel: 2}\n"
-    )
+    (tmp_path / ".aegis.yaml").write_text(CONFIG + "queues:\n  q: {agent: opus}\n")
     s = Server(tmp_path, fake_claude, fake_opencode).start()
     yield s
     s.stop()
@@ -3426,6 +3433,20 @@ def enqueue(pg, payload: str) -> None:
     args = {"queue": "q", "payload": payload, "callback": False}
     pg.fill("#input", f"/mcp queue_enqueue {json.dumps(args)}")
     pg.press("#input", "Enter")
+
+
+def fleet_unfolded(pg, until: str, timeout: float = 30) -> None:
+    """The Fleet, opening groups until `until` shows: a worker joins the group
+    of the session that enqueued it a moment after the enqueue, and a group is
+    one folded stack until clicked."""
+    pg.click("#tab-fleet")
+    pg.wait_for_selector("#a2[data-view=fleet]")
+    end = time.monotonic() + timeout
+    while not pg.locator(until).first.is_visible():
+        assert time.monotonic() < end, f"no {until} in the Fleet"
+        if pg.locator("#cards .stack").count():
+            pg.click("#cards .stack >> nth=0")
+        pg.wait_for_timeout(200)
 
 
 def test_a_session_waiting_on_a_worker_names_it_and_opens_it(queue_server, page):
@@ -3439,9 +3460,8 @@ def test_a_session_waiting_on_a_worker_names_it_and_opens_it(queue_server, page)
     row = page.wait_for_selector("#s-wait-sec:not([hidden]) .kv.wait.go")
     handle = row.query_selector("span").text_content()
     assert row.query_selector(".r").text_content() == "queue q · running"
-    page.click("#tab-fleet")
-    page.wait_for_selector(
-        f"#cards .card[data-id='{boss}'] .s >> text=waiting · {handle}"
+    fleet_unfolded(
+        page, f"#cards .card[data-id='{boss}'] .s >> text=waiting · {handle}"
     )
     page.click(f"#cards .card[data-id='{boss}']")
     page.click("#s-waiting .kv.wait.go")
@@ -3473,14 +3493,12 @@ def test_a_finished_worker_fades_and_sinks_below_the_live_cards_and_an_errored_o
     boss = spawn(page, "hello")
     enqueue(page, "/exit 4")
     turns_done(page, 2)
-    page.click("#tab-fleet")
-    page.wait_for_selector("#cards .card.at-error .badge >> text=worker · q")
+    fleet_unfolded(page, "#cards .card.at-error .badge >> text=worker · q")
     failed = page.get_attribute("#cards .card.at-error", "data-id")
     page.click("#tab-fleet")
     page.click(f"#tablist .tab[data-id='{boss}']")
     enqueue(page, "/busy 4")
-    page.click("#tab-fleet")
-    page.wait_for_selector("#cards .card:not(.at-error) .badge >> text=worker · q")
+    fleet_unfolded(page, "#cards .card:not(.at-error) .badge >> text=worker · q")
     worker = page.get_attribute("#cards .card:not(.at-error):has(.badge)", "data-id")
     # Live: not finished, but quiet (#386): dimmed, last, with no tab.
     assert page.locator(f"#cards .card[data-id='{worker}'].finished").count() == 0
@@ -3496,10 +3514,13 @@ def test_a_finished_worker_fades_and_sinks_below_the_live_cards_and_an_errored_o
     page.click(f"#arch-list tr[data-id='{worker}'] .btn.reopen")
     page.wait_for_selector("#a2[data-view=session][data-mode=live]")
     live = spawn(page, "still going")
-    page.click("#tab-fleet")
-    page.wait_for_selector(f"#cards .card[data-id='{worker}'].finished")
-    # A live card above it, whatever the order the tabs are in.
-    assert card_ids(page) == [failed, boss, live, worker]
+    fleet_unfolded(page, f"#cards .card[data-id='{worker}'].finished")
+    # A live card above it, whatever the order the tabs are in. The worker is
+    # in its enqueuer's group, which keeps its members together: it sinks to
+    # the bottom of the group, below the boss and the errored worker.
+    ids = card_ids(page)
+    assert sorted(ids) == sorted([failed, boss, live, worker])
+    assert ids.index(worker) > max(ids.index(boss), ids.index(failed))
     assert page.locator(f"#cards .card[data-id='{failed}'].finished").count() == 0
     assert card_opacity(page, failed) == "1"
     assert card_opacity(page, worker) == "0.5"
@@ -3515,8 +3536,7 @@ def test_a_finished_worker_fades_and_sinks_below_the_live_cards_and_an_errored_o
     # An errored turn is not faded, though the task behind it is over.
     page.fill("#input", "/exit 4")
     page.press("#input", "Enter")
-    page.click("#tab-fleet")
-    page.wait_for_selector(f"#cards .card[data-id='{worker}'].at-error")
+    fleet_unfolded(page, f"#cards .card[data-id='{worker}'].at-error")
     assert page.locator(f"#cards .card[data-id='{worker}'].finished").count() == 0
     assert card_opacity(page, worker) == "1"
     assert page.errors == []
@@ -3538,8 +3558,7 @@ def test_the_session_panel_names_the_server_and_marks_a_queue_worker(
     # its open panel goes back to the Fleet, which a slow runner reached
     # before the badge was checked when the task took 4 s.
     enqueue(page, "/busy 60")
-    page.click("#tab-fleet")
-    page.wait_for_selector("#cards .card .badge >> text=worker · q")
+    fleet_unfolded(page, "#cards .card .badge >> text=worker · q")
     page.click("#cards .card:has(.badge)")
     page.wait_for_selector("#a2[data-view=session]")
     page.wait_for_selector("#s-worker:visible >> text=worker · q")
@@ -3582,8 +3601,7 @@ def test_a_click_on_a_quiet_card_opens_it_when_a_patch_overtakes_the_unquiet(
     page.wait_for_selector("#a2[data-view=fleet]")
     spawn(page, "hello")
     enqueue(page, "/stream 400")  # a card patch every few hundred ms
-    page.click("#tab-fleet")
-    page.wait_for_selector("#cards .card.quiet .badge >> text=worker · q")
+    fleet_unfolded(page, "#cards .card.quiet .badge >> text=worker · q")
     worker = page.get_attribute("#cards .card:has(.badge)", "data-id")
     gate["worker"] = worker
     page.click(f"#cards .card[data-id='{worker}']")
@@ -4019,7 +4037,7 @@ def test_renaming_the_default_agent_carries_to_the_default(settings_server, page
 
 def test_renaming_an_agent_carries_to_the_queues_that_run_it(settings_server, page):
     (settings_server.root / ".aegis.yaml").write_text(
-        SETTINGS_CONFIG + "queues:\n  q: {agent: opus, max_parallel: 2}\n"
+        SETTINGS_CONFIG + "queues:\n  q: {agent: opus}\n"
     )
     open_settings(page, settings_server.url)
     page.wait_for_selector('.set-queue[data-row="queues.q"]')
@@ -4032,6 +4050,24 @@ def test_renaming_an_agent_carries_to_the_queues_that_run_it(settings_server, pa
         "document.querySelector('#set-status').textContent === 'Saved'"
     )
     assert "agent: big" in (settings_server.root / ".aegis.yaml").read_text()
+
+
+def test_settings_sets_a_queue_priority_and_the_worker_limit(settings_server, page):
+    (settings_server.root / ".aegis.yaml").write_text(
+        SETTINGS_CONFIG + "queues:\n  q: {agent: opus}\n"
+    )
+    open_settings(page, settings_server.url)
+    page.wait_for_selector('.set-queue[data-row="queues.q"]')
+    page.fill('.set-queue[data-row="queues.q"] input[name=priority]', "0")
+    page.fill("#set-max-workers input[name=max_workers]", "6")
+    page.click("#set-save")
+    page.wait_for_function(
+        "document.querySelector('#set-status').textContent === 'Saved'"
+    )
+    data = YAML(typ="safe").load((settings_server.root / ".aegis.yaml").read_text())
+    assert data["queues"]["q"] == {"agent": "opus", "priority": 0}
+    assert data["max_workers"] == 6
+    assert page.errors == []
 
 
 def test_a_reply_read_on_screen_turns_its_mark_and_clears_the_done_badge(server, page):
@@ -4793,7 +4829,7 @@ def test_an_open_tab_takes_the_new_build_after_an_upgrade(server, browser, worke
     page.evaluate("window.__before = true")
     # An upgrade: the server restarts serving another client. The build id
     # hashes each file's mtime, so a newer mtime is a new build.
-    css = aegis.web.CLIENT_DIR / "css" / "base.css"
+    css = aegis.web.CLIENT_DIR / "css" / "client.css"
     st = css.stat()
     server.stop()
     try:
@@ -6700,8 +6736,13 @@ def test_a_phone_header_is_one_row_with_the_tabs_beside_the_menu(
     assert rows == [["hdr-burger", "tablist", "tab-more", "tab-add"]], rows
     header = page.locator("#a2 > .tabs").bounding_box()
     assert header["height"] <= 52, header
+    # The tabs take the whole row the menu, the count (its "3 ▾") and + leave.
     tabs = page.locator("#tablist").bounding_box()
-    assert tabs["width"] > width - 140, tabs
+    burger = page.locator("#hdr-burger").bounding_box()
+    more = page.locator("#tab-more").bounding_box()
+    assert tabs["x"] - (burger["x"] + burger["width"]) < 8, (burger, tabs)
+    assert more["x"] - (tabs["x"] + tabs["width"]) < 12, (tabs, more)
+    assert tabs["width"] > width - 160, tabs
     assert page.evaluate(WIDER) == []
     assert errors == []
 
@@ -7810,24 +7851,26 @@ def test_spawn_on_a_linked_server_from_the_new_tab(linked, page):
     assert not page.errors
 
 
-def test_settings_shows_a_trusted_link_on_both_servers(
+def test_settings_shows_a_link_on_both_servers(
     tmp_path: Path, fake_claude: str, fake_opencode: str, page
 ):
-    """A trusted link says so on the server that holds it, and the far server
-    lists it under the servers that link it, at desktop and phone width."""
-    pair = Linked(tmp_path, fake_claude, fake_opencode, trusted=True).start()
+    """A link is linked on the server that holds it, with no trust box and an
+    exit button, and the far server lists it under the servers that link it,
+    at desktop and phone width."""
+    pair = Linked(tmp_path, fake_claude, fake_opencode).start()
     try:
         open_settings(page, pair.alpha.url)
         page.wait_for_function(
             "document.querySelector('#set-servers .link-beta')"
-            "?.textContent.includes('trusted, both ways')",
+            "?.textContent.includes('Exit here')",
             timeout=10000,
         )
-        assert page.locator("#set-link-trusted").count() == 1
+        assert page.locator("#set-link-trusted").count() == 0
+        assert "trust" not in page.inner_text("#set-servers").lower()
         open_settings(page, pair.beta.url)
         page.wait_for_selector("#set-servers .set-incoming.link-alpha", timeout=10000)
         row = page.inner_text("#set-servers .set-incoming.link-alpha")
-        assert "links here" in row and "trusted · both ways" in row
+        assert "links here" in row and "linked" in row
         page.set_viewport_size({"width": 390, "height": 844})
         wide = page.evaluate(
             "[...document.querySelectorAll('#set-servers *')]"
@@ -7835,6 +7878,49 @@ def test_settings_shows_a_trusted_link_on_both_servers(
         )
         assert wide == 0
         assert page.errors == []
+    finally:
+        pair.stop()
+
+
+def test_a_far_server_shows_and_drives_the_near_servers_sessions(
+    tmp_path: Path, fake_claude: str, fake_opencode: str, browser, page
+):
+    """Over a link the far server's page shows the near server's
+    sessions under its band and drives them (#969), at desktop and phone width."""
+    pair = Linked(tmp_path, fake_claude, fake_opencode).start()
+    try:
+        errors: list = []
+        pg = new_page(browser, errors)
+        pg.goto(pair.alpha.url)
+        pg.wait_for_selector("#a2[data-view=fleet]")
+        lid = spawn(pg, "from alpha")
+        pg.close()
+        page.goto(pair.beta.url)
+        page.wait_for_selector("#a2[data-view=fleet]")
+        box = "#remotes .remote[data-server=alpha]"
+        page.wait_for_selector(f"{box} .card[data-id='alpha/{lid}']", timeout=10000)
+        assert page.inner_text(f"{box} .band-server") == "alpha"
+        shots = os.environ.get("AEGIS_SHOTS")
+        if shots:
+            page.screenshot(path=f"{shots}/fleet-desktop.png")
+        page.click(f"#tablist .tab[data-id='alpha/{lid}']")
+        page.wait_for_selector("#a2[data-view=session]")
+        turns_done(page, 1)
+        page.fill("#input", "hello from beta")
+        page.press("#input", "Enter")
+        turns_done(page, 2)
+        store = pair.alpha.root / ".aegis" / "state" / "transcripts" / f"{lid}.jsonl"
+        assert "hello from beta" in store.read_text()
+        page.set_viewport_size({"width": 390, "height": 844})
+        page.goto(pair.beta.url)
+        page.wait_for_selector(f"{box} .card[data-id='alpha/{lid}']", timeout=10000)
+        if shots:
+            page.screenshot(path=f"{shots}/fleet-phone.png", full_page=True)
+        # Settings lists alpha under the servers that link here, not as a link.
+        open_settings(page, pair.beta.url)
+        page.wait_for_selector("#set-servers .set-incoming.link-alpha", timeout=10000)
+        assert page.locator("#set-servers .set-link:not(.set-incoming)").count() == 0
+        assert page.errors == [] and errors == []
     finally:
         pair.stop()
 
@@ -9189,235 +9275,6 @@ def test_a_slash_in_the_new_tab_opens_the_command_list(server, page):
     assert page.errors == []
 
 
-# -- tokens and owners (#311) -------------------------------------------------------
-def member_page(browser, server, name="ben", policy=None):
-    """A second browser, signed in with a member token minted by the CLI, and
-    ``policy`` as its quota policy (quota_gate.py)."""
-    token = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "aegis",
-            "token",
-            "add",
-            name,
-            "--root",
-            str(server.root),
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
-    if policy is not None:
-        set_policy(server, name, policy)
-    pg = new_page(browser, [])
-    base = server.url.split("?")[0]
-    pg.goto(f"{base}?token={token}")
-    pg.wait_for_selector("#a2[data-view=fleet]")
-    return pg, base
-
-
-def test_a_member_reads_the_admins_session_but_cannot_write_to_it(
-    server, page, browser
-):
-    page.goto(server.url)
-    page.wait_for_selector("#a2[data-view=fleet]")
-    a = spawn(page, "hello")
-    pg, base = member_page(browser, server)
-    pg.goto(f"{base}#s={a}")
-    pg.wait_for_selector(".row.user")
-    pg.wait_for_function("document.getElementById('input').disabled")
-    assert pg.is_disabled("#send") and pg.is_disabled("#stop-session")
-    assert "only" in pg.get_attribute("#input", "placeholder")
-    pg.wait_for_selector(f"#tablist .tab[data-id='{a}'] .who")
-
-
-def test_a_members_settings_hold_only_this_browser(server, browser):
-    pg, _ = member_page(browser, server)
-    pg.click("#settings-btn")
-    pg.wait_for_selector("#set-browser")
-    pg.wait_for_selector("text=edited by an admin")
-    assert pg.locator("#set-servers").count() == 0
-    assert pg.locator("#set-tokens").count() == 0
-    assert pg.locator("#set-park").count() == 0
-    assert pg.locator("#set-workflows").count() == 0
-
-
-def test_an_admin_adds_and_revokes_a_token_in_settings(server, page):
-    page.goto(server.url)
-    page.wait_for_selector("#a2[data-view=fleet]")
-    page.click("#settings-btn")
-    page.wait_for_selector("#set-tokens")
-    # Outside multi-user mode a token names no Linux user.
-    page.wait_for_selector("#set-tokens .set-agent")
-    assert page.query_selector("#set-token-user") is None
-    page.fill("#set-token-name", "cara")
-    page.click("#set-token-add")
-    page.wait_for_selector("#set-token-once")
-    page.wait_for_selector("#set-tokens .tok-cara")
-    assert page.query_selector("#set-tokens .set-uid") is None
-    page.click("#set-tokens .tok-cara .danger")
-    page.click("#set-tokens .tok-cara .danger")  # the second click confirms
-    page.wait_for_function("!document.querySelector('#set-tokens .tok-cara')")
-
-
-def tokens_file(server) -> Path:
-    return server.root / ".aegis" / "state" / "tokens.json"
-
-
-def set_policy(server, name, policy) -> None:
-    """Give ``name`` a policy by hand, as an admin may in tokens.json."""
-    path = tokens_file(server)
-    doc = json.loads(path.read_text())
-    for e in doc["tokens"]:
-        if e["name"] == name:
-            e["policy"] = policy
-    path.write_text(json.dumps(doc))
-
-
-def lines(launch, stop):
-    return {
-        "claude": {
-            "mode": "lines",
-            "lines": {"session": {"launch": launch, "stop": stop}},
-        }
-    }
-
-
-def test_a_member_over_its_launch_line_is_told_why_nothing_started(
-    quota_server, browser
-):
-    # The seeded reading has Claude's 5 hours at 71%.
-    pg, _ = member_page(browser, quota_server, policy=lines(50, 90))
-    pg.click("#tab-add")
-    pg.wait_for_function("document.querySelector('#sp-agent').value !== ''")
-    pg.fill("#sp-text", "do the thing")
-    pg.click("#sp-go")
-    pg.wait_for_selector(".toast.error .msg >> text=cannot start")
-    err = pg.text_content(".toast.error .msg")
-    assert "ben cannot start a session now" in err and "71%" in err and "50%" in err
-    assert pg.input_value("#sp-text") == "do the thing"
-
-
-def test_a_members_gauge_carries_its_own_lines(quota_server, browser):
-    pg, base = member_page(browser, quota_server, policy=lines(80, 95))
-    spawn(pg, "hello")
-    pg.wait_for_selector(
-        "#s-quota .qrow[data-kind=session] .tick.lim.l", state="attached"
-    )
-    left = lambda w: pg.eval_on_selector(  # noqa: E731
-        f"#s-quota .qrow[data-kind=session] .tick.lim.{w}", "n => n.style.left"
-    )
-    assert (left("l"), left("s")) == ("80%", "95%")
-    assert pg.locator("#s-quota .qrow[data-kind=weekly_all] .tick.lim").count() == 0
-
-
-def open_tokens(page, server):
-    page.goto(server.url)
-    page.wait_for_selector("#a2[data-view=fleet]")
-    page.click("#settings-btn")
-    page.wait_for_selector("#set-tok-default")
-
-
-@pytest.mark.quarantine("#776")
-def test_an_admin_edits_a_members_policy_and_the_default(quota_server, page, browser):
-    member_page(browser, quota_server)  # mints ben
-    open_tokens(page, quota_server)
-    page.wait_for_selector("#set-tokens .tok-ben >> text=uses the default")
-    page.click("#set-tokens .tok-ben >> text=Customize")
-    pick(page, "#set-tokens .tok-ben .poolrow.pool-claude pick-chip", "lines")
-    row = "#set-tokens .tok-ben .pool-claude .win-session"
-    page.wait_for_selector(f"{row} .h.s")
-    assert "start below 50% · stop at 90%" in page.text_content(f"{row} .rd")
-    # Drag the stop handle to about 80% of the track.
-    box = page.locator(f"{row} .track").bounding_box()
-    handle = page.locator(f"{row} .h.s").bounding_box()
-    page.mouse.move(
-        handle["x"] + handle["width"] / 2, handle["y"] + handle["height"] / 2
-    )
-    page.mouse.down()
-    page.mouse.move(box["x"] + box["width"] * 0.8, box["y"] + 3, steps=5)
-    page.mouse.up()
-    page.focus(f"{row} .h.l")
-    page.keyboard.press("Shift+ArrowLeft")
-    assert "start below 45% · stop at 80%" in page.text_content(f"{row} .rd")
-    # The launch handle stops a point short of the stop handle.
-    for _ in range(12):
-        page.keyboard.press("Shift+ArrowRight")
-    assert "start below 79% · stop at 80%" in page.text_content(f"{row} .rd")
-    # The default: open OpenCode Go without lines.
-    pick(page, "#set-tok-default .poolrow.pool-opencode-go pick-chip", "open, no lines")
-    page.wait_for_function(
-        "document.getElementById('set-status').textContent === 'Unsaved changes'"
-    )
-    page.click("#set-save")
-    page.wait_for_function(
-        "document.getElementById('set-status').textContent === 'Saved'"
-    )
-    doc = json.loads(tokens_file(quota_server).read_text())
-    (ben,) = [e for e in doc["tokens"] if e["name"] == "ben"]
-    assert ben["policy"]["claude"] == {
-        "mode": "lines",
-        "lines": {"session": {"launch": 79, "stop": 80}},
-    }
-    assert doc["default_policy"] == {"opencode-go": {"mode": "open"}}
-    # The reloaded card shows the saved lines and the gate they make now.
-    page.reload()
-    page.click("#settings-btn")
-    page.wait_for_selector(f"{row} .rd")
-    assert "start below 79% · stop at 80%" in page.text_content(f"{row} .rd")
-    # 71% now: open below the 79% launch line; OpenCode Go is not named.
-    chips = page.locator("#set-tokens .tok-ben .picks .set-pill").all_text_contents()
-    assert "Claude open" in chips and "OpenCode Go closed" in chips
-
-
-def test_the_policy_editor_fits_a_phone(quota_server, browser):
-    ctx = browser.new_context(
-        viewport={"width": 390, "height": 844}, has_touch=True, is_mobile=True
-    )
-    pg = ctx.new_page()
-    pg.goto(quota_server.url)
-    pg.wait_for_selector("#a2[data-view=fleet]")
-    pg.click("#hdr-burger")
-    pg.click("#settings-btn")
-    pg.wait_for_selector("#set-tok-default")
-    pick(pg, "#set-tok-default .poolrow.pool-claude pick-chip", "lines")
-    pg.wait_for_selector("#set-tok-default .win-session .h.s")
-    assert pg.evaluate("document.documentElement.scrollWidth") <= 390
-    ctx.close()
-
-
-def test_a_hand_edited_lines_policy_without_lines_still_draws(quota_server, page):
-    path = tokens_file(quota_server)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    doc = json.loads(path.read_text()) if path.exists() else {"tokens": []}
-    doc["default_policy"] = {"claude": {"mode": "lines"}}
-    path.write_text(json.dumps(doc))
-    open_tokens(page, quota_server)
-    page.wait_for_selector("#set-tok-default .pool-claude .win-session.off")
-
-
-def test_a_policy_save_for_a_token_revoked_meanwhile_saves_the_rest(
-    quota_server, page, browser
-):
-    member_page(browser, quota_server)  # mints ben
-    open_tokens(page, quota_server)
-    page.click("#set-tokens .tok-ben >> text=Customize")
-    pick(page, "#set-tok-default .poolrow.pool-codex pick-chip", "open, no lines")
-    path = tokens_file(quota_server)  # another admin revokes ben
-    doc = json.loads(path.read_text())
-    doc["tokens"] = [e for e in doc["tokens"] if e["name"] != "ben"]
-    path.write_text(json.dumps(doc))
-    page.click("#set-save")
-    page.wait_for_function(
-        "document.getElementById('set-status').textContent.includes('ben')"
-    )
-    assert "no token named ben" in page.text_content("#set-status")
-    assert json.loads(path.read_text())["default_policy"] == {"codex": {"mode": "open"}}
-    page.wait_for_function("!document.querySelector('#set-tokens .tok-ben')")
-
-
-# -- toasts (#329) -----------------------------------------------------------------
 def toast_texts(pg) -> list[str]:
     return pg.evaluate(
         "[...document.querySelectorAll('.toasts .toast:not(.out) .msg')].map(m => m.textContent)"
@@ -9563,6 +9420,24 @@ def test_the_cold_notice_appears_for_a_large_idle_context_only(cold_server, page
     page.press("#input", "Enter")
     turns_done(page, 2)
     page.wait_for_selector("#coldnote:not([hidden]) >> text=150k tokens", timeout=4000)
+
+
+def test_a_device_clock_ahead_does_not_show_the_cold_notice(server, browser):
+    """#924: a phone whose clock ran an hour ahead after a daylight saving
+    change showed the cold notice the moment a turn ended. The client measures
+    idle time on the server's clock, not the device's."""
+    errors: list = []
+    page = new_page(browser, errors)
+    page.add_init_script(
+        "const real = Date.now; Date.now = () => real() + 2 * 3600 * 1000;"
+    )
+    page.goto(server.url)
+    page.wait_for_selector("#a2[data-view=fleet]")
+    spawn(page, "/ctx 150000")
+    turns_done(page, 1)
+    page.wait_for_timeout(1500)
+    assert page.is_hidden("#coldnote")
+    assert errors == []
 
 
 def test_the_handoff_chip_continues_fresh_at_once(server, page):
@@ -9750,3 +9625,185 @@ def test_the_sidebar_shows_the_sessions_load(server, page):
     page.wait_for_selector("#s-load:not([hidden])", timeout=15000)
     assert re.fullmatch(r"\d+\.\d cores · \d+\.\d GB", page.inner_text("#s-load-v"))
     assert page.errors == []
+
+
+# -- hold the mic to record (record.js, #932) --------------------------------
+
+
+def sends_of(server, lid) -> list[dict]:
+    store = server.root / ".aegis" / "state" / "transcripts" / f"{lid}.jsonl"
+    recs = [json.loads(line) for line in store.read_text().splitlines()]
+    return [r for r in recs if r.get("kind") == "send"]
+
+
+def press_mic(pg, mic="#mic"):
+    box = pg.locator(mic).bounding_box()
+    x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+    pg.mouse.move(x, y)
+    pg.mouse.down()
+    return x, y
+
+
+def test_holding_the_mic_records_and_releasing_sends_the_take(server, mic_page):
+    pg = mic_page
+    pg.goto(server.url)
+    pg.wait_for_selector("#a2[data-view=fleet]")
+    lid = spawn(pg)
+    pg.fill("#input", "scene one")
+    press_mic(pg)
+    pg.wait_for_selector("#composer .rec-bar[data-state=held]", timeout=5000)
+    pg.wait_for_timeout(2500)
+    assert pg.locator("#composer .rec-time").inner_text() in ("0:02", "0:03")
+    pg.mouse.up()
+    turns_done(pg, 1)
+    assert pg.get_attribute("#mic", "data-state") == "idle", "a hold is not a tap"
+    assert pg.locator("#composer .rec-bar").is_hidden()
+    (got,) = inbox_of(server, lid).glob("*-recording.*")
+    assert got.suffix == ".ogg" or not shutil.which("ffmpeg")
+    (sent,) = sends_of(server, lid)
+    assert sent["typed"] == "scene one"
+    line = sent["text"].split("Attached files:\n")[1].splitlines()[0]
+    assert line.startswith(f"- {got} (an audio recording the person made")
+    assert re.search(r"0:0[23] long", line), line
+    row = pg.locator(".row.user").last
+    assert row.locator(".fcard").count() == 1 and "scene one" in row.inner_text()
+    assert pg.input_value("#input") == ""
+    assert pg.errors == []
+
+
+def test_sliding_up_locks_a_take_and_stop_sends_it(server, mic_page):
+    pg = mic_page
+    pg.goto(server.url)
+    pg.wait_for_selector("#a2[data-view=fleet]")
+    lid = spawn(pg)
+    x, y = press_mic(pg)
+    pg.wait_for_selector("#composer .rec-bar[data-state=held]", timeout=5000)
+    pg.mouse.move(x, y - 40, steps=4)
+    assert pg.get_attribute("#composer .rec-bar", "data-state") == "held"
+    pg.mouse.move(x, y - 90, steps=4)
+    pg.wait_for_selector("#composer .rec-bar[data-state=locked]")
+    pg.mouse.up()
+    pg.wait_for_timeout(1500)
+    assert pg.get_attribute("#composer .rec-bar", "data-state") == "locked"
+    assert not inbox_of(server, lid).exists() or not list(
+        inbox_of(server, lid).glob("*-recording.*")
+    ), "releasing a locked take sends nothing"
+    pg.click("#composer .rec-stop")
+    turns_done(pg, 1)
+    (sent,) = sends_of(server, lid)
+    assert "an audio recording the person made" in sent["text"]
+    assert pg.errors == []
+
+
+def test_esc_throws_a_locked_take_away(server, mic_page):
+    pg = mic_page
+    pg.goto(server.url)
+    pg.wait_for_selector("#a2[data-view=fleet]")
+    lid = spawn(pg)
+    x, y = press_mic(pg)
+    pg.wait_for_selector("#composer .rec-bar[data-state=held]", timeout=5000)
+    pg.mouse.move(x, y - 90, steps=4)
+    pg.mouse.up()
+    pg.wait_for_timeout(1200)
+    pg.keyboard.press("Escape")
+    pg.wait_for_selector("#composer .rec-bar", state="hidden")
+    pg.wait_for_timeout(800)
+    assert pg.locator("#atts .chip").count() == 0
+    assert sends_of(server, lid) == []
+    assert pg.errors == []
+
+
+def test_the_working_row_types_its_verb_and_counts_the_turns_tokens(server, page):
+    """#938: while a turn runs the verb types out letter by letter and the
+    counters show the turn's new input and output tokens; they start at zero
+    on the next turn. The verb types while no tool runs (#1012)."""
+    page.goto(server.url)
+    spawn(page, "hello")
+    page.fill("#input", '/script [["sleep", 2]]')
+    page.press("#input", "Enter")
+    page.wait_for_selector("#working", state="visible")
+    seen = set()
+    for _ in range(25):
+        seen.add(page.text_content("#working-verb"))
+        time.sleep(0.04)
+    assert len(seen) > 3, seen  # it types, not one word drawn at once
+    turns_done(page, 2)  # hello's, then the script's
+    page.fill("#input", "/busy 4")
+    page.press("#input", "Enter")
+    page.wait_for_selector("#working", state="visible")
+    page.wait_for_function(
+        "document.getElementById('working-out').textContent === '20'"
+    )
+    assert page.text_content("#working-in") == "10"
+    shots = os.environ.get("AEGIS_SHOTS")
+    if shots:
+        page.locator("#working").screenshot(path=f"{shots}/working-desktop.png")
+        page.set_viewport_size({"width": 390, "height": 844})
+        time.sleep(0.5)
+        page.screenshot(path=f"{shots}/working-phone.png")
+
+
+def test_the_working_row_takes_the_running_calls_glyph_and_verb(server, page):
+    """#1012: while a call runs, the working row's title is that call's glyph
+    and a verb of what it does, with the counters kept and no call name nor
+    parentheses (#1017); a
+    call that ends at once keeps the title about two pulses, then the star
+    and the general verbs come back."""
+    page.goto(server.url)
+    spawn(page, "hello")
+    page.fill("#input", "/busy 4")
+    page.press("#input", "Enter")
+    page.wait_for_selector("#working.calling", timeout=5000)
+    assert page.query_selector("#working .wcall") is None
+    meta = page.text_content("#working .meta")
+    assert "(" not in meta and ")" not in meta, meta
+    assert page.is_visible("#working-s")
+    seen = set()
+    for _ in range(25):
+        seen.add(page.text_content("#working-verb"))
+        time.sleep(0.04)
+    assert len(seen) > 3, seen  # it types, not one word drawn at once
+    verbs = "Reading Studying Scanning Digesting Exploring Untangling".split()
+    assert any(v.startswith(s.rstrip("…")) for s in seen if s for v in verbs), seen
+    shots = os.environ.get("AEGIS_SHOTS")
+    if shots:
+        time.sleep(0.6)
+        page.locator("#tr").screenshot(path=f"{shots}/call-title-desktop.png")
+        page.set_viewport_size({"width": 390, "height": 844})
+        time.sleep(0.6)
+        page.screenshot(path=f"{shots}/call-title-phone.png")
+        page.set_viewport_size({"width": 1280, "height": 800})
+    turns_done(page, 2)  # hello's, then busy's
+
+    page.fill("#input", '/script [["toast", {"line": "hi"}], ["sleep", 5]]')
+    page.press("#input", "Enter")
+    page.wait_for_selector("#working.calling", timeout=5000)
+    t0 = time.monotonic()
+    page.wait_for_selector("#working:not(.calling)", timeout=6000)
+    held = time.monotonic() - t0
+    assert 1.5 < held < 4, held  # the quick call held the title, then let go
+    assert page.is_visible("#working")
+    assert page.errors == []
+
+
+def test_the_working_row_names_esc_only_where_there_is_a_keyboard(server, browser):
+    """#974: a phone has no Esc, so the working row leaves the hint out there;
+    a desktop still shows it."""
+    for touch, shown in ((False, True), (True, False)):
+        ctx = browser.new_context(
+            viewport={"width": 390 if touch else 1280, "height": 844},
+            has_touch=touch,
+            is_mobile=touch,
+        )
+        pg = ctx.new_page()
+        pg.goto(server.url)
+        spawn(pg, "hello")
+        pg.fill("#input", "/busy 4")
+        pg.click("#send")  # Enter is a newline on a phone
+        pg.wait_for_selector("#working", state="visible")
+        assert pg.is_visible("#working .wesc") is shown
+        shots = os.environ.get("AEGIS_SHOTS")
+        if shots:
+            name = "phone" if touch else "desktop"
+            pg.screenshot(path=f"{shots}/esc-hint-{name}.png")
+        ctx.close()

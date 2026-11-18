@@ -143,7 +143,7 @@ def register_artifact_ops(app: App) -> None:
 
     async def land(s, a, caption: str | None):
         """Checks, snapshot, probe, record; the snapshot goes when the probe fails."""
-        run = app.place_of_session(s.log_id).run
+        run = asyncio.to_thread
         path = artifacts.draft_path(s.drafts, a.id)
         try:
             artifacts.check(await run(path.read_text, encoding="utf-8"))
@@ -152,7 +152,9 @@ def register_artifact_ops(app: App) -> None:
         except ArtifactError as e:
             raise _err(e) from e
         try:
-            (rec,) = await files.store_as(app.roots.state_root, [path], run)
+            (rec,) = await asyncio.to_thread(
+                files.store_all, app.roots.state_root, [path], s.log_id
+            )
         except files.FileError as e:
             raise OpError(e.code, e.message) from e
         url = files.url(rec["file_id"], rec["name"])
@@ -175,6 +177,9 @@ def register_artifact_ops(app: App) -> None:
             ):  # a failed probe, a late submit, an interrupt: nothing is served
                 shutil.rmtree(
                     app.roots.state_root / "files" / rec["file_id"], ignore_errors=True
+                )
+                (app.roots.state_root / files.SESSIONS / rec["file_id"]).unlink(
+                    missing_ok=True
                 )
         return {"id": a.id, "url": url, "started": started, "watching": watching > 0}
 
@@ -211,8 +216,7 @@ def register_artifact_ops(app: App) -> None:
         if p.state is not None:
             _sized(p.state, "state")
         a = s.artifacts.create(p.title, p.caption, p.state, write=False)
-        run = app.place_of_session(s.log_id).run
-        # Written as the session's user, in its home in multi-user mode.
+        run = asyncio.to_thread
         path = await run(artifacts.write_draft, s.drafts, a.id, p.title)
         return {"id": a.id, "path": str(path), "html": artifacts.skeleton(p.title)}
 
@@ -257,7 +261,7 @@ def register_artifact_ops(app: App) -> None:
                 out |= {"docked": False, "reason": str(e)}
         return out
 
-    @r.op("artifact.read", ArtifactId, agent=True)
+    @r.op("artifact.read", ArtifactId, agent=True, access="read")
     async def read(p: ArtifactId, caller):
         """The page's status (draft, live, submitted, closed), its latest state,
         its last 20 events, the submit's data and label, and `errors`: how
@@ -316,7 +320,7 @@ def register_artifact_ops(app: App) -> None:
         except ArtifactError as e:
             raise _err(e) from e
         if draft:
-            run = app.place_of_session(s.log_id).run
+            run = asyncio.to_thread
             await run(artifacts.drop_draft, s.drafts, p.id)
         return "closed"
 
@@ -329,7 +333,7 @@ def register_artifact_ops(app: App) -> None:
             raise _err(e) from e
         return s
 
-    @r.op("artifact.state", PageState, owned="log_id")
+    @r.op("artifact.state", PageState, names=(("log_id", "session"),))
     async def state(p: PageState, caller):
         s = page(p)
         _sized(p.state, "state")
@@ -339,7 +343,7 @@ def register_artifact_ops(app: App) -> None:
             raise _err(e) from e
         return "ok"
 
-    @r.op("artifact.emit", PageEmit, owned="log_id")
+    @r.op("artifact.emit", PageEmit, names=(("log_id", "session"),))
     async def emit(p: PageEmit, caller):
         s = page(p)
         s.check_lock()  # a person does not steer a workflow's node
@@ -355,7 +359,7 @@ def register_artifact_ops(app: App) -> None:
         )
         return "ok"
 
-    @r.op("artifact.submit", PageSubmit, owned="log_id")
+    @r.op("artifact.submit", PageSubmit, names=(("log_id", "session"),))
     async def submit(p: PageSubmit, caller):
         s = page(p)
         s.check_lock()  # a person does not steer a workflow's node
@@ -374,7 +378,7 @@ def register_artifact_ops(app: App) -> None:
         )
         return "ok"
 
-    @r.op("artifact.upload", PageUpload, owned="log_id")
+    @r.op("artifact.upload", PageUpload, names=(("log_id", "session"),))
     async def upload(p: PageUpload, caller):
         """Move a file the page uploaded (attachment.begin and .put) into the
         session's inbox and wake the agent with its path. It counts as an
@@ -392,7 +396,6 @@ def register_artifact_ops(app: App) -> None:
                 app.roots.state_root,
                 p.log_id,
                 [p.upload_id],
-                deliver=app._deliver(s),
             )
         except files.FileError as e:
             raise OpError(e.code, e.message) from e
@@ -408,7 +411,7 @@ def register_artifact_ops(app: App) -> None:
         )
         return sent
 
-    @r.op("artifact.error", PageError, owned="log_id")
+    @r.op("artifact.error", PageError, names=(("log_id", "session"),))
     async def error(p: PageError, caller):
         s = page(p)
         s.check_lock()  # a person does not steer a workflow's node
@@ -420,7 +423,7 @@ def register_artifact_ops(app: App) -> None:
         )
         return "ok"
 
-    @r.op("artifact.probed", Probed, owned="log_id")
+    @r.op("artifact.probed", Probed, names=(("log_id", "session"),))
     async def probed(p: Probed, caller):
         s = reg.open(p.log_id)
         return (

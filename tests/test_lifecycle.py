@@ -8,7 +8,6 @@ import signal
 
 import pytest
 
-from aegis import agent_ops
 from aegis.ops import OpError
 from aegis.session import asleep_from
 
@@ -78,38 +77,6 @@ async def test_old_metas_on_disk_load_as_asleep(world):
         for s in (a, b)
     ]
     assert got == [("asleep", "slept"), ("asleep", "idle")]
-
-
-def test_session_list_keeps_a_linked_servers_old_states():
-    far = [
-        {"handle": "old-stop", "state": "stopped"},
-        {"handle": "old-park", "state": "parked"},
-        {"handle": "new-one", "state": "asleep", "asleep_why": "exited"},
-        {"handle": "liar-one", "state": "asleep", "asleep_why": "MARKER"},
-        {"handle": "busy-one", "state": "working"},
-    ]
-    assert [agent_ops.far_entry(e, "beta") for e in far] == [
-        {
-            "handle": "old-stop",
-            "server": "beta",
-            "state": "asleep",
-            "asleep_why": "slept",
-        },
-        {
-            "handle": "old-park",
-            "server": "beta",
-            "state": "asleep",
-            "asleep_why": "idle",
-        },
-        {
-            "handle": "new-one",
-            "server": "beta",
-            "state": "asleep",
-            "asleep_why": "exited",
-        },
-        {"handle": "liar-one", "server": "beta", "state": "asleep", "asleep_why": None},
-        {"handle": "busy-one", "server": "beta", "state": "working"},
-    ]
 
 
 async def test_restart_gives_a_fresh_process_on_the_same_conversation(world):

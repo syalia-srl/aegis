@@ -205,7 +205,7 @@ class Nudges:
     async def check(self, s: "Session", now: float | None = None) -> None:
         """Nudge ``s`` when it is due one now."""
         now = time.time() if now is None else now
-        if s.archived:
+        if s.archived or not s.spec.notices:
             return
         silent_s, plan_s = self.timings()
         kind = due(

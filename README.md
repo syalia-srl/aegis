@@ -126,19 +126,14 @@ own token, so no tool asks who is calling.
   calls is one Bash call, and a result piped into `wc` or `jq` never enters
   the agent's context.
 
-The same works across machines. `aegis link add vps https://dev.example` makes
-this server a client of another aegis. The far server's sessions appear in your
-Fleet and your tab bar with a server tag, and they take prompts, interrupts and
-closes from here. An agent here hands work to one there with
-`peer_handoff(target="knuth@vps")`. The link goes one way: the far server can
-never reach the one that linked it, so a shared server cannot touch your laptop.
-Both servers need aegis 2.4.0 or newer; an older far server refuses the link
-with an HTTP 403, and `aegis link add` says so.
-
-Between two servers only you use, `aegis link add vps <url> --trusted` makes
-the link reach both ways over the same socket, so a laptop behind NAT can be
-reached from the server without a connection of its own. Agents on either side
-then read, spawn, enqueue on and wait on the other's sessions as at home.
+The same works across machines. `aegis link add vps https://dev.example` joins
+this server and another aegis, both ways over one socket, so a laptop behind
+NAT can be reached from the server without a connection of its own. Each
+server's sessions appear in the other's Fleet and tab bar with a server tag,
+and take prompts, interrupts and closes from there. Agents on either side
+spawn, read, hand off to, enqueue on and wait on the other's sessions as at
+home, as in `peer_handoff(target="knuth@vps")`. Linking servers federates them,
+so link only servers you use. Both servers need aegis 3.0.0 or newer.
 
 ## Skills and memories every session finds
 
@@ -361,22 +356,10 @@ up and it only opens another window. Plain `aegis serve` opens nothing and print
 the URL, for systemd and remote hosts.
 
 The defaults are `--port 8742 --host 127.0.0.1`. Anything but loopback has to be
-asked for with `--host`. The printed token is the admin's. It lives in
-`.aegis/state/token` and survives restarts; delete the file to rotate it, which
-signs every browser out. `aegis token add NAME` gives another person, a linked
-server or a job a token of its own, a member by default: it reads every session
-and changes only the ones it starts. `aegis token list` names them and `aegis
-token revoke NAME` ends one; revoking the admin's prints its replacement. Each
-member spends the subscription only below its lines: in Settings, an admin gives
-a token, or every member by default, a launch line and a stop line on each quota
-window, or opens or closes a provider outright. Below the launch line the
-member's sessions start; above it nothing new starts and its messages wait; at the
-stop line aegis interrupts its turns and continues them when the gauge is back
-under the launch line. The same policies sit in `.aegis/state/tokens.json`, and
-`aegis token list` prints them. A member's agents run as the same Linux user as everyone's, so one with shell access
-can read `.aegis/state/token` and act as the admin: tokens keep colleagues from
-changing each other's sessions by accident, and give only people you trust with
-the machine a token. Opening
+asked for with `--host`. The printed token is the server's only one: aegis is one
+person's workplace, and from 3.0 it has no multi-user mode. The token lives in
+`.aegis/state/token` and survives restarts; `aegis token revoke $USER` replaces
+it and prints the new one, which signs every browser out. Opening
 the printed URL once signs that browser in: the server moves the token into an
 HttpOnly cookie that lasts a year and drops it from the address bar, so no script
 on the page can read it.

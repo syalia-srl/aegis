@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from aegis import attachments
+from aegis import attachments, recordings
 from aegis.app import App
 from aegis.ops import Caller, OpError
 from aegis.roots import make_roots
@@ -244,3 +244,35 @@ async def test_a_send_that_cannot_start_the_harness_leaves_the_upload_staged(
         f["name"]
         for f in [e for e in s.entries() if e["kind"] == "user"][-1]["detail"]["files"]
     ] == ["a.txt"]
+
+
+async def test_a_recording_reaches_the_agent_as_a_recording_with_its_duration(
+    app, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(recordings.shutil, "which", lambda _: None)  # browser's clock
+    lid = await spawn(app)
+    s = app.sessions.sessions[lid]
+    call = app.registry.call
+    body = b"opus bytes"
+    uid = (
+        await call(
+            "attachment.begin",
+            {
+                "log_id": lid,
+                "name": "recording.webm",
+                "size": len(body),
+                "recorded_ms": 61_000,
+            },
+        )
+    )["upload_id"]
+    data = base64.b64encode(body).decode()
+    await call(
+        "attachment.put", {"log_id": lid, "upload_id": uid, "offset": 0, "data": data}
+    )
+    await call("session.send", {"log_id": lid, "text": "scene 1", "attachments": [uid]})
+    await until(lambda: s.status == "idle", timeout=8, what="the turn")
+    (said,) = prompts(tmp_path)
+    head, line = said.split("\n\nAttached files:\n")
+    assert head == "scene 1"
+    assert "an audio recording the person made in the composer, 1:01 long" in line
+    assert "not transcribed" in line

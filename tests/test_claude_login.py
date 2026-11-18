@@ -58,15 +58,14 @@ def test_only_a_private_well_formed_file_is_read():
     assert login.read_token() == GOOD and login.file_problem(token_file()) is None
 
 
-def test_the_token_reaches_the_servers_own_children_only(monkeypatch):
+def test_the_token_reaches_the_servers_children(monkeypatch):
     put(GOOD)
     monkeypatch.delenv(login.VAR, raising=False)
-    assert login.with_token({"A": "1"}, None) == {"A": "1", login.VAR: GOOD}
-    assert login.with_token({"A": "1"}, "ben") == {"A": "1"}
-    assert login.with_token({login.VAR: "pool"}, None) == {login.VAR: "pool"}
-    assert login.with_token(None, None)[login.VAR] == GOOD
+    assert login.with_token({"A": "1"}) == {"A": "1", login.VAR: GOOD}
+    assert login.with_token({login.VAR: "set"}) == {login.VAR: "set"}
+    assert login.with_token(None)[login.VAR] == GOOD
     token_file().unlink()
-    assert login.with_token(None, None) is None
+    assert login.with_token(None) is None
 
 
 def test_a_written_token_is_0600_in_a_0700_directory(tmp_path):
@@ -143,7 +142,7 @@ def toasts(world, monkeypatch):
 
 
 def cards(s) -> list[dict]:
-    return [e for e in s.entries() if e["kind"] == "claude_login"]
+    return [e for e in s.entries() if e["kind"] == "sign_in"]
 
 
 async def test_a_failed_sign_in_raises_one_card_and_a_new_token_restarts_both(
@@ -161,7 +160,7 @@ async def test_a_failed_sign_in_raises_one_card_and_a_new_token_restarts_both(
         lambda: len(cards(a)[0]["detail"]["handles"]) == 2, what="b joins the card"
     )
     assert cards(a)[0]["detail"]["handles"] == [a.handle, b.handle]
-    assert world.app.sessions.card(a)["attention_line"] == "Claude sign-in failed"
+    assert world.app.sessions.card(a)["attention_line"] == "Sign-in failed"
 
     call = world.app.registry.call
     with pytest.raises(OpError) as err:
@@ -182,7 +181,7 @@ async def test_a_failed_sign_in_raises_one_card_and_a_new_token_restarts_both(
     assert sorted(got["restarted"]) == sorted([a.handle, b.handle])
     assert login.read_token() == GOOD
     assert stat.S_IMODE(token_file().stat().st_mode) == 0o600
-    assert cards(a)[0]["status"] == "renewed"
+    assert cards(a)[0]["status"] == "done"
     for s in (a, b):
         await until(lambda s=s: inbox(s), timeout=8, what="the renewed message")
         assert "aegis:login · renewed" in json.dumps(inbox(s), ensure_ascii=False)
@@ -204,3 +203,29 @@ async def test_a_turns_rate_limit_event_moves_the_claude_gauges(world, monkeypat
         return None
 
     await until(lambda: session_percent() == 37.0, what="the gauge")
+
+
+async def test_an_agent_opens_a_sign_in_card_but_cannot_answer_it(world):
+    from aegis.ops import Caller
+
+    a = await world.spawn()
+    reg = world.app.registry
+    got = await reg.call("signin.open", {}, Caller("agent", log_id=a.log_id))
+    await until(lambda: cards(a), what="the card")
+    assert cards(a)[0]["id"] == got["card_id"]
+    tools = {op.name for op in reg.agent_ops()}
+    assert "signin.open" in tools
+    assert not tools & {
+        "signin.answer",
+        "signin.choose",
+        "signin.cancel",
+        "signin.start",
+        "claude.token",
+    }
+    with pytest.raises(OpError) as err:
+        await reg.call(
+            "signin.answer",
+            {"log_id": a.log_id, "id": got["card_id"], "secret": "x"},
+            Caller("agent", log_id=a.log_id),
+        )
+    assert err.value.code == "not_for_agents"

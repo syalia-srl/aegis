@@ -9,7 +9,7 @@ from aegis.transcript.store import read_store
 
 from .conftest import until
 from .knowledge_samples import mem
-from .test_acts_for import BEN, ben_home, mu_world, recorded  # noqa: F401
+from .one_person import BEN, ben_home, mu_world, recorded  # noqa: F401
 from .test_commands import app, send, spawn  # noqa: F401
 
 
@@ -79,18 +79,6 @@ async def world(tmp_path, fake_claude, monkeypatch, ben_home, recorded):  # noqa
     w = await mu_world(tmp_path, fake_claude, monkeypatch)
     yield w
     await w.stop()
-
-
-async def test_a_member_is_never_hinted_another_principals_memory(world):
-    w = world.app
-    await w.knowledge.store.save(w.user, mem("secret-fact", "the bot host"), "t")
-    await w.knowledge.store.save("ben", mem("ben-fact", "the bot host"), "t")
-    r = await w.registry.call("session.spawn", {"agent": "opus"}, BEN)
-    lid = r["log_id"]
-    await w.registry.call("session.send", {"log_id": lid, "text": "the bot host"}, BEN)
-    await until(lambda: sends(w, lid), what="ben's send")
-    assert "ben-fact" in sends(w, lid)[-1]
-    assert "secret-fact" not in sends(w, lid)[-1]
 
 
 async def test_a_datetime_expiry_does_not_break_the_send(app):  # noqa: F811

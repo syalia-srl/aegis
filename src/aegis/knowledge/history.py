@@ -38,7 +38,7 @@ def _git(
 ) -> subprocess.CompletedProcess[str]:
     # The server's own user: the store lives in the state directory.
     argv = ["git", "-C", str(root), *_ID, *args]
-    r = launch.run(argv, user=None, env=_env(), text=True)
+    r = launch.run(argv, env=_env(), text=True)
     if check and r.returncode != 0:
         raise subprocess.CalledProcessError(r.returncode, argv, r.stdout, r.stderr)
     return r

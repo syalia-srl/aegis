@@ -6,7 +6,6 @@ import time
 
 import pytest
 
-from aegis.ops import Caller
 from aegis.schedule_log import Definition
 
 from .conftest import until
@@ -253,32 +252,6 @@ async def test_an_archived_target_pauses_the_schedule_at_once(world):
     assert world.app.schedules.items["dead-end"].paused["by"] == "errors"
 
 
-async def test_a_closed_quota_gate_holds_the_tick_and_fires_it_when_it_opens(world):
-    from .test_quota_gate_app import LINES, seed
-
-    app = world.app
-    app.principals.add("ben", "member")
-    await app.registry.call(
-        "token.policy", {"name": "ben", "policy": LINES}, Caller("user")
-    )
-    t = frozen(world)
-    seed(world, session=63)
-    app.schedules.create(
-        "ben-brief",
-        Definition.model_validate(
-            {"clock": {"every": "5m"}, "fire": {"agent": "opus"}, "prompt": DONE}
-        ),
-        {"kind": "user", "principal": "ben"},
-        world.root,
-    )
-    await tick(world, t)
-    (held,) = runs(world, "ben-brief", "tick")
-    assert (held["out"], held["why"]) == ("held", "quota")
-    seed(world, session=40)
-    await app.schedules.step()
-    assert len(runs(world, "ben-brief", "fired")) == 1
-
-
 def gauge(world, session=10.0, weekly_projected=None) -> None:
     """Every reading says Claude's 5 hours are at ``session``% and the week is
     projected to reach ``weekly_projected``% at its reset."""
@@ -341,6 +314,20 @@ async def test_a_launch_line_holds_a_fire_into_an_existing_session(world):
     gauge(world, session=40)
     await world.app.schedules.step()
     await until(lambda: inbox(a), 10, "the released message")
+
+
+async def test_a_schedule_quota_line_on_projected_holds_a_fire(world):
+    t = frozen(world)
+    gauge(world, weekly_projected=95)
+    create(
+        world, "ahead-line", DONE, quota={"claude": {"weekly_all": {"projected": 90}}}
+    )
+    await tick(world, t)
+    (held,) = runs(world, "ahead-line", "tick")
+    assert held["why"] == "quota" and "launch line 90%" in held["line"]
+    gauge(world, weekly_projected=80)
+    await world.app.schedules.step()
+    assert len(runs(world, "ahead-line", "fired")) == 1
 
 
 async def test_an_empty_quota_sets_no_line(world):

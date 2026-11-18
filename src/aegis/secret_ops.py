@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 from . import secret_store as ss
 from .monitors import iso_now
 from .ops import Caller, OpError
+from .signin.status import harness_status
 
 if TYPE_CHECKING:
     from .app import App
@@ -77,6 +78,19 @@ class SecretRef(_Strict):
 
 class SecretProvide(SecretRef):
     secret: str = Field(min_length=1, max_length=ss.MAX_BYTES)
+
+
+class SignInChoose(SecretRef):
+    option: str = Field(min_length=1, max_length=200)
+
+
+class SignInStart(_Strict):
+    log_id: str
+    harness: str = Field(min_length=1, max_length=40)
+
+
+class SignInOpen(_Strict):
+    harness: str = Field(default="claude-code", min_length=1, max_length=40)
 
 
 def _err(e: ss.SecretError) -> OpError:
@@ -208,7 +222,7 @@ def register_secret_ops(app: App) -> ss.SecretStore:
             else "restarted"
         )
 
-    @r.op("secret.reveal", SecretRef, owned="log_id")
+    @r.op("secret.reveal", SecretRef, names=(("log_id", "session"),))
     async def reveal(p: SecretRef, caller):
         s = reg.open(p.log_id)
         pad = store.take(s.log_id, p.id)
@@ -224,7 +238,7 @@ def register_secret_ops(app: App) -> ss.SecretStore:
         )
         return {"pad": base64.b64encode(pad).decode()}
 
-    @r.op("secret.provide", SecretProvide, owned="log_id")
+    @r.op("secret.provide", SecretProvide, names=(("log_id", "session"),))
     async def provide(p: SecretProvide, caller):
         s = reg.open(p.log_id)
         s.check_lock()  # a person does not steer a workflow's node
@@ -255,15 +269,80 @@ def register_secret_ops(app: App) -> ss.SecretStore:
         )
         return "ok"
 
-    @r.op("claude.token", SecretProvide, owned="log_id")
+    @r.op("claude.token", SecretProvide, names=(("log_id", "session"),), server=True)
     async def claude_token(p: SecretProvide, caller):
-        """The sign-in card's field (claude/login.py): check a setup-token,
-        keep it, restart the sessions that failed to sign in."""
+        """The sign-in card's paste-a-token field (signin/core.py): check a
+        setup-token, keep it, restart the sessions that failed to sign in."""
         s = reg.open(p.log_id)
         if reg.sign_in is None:
             raise OpError("off", "this server keeps no Claude token")
         try:
-            return await reg.sign_in.provide(s, p.id, p.secret)
+            return await reg.sign_in.provide_token(s, p.id, p.secret)
+        except ValueError as e:
+            raise OpError("refused", str(e)) from None
+
+    # The sign-in card's controls (signin/core.py). Never agent tools: an agent
+    # may open a card, never answer one.
+    def _sign_ins():
+        if reg.sign_in is None:
+            raise OpError("off", "this server runs no sign-ins")
+        return reg.sign_in
+
+    @r.op("signin.answer", SecretProvide, names=(("log_id", "session"),), server=True)
+    async def sign_in_answer(p: SecretProvide, caller):
+        """Type the code the sign-in page gave into the waiting login."""
+        reg.open(p.log_id)
+        try:
+            await _sign_ins().answer(p.id, p.secret)
+        except ValueError as e:
+            raise OpError("refused", str(e)) from None
+        return "ok"
+
+    @r.op("signin.choose", SignInChoose, names=(("log_id", "session"),), server=True)
+    async def sign_in_choose(p: SignInChoose, caller):
+        """Pick one of the login's offered options."""
+        reg.open(p.log_id)
+        try:
+            await _sign_ins().choose(p.id, p.option)
+        except ValueError as e:
+            raise OpError("refused", str(e)) from None
+        return "ok"
+
+    @r.op("signin.cancel", SecretRef, names=(("log_id", "session"),), server=True)
+    async def sign_in_cancel(p: SecretRef, caller):
+        """Stop the login; the sessions keep waiting."""
+        reg.open(p.log_id)
+        try:
+            await _sign_ins().cancel(p.id)
+        except ValueError as e:
+            raise OpError("refused", str(e)) from None
+        return "ok"
+
+    @r.op("signin.open", SignInOpen, agent=True, server=True, work=True)
+    async def signin_open(p: SignInOpen, caller):
+        """Open a sign-in card for a harness in your transcript, to renew its
+        sign-in before it expires or when the person asks. aegis runs the
+        harness's own login; the person answers the card, never you. Returns
+        the card's id at once; when the sign-in is done you are woken with
+        `> from aegis:login · renewed`. Only claude-code has a sign-in today."""
+        s = own(caller)
+        try:
+            return {"card_id": await _sign_ins().start(p.harness, s, s.handle)}
+        except ValueError as e:
+            raise OpError("refused", str(e)) from None
+
+    @r.op("harness.status", read=True, access="read")
+    async def harness_status_op(p, caller):
+        """Each harness with a sign-in: installed, its version, signed in and until when."""
+        rows = await harness_status(_sign_ins().recipes())
+        return [r for r in rows if app.offers(caller, harness=str(r["harness"]))]
+
+    @r.op("signin.start", SignInStart, names=(("log_id", "session"),), server=True)
+    async def sign_in_start(p: SignInStart, caller):
+        """Open a sign-in card in this session's transcript, or name the one open."""
+        s = reg.open(p.log_id)
+        try:
+            return {"card_id": await _sign_ins().start(p.harness, s, by(caller))}
         except ValueError as e:
             raise OpError("refused", str(e)) from None
 

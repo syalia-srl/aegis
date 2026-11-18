@@ -1,4 +1,4 @@
-"""Exit through a trusted link (#862, exit.py): a child's proxy on the near
+"""Exit through a link (#862, exit.py): a child's proxy on the near
 server, one websocket per stream, and a relay on the far server. Alpha exits
 through beta, two real servers in this process as in test_links.py.
 """
@@ -14,11 +14,12 @@ from pathlib import Path
 
 import httpx
 import pytest
+from ruamel.yaml import YAML
 
 from aegis import doctor, launch
 from aegis import exit as exit_
 from aegis.browsers import launch_proxy
-from aegis.config import Snapshot, write
+from aegis.config import Snapshot, stamp_of, write
 from aegis.links import LinkStore
 from aegis.net.config import NetConfig
 from aegis.net.probe import Reach, Trace
@@ -28,7 +29,7 @@ from aegis.roots import make_roots
 
 from .conftest import until
 from .test_links import Node
-from .test_trusted_links import _granted, trusted  # noqa: F401
+from .test_links_back import _joined, linked  # noqa: F401
 
 
 class Target:
@@ -85,8 +86,8 @@ async def _body(reader, head: str) -> str:
     return (await reader.readexactly(n)).decode()
 
 
-async def test_connect_reaches_the_target_through_the_far_server(trusted, anywhere):  # noqa: F811
-    alpha, beta = trusted
+async def test_connect_reaches_the_target_through_the_far_server(linked, anywhere):  # noqa: F811
+    alpha, beta = linked
     out = alpha.app.exits.get("beta")
     async with Target() as t:
         r, w, head = await _connect(out.port, out.secret, f"127.0.0.1:{t.port}")
@@ -100,8 +101,8 @@ async def test_connect_reaches_the_target_through_the_far_server(trusted, anywhe
     assert beta.app.exit_bytes["alpha"] >= len(answer)
 
 
-async def test_a_plain_request_is_forwarded_in_origin_form(trusted, anywhere):  # noqa: F811
-    alpha, _ = trusted
+async def test_a_plain_request_is_forwarded_in_origin_form(linked, anywhere):  # noqa: F811
+    alpha, _ = linked
     out = alpha.app.exits.get("beta")
     async with Target() as t:
         async with httpx.AsyncClient(proxy=out.url, trust_env=False) as c:
@@ -113,8 +114,8 @@ async def test_a_plain_request_is_forwarded_in_origin_form(trusted, anywhere):  
     assert "connection: close" in t.head.lower()
 
 
-async def test_the_child_env_names_the_exit_and_keeps_loopback_direct(trusted):  # noqa: F811
-    alpha, _ = trusted
+async def test_the_child_env_names_the_exit_and_keeps_loopback_direct(linked):  # noqa: F811
+    alpha, _ = linked
     out = alpha.app.exits.get("beta")
     env = alpha.app.exits.env("beta")
     assert env["HTTPS_PROXY"] == env["https_proxy"] == out.url
@@ -126,8 +127,8 @@ async def test_the_child_env_names_the_exit_and_keeps_loopback_direct(trusted): 
     assert alpha.app.exits.get("beta") is out
 
 
-async def test_the_wrong_secret_gets_407(trusted, anywhere):  # noqa: F811
-    alpha, _ = trusted
+async def test_the_wrong_secret_gets_407(linked, anywhere):  # noqa: F811
+    alpha, _ = linked
     out = alpha.app.exits.get("beta")
     async with Target() as t:
         for secret, auth in (("nope", True), (out.secret, False)):
@@ -162,8 +163,8 @@ def test_public_address_takes_the_internet(address):
     assert exit_.public_address(address)
 
 
-async def test_the_relay_refuses_a_private_target(trusted):  # noqa: F811
-    alpha, _ = trusted
+async def test_the_relay_refuses_a_private_target(linked):  # noqa: F811
+    alpha, _ = linked
     out = alpha.app.exits.get("beta")
     async with Target() as t:
         r, w, head = await _connect(out.port, out.secret, f"127.0.0.1:{t.port}")
@@ -188,46 +189,8 @@ async def test_a_name_with_any_private_answer_is_refused(monkeypatch):
         await exit_.resolve("rebound.example", 443)
 
 
-async def test_a_plain_link_is_no_exit(tmp_path, fake_claude, anywhere):
-    beta = await Node(tmp_path / "beta", "beta", fake_claude).start()
-    alpha = await Node(tmp_path / "alpha", "alpha", fake_claude).start()
-    try:
-        alpha.app.links.add("beta", beta.base, beta.token)
-        await until(
-            lambda: alpha.app.links.get("beta").state == "linked",
-            timeout=10,
-            what="the link",
-        )
-        out = alpha.app.exits.get("beta")
-        async with Target() as t:
-            r, w, head = await _connect(out.port, out.secret, f"127.0.0.1:{t.port}")
-            body = await _body(r, head)
-            w.close()
-            assert head.startswith("HTTP/1.1 502")
-            assert "not trusted" in body
-            assert t.hits == 0
-    finally:
-        await alpha.stop()
-        await beta.stop()
-
-
-async def test_a_member_token_on_the_far_server_ends_the_exit(trusted, anywhere):  # noqa: F811
-    """Checked by the relay itself at each stream, whatever the near side
-    still believes about the trust it was granted."""
-    alpha, beta = trusted
-    out = alpha.app.exits.get("beta")
-    async with Target() as t:
-        beta.app.principals.has_members = lambda: True
-        r, w, head = await _connect(out.port, out.secret, f"127.0.0.1:{t.port}")
-        body = await _body(r, head)
-        w.close()
-        assert head.startswith("HTTP/1.1 502")
-        assert "besides its admin" in body
-        assert t.hits == 0
-
-
-async def test_a_wrong_token_is_refused_by_the_relay(trusted, anywhere):  # noqa: F811
-    alpha, _ = trusted
+async def test_a_wrong_token_is_refused_by_the_relay(linked, anywhere):  # noqa: F811
+    alpha, _ = linked
     out = alpha.app.exits.get("beta")
     alpha.app.links.outbound("beta").token = "not-the-token"
     async with Target() as t:
@@ -238,11 +201,11 @@ async def test_a_wrong_token_is_refused_by_the_relay(trusted, anywhere):  # noqa
         assert t.hits == 0
 
 
-async def test_a_browser_cannot_open_a_stream(trusted):  # noqa: F811
+async def test_a_browser_cannot_open_a_stream(linked):  # noqa: F811
     from websockets.asyncio.client import connect
     from websockets.exceptions import InvalidStatus
 
-    _, beta = trusted
+    _, beta = linked
     with pytest.raises(InvalidStatus):
         await connect(
             f"ws://127.0.0.1:{beta.port}/tunnel",
@@ -255,8 +218,8 @@ async def test_a_browser_cannot_open_a_stream(trusted):  # noqa: F811
         )
 
 
-async def test_a_dead_link_answers_502_and_never_goes_direct(trusted, anywhere):  # noqa: F811
-    alpha, beta = trusted
+async def test_a_dead_link_answers_502_and_never_goes_direct(linked, anywhere):  # noqa: F811
+    alpha, beta = linked
     out = alpha.app.exits.get("beta")
     await beta.stop()
     await until(
@@ -274,8 +237,8 @@ async def test_a_dead_link_answers_502_and_never_goes_direct(trusted, anywhere):
     await beta.start()
 
 
-async def test_an_unknown_link_answers_502(trusted, anywhere):  # noqa: F811
-    alpha, _ = trusted
+async def test_an_unknown_link_answers_502(linked, anywhere):  # noqa: F811
+    alpha, _ = linked
     out = alpha.app.exits.get("nowhere")
     r, w, head = await _connect(out.port, out.secret, "1.1.1.1:443")
     assert head.startswith("HTTP/1.1 502")
@@ -283,8 +246,8 @@ async def test_an_unknown_link_answers_502(trusted, anywhere):  # noqa: F811
     w.close()
 
 
-async def test_a_half_closed_stream_still_gets_its_answer(trusted, anywhere):  # noqa: F811
-    alpha, _ = trusted
+async def test_a_half_closed_stream_still_gets_its_answer(linked, anywhere):  # noqa: F811
+    alpha, _ = linked
     out = alpha.app.exits.get("beta")
 
     async def echo_after_eof(reader, writer):
@@ -305,8 +268,8 @@ async def test_a_half_closed_stream_still_gets_its_answer(trusted, anywhere):  #
     server.close()
 
 
-async def test_leaving_mid_transfer_closes_the_far_connection(trusted, anywhere):  # noqa: F811
-    alpha, _ = trusted
+async def test_leaving_mid_transfer_closes_the_far_connection(linked, anywhere):  # noqa: F811
+    alpha, _ = linked
     out = alpha.app.exits.get("beta")
     closed = asyncio.Event()
 
@@ -330,10 +293,10 @@ async def test_leaving_mid_transfer_closes_the_far_connection(trusted, anywhere)
     server.close()
 
 
-async def test_a_slow_reader_slows_the_far_read(trusted, anywhere):  # noqa: F811
+async def test_a_slow_reader_slows_the_far_read(linked, anywhere):  # noqa: F811
     """Flow control holds across the tunnel: with nobody reading, the target
     stops being read far short of what it could send."""
-    alpha, _ = trusted
+    alpha, _ = linked
     out = alpha.app.exits.get("beta")
     sent = 0
     total = 200 * 1024 * 1024
@@ -360,8 +323,8 @@ async def test_a_slow_reader_slows_the_far_read(trusted, anywhere):  # noqa: F81
     server.close()
 
 
-async def test_several_streams_at_once(trusted, anywhere):  # noqa: F811
-    alpha, _ = trusted
+async def test_several_streams_at_once(linked, anywhere):  # noqa: F811
+    alpha, _ = linked
     out = alpha.app.exits.get("beta")
 
     async def one(t: Target) -> str:
@@ -374,8 +337,8 @@ async def test_several_streams_at_once(trusted, anywhere):  # noqa: F811
     assert t.hits == 8
 
 
-async def test_stopping_the_server_closes_its_listener(trusted):  # noqa: F811
-    alpha, _ = trusted
+async def test_stopping_the_server_closes_its_listener(linked):  # noqa: F811
+    alpha, _ = linked
     out = alpha.app.exits.get("beta")
     r, w = await asyncio.open_connection("127.0.0.1", out.port)
     w.close()
@@ -384,8 +347,8 @@ async def test_stopping_the_server_closes_its_listener(trusted):  # noqa: F811
         await asyncio.open_connection("127.0.0.1", out.port)
 
 
-async def test_no_secret_or_token_is_logged(trusted, anywhere, caplog):  # noqa: F811
-    alpha, beta = trusted
+async def test_no_secret_or_token_is_logged(linked, anywhere, caplog):  # noqa: F811
+    alpha, beta = linked
     out = alpha.app.exits.get("beta")
     with caplog.at_level(logging.DEBUG):
         async with Target() as t:
@@ -416,7 +379,7 @@ agents:
   opus: {harness: claude-code, model: opus, effort: high, permission: full}
   direct: {harness: claude-code, model: opus, effort: high, permission: full, exit: "off"}
 queues:
-  general: {agent: opus, max_parallel: 1}
+  general: {agent: opus}
 """
 
 
@@ -432,8 +395,8 @@ async def _reload(node: Node, text: str) -> None:
     )
 
 
-async def test_a_session_exits_and_a_profile_with_exit_off_does_not(trusted):  # noqa: F811
-    alpha, _ = trusted
+async def test_a_session_exits_and_a_profile_with_exit_off_does_not(linked):  # noqa: F811
+    alpha, _ = linked
     await _reload(alpha, CONFIG_EXIT)
     url = alpha.app.exits.get("beta").url
     s = await alpha.spawn(agent="opus")
@@ -447,8 +410,31 @@ async def test_a_session_exits_and_a_profile_with_exit_off_does_not(trusted):  #
     assert d.wire()["exit"] is None
 
 
-async def test_a_profile_alone_can_name_the_exit(trusted):  # noqa: F811
-    alpha, _ = trusted
+async def test_a_hosts_block_sets_the_exit_on_its_server_alone(linked):  # noqa: F811
+    alpha, _ = linked
+    text = CONFIG_EXIT.replace("exit_via: beta\n", "")
+    other = text + "hosts:\n  somewhere-else: {exit_via: beta}\n"
+    path = alpha.root / ".aegis.yaml"
+    path.write_text(other)
+    await until(
+        lambda: alpha.app.config.current().stamp == stamp_of(path),
+        timeout=5,
+        what="the config",
+    )
+    assert launch.resolve_via() is None
+    mine = text + f"hosts:\n  {alpha.app.server_name}: {{exit_via: beta}}\n"
+    path.write_text(mine)
+    await until(lambda: launch.resolve_via() == "beta", timeout=5, what="the block")
+    # Settings edits the shared layer: the block is not in its form.
+    assert alpha.app.config.current().doc.exit_via is None
+    s = await alpha.spawn(agent="opus")
+    await until(lambda: s.pid, timeout=10, what="the process")
+    env = await _environ(s.pid)
+    assert env["HTTPS_PROXY"] == alpha.app.exits.get("beta").url
+
+
+async def test_a_profile_alone_can_name_the_exit(linked):  # noqa: F811
+    alpha, _ = linked
     text = CONFIG_EXIT.replace("exit_via: beta\n", "").replace(
         'exit: "off"', "exit: beta"
     )
@@ -460,34 +446,36 @@ async def test_a_profile_alone_can_name_the_exit(trusted):  # noqa: F811
     assert launch.resolve_via() is None
 
 
-async def test_a_monitor_and_a_workflow_step_get_the_exit(trusted):  # noqa: F811
-    alpha, _ = trusted
+async def test_a_monitor_and_a_workflow_step_get_the_exit(linked):  # noqa: F811
+    alpha, _ = linked
     await _reload(alpha, CONFIG_EXIT)
     assert launch.resolve_via() == "beta"
     p = await launch.child(
         ["sh", "-c", "echo $HTTPS_PROXY"],
         stdout=launch.PIPE,
-        user=None,
         via=launch.resolve_via(),
     )
     out, _ = await p.communicate()
     assert out.decode().strip() == alpha.app.exits.get("beta").url
 
 
-async def test_a_direct_child_keeps_the_servers_environment(trusted, monkeypatch):  # noqa: F811
+async def test_a_direct_child_keeps_the_servers_environment(linked, monkeypatch):  # noqa: F811
     monkeypatch.setenv("HTTPS_PROXY", "http://corp.example:3128")
     p = await launch.child(
-        ["sh", "-c", "echo $HTTPS_PROXY"], stdout=launch.PIPE, user=None, via=None
+        ["sh", "-c", "echo $HTTPS_PROXY"], stdout=launch.PIPE, via=None
     )
     out, _ = await p.communicate()
     assert out.decode().strip() == "http://corp.example:3128"
 
 
-async def test_link_exit_writes_the_config_and_refuses_an_unknown_link(trusted):  # noqa: F811
-    alpha, _ = trusted
+async def test_link_exit_writes_the_config_and_refuses_an_unknown_link(linked):  # noqa: F811
+    alpha, _ = linked
     r = await alpha.app.registry.call("link.exit", {"name": "beta"})
     assert r == {"exit_via": "beta"}
-    assert "exit_via: beta" in (alpha.root / ".aegis.yaml").read_text()
+    data = YAML(typ="safe").load((alpha.root / ".aegis.yaml").read_text())
+    # This server's own block: the far one reads the same file in git.
+    assert data["hosts"][alpha.app.server_name] == {"exit_via": "beta"}
+    assert "exit_via" not in data
     await until(lambda: launch.resolve_via() == "beta", timeout=5, what="the config")
     await alpha.app.registry.call("link.exit", {"name": None})
     assert "exit_via" not in (alpha.root / ".aegis.yaml").read_text()
@@ -495,8 +483,8 @@ async def test_link_exit_writes_the_config_and_refuses_an_unknown_link(trusted):
         await alpha.app.registry.call("link.exit", {"name": "nowhere"})
 
 
-async def test_a_settings_save_keeps_the_exit_keys(trusted):  # noqa: F811
-    alpha, _ = trusted
+async def test_a_settings_save_keeps_the_exit_keys(linked):  # noqa: F811
+    alpha, _ = linked
     await _reload(alpha, CONFIG_EXIT)
     snap = alpha.app.config.current()
     assert write(alpha.app.config.path, snap.doc, snap.stamp) == []
@@ -504,8 +492,8 @@ async def test_a_settings_save_keeps_the_exit_keys(trusted):  # noqa: F811
     assert "exit_via: beta" in text and "exit: off" in text.replace('"', "")
 
 
-async def test_the_far_server_shows_the_bytes_each_link_took(trusted, anywhere):  # noqa: F811
-    alpha, beta = trusted
+async def test_the_far_server_shows_the_bytes_each_link_took(linked, anywhere):  # noqa: F811
+    alpha, beta = linked
     out = alpha.app.exits.get("beta")
     async with Target() as t:
         async with httpx.AsyncClient(proxy=out.url, trust_env=False) as c:
@@ -514,8 +502,8 @@ async def test_the_far_server_shows_the_bytes_each_link_took(trusted, anywhere):
     assert row["name"] == "alpha" and row["exit_bytes"] > 0
 
 
-async def test_the_via_reading_says_the_address_and_the_link_going_down(trusted):  # noqa: F811
-    alpha, beta = trusted
+async def test_the_via_reading_says_the_address_and_the_link_going_down(linked):  # noqa: F811
+    alpha, beta = linked
     await _reload(alpha, CONFIG_EXIT)
     seen = []
 
@@ -543,8 +531,8 @@ async def test_the_via_reading_says_the_address_and_the_link_going_down(trusted)
     await beta.start()
 
 
-async def test_a_multi_user_server_refuses_an_exit(trusted, anywhere):  # noqa: F811
-    alpha, _ = trusted
+async def test_a_multi_user_server_refuses_an_exit(linked, anywhere):  # noqa: F811
+    alpha, _ = linked
     out = alpha.app.exits.get("beta")
     out.refused = lambda: "an exit is off on a multi-user server"
     async with Target() as t:
@@ -555,24 +543,23 @@ async def test_a_multi_user_server_refuses_an_exit(trusted, anywhere):  # noqa: 
         assert t.hits == 0
 
 
-def test_doctor_flags_a_name_that_is_no_trusted_link(tmp_path):
+def test_doctor_takes_any_link_as_an_exit(tmp_path):
     roots = make_roots(tmp_path, None)
     roots.state_root.mkdir(parents=True, exist_ok=True)
+    # A 2.x file may still say trusted: false; the link is an exit all the same.
     LinkStore(roots.state_root / "links.json").save(
-        [{"name": "plain", "url": "http://x", "token": "t", "trusted": False},
-         {"name": "good", "url": "http://y", "token": "t", "trusted": True}]
+        [{"name": "old", "url": "http://x", "token": "t", "trusted": False},
+         {"name": "good", "url": "http://y", "token": "t"}]
     )  # fmt: skip
 
     def finding(name):
         snap = Snapshot(path=tmp_path / "x", exit_via=name)
-        return doctor._exit(snap, roots, multi_user=False)
+        return doctor._exit(snap, roots)
 
-    assert doctor._exit(Snapshot(path=tmp_path / "x"), roots, multi_user=False) == []
-    assert finding("good")[0].level == "ok"
-    for name in ("plain", "gone"):
-        assert finding(name)[0].level == "error"
-    snap = Snapshot(path=tmp_path / "x", exit_via="good")
-    assert doctor._exit(snap, roots, multi_user=True)[0].level == "error"
+    assert doctor._exit(Snapshot(path=tmp_path / "x"), roots) == []
+    for name in ("old", "good"):
+        assert finding(name)[0].level == "ok"
+    assert finding("gone")[0].level == "error"
 
 
 # -- the gaps: git over SSH and Chromium ---------------------------------------------
@@ -584,15 +571,14 @@ async def _through_helper(url: str, port: int, send: bytes) -> tuple[bytes, byte
         stdin=launch.PIPE,
         stdout=launch.PIPE,
         stderr=launch.PIPE,
-        user=None,
         via=None,
     )
     out, err = await asyncio.wait_for(p.communicate(send), 15)
     return out, err, p.returncode
 
 
-async def test_the_ssh_helper_carries_a_stream_through_the_exit(trusted, anywhere):  # noqa: F811
-    alpha, beta = trusted
+async def test_the_ssh_helper_carries_a_stream_through_the_exit(linked, anywhere):  # noqa: F811
+    alpha, beta = linked
     out = alpha.app.exits.get("beta")
 
     async def reverse(reader, writer):
@@ -609,16 +595,16 @@ async def test_the_ssh_helper_carries_a_stream_through_the_exit(trusted, anywher
     assert beta.app.exit_bytes["alpha"] >= 3
 
 
-async def test_the_ssh_helper_says_why_when_the_exit_refuses(trusted):  # noqa: F811
-    alpha, _ = trusted
+async def test_the_ssh_helper_says_why_when_the_exit_refuses(linked):  # noqa: F811
+    alpha, _ = linked
     out = alpha.app.exits.get("beta")
     got, err, code = await _through_helper(out.url, 22, b"")
     assert got == b"" and code == 1
     assert b"not a public address" in err
 
 
-async def test_git_gets_the_helper_and_a_persons_own_command_stays(trusted):  # noqa: F811
-    alpha, _ = trusted
+async def test_git_gets_the_helper_and_a_persons_own_command_stays(linked):  # noqa: F811
+    alpha, _ = linked
     command = alpha.app.exits.env("beta")["GIT_SSH_COMMAND"]
     words = shlex.split(command)
     assert words[:2] == ["ssh", "-o"]
@@ -631,8 +617,8 @@ async def test_git_gets_the_helper_and_a_persons_own_command_stays(trusted):  # 
     assert kept["HTTPS_PROXY"] == alpha.app.exits.get("beta").url
 
 
-async def test_chromium_gets_the_exit_only_when_one_is_in_force(trusted):  # noqa: F811
-    alpha, _ = trusted
+async def test_chromium_gets_the_exit_only_when_one_is_in_force(linked):  # noqa: F811
+    alpha, _ = linked
     assert launch_proxy() == {}
     await _reload(alpha, CONFIG_EXIT)
     out = alpha.app.exits.get("beta")
@@ -647,13 +633,13 @@ async def test_chromium_gets_the_exit_only_when_one_is_in_force(trusted):  # noq
 
 @pytest.mark.browser
 @pytest.mark.slow
-async def test_chromium_reaches_a_page_through_the_exit(trusted, monkeypatch):  # noqa: F811
+async def test_chromium_reaches_a_page_through_the_exit(linked, monkeypatch):  # noqa: F811
     """A name the near server cannot resolve, which only the relay's answer
     turns into the target: a page that loads came through it."""
     pytest.importorskip("playwright")
     from playwright.async_api import async_playwright
 
-    alpha, _ = trusted
+    alpha, _ = linked
     await _reload(alpha, CONFIG_EXIT)
 
     async def here(host, port):

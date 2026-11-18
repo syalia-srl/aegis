@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 import os
 
 from ..harness import Launch, session_env
+from ..mcp_servers import by_ref
 from . import login
 from . import control
 from .control import Catalog
@@ -35,22 +36,41 @@ _SETTERS = {
 }
 
 
+def isolated_env(home: Path) -> dict[str, str]:
+    """An isolated session's environment (#983): ``home`` as Claude Code's
+    config dir, holding a link to the person's sign-in and nothing else of
+    theirs (no CLAUDE.md, skills, plugins or settings). An empty dir without
+    the link starts signed out."""
+    own = os.environ.get("CLAUDE_CONFIG_DIR") or str(Path.home() / ".claude")
+    link, login_file = home / ".credentials.json", Path(own) / ".credentials.json"
+    if login_file.exists() and not link.is_symlink():
+        link.symlink_to(login_file)
+    return {"CLAUDE_CONFIG_DIR": str(home)}
+
+
 class ClaudeSession:
     def __init__(self, bin: str, launch: Launch) -> None:
+        from ..mcp import mcp_config as build
+
         mcp_config = None
         disallowed: tuple[str, ...] = ()
+        url = launch.mcp[0] if launch.mcp is not None else None
+        if url is not None or launch.extra_mcp:
+            mcp_config = build(url, launch.extra_mcp)
         if launch.mcp is not None:
-            from ..mcp import mcp_config as build
-
-            mcp_config = build(launch.mcp[0])
             # Without aegis's tools there is nothing to replace them with.
             keep = set(launch.keep_harness_tools)
             disallowed = tuple(t for t in REPLACED_TOOLS if t not in keep)
             if launch.knowledge_native:
                 disallowed += tuple(NATIVE_TOOLS)
         env = session_env(launch)
+        if launch.extra_mcp:
+            refs = by_ref(launch.extra_mcp)[1]
+            env = {**(os.environ if env is None else env), **refs}
         if launch.knowledge_native:
             env = {**(os.environ if env is None else env), **NO_AUTO_MEMORY}
+        if launch.home is not None:
+            env = {**(os.environ if env is None else env), **isolated_env(launch.home)}
         argv = build_argv(
             bin,
             launch.model,
@@ -61,6 +81,8 @@ class ClaudeSession:
             system_prompt=launch.system_prompt,
             add_dirs=launch.read_dirs,
             disallowed=disallowed,
+            mcp_names=tuple(m.name for m in launch.extra_mcp),
+            own_tools=launch.harness_tools,
         )
         self._proc = ClaudeProcess(
             argv,
@@ -68,9 +90,8 @@ class ClaudeSession:
             launch.stderr_path,
             launch.on_line,
             launch.on_exit,
-            env=login.with_token(env, launch.user),
+            env=login.with_token(env),
             cgroup=launch.cgroup,
-            user=launch.user,
             via=launch.via,
         )
 
@@ -119,6 +140,8 @@ class ClaudeCode:
     label = "Claude Code"
     steers_mid_turn = True  # a user message read at the next tool boundary
     steers_notices = True
+    mcp_transports = frozenset({"http", "stdio"})
+    contains = frozenset({"harness_tools", "isolated"})
     tool_prefix = "mcp__aegis__"
 
     def __init__(self, bin: str) -> None:

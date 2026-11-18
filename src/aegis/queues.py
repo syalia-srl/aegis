@@ -1,8 +1,14 @@
 """Queues of worker sessions.
 
-A task waits FIFO for a free slot in its queue (``max_parallel``), then a worker
-session is spawned from the queue's agent with the payload as its first
-prompt. The worker is an ordinary session with a tab, marked ``worker``.
+One dispatcher serves every queue, up to ``max_workers`` workers at once on
+the server (config.py). A free slot goes to the queue with the fewest running
+workers for its ``priority``, the smallest (running + 1) / priority, so a queue
+at priority 2 runs two workers for each one of a queue at priority 1; a queue
+with nothing to start leaves its share to the others. Priority 0 pauses a
+queue: its tasks are kept pending and none starts. Within a queue tasks start
+FIFO. A worker session is spawned from the queue's agent with the payload as
+its first prompt. The worker is an ordinary session with a tab, marked
+``worker``.
 
 **A turn ending is not completion.** Ending a turn is how an agent waits, so a
 task finishes only when its worker's turn has ended *and* it has no live
@@ -24,23 +30,30 @@ dispatches again on every change.
 
 from __future__ import annotations
 
+import dataclasses
+
 import asyncio
 import json
 import logging
 import secrets
 import time
+from collections import Counter
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 from .agents import ConfigError, read_config, resolve
+from . import budgets, guards
+from .guards import QUEUE_ACTIONS
 from . import restarts
 from . import notice_sources
 from .monitors import iso_now
 from .notice_sources import Item
 from .names import default_title
 from .ops import OpError
+from .quota_gate import Gate, waits
+from .scopes import Scope
 
 if TYPE_CHECKING:
     from .config import Config
@@ -49,6 +62,11 @@ if TYPE_CHECKING:
     from .session import Session
 
 log = logging.getLogger("aegis.queues")
+# A queue's priority when .aegis.yaml leaves it out.
+DEFAULT_PRIORITY = 1
+# Queue keys read and ignored: max_parallel was each queue's own bound before
+# max_workers bounded them all (#927).
+LEGACY_QUEUE_KEYS = ("max_parallel",)
 RESTARTED = "The server restarted while you were working on your task. Continue it where you left off."
 CONTINUE = "Continue your task where you left off."
 
@@ -70,9 +88,17 @@ class Task:
     # The principal the task and its worker belong to (tokens.py); None in a
     # log from before owners, which reads as the admin's.
     owner: str | None = None
-    # The agent on a server linked with trust that enqueued it, as
+    # The agent on a linked server that enqueued it, as
     # {handle, server}: its result goes back over the link (#684).
     far_enqueuer: dict | None = None
+    # The enqueuer's scope when it enqueued (scopes.py, #1066), in its record
+    # form; {} for any. The worker's scope is its agent's met with it.
+    scope: dict = field(default_factory=dict)
+    # The agent that runs it, over its queue's: an @agent run (mentions.py).
+    agent: str | None = None
+    # The @ mention it answers, as {id, log_id, member}: its result goes to
+    # that mention, not to an inbox (mentions.py).
+    mention: dict | None = None
 
     def public(self) -> dict:
         d = asdict(self)
@@ -100,35 +126,69 @@ def queue_items(running: list[str], waiting: int) -> list[Item]:
 
 def queues_from(raw: Any) -> dict[str, dict]:
     """Every queue in a parsed ``queues:`` map. A queue that does not name its
-    agent and a positive ``max_parallel`` is kept with an ``error``, so
-    enqueueing on it says what is wrong; nothing in .aegis.yaml is a default
-    (agents.py)."""
+    agent, or whose ``priority`` is not a whole number from 0 up, is kept with
+    an ``error``, so enqueueing on it says what is wrong. ``priority`` left out
+    is 1. ``max_parallel``, the per-queue bound before #927, is read and
+    ignored, so a file from then still runs; ``legacy`` names it for aegis
+    doctor."""
     if not isinstance(raw, dict):
         return {}
     out: dict[str, dict] = {}
     for name, q in raw.items():
         q = q if isinstance(q, dict) else {}
-        agent, limit = q.get("agent"), q.get("max_parallel")
-        missing = [
-            k for k, v in (("agent", agent), ("max_parallel", limit)) if v in (None, "")
-        ]
-        if missing:
-            verb = "is" if len(missing) == 1 else "are"
-            out[str(name)] = {"error": f"{', '.join(missing)} {verb} missing"}
-        elif isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+        agent, priority = q.get("agent"), q.get("priority", DEFAULT_PRIORITY)
+        if agent in (None, ""):
+            out[str(name)] = {"error": "agent is missing"}
+        elif (
+            isinstance(priority, bool) or not isinstance(priority, int) or priority < 0
+        ):
             out[str(name)] = {
-                "error": f"max_parallel {limit!r} is not a positive integer"
+                "error": f"priority {priority!r} is not a whole number from 0 up"
             }
         elif not isinstance(q.get("quiet", True), bool):
             out[str(name)] = {"error": f"quiet {q['quiet']!r} is not true or false"}
+        elif (bad := _guard_error(q)) is not None:
+            out[str(name)] = {"error": bad}
         else:
             # A worker starts with no tab: its result goes to its enqueuer (#386).
             out[str(name)] = {
                 "agent": str(agent),
-                "max_parallel": limit,
+                "priority": priority,
                 "quiet": q.get("quiet", True),
+                "legacy": [k for k in LEGACY_QUEUE_KEYS if k in q],
+                # Its quota guard, None for none, and its bound (#1067).
+                "guard": guards.parse(q.get("quota"), QUEUE_ACTIONS)[0],
+                "max_pending": guards.max_pending(q.get("max_pending"))[0],
             }
     return out
+
+
+def _guard_error(q: dict) -> str | None:
+    return (
+        guards.parse(q.get("quota"), QUEUE_ACTIONS)[1]
+        or guards.max_pending(q.get("max_pending"))[1]
+    )
+
+
+# The queue @agent runs take (mentions.py): built in, so a mention needs no
+# configuration; a ``mention:`` entry in .aegis.yaml replaces it.
+MENTION_QUEUE = "mention"
+
+
+def mention_queue(default_agent: str | None) -> dict:
+    return {
+        "agent": default_agent or "claude",
+        "priority": DEFAULT_PRIORITY,
+        "quiet": True,
+        "legacy": [],
+        "guard": None,
+        "max_pending": None,
+    }
+
+
+def with_agent(t: Task, q: dict) -> dict:
+    """``q`` as ``t`` runs on it: with the task's own agent, if it names one."""
+    return {**q, "agent": t.agent} if t.agent else q
 
 
 def load_queues(config_root: Path) -> dict[str, dict]:
@@ -146,6 +206,8 @@ class Queues:
         # Sends a task's result back to an agent on a server linked with
         # trust (app.py sets it).
         self.far_callback: Callable[[Task, str, str], Awaitable[None]] | None = None
+        # Takes the result of an @agent run (mentions.py; app.py sets it).
+        self.on_mention: Callable[[Task, str, str], Awaitable[None]] | None = None
         self._registry = registry
         self._monitors = monitors
         self._path = path
@@ -164,8 +226,13 @@ class Queues:
 
     @property
     def queues(self) -> dict[str, dict]:
-        """The queues in .aegis.yaml as it is now (config.py)."""
-        return self._config.current().queues
+        """The queues in .aegis.yaml as it is now (config.py), and the built-in
+        ``mention`` queue the @agent runs take unless the file sets its own
+        (mentions.py); each of its tasks names its agent."""
+        snap = self._config.current()
+        if MENTION_QUEUE in snap.queues:
+            return snap.queues
+        return {**snap.queues, MENTION_QUEUE: mention_queue(snap.default_agent)}
 
     # -- the log --------------------------------------------------------------
     def _log(self, t: Task, event: str) -> None:
@@ -238,6 +305,7 @@ class Queues:
         q = self.queues.get(t.queue)
         if t.status == "pending" and q is not None and "error" not in q:
             d["waiting_for_quota"] = self.quota_wait(t, q)
+            d["paused"] = q["priority"] == 0
         if t.worker and t.worker in self._registry.sessions:
             d["worker_handle"] = self._registry.sessions[t.worker].handle
         return d
@@ -252,6 +320,17 @@ class Queues:
             None,
         )
 
+    def move(self, old: str, new: str) -> None:
+        """A handoff (#1019): the tasks ``old`` enqueued and still waits on
+        report to its successor ``new``, which can also cancel them."""
+        for t in self.tasks.values():
+            if t.enqueuer == old and t.status in ("pending", "running"):
+                t.enqueuer = new
+                self._log(t, "moved")
+        self._status(old)
+        self._registry.refresh_card(old)
+        self._registry.refresh_card(new)
+
     # -- operations ------------------------------------------------------------------
     async def enqueue(
         self,
@@ -262,8 +341,13 @@ class Queues:
         cwd: str,
         owner: str | None = None,
         far_enqueuer: dict | None = None,
+        scope: dict | None = None,
+        agent: str | None = None,
+        mention: dict | None = None,
     ) -> Task:
         t = Task(
+            agent=agent,
+            mention=mention,
             id=f"task-{secrets.token_hex(4)}",
             queue=queue,
             payload=payload,
@@ -272,6 +356,7 @@ class Queues:
             cwd=cwd,
             owner=owner,
             far_enqueuer=far_enqueuer,
+            scope=dict(scope or {}),
         )
         self.tasks[t.id] = t
         self._log(t, "enqueued")
@@ -307,16 +392,24 @@ class Queues:
             if present and t.status == "pending" and (q is None or "error" in q):
                 why = q["error"] if q else "it is no longer configured"
                 self._fail(t, f"its queue {t.queue!r} in .aegis.yaml: {why}")
-        for name, q in self.queues.items():
-            if "error" in q:
-                continue
-            while True:
-                running = sum(
-                    1
-                    for t in self.tasks.values()
-                    if t.queue == name and t.status == "running"
-                )
-                pending = sorted(
+            elif t.status == "pending" and q is not None:
+                # A spent session cap up its line never frees (budgets.py):
+                # the task would wait forever.
+                g = self.gate(t.queue, q, t.enqueuer, t.cwd, t.owner)
+                if budgets.never_frees(g):
+                    self._fail(t, f"{g.why}; {budgets.NEVER}")
+        limit = self._config.current().max_workers
+        while True:
+            running = Counter(
+                t.queue for t in self.tasks.values() if t.status == "running"
+            )
+            if sum(running.values()) >= limit:
+                return
+            best: tuple[tuple[float, float], Task, dict] | None = None
+            for name, q in self.queues.items():
+                if "error" in q or q["priority"] < 1:
+                    continue
+                head = min(
                     (
                         t
                         for t in self.tasks.values()
@@ -325,41 +418,136 @@ class Queues:
                         and self.quota_wait(t, q) is None
                     ),
                     key=lambda t: t.created_at,
+                    default=None,
                 )
-                if not pending or running >= q["max_parallel"]:
-                    break
-                await self._start(pending[0], q)
+                if head is None:
+                    continue
+                key = ((running[name] + 1) / q["priority"], head.created_at)
+                if best is None or key < best[0]:
+                    best = (key, head, q)
+            if best is None:
+                return
+            await self._start(best[1], best[2])
 
     def quota_wait(self, t: Task, q: dict) -> str | None:
-        """Why ``t``'s owner's quota gate keeps it pending, or None. A task
-        that waits is skipped, never failed, so the next owner's starts; the
-        gate's next reading dispatches it (app.on_quota). An agent that cannot
-        resolve is left to _start, which fails the task with the reason."""
-        start_spec = self._registry.start_spec
-        if start_spec is None:
-            return None
-        try:
-            agents = list(self._config.current().agents)
-            spec = resolve(agents, None, q["agent"], {}, Path(t.cwd), owner=t.owner)
-        except OpError:
-            return None
-        _, g = start_spec(spec)
+        """Why ``t``'s gate keeps it pending, or None. A task that waits is
+        skipped, never failed, so the next one starts, and a queue with none
+        to start leaves its share of max_workers to the others; the gate's
+        next reading dispatches it (app.on_quota)."""
+        g = self.gate(t.queue, with_agent(t, q), t.enqueuer, t.cwd, t.owner)
         return None if g.may_start else g.why
 
-    async def _start(self, t: Task, q: dict) -> None:
+    def gate(
+        self, name: str, q: dict, enqueuer: str | None, cwd: str, owner: str | None
+    ) -> Gate:
+        """The gate a worker of queue ``name`` enqueued by ``enqueuer`` passes
+        now: the cascade, the pause, and the guards of its agent, the queue
+        and the enqueuer's chain (guards.py). An agent that cannot resolve is
+        left to _start, which fails the task with the reason."""
+        start_spec = self._registry.start_spec
+        if start_spec is None:
+            return Gate("open")
         try:
             agents = list(self._config.current().agents)
-            # A worker joins its enqueuer's group (#586).
-            enqueuer = self._registry.sessions.get(t.enqueuer or "")
-            group = enqueuer.group_key() if enqueuer else None
-            spec = resolve(
-                agents, None, q["agent"], {}, Path(t.cwd), owner=t.owner, group=group
+            spec = resolve(agents, None, q["agent"], {}, Path(cwd), owner=owner)
+        except OpError:
+            return Gate("open")
+        spec = dataclasses.replace(spec, started_by=enqueuer)
+        _, g = start_spec(spec, name)
+        return g
+
+    def guard_gate(
+        self, name: str, q: dict, enqueuer: str | None, cwd: str, owner: str | None
+    ) -> Gate:
+        """The guards alone over a worker of ``name`` that ``enqueuer``
+        starts (guards.py), across its cascade: closed only when every model
+        it may start on is, with the first one's why and reopen. A cooling
+        model or the pause never closes it: they only ever hold a task."""
+        guard = self._registry.guard
+        if guard is None:
+            return Gate("open")
+        try:
+            agents = list(self._config.current().agents)
+            spec = resolve(agents, None, q["agent"], {}, Path(cwd), owner=owner)
+        except OpError:
+            return Gate("open")
+        spec = dataclasses.replace(spec, started_by=enqueuer)
+        models = spec.cascade if spec.model in spec.cascade else (spec.model,)
+        first: Gate | None = None
+        for m in models:
+            g = guard(spec, name, m)
+            if g.may_start:
+                return g
+            first = first or g
+        return first or Gate("open")
+
+    def admit(
+        self, name: str, enqueuer: str | None, cwd: str, owner: str | None
+    ) -> str | None:
+        """Whether queue ``name`` takes one more task from ``enqueuer`` now:
+        past ``max_pending`` it raises queue_full whatever the gate says;
+        with the guards closed (guard_gate), ``on_closed: reject`` raises
+        queue_closed and ``warn`` returns the warning; ``hold``, the default,
+        waits silently, as a task waits for a cooling model or the pause. A
+        spent session cap up the enqueuer's line raises queue_closed
+        whatever on_closed says: it never frees (budgets.py)."""
+        q = self.queues[name]
+        pending = sum(
+            1 for t in self.tasks.values() if t.queue == name and t.status == "pending"
+        )
+        if (cap := q.get("max_pending")) is not None and pending >= cap:
+            raise OpError(
+                "queue_full",
+                f"queue {name!r} already holds {pending} pending tasks, its "
+                f"max_pending; nothing was enqueued",
             )
+        guard = q.get("guard")
+        action = guard.on_closed if guard is not None else "hold"
+        g = self.guard_gate(name, q, enqueuer, cwd, owner)
+        if budgets.never_frees(g):
+            # A spent session cap up the line: whatever on_closed says, the
+            # task could never start (budgets.py).
+            raise OpError(
+                "queue_closed",
+                f"queue {name!r} rejects new tasks: {g.why}; {budgets.NEVER}",
+            )
+        if action == "hold" or g.may_start:
+            return None
+        text = waits(g)
+        if action == "reject":
+            raise OpError("queue_closed", f"queue {name!r} rejects new tasks: {text}")
+        return f"the task waits until the gate opens: {text}"
+
+    async def _start(self, t: Task, q: dict) -> None:
+        q = with_agent(t, q)
+        try:
+            agents = list(self._config.current().agents)
+            # A worker joins its enqueuer's group (#1039), making one if the
+            # enqueuer has none yet.
+            enqueuer = self._registry.sessions.get(t.enqueuer or "")
+            group = (
+                self._registry.ensure_group(enqueuer) if enqueuer is not None else None
+            )
+            spec = resolve(
+                agents,
+                None,
+                q["agent"],
+                {},
+                Path(t.cwd),
+                owner=t.owner,
+                group=group,
+                within=Scope.from_record(t.scope),
+            )
+            # Its starter, so the chain of starters can be walked (#1066).
+            spec = dataclasses.replace(spec, started_by=t.enqueuer)
+            if enqueuer is not None:
+                # A worker stays where its enqueuer's host put it (#959).
+                spec = dataclasses.replace(spec, tags=dict(enqueuer.spec.tags))
         except OpError as e:
             self._fail(t, f"the queue's agent {q['agent']!r} cannot start: {e.message}")
             return
         if self._registry.start_spec is not None:
-            spec, _ = self._registry.start_spec(spec)
+            spec, _ = self._registry.start_spec(spec, t.queue)
         try:
             s = await self._registry.spawn(
                 spec,
@@ -500,6 +688,13 @@ class Queues:
         loop.create_task(self.dispatch())
 
     async def _callback(self, t: Task, outcome: str, body: str) -> None:
+        if t.mention is not None:
+            if self.on_mention is not None:
+                try:
+                    await self.on_mention(t, outcome, body)
+                except Exception:
+                    log.exception("aegis: could not answer the mention of %s", t.id)
+            return
         if t.callback and t.far_enqueuer and self.far_callback is not None:
             try:
                 await self.far_callback(t, outcome, body)

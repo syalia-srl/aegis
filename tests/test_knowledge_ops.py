@@ -10,11 +10,9 @@ from aegis.ops import OpError
 
 from .conftest import until
 from .knowledge_samples import mem
-from .test_acts_for import BEN, recorded  # noqa: F401
 from .test_agents import mcp, turn
 from .test_agents import world as agents_world  # noqa: F401
 from .test_commands import send
-from .test_member_view import ADMIN, homes, spawn, world  # noqa: F401
 
 
 def ok(said: str):
@@ -70,18 +68,6 @@ async def test_a_temporary_memory_needs_an_expiry(agents_world):
         ),
     )
     assert said.startswith("mcp error: bad_params"), said
-
-
-async def test_a_member_cannot_read_the_admins_memory_by_name(world):
-    app = world.app
-    await app.knowledge.store.save(app.user, mem("admin-fact", "the admin's fact"), "t")
-    ben = app.sessions.sessions[await spawn(world, BEN)]
-    said = await turn(ben, mcp("memory_read", names=["admin-fact"]))
-    assert said.startswith("mcp error: not_found"), said
-    assert ok(await turn(ben, mcp("memory_search", query="admin fact"))) == {"hits": []}
-    ok(await turn(ben, mcp("memory_save", name="ben-fact", description="d", body="b")))
-    assert app.knowledge.store.get("ben", "ben-fact") is not None
-    assert app.knowledge.store.get(app.user, "ben-fact") is None
 
 
 async def test_a_read_after_a_hint_records_its_rank(agents_world):

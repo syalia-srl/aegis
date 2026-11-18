@@ -14,12 +14,12 @@ from aegis.session import SpawnSpec
 
 from .conftest import until
 from .knowledge_samples import skill
-from .test_acts_for import BEN, recorded  # noqa: F401
+from .one_person import BEN, recorded  # noqa: F401
 from .test_agents import mcp, turn, world  # noqa: F401  (fixture)
 from .test_commands import app, send  # noqa: F401
 from .test_commands import spawn as spawn_here
-from .test_member_view import homes, spawn  # noqa: F401
-from .test_member_view import world as members  # noqa: F401
+from .one_person import homes, spawn  # noqa: F401
+from .one_person import world as members  # noqa: F401
 
 VAR = "CLAUDE_CODE_DISABLE_AUTO_MEMORY"
 
@@ -84,17 +84,6 @@ async def test_native_on_turns_auto_memory_off(world):
     await started(s)
     assert "Skill" in denied(s) and "Monitor" in denied(s)
     assert proc_env(s)[VAR] == "1"
-
-
-async def test_native_on_disallows_skill_for_that_owner_only(members):
-    app = members.app
-    assert await setting(app, BEN, native=True) is True
-    assert await setting(app) is False  # the admin's own is untouched
-    ben = app.sessions.sessions[await spawn(members, BEN)]
-    mine = await members.spawn()
-    await started(ben, mine)
-    assert "Skill" in denied(ben) and proc_env(ben)[VAR] == "1"
-    assert "Skill" not in denied(mine) and VAR not in proc_env(mine)
 
 
 async def test_the_switch_is_undone_and_reaches_the_next_session(world):

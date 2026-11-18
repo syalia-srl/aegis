@@ -1,0 +1,1 @@
+- **Esc stops a Cursor agent.** Closing its stdin left the turn running, and the lines it kept sending put the session back to work, so the interrupt showed and the agent did not stop. An interrupt now kills the process group at once and drops those lines.

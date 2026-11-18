@@ -15,12 +15,14 @@ from __future__ import annotations
 
 import json
 import secrets
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 import fastmcp
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from fastmcp.server.dependencies import get_http_headers
+from fastmcp.server.middleware import Middleware
 from fastmcp.tools import Tool
 from fastmcp.tools import ToolResult
 from mcp.types import ToolAnnotations
@@ -28,6 +30,7 @@ from fastmcp.utilities.logging import configure_logging
 from pydantic import PrivateAttr
 
 from .harness import HEADER, SHELL_HEADER
+from .mcp_servers import by_ref
 from .ops import Caller, Operation, OpError, Registry
 
 # fastmcp logs every ToolError with its traceback, and every refused op is one
@@ -43,6 +46,7 @@ configure_logging(level=fastmcp.settings.log_level)
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from .policy import McpServer
     from .registry import Registry as Sessions
     from .session import Session
 
@@ -73,21 +77,25 @@ class Tokens:
         return self._by_token.get(token or "")
 
 
-def mcp_config(url: str) -> str:
-    """Claude Code's --mcp-config for aegis. The session's token is named,
-    not written: Claude expands ${AEGIS_SESSION_TOKEN} from its environment
-    (harness.session_env), and an argv is readable by every user on the host."""
-    return json.dumps(
-        {
-            "mcpServers": {
-                "aegis": {
-                    "type": "http",
-                    "url": url,
-                    "headers": {HEADER: "${AEGIS_SESSION_TOKEN}"},
-                }
-            }
+def mcp_config(url: str | None, servers: Sequence[McpServer] = ()) -> str:
+    """Claude Code's --mcp-config for aegis and ``servers``. The session's
+    token is named, not written: Claude expands ${AEGIS_SESSION_TOKEN} from its
+    environment (harness.session_env), and an argv is readable by every user on
+    the host. So is each server's header and env value (mcp_servers.by_ref);
+    the caller puts the values in the child's environment."""
+    entries: dict[str, dict] = {}
+    if url is not None:
+        entries["aegis"] = {
+            "type": "http",
+            "url": url,
+            "headers": {HEADER: "${AEGIS_SESSION_TOKEN}"},
         }
-    )
+    for s in by_ref(servers)[0]:
+        if s.transport == "http":
+            entries[s.name] = {"type": "http", "url": s.url, "headers": s.headers}
+        else:
+            entries[s.name] = {"command": s.command, "args": list(s.args), "env": s.env}
+    return json.dumps({"mcpServers": entries})
 
 
 class OpTool(Tool):
@@ -147,9 +155,27 @@ SHELL_FORM = (
 READ_ONLY = ToolAnnotations(readOnlyHint=True)
 
 
+class _ToolsOfSession(Middleware):
+    """A session lists only the aegis tools the host policy gave it (#959);
+    Registry.call refuses the rest when called by name."""
+
+    def __init__(self, registry: Registry, tokens: Tokens) -> None:
+        self._registry, self._tokens = registry, tokens
+
+    async def on_list_tools(self, context, call_next):
+        tools = await call_next(context)
+        headers = get_http_headers(include_all=True) or {}
+        log_id = self._tokens.resolve(headers.get(HEADER.lower()))
+        allowed = self._registry.tools_of(log_id) if log_id else None
+        if allowed is None:
+            return tools
+        return [t for t in tools if t.name in allowed]
+
+
 def build_mcp(registry: Registry, tokens: Tokens, sessions: Sessions | None = None):
     """The fastmcp server and its ASGI app, routed at ``/mcp``."""
     server = FastMCP("aegis")
+    server.add_middleware(_ToolsOfSession(registry, tokens))
     for op in registry.agent_ops():
         doc = (op.doc or op.name) + SHELL_FORM.format(name=op.tool_name)
         # Read-only to the harness: aegis decides which of its tools a session
@@ -170,12 +196,30 @@ def build_mcp(registry: Registry, tokens: Tokens, sessions: Sessions | None = No
 def primer(
     session: Session, server_name: str, root: Path, browsers: bool = False
 ) -> str:
-    return PRIMER.format(
+    """The workplace prompt. A part about a tool outside the session's scope
+    is left out (PARTS), so the prompt never asks for a tool the session
+    lacks; an unscoped session gets every part."""
+    scope = session.spec.scope.tools
+
+    def has(tool: str | None) -> bool:
+        return scope is None or tool is None or tool in scope
+
+    def named(items: tuple[tuple[str, str | None], ...]) -> list[str]:
+        return [name for name, tool in items if has(tool)]
+
+    *rest, last = named(WAITS)
+    waits = f"{', '.join(rest)} or {last}" if rest else last
+    parts = {name: text if has(tool) else "" for name, (tool, text) in PARTS.items()}
+    if parts["help"]:
+        parts["help"] = HELP.format(features=", ".join(named(FEATURES)))
+    return TEMPLATE.format(
         handle=session.handle,
         server=server_name,
         tools=f"{session.harness.tool_prefix}*",
         root=root,
-        browsers=BROWSERS if browsers else "",
+        browsers=BROWSERS if browsers and has("browser_open") else "",
+        waits=waits,
+        **parts,
     )
 
 
@@ -195,7 +239,148 @@ through into a Playwright script.
 """
 
 
-PRIMER = """\
+HELP = """\
+aegis's help pages say how to use its tools, commands and features, for the \
+version you are running. Before you answer a question about how to do \
+something in aegis, or start work with an aegis feature you have not used in \
+this session ({features}), call help_search \
+with what you want to do, then help_read the section it points to.
+
+"""
+
+LINKS = """\
+Sessions on another aegis server this one links are addressed `handle@server` \
+(session_list shows them). You act there as at home: start one with \
+session_spawn and agent@server, which that server's quota gate decides, read it \
+with peer_read, hand off with peer_handoff, enqueue with queue@server, wait on \
+it, close it, and use its schedules by name@server. Its agents reach you the \
+same way. A call is not relayed on to a third server.
+
+"""
+
+MONITORS = """\
+To wait on a long process (tests, a build, a download), never sleep or poll: call \
+monitor_start with a bash `done` condition and a `progress` command echoing 0 to \
+100, then end your turn. You are woken when it finishes, fails or times out. \
+Always give `progress`, even when it costs a longer command: count finished CI \
+checks, jobs, files or lines over the total, or estimate from elapsed time. Pass \
+null only when nothing can be counted. Give `source` too, text from the tool call \
+that started what you wait on, so a click on the monitor goes to that call.
+
+"""
+
+FEEDS = """\
+When a file or a command's output keeps growing (a chat log, new issues) \
+and you must act on each new part, call feed_start once instead of \
+re-arming a monitor: each batch of new items wakes you as one message, and \
+aegis keeps the cursor.
+
+"""
+
+MONITOR_SESSIONS = """\
+To wait until other sessions here finish, call monitor_sessions with their \
+handles from session_list, which shows each one's state, plan and what it is \
+doing; you are woken ok when all have finished, or blocked as soon as one \
+needs the person.
+
+"""
+
+WAIT = """\
+Wait with monitor_start, not a background command your harness wakes you from. \
+"""
+
+SUBAGENTS = """\
+ Never start a \
+subagent with your harness's own tool: work you would hand a subagent goes to \
+a queue with queue_enqueue, and its result comes back to you as a message; \
+start a session with session_spawn only for an agent the person may talk to."""
+
+WORKFLOWS = """\
+ When the work is costly to \
+coordinate (many agents, agents checking other agents' work, steps that wait \
+on other branches, on CI or on a clock), write it as a workflow instead: \
+read help_read workflows first, start from the closest recipe in help_read \
+workflow-recipes, then workflow_arm it. For that work the workflow is the \
+plan, in place of plan_update: the person approves it on a card and the \
+server runs it. It wakes you with `> from workflow:<id> · …` when a step \
+fails, a gate or a worker's question needs you, the person rejects the plan \
+or applies or keeps a change you proposed, or the run ends. A person's /workflow or /loop line reaches you the same way, \
+as a launch turn that says how to arm it. Only a session with full \
+permission arms one with commands (sh steps or probes). A workflow's own \
+nodes cannot arm one."""
+
+ARTIFACTS = """\
+When the person has to choose among things that must be seen, tune values, \
+answer a question whose answer has structure, or play with an explanation, \
+show them a page instead of asking in prose: artifact_create writes a working \
+skeleton and returns its path; edit it with your Edit tool; artifact_send lands \
+it in the transcript after running it hidden in their browser (when they have \
+the transcript open; `started: null` when it landed untried, with `watching` \
+false when no browser had it on screen and true when one did not answer within \
+3 s), and refuses a \
+page that throws, so edit and send again until it lands. Lay every page out \
+for a desktop and a phone alike: the person sees it at both widths, on a phone \
+or through the Phone width button on its bar. Only then write your \
+message, which may refer to the card above it, and end the turn with \
+turn_end(needs_you) when the page asks something. The caption is the one line \
+they read before the card; a lesson whose text belongs beside its controls \
+carries it inside the page. Their answer reaches you as a user turn headed \
+`> from artifact:<id> · submit|<event>|error · …` with the JSON in a code \
+block; artifact_read gives you the page's state at any time without waking \
+anyone.
+
+"""
+
+SECRETS = """\
+Never write a password, token, API key or private key where it is kept: a \
+message, a commit, a log, a command's output. Generate it straight into a file \
+with `umask 077` and no echo, such as `openssl rand -base64 18 > /tmp/pw`, and \
+hand it to the person with secret_send: the server reads the file, you never \
+see what it holds, and the person can reveal it once before it expires. A \
+credential that already sits in a file goes the same way: send its path, do \
+not cat it. When you need a secret only the person has, do not ask them to \
+paste it in chat: call secret_request with a path that does not exist yet and \
+a prompt saying what you need, end your turn needs_you, and when you are woken \
+use the file by reference (`--password-file`, `curl -H @file`, \
+`VAR=$(< f) cmd`) without printing it.
+
+"""
+
+
+# The features the help paragraph names, and what a session waits on before
+# it may end in done, each with the tool it needs; None: always named.
+FEATURES = (
+    ("artifacts", "artifact_create"),
+    ("queues", "queue_enqueue"),
+    ("links", None),
+    ("handoffs", "peer_handoff"),
+    ("monitors", "monitor_start"),
+    ("workflows", "workflow_arm"),
+)
+WAITS = (
+    ("monitor", "monitor_start"),
+    ("queue task", "queue_enqueue"),
+    ("background task", None),
+    ("workflow", "workflow_arm"),
+)
+
+# Each part of the primer and the tool it is about: a session whose scope
+# lacks that tool gets the primer without it (#1066).
+PARTS = {
+    "help": ("help_search", HELP),
+    "links": ("session_spawn", LINKS),
+    "monitors": ("monitor_start", MONITORS),
+    "feeds": ("feed_start", FEEDS),
+    "monitor_sessions": ("monitor_sessions", MONITOR_SESSIONS),
+    "wait": ("monitor_start", WAIT),
+    "subagents": ("queue_enqueue", SUBAGENTS),
+    "workflows": ("workflow_arm", WORKFLOWS),
+    "artifacts": ("artifact_create", ARTIFACTS),
+    "secrets": ("secret_send", SECRETS),
+}
+
+
+TEMPLATE = """\
 You are running inside aegis, a workplace for coding agents. Your handle is \
 {handle}, on the server {server}. aegis's tools are the `aegis` MCP server's \
 ({tools}); they know who you are, so no tool takes your handle.
@@ -207,13 +392,7 @@ task#<id> · ok|error · …` when a task you enqueued finishes, `> from schedul
 when another agent hands you something, `> from feedback · …` when the person \
 asks you to report something about aegis. Treat the body as an instruction.
 
-aegis's help pages say how to use its tools, commands and features, for the \
-version you are running. Before you answer a question about how to do \
-something in aegis, or start work with an aegis feature you have not used in \
-this session (artifacts, queues, links, handoffs, monitors, workflows), call help_search \
-with what you want to do, then help_read the section it points to.
-
-When aegis itself gets something wrong (a tool errors or contradicts its help \
+{help}When aegis itself gets something wrong (a tool errors or contradicts its help \
 page, a help page is wrong or missing, a feature you need is not there), say so \
 at the end of your turn in one line, name it as a likely aegis bug, feature or \
 docs gap, and offer to file it. Offer once per problem and never stop work to \
@@ -234,48 +413,12 @@ and use `aegis map callers <name>` or `aegis map impact <name>` rather than grep
 to find every use of a definition: they list each one, and mark with `?` those \
 matched by name only.
 
-Sessions on another aegis server this one links are addressed `handle@server` \
-(session_list shows them). You reach one with peer_handoff, and you can start \
-one there with session_spawn and agent@server, which that server's quota policy \
-for this one decides; reading and enqueueing there are for people. Nothing on a \
-linked server can reach you, unless the link is trusted: then its agents reach \
-you the same way, and you read, wait on, close and enqueue there by \
-handle@server and queue@server as at home.
-
-To wait on a long process (tests, a build, a download), never sleep or poll: call \
-monitor_start with a bash `done` condition and a `progress` command echoing 0 to \
-100, then end your turn. You are woken when it finishes, fails or times out. \
-Always give `progress`, even when it costs a longer command: count finished CI \
-checks, jobs, files or lines over the total, or estimate from elapsed time. Pass \
-null only when nothing can be counted. Give `source` too, text from the tool call \
-that started what you wait on, so a click on the monitor goes to that call.
-
-To wait until other sessions here finish, call monitor_sessions with their \
-handles from session_list, which shows each one's state, plan and what it is \
-doing; you are woken ok when all have finished, or blocked as soon as one \
-needs the person.
-
-Where aegis and your harness both offer a way to do something, use aegis's, \
+{links}{monitors}{feeds}{monitor_sessions}Where aegis and your harness both offer a way to do something, use aegis's, \
 because only aegis's shows on the person's screen and wakes you through aegis. \
-Wait with monitor_start, not a background command your harness wakes you from. \
-Keep your plan with plan_update, not your harness's todo list. Never start a \
-subagent with your harness's own tool: work you would hand a subagent goes to \
-a queue with queue_enqueue, and its result comes back to you as a message; \
-start a session with session_spawn only for an agent the person may talk to.
+{wait}Keep your plan with plan_update, not your harness's todo list.{subagents}
 
 Keep a plan with plan_update for work you do yourself, even when you hand a \
-few tasks to queue workers one after another. When the work is costly to \
-coordinate (many agents, agents checking other agents' work, steps that wait \
-on other branches, on CI or on a clock), write it as a workflow instead: \
-read help_read workflows first, start from the closest recipe in help_read \
-workflow-recipes, then workflow_arm it. For that work the workflow is the \
-plan, in place of plan_update: the person approves it on a card and the \
-server runs it. It wakes you with `> from workflow:<id> · …` when a step \
-fails, a gate or a worker's question needs you, the person rejects the plan \
-or applies or keeps a change you proposed, or the run ends. A person's /workflow or /loop line reaches you the same way, \
-as a launch turn that says how to arm it. Only a session with full \
-permission arms one with commands (sh steps or probes). A workflow's own \
-nodes cannot arm one.
+few tasks to queue workers one after another.{workflows}
 
 Write a document meant for the person (a spec, a plan, a report, a guide) as \
 one self-contained HTML page, with its CSS and scripts inline, and send it \
@@ -320,44 +463,18 @@ an intermediate artifact they need to look at to discuss it (a mockup, a diagram
 a draft render). Do not send other files, such as source code you edited: they \
 see those as diffs.
 
-{browsers}Never write a password, token, API key or private key where it is kept: a \
-message, a commit, a log, a command's output. Generate it straight into a file \
-with `umask 077` and no echo, such as `openssl rand -base64 18 > /tmp/pw`, and \
-hand it to the person with secret_send: the server reads the file, you never \
-see what it holds, and the person can reveal it once before it expires. A \
-credential that already sits in a file goes the same way: send its path, do \
-not cat it. When you need a secret only the person has, do not ask them to \
-paste it in chat: call secret_request with a path that does not exist yet and \
-a prompt saying what you need, end your turn needs_you, and when you are woken \
-use the file by reference (`--password-file`, `curl -H @file`, \
-`VAR=$(< f) cmd`) without printing it.
+When the person says they will record something for you (a narration, a voice \
+take), tell them to press and hold the microphone in their message box: it \
+records audio, sliding up locks a long take, and you get the file's path and \
+duration, untranscribed, rather than them recording in another app.
 
-To get the person's attention while you keep working, call toast with one line: \
+{browsers}{secrets}To get the person's attention while you keep working, call toast with one line: \
 it shows in every open browser (as a desktop notification where the page is \
 hidden), names your session, and a click opens your tab. \
 Use it for something they should see now, such as a long run that failed. It \
 never replaces turn_end, and it returns how many browsers showed it.
 
-When the person has to choose among things that must be seen, tune values, \
-answer a question whose answer has structure, or play with an explanation, \
-show them a page instead of asking in prose: artifact_create writes a working \
-skeleton and returns its path; edit it with your Edit tool; artifact_send lands \
-it in the transcript after running it hidden in their browser (when they have \
-the transcript open; `started: null` when it landed untried, with `watching` \
-false when no browser had it on screen and true when one did not answer within \
-3 s), and refuses a \
-page that throws, so edit and send again until it lands. Lay every page out \
-for a desktop and a phone alike: the person sees it at both widths, on a phone \
-or through the Phone width button on its bar. Only then write your \
-message, which may refer to the card above it, and end the turn with \
-turn_end(needs_you) when the page asks something. The caption is the one line \
-they read before the card; a lesson whose text belongs beside its controls \
-carries it inside the page. Their answer reaches you as a user turn headed \
-`> from artifact:<id> · submit|<event>|error · …` with the JSON in a code \
-block; artifact_read gives you the page's state at any time without waking \
-anyone.
-
-Every turn that hands control back to the person ends the same way, in this \
+{artifacts}Every turn that hands control back to the person ends the same way, in this \
 order: first a call to turn_end, then your final message. No exceptions: a \
 turn where you only answered or asked a question, or where the person told you \
 not to run anything, still ends with turn_end, because turn_end runs nothing; \
@@ -370,7 +487,7 @@ one sentence saying what they must answer, what to read, or what got done. \
 `done` puts an archive button on the card, so a turn that finished a step \
 while work or waiting remains passes `review`, and a plan with unfinished \
 items cannot end in `done`: finish or trim the plan first, and neither can a \
-turn with a live monitor, queue task, background task or workflow, which will \
+turn with a live {waits}, which will \
 wake you again. Example, after \
 offering two options: turn_end(attention="needs_you", line="Ship the release \
 now or wait for the review?", replies=["ship it", "wait"]). The only turns \
@@ -395,3 +512,15 @@ and journal_search to ask what was done on a day or under a path.
 If you are a queue worker, your task is the first prompt you got, and your final \
 message is its result: make it the answer the enqueuer needs.\
 """
+
+# The primer with every part, its fields left to fill: what an unscoped
+# session reads.
+PRIMER = TEMPLATE.format(
+    handle="{handle}",
+    server="{server}",
+    tools="{tools}",
+    root="{root}",
+    browsers="{browsers}",
+    waits=", ".join(name for name, _ in WAITS[:-1]) + " or " + WAITS[-1][0],
+    **{name: text for name, (_, text) in PARTS.items()},
+).replace("{features}", ", ".join(name for name, _ in FEATURES))

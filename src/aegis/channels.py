@@ -34,9 +34,10 @@ Resolve = Callable[[str, int | None], Snapshot | None]
 
 
 class View(Protocol):
-    """What one subscriber may see (multi-user mode, app.py): whether it may
-    subscribe to a channel at all, and each snapshot and op as it may see
-    it, an op it may not see being None."""
+    """What one subscriber may see: whether it may subscribe to a channel at
+    all, and each snapshot and op as it may see it, an op it may not see being
+    None. Nothing sets one since the multi-user mode left (#958); the host
+    policy (#959) narrows a subscriber through it."""
 
     def allows(self, channel: str) -> bool: ...
     def snapshot(self, channel: str, data: Any) -> Any: ...

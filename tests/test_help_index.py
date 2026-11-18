@@ -228,9 +228,6 @@ FIRST = [
     ),
     ("what does this icon mean", "icons"),
     ("which icon shows the effort level", "icons#session-facts"),
-    ("let several people use one server as their own linux users", "multi-user"),
-    ("add a person to a multi-user server", "multi-user#add-a-person"),
-    ("members cannot see each other's sessions", "multi-user"),
     ("move my claude code skills and cron jobs into aegis", "setup"),
     ("merge duplicate memories and retire unused skills", "consolidate"),
     (
@@ -238,8 +235,8 @@ FIRST = [
         "config#suggested-changes-applied-from-a-card",
     ),
     ("ask the person for an API token", "secrets"),
-    ("claude keeps logging me out", "claude-sign-in"),
-    ("a claude session failed to sign in with a 401", "claude-sign-in"),
+    ("claude keeps logging me out", "sign-in"),
+    ("a claude session failed to sign in with a 401", "sign-in"),
     (
         "have a judge agent check before publishing",
         "workflow-recipes#let-a-judge-decide-before-going-on",
@@ -277,6 +274,12 @@ FIRST = [
     ("first time using aegis", "getting-started"),
     ("learn aegis from my first session to a queue of workers", "getting-started"),
     ("update a help page after changing a tool", "writing-help-pages"),
+    ("embed aegis in my web page", "embedding"),
+    (
+        "mount aegis under my own URL prefix",
+        "embedding#serving-under-a-prefix",
+    ),
+    ("draw my own card for a tool call", "embedding#renderers"),
     ("repeat a prompt every few minutes", "workflows#repeat-a-prompt-with-loop"),
     ("run a saved workflow", "workflows#run-a-saved-workflow"),
     ("make a schedule run a workflow", "schedules#fire-a-workflow"),
@@ -292,11 +295,9 @@ EITHER = [
         {"tutorial-layouts", "transcript"},
     ),
     ("try aegis on my phone step by step", {"tutorial-phone", "phone"}),
-    ("tutorial for running a server for other people", {"tutorial-server", "tokens"}),
     ("send work to another server", {"handoffs", "links"}),
     ("make the agent run on haiku", {"sessions", "config"}),
     ("reopen an archived session", {"sessions", "getting-started"}),
-    ("make a token for a colleague", {"commands", "tokens"}),
 ]
 
 

@@ -7,6 +7,7 @@
 
 import { who } from "./me.js";
 import { refreshBell } from "./ping.js";
+import { serverNow } from "./clock.js";
 
 const ID = "aegis.push.id";
 const SOURCES_KEY = "aegis.push.sources";
@@ -182,7 +183,7 @@ function h(tag, props = {}, ...kids) {
 }
 
 function ago(t) {
-  const s = Math.max(0, Date.now() / 1000 - t);
+  const s = Math.max(0, serverNow() - t);
   if (s < 60) return "just now";
   if (s < 3600) return `${Math.round(s / 60)} min ago`;
   if (s < 86400) return `${Math.round(s / 3600)} h ago`;

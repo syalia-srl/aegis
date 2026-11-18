@@ -51,7 +51,7 @@ import httpx
 from ..claude.control import Catalog
 from .. import launch
 from ..harness import Launch, session_env
-from .config import catalog_from, child_config, split_model
+from .config import catalog_from, child_config, isolated_env, split_model
 from .sweep import OWNER, owner_tag
 from .stream import DELTAS, STORED, TURN_ENDS, _dict
 
@@ -198,17 +198,20 @@ class OpenCodeProcess:
                     self.permission,
                     self._launch.read_dirs,
                     self._launch.knowledge_native,
+                    self._launch.extra_mcp,
+                    self._launch.harness_tools,
                 )
             ),
             "OPENCODE_SERVER_PASSWORD": password,
             OWNER: owner_tag(),
+            **(isolated_env(self._launch.home) if self._launch.home else {}),
         }
         self._launch.stderr_path.parent.mkdir(parents=True, exist_ok=True)
         self._proc = await launch.child(
             [self._bin, "serve", "--hostname", "127.0.0.1", "--port", "0"],
             cwd=self._launch.cwd, env=session_env(self._launch, env),
             stdin=launch.DEVNULL, stdout=launch.PIPE, stderr=launch.PIPE,
-            cgroup=self._launch.cgroup, oom=True, user=self._launch.user,
+            cgroup=self._launch.cgroup, oom=True,
             via=self._launch.via, die_with_parent=True,
         )  # fmt: skip
         try:
@@ -286,7 +289,7 @@ class OpenCodeProcess:
         proc = self._proc
         if proc is not None and proc.returncode is None:
             await launch.signal_process_async(
-                proc.pid, signal.SIGTERM, user=self._launch.user
+                proc.pid, signal.SIGTERM
             )  # direct signal before the fallback can yield
         else:
             proc = None
@@ -295,9 +298,7 @@ class OpenCodeProcess:
             try:
                 await asyncio.wait_for(proc.wait(), TERM_GRACE_S)
             except TimeoutError:
-                await launch.signal_process_async(
-                    proc.pid, signal.SIGKILL, user=self._launch.user
-                )
+                await launch.signal_process_async(proc.pid, signal.SIGKILL)
                 await proc.wait()
         if self._wait_task is not None:
             self._wait_task.cancel()
@@ -328,7 +329,7 @@ class OpenCodeProcess:
             self._note("the event stream closed")
             assert self._proc is not None
             await launch.signal_process_async(
-                self._proc.pid, signal.SIGTERM, user=self._launch.user
+                self._proc.pid, signal.SIGTERM
             )  # _wait reports the exit
 
     def _deliver(self, raw: str) -> None:

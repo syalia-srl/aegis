@@ -257,9 +257,12 @@ def test_a_cards_menu_follows_its_state_and_acts_on_that_card(server, page, brow
         "handoff",
         "rename",
         "autoclose",
+        "autohandoff",
+        "moveto-new",
         "archive",
     ]
-    assert page.locator(".cmenu .grp").count() == 3
+    # The move to a group (#1039) is a group of its own.
+    assert page.locator(".cmenu .grp").count() == 4
     page.click(".cmenu [data-id=interrupt]")
     page.wait_for_selector(card(busy) + ":not(.working)")
     assert page.locator(card(idle)).count() == 1
@@ -309,18 +312,6 @@ def test_a_session_tab_has_the_cards_menu(server, page):  # noqa: F811
     page.wait_for_selector("#s-handle input.rename")
     assert page.evaluate("location.hash") == f"#s={a}"
     assert page.errors == []
-
-
-def test_another_members_card_offers_only_opening(server, page, browser):  # noqa: F811
-    from .test_browser import member_page
-
-    page.goto(server.url)
-    page.wait_for_selector("#a2[data-view=fleet]")
-    a = spawn(page, "hello")
-    pg, base = member_page(browser, server)
-    pg.wait_for_selector(card(a))
-    pg.click(card(a), button="right")
-    assert item_ids(pg) == ["open", "newtab"]
 
 
 def meta(srv, key: str) -> dict:

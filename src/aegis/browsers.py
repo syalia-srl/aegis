@@ -182,13 +182,11 @@ class Browsers:
         publish: Callable[[str, list[dict]], None],
         subscribers: Callable[[str], int],
         deliver: Deliver,
-        multi_user: bool = False,
     ) -> None:
         self.dir = state_root / "browsers"
         self._publish = publish
         self._subscribers = subscribers
         self._deliver = deliver
-        self._multi_user = multi_user
         self.open: dict[str, Browser] = {}
         self._pw: Any = None
         self._background: set[asyncio.Task] = set()
@@ -200,8 +198,6 @@ class Browsers:
 
     def available(self) -> str | None:
         """None when browsers work here, else why not."""
-        if self._multi_user:
-            return "browsers do not run in multi-user mode yet"
         if not available():
             return "browsers need the extra: pip install 'aegis-harness[browser]'"
         return None

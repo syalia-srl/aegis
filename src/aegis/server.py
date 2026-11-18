@@ -2,11 +2,17 @@
 
 The Server builds what ``aegis serve`` builds (an App, then build_web) and runs
 uvicorn as a task on a socket it bound first, so the port is known before the
-App needs it in ``base_url``. Starlette's lifespan still calls ``boot()`` and
-``shutdown()``, in the CLI's order. It always listens, on loopback by default:
+App needs it in ``base_url``, and that already listens (``listening``).
+Starlette's lifespan still calls ``boot()`` and ``shutdown()``, in the CLI's
+order. It always listens, on loopback by default:
 harness children reach aegis's tools at ``<base_url>/mcp``, so a server without
 a listener would spawn agents with no aegis tools. It installs no signal
 handlers; the host program stops it by leaving the block.
+
+``prefix`` is where the host mounts ``srv.asgi``. Only the URLs aegis generates
+carry it, and the MCP routes stay on the loopback listener alone, so a host's
+public prefix never serves ``/mcp``; the listener's page is not browsable under
+a prefix, and the host serves it.
 
 One Server runs per process at a time: ``launch.configure`` sets a mode every
 child process reads, and two servers would share it (spec 2026-10-23).
@@ -15,14 +21,15 @@ child process reads, and two servers would share it (spec 2026-10-23).
 from __future__ import annotations
 
 import asyncio
+import copy
 import contextlib
 import socket
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .ops import Caller
+from .ops import Caller, Principal
 
 if TYPE_CHECKING:
     from .api.ops import Ops
@@ -30,9 +37,10 @@ if TYPE_CHECKING:
     from .api.schedules import Schedules
     from .api.sessions import Sessions
     from .api.workflows import Workflows
+    from .policy import HostPolicy, McpServer
     from .app import App
     from .roots import Roots
-    from .users import MultiUser
+    from starlette.applications import Starlette
 
 
 class StartError(Exception):
@@ -46,7 +54,22 @@ class StartError(Exception):
 @dataclass(frozen=True)
 class Prepared:
     roots: Roots
-    multi_user: MultiUser | None
+
+
+def _proc_status() -> str:
+    try:
+        return Path("/proc/self/status").read_text()
+    except OSError:
+        return ""
+
+
+def _ambient_caps(status: str) -> bool:
+    """Whether this process holds ambient capabilities, which every child
+    inherits: a systemd unit made for the multi-user mode grants them."""
+    for line in status.splitlines():
+        if line.startswith("CapAmb:"):
+            return int(line.split(":", 1)[1].strip() or "0", 16) != 0
+    return False
 
 
 def prepare(start: Path, root: Path | None = None) -> Prepared:
@@ -64,16 +87,25 @@ def prepare(start: Path, root: Path | None = None) -> Prepared:
                 f"  mv {roots.state_root} {roots.state_root.parent / 'legacy-state'}",
             ]
         )
+    from .tokens import OldStateError, refuse_old_state
+
+    try:
+        refuse_old_state(roots.state_root)
+    except OldStateError as e:
+        raise StartError([str(e)]) from None
+    if _ambient_caps(_proc_status()):
+        raise StartError(
+            [
+                "aegis holds ambient capabilities, which every agent would inherit: "
+                "its systemd unit was made for the multi-user mode, which aegis 3.0 "
+                "removed.",
+                "Write a new unit with `aegis service install` and restart the service.",
+            ]
+        )
     snap = Config(roots.config_root).current()
     if snap.multi_user_error:
         raise StartError([snap.multi_user_error])
-    if snap.multi_user is not None:
-        from .users import boot_problems
-
-        if problems := boot_problems(roots.state_root, snap.multi_user):
-            raise StartError(list(problems))
-        roots.state_root.mkdir(mode=0o700, parents=True, exist_ok=True)
-    return Prepared(roots, snap.multi_user)
+    return Prepared(roots)
 
 
 def allowed_hosts(host: str, port: int) -> set[str]:
@@ -82,6 +114,17 @@ def allowed_hosts(host: str, port: int) -> set[str]:
 
 
 _running: Server | None = None
+
+
+def listening(host: str, port: int) -> socket.socket:
+    """A socket that listens before uvicorn's lifespan runs ``boot()``. Boot
+    resumes the turns a restart cut, and each resumed harness connects to
+    ``/mcp`` at once: on a socket uvicorn binds only after the lifespan, that
+    connection is refused and Claude Code drops aegis's tools for the rest of
+    the process (#1024). Listening first, it waits in the backlog until boot
+    ends and uvicorn serves it."""
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET
+    return socket.create_server((host, port), family=family, backlog=2048)
 
 
 class Server:
@@ -99,6 +142,9 @@ class Server:
         codex: str = "codex",
         cursor: str = "cursor-agent",
         origins: Iterable[str] = (),
+        policy: HostPolicy | None = None,
+        mcp: Mapping[str, McpServer] | None = None,
+        prefix: str = "",
     ) -> None:
         # Required: nothing below the CLI reads the working directory (test_no_cwd).
         self._root = Path(root)
@@ -107,7 +153,11 @@ class Server:
         self._name = name
         self._bins = (claude, opencode, codex, cursor)
         self._origins = list(origins)
+        self._policy = policy
+        self._mcp = mcp
+        self._prefix = prefix
         self._app: App | None = None
+        self._asgi: Starlette | None = None
         self._uvicorn: Any = None
         self._task: asyncio.Task | None = None
         self._caller: Caller | None = None
@@ -147,12 +197,9 @@ class Server:
         from .web import build_web, load_or_create_token, ws_protocol
 
         p = prepare(self._root, self._root)
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
-            sock.bind((self._host, self._port))
+            sock = listening(self._host, self._port)
         except OSError as e:
-            sock.close()
             raise StartError(
                 [f"cannot listen on {self._host}:{self._port}: {e}"]
             ) from e
@@ -164,14 +211,29 @@ class Server:
             p.roots,
             base_url=self.base_url,
             server_name=self._name or socket.gethostname(),
-            multi_user=p.multi_user,
             claude_bin=self._bins[0],
             opencode_bin=self._bins[1],
             codex_bin=self._bins[2],
             cursor_bin=self._bins[3],
+            policy=self._policy,
+            mcp=self._mcp,
         )
         web = build_web(
-            self._app, self.token, allowed_hosts(self._host, port), self._origins
+            self._app,
+            self.token,
+            allowed_hosts(self._host, port),
+            self._origins,
+            self._prefix,
+        )
+        # The listener keeps /mcp for harness children; the app a host mounts
+        # on its public prefix does not (#993).
+        self._asgi = build_web(
+            self._app,
+            self.token,
+            allowed_hosts(self._host, port),
+            self._origins,
+            self._prefix,
+            mcp=False,
         )
         self._caller = Caller(
             "user", principal=self._app.principals.resolve(self.token)
@@ -205,6 +267,15 @@ class Server:
         return self._app
 
     @property
+    def asgi(self) -> Starlette:
+        """The web app a host mounts at its own prefix, or a proxy reaches
+        with the prefix stripped: ``app.mount("/aegis", srv.asgi)``. Its
+        routes are relative; only the URLs it generates carry ``prefix``."""
+        if self._asgi is None:
+            raise RuntimeError("the Server is not running: use it in `async with`")
+        return self._asgi
+
+    @property
     def sessions(self) -> Sessions:
         from .api.sessions import Sessions
 
@@ -233,6 +304,45 @@ class Server:
         from .api.ops import Ops
 
         return Ops(self)
+
+    def as_who(self, who: Any) -> Server:
+        """This server's API acting as ``who``, one of the host policy's
+        callers: ``srv.as_who(who).sessions.spawn()`` starts a session that
+        is theirs, and lists show what the policy lets them see. ``srv``
+        itself acts as the server's own caller."""
+        if self._caller is None:
+            raise RuntimeError("the Server is not running: use it in `async with`")
+        key = self.app._host_key(who)
+        self.app.whos[key] = who
+        acting = copy.copy(self)
+        acting._caller = Caller("user", principal=Principal(key, who))
+        return acting
+
+    def token_for(self, who: Any, ttl: float = 3600) -> str:
+        """A signed token for ``who``, valid ``ttl`` seconds and across a
+        restart, that the host's page passes to the client."""
+        return self.app.token_for(who, ttl)
+
+    def sign_in(self, response: Any, token: str, request: Any = None) -> Any:
+        """Set the session cookie on ``response`` for a token from
+        :meth:`token_for`, as the standalone page's ``?token=`` sign-in does.
+
+        A host that hands its page a token needs this too: a websocket hello
+        carries the token, but an HTTP fetch of a sent file or a page's frame
+        cannot, and a narrowing policy refuses it without the cookie. The
+        cookie is HttpOnly and SameSite=strict; pass the ``request`` so a
+        host behind https gets ``Secure`` (when omitted, any https origin the
+        server was built with does). A minted token expires after its ``ttl``,
+        so a host that mints a new one signs the browser in again with it."""
+        from .web import cookie_name, sign_in_cookie
+
+        return sign_in_cookie(
+            response,
+            request,
+            token,
+            cookie_name(self.app.roots.state_root),
+            self._origins,
+        )
 
     async def _call(self, name: str, params: dict | None = None) -> Any:
         """Run operation ``name`` as the server's admin person."""

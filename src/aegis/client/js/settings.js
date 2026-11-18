@@ -7,7 +7,7 @@
 // An agent is drawn as a card whose chips are the new-tab composer's, so a
 // preset looks like the session it starts.
 //
-// "This browser" comes first: the theme, which only this browser keeps
+// this.t("settings.thisBrowser") comes first: the theme, which only this browser keeps
 // (localStorage), so it is not part of the form and Save does not write it,
 // then this device as an app: installed or not, and the build the service
 // worker keeps for offline use (install.js, appworker.js).
@@ -17,6 +17,7 @@
 // operations and `config` channel, sent through the link.
 
 import { elapsed } from "./gauges.js";
+import { labelsFor } from "./labels.js";
 import { modelMeta, modelPrice } from "./models.js";
 import "./pick.js";
 import { who } from "./me.js";
@@ -26,6 +27,7 @@ import { onPushState, pushState, unsubscribePush } from "./pushpanel.js";
 import { markNeedsNet, offline } from "./net.js";
 import { ask } from "./dialog.js";
 import { MIN_SPEED } from "./speak.js";
+import { serverNow } from "./clock.js";
 
 const h = (tag, props = {}, ...kids) => {
   const el = Object.assign(document.createElement(tag), props);
@@ -53,8 +55,13 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 const readout = (l) => `start ${l.launch === "pace" ? "on pace" : `below ${l.launch}%`} · stop at ${l.stop}%`;
 
 export class Settings {
-  constructor(conn, box, { themes, setTheme, speaker = null }) {
+  constructor(conn, box, { themes, setTheme, speaker = null, lastSession = () => null, openSession = () => {}, t = labelsFor("en") }) {
     this.conn = conn;
+    this.t = t;
+    // The session the person last looked at, and how to go to it: Sign in
+    // opens its card there (signin.start).
+    this.lastSession = lastSession;
+    this.openSession = openSession;
     this.speaker = speaker; // app.js's Speaker: the Read aloud row chooses its voice (speak.js)
     this.box = box;
     this.themes = themes;
@@ -73,6 +80,9 @@ export class Settings {
     this.server = null; // the server whose config the form edits; null: this one
     this.home = ""; // this server's name
     this.links = []; // the `links` channel
+    this.chrome = { devices: [] }; // the `chrome` channel (chrome.py)
+    this.chromeCode = null; // the pairing code shown, from chrome.code
+    this.chromeError = "";
     this.homeWire = null;
     this.unsubFar = null;
     this.linkError = "";
@@ -91,11 +101,20 @@ export class Settings {
   }
 
   onLinks(links, home) {
+    // A way back (links.py, Backlink) is listed under "links here", not as a link.
+    links = links.filter((l) => !l.back);
     this.links = links;
     this.home = home;
     this.incoming = undefined; // a way back opened or went: read it again
     if (this.server && !links.some((l) => l.name === this.server)) this.pick(null);
     else if (this.box.isConnected && this.box.offsetParent !== null && !this.dirty) this.editing() ? this.later() : this.draw();
+  }
+
+  onChrome(snap) {
+    this.chrome = snap;
+    // A browser that paired used the code: stop showing it.
+    if (this.chromeCode && snap.devices.some((d) => d.paired_at >= this.chromeCode.at)) this.chromeCode = null;
+    if (this.box.isConnected && this.box.offsetParent !== null && !this.dirty) this.editing() ? this.later() : this.draw();
   }
 
   // Whether a field of the form has the focus. A chip's typed filter is not
@@ -220,28 +239,11 @@ export class Settings {
       return;
     }
     this.drawLater = false;
-    // A member changes nothing on the server: this browser, the doctor, a word.
-    if (who.role === "member")
-      return this.box.replaceChildren(
-        h(
-          "div",
-          { className: "set-page" },
-          h("p", { className: "notice", id: "set-member", textContent: "Server settings (agents, queues, parking, workflows, servers, tokens) are edited by an admin." }),
-          this.browser(),
-          this.knowledge(),
-          this.checks(),
-          this.modelsView(),
-        ),
-      );
-    if (this.tokenRows === undefined) {
-      this.tokenRows = null;
-      this.loadTokens();
-    }
     const w = this.wire;
     // The title first, then what this browser keeps, then the servers; the
     // loading and no-config pages keep the same width and order.
-    const page = (...kids) => h("div", { className: "set-page" }, ...kids, this.browser(), this.knowledge(), this.servers(), this.tokens());
-    if (!w || !this.doc) return this.box.replaceChildren(page(h("p", { className: "notice", textContent: "Loading…" })));
+    const page = (...kids) => h("div", { className: "set-page" }, ...kids, this.browser(), this.knowledge(), this.servers(), this.chromeView());
+    if (!w || !this.doc) return this.box.replaceChildren(page(h("p", { className: "notice", textContent: this.t("settings.loading") })));
     if (!w.exists && !this.dirty) return this.box.replaceChildren(page(this.empty()));
     const full = h(
       "div",
@@ -250,24 +252,28 @@ export class Settings {
       this.browser(),
       this.knowledge(),
       this.servers(),
+      this.chromeView(),
       this.pauseView(),
-      this.tokens(),
       w.error && h("p", { className: "set-alert err", id: "set-error", textContent: `The file on disk does not parse, so aegis is still using the last version that did. ${w.error}` }),
       this.stale && this.staleAlert(),
       this.checks(),
       this.agents(),
       this.modelsView(),
+      this.fieldSection("ranking"),
       this.queues(),
       this.fieldSection("generators"),
       this.terminals(),
+      this.mcp(),
       this.fieldSection("memory"),
       this.fieldSection("context"),
       this.fieldSection("nudges"),
       this.fieldSection("notices"),
       this.park(),
       this.untested(),
+      this.harnesses(),
       this.workflows(),
       this.usage(),
+      this.fieldSection("quota"),
       this.fieldSection("embeddings"),
       this.fieldSection("network"),
       this.fieldSection("host"),
@@ -280,7 +286,7 @@ export class Settings {
     return h(
       "p",
       { className: "set-alert", id: "set-stale", textContent: "The file changed on disk since you opened it. " },
-      button("Reload from disk", "set-reload", () => {
+      button(this.t("settings.reload"), "set-reload", () => {
         this.load(this.wire);
         this.findings = null;
         this.draw();
@@ -293,7 +299,7 @@ export class Settings {
   browser() {
     if (!this.browserNode) {
       this.themeChip = h("pick-chip", { id: "set-theme", name: "theme", className: "pick" });
-      this.themeChip.setAttribute("aria-label", "Theme");
+      this.themeChip.setAttribute("aria-label", this.t("settings.theme"));
       this.themeChip.options = this.themes;
       this.themeChip.addEventListener("change", () => this.setTheme(this.themeChip.value));
       this.speakNode = h("div", { id: "set-speak" });
@@ -309,8 +315,8 @@ export class Settings {
       this.browserNode = h(
         "section",
         { className: "set-browser", id: "set-browser" },
-        h("h3", { textContent: "This browser" }),
-        h("div", { className: "set-browser-row" }, h("span", { className: "set-browser-k", textContent: "Theme" }), this.themeChip),
+        h("h3", { textContent: this.t("settings.thisBrowser") }),
+        h("div", { className: "set-browser-row" }, h("span", { className: "set-browser-k", textContent: this.t("settings.theme") }), this.themeChip),
         this.speakNode,
         this.appNode,
         this.pushNode,
@@ -349,13 +355,13 @@ export class Settings {
           this.drawNative(!want, String(e?.message || e), true);
         }
       });
-      this.nativeRetry = button("Retry", "set-native-retry", () => this.loadNative());
+      this.nativeRetry = button(this.t("settings.retry"), "set-native-retry", () => this.loadNative());
       this.nativeRetry.hidden = true;
       this.knowledgeNode = h(
         "section",
         { className: "set-knowledge", id: "set-knowledge" },
-        h("h3", { textContent: "Skills and memory" }),
-        h("label", { className: "set-browser-row set-native" }, this.nativeBox, h("span", { textContent: "Only aegis's skills and memory in my sessions" })),
+        h("h3", { textContent: this.t("settings.skillsMemory") }),
+        h("label", { className: "set-browser-row set-native" }, this.nativeBox, h("span", { textContent: this.t("settings.onlyAegis") })),
         this.nativeNote,
         this.nativeRetry,
       );
@@ -394,9 +400,9 @@ export class Settings {
     if (!this.speaker) return;
     const s = this.speaker.settings;
     const chip = h("pick-chip", { id: "set-speak-engine", name: "speech", className: "pick" });
-    chip.setAttribute("aria-label", "Read aloud voice");
+    chip.setAttribute("aria-label", this.t("settings.voice"));
     chip.options = [
-      { value: "builtin", label: "Built-in" },
+      { value: "builtin", label: this.t("settings.builtin") },
       { value: "phonon", label: "Phonon" },
     ];
     chip.value = s.engine;
@@ -409,12 +415,12 @@ export class Settings {
     else note = "the browser's own voice, in every language it has; Phonon sounds better: a 65 MB download, English only";
     const kids = [h("span", { className: "set-app-v set-speak-note", textContent: note })];
     if (!busy && s.engine !== "phonon" && m && m.speed < MIN_SPEED) {
-      const b = button("Use it anyway", null, () => this.chooseSpeech("phonon", true));
+      const b = button(this.t("settings.useAnyway"), null, () => this.chooseSpeech("phonon", true));
       b.dataset.act = "speak-anyway";
       kids.push(b);
     }
     this.speakNode.replaceChildren(
-      h("div", { className: "set-browser-row" }, h("span", { className: "set-browser-k", textContent: "Read aloud" }), chip),
+      h("div", { className: "set-browser-row" }, h("span", { className: "set-browser-k", textContent: this.t("settings.readAloud") }), chip),
       h("div", { className: "set-speak-line" }, ...kids),
     );
   }
@@ -446,11 +452,11 @@ export class Settings {
     const row = (k, v) => h("div", { className: "set-browser-row" }, h("span", { className: "set-browser-k", textContent: k }), v);
     const { canPrompt, installed } = installState();
     let app;
-    if (installed) app = h("span", { className: "set-app-v", textContent: "installed" });
+    if (installed) app = h("span", { className: "set-app-v", textContent: this.t("settings.installed") });
     else if (canPrompt) {
-      app = button("Install", null, openInstallDialog);
+      app = button(this.t("settings.install"), null, openInstallDialog);
       app.dataset.act = "install";
-    } else app = h("span", { className: "set-app-v", textContent: "your browser's menu installs it" });
+    } else app = h("span", { className: "set-app-v", textContent: this.t("settings.installMenu") });
     const copy = h("span", { className: "set-app-v", textContent: navigator.serviceWorker ? "downloading" : "not kept: needs https" });
     const push = pushState();
     const note = !push.supported
@@ -458,7 +464,7 @@ export class Settings {
       : push.subscribed
         ? `push on · ${push.sources.length} sources · the bell chooses them`
         : "push off · the bell turns it on";
-    this.appNode.replaceChildren(row("App", app), row("Offline copy", copy), row("Notifications", h("span", { className: "set-app-v", textContent: note })));
+    this.appNode.replaceChildren(row(this.t("settings.app"), app), row(this.t("settings.offline"), copy), row(this.t("settings.notifications"), h("span", { className: "set-app-v", textContent: note })));
     deviceCopy().then((c) => {
       if (c?.complete) copy.textContent = `build ${c.build} · ${Math.round(c.bytes / 1024).toLocaleString()} KB · ready`;
     });
@@ -481,7 +487,7 @@ export class Settings {
     const here = pushState().id;
     const when = (t) => (t ? new Date(t * 1000).toLocaleString([], { dateStyle: "short", timeStyle: "short" }) : "never");
     const rows = (this.pushRows || []).map((r) => {
-      const remove = button("Remove", null, async () => {
+      const remove = button(this.t("settings.remove"), null, async () => {
         remove.disabled = true;
         if (r.id === here) await unsubscribePush().catch(() => {});
         else await this.conn.call("push.remove", { id: r.id }).catch(() => {});
@@ -491,14 +497,14 @@ export class Settings {
       const el = h(
         "div",
         { className: "set-push-row" },
-        h("span", { className: "set-push-dev" }, h("b", { textContent: r.device }), r.id === here && h("span", { className: "set-push-here", textContent: " · this device" })),
+        h("span", { className: "set-push-dev" }, h("b", { textContent: r.device }), r.id === here && h("span", { className: "set-push-here", textContent: this.t("settings.thisDevice") })),
         h("span", { className: "set-push-facts", textContent: facts.join(" · ") }),
         remove,
       );
       el.dataset.id = r.id;
       return el;
     });
-    this.pushNode.replaceChildren(...(rows.length ? [h("div", { className: "set-browser-k", textContent: "Push to" }), ...rows] : []));
+    this.pushNode.replaceChildren(...(rows.length ? [h("div", { className: "set-browser-k", textContent: this.t("settings.pushTo") }), ...rows] : []));
   }
 
   // What aegis starts from now on reaches the internet from this link (exit.py).
@@ -524,14 +530,13 @@ export class Settings {
       return b;
     };
     const since = (t) => new Date(t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    const trust = (l) => (!l.trusted || l.state !== "linked" ? "" : l.granted ? " · trusted, both ways" : l.trust_error ? ` · trust refused: ${l.trust_error}` : "");
     const state = (l) =>
       l.state === "linked"
-        ? `linked${l.rtt_ms != null ? ` · ${l.rtt_ms} ms` : ""}${trust(l)}`
+        ? `linked${l.rtt_ms != null ? ` · ${l.rtt_ms} ms` : ""}`
         : l.state === "offline"
           ? `offline since ${since(l.since)}`
           : `${l.state}${l.error ? `: ${l.error}` : ""}`;
-    // The servers that linked this one with trust (links.py, Backlink).
+    // The servers that linked this one (links.py, Backlink).
     if (this.incoming === undefined) {
       this.incoming = [];
       this.conn
@@ -543,7 +548,7 @@ export class Settings {
         .catch(() => {});
     }
     const rows = [
-      h("tr", {}, h("td", {}, h("b", { textContent: this.home })), h("td", { className: "m", textContent: "this server" }), h("td", {}, h("span", { className: "set-pill ok", textContent: "serving" })), h("td")),
+      h("tr", {}, h("td", {}, h("b", { textContent: this.home })), h("td", { className: "m", textContent: "this server" }), h("td", {}, h("span", { className: "set-pill ok", textContent: this.t("settings.serving") })), h("td")),
       ...this.links.map((l) =>
         h(
           "tr",
@@ -551,7 +556,7 @@ export class Settings {
           h("td", {}, h("b", { textContent: l.name })),
           h("td", { className: "m", textContent: l.url }),
           h("td", {}, h("span", { className: `set-pill ${l.state === "linked" ? "ok" : "bad"}`, textContent: state(l) })),
-          h("td", {}, !this.server && l.trusted && l.granted ? exitButton(l.name === this.doc?.exit_via ? "Stop exit" : "Exit here", null, () => this.exitVia(l.name === this.doc?.exit_via ? null : l.name)) : null, button("Remove", null, () => this.unlink(l.name))),
+          h("td", {}, !this.server && l.state === "linked" ? exitButton(l.name === this.doc?.exit_via ? "Stop exit" : "Exit here", null, () => this.exitVia(l.name === this.doc?.exit_via ? null : l.name)) : null, button(this.t("settings.remove"), null, () => this.unlink(l.name))),
         ),
       ),
       ...this.incoming.map((l) =>
@@ -560,30 +565,23 @@ export class Settings {
           { className: `set-link set-incoming link-${l.name}` },
           h("td", {}, h("b", { textContent: l.name })),
           h("td", { className: "m", textContent: "links here" }),
-          h("td", {}, h("span", { className: `set-pill ${l.state === "linked" ? "ok" : "bad"}`, textContent: l.exit_bytes ? `exit · ${Math.round(l.exit_bytes / 1e6)} MB` : l.state === "linked" ? "trusted · both ways" : l.state })),
+          h("td", {}, h("span", { className: `set-pill ${l.state === "linked" ? "ok" : "bad"}`, textContent: l.exit_bytes ? `exit · ${Math.round(l.exit_bytes / 1e6)} MB` : l.state === "linked" ? "linked" : l.state })),
           h("td"),
         ),
       ),
     ];
     const url = h("input", { className: "set-in", id: "set-link-url", placeholder: "https://dev.example", spellcheck: false });
     const token = h("input", { className: "set-in", id: "set-link-token", placeholder: "its token; kept in links.json, never in .aegis.yaml", type: "password" });
-    const trusted = h("input", { type: "checkbox", id: "set-link-trusted" });
-    const trustBox = h(
-      "label",
-      { className: "set-link-trust", title: "Only for a server you alone use. Its agents will be able to start sessions and read here." },
-      trusted,
-      h("span", { textContent: "Trusted (both ways)" }),
-    );
-    const add = button("Link", "set-link-add", () => this.link(url.value.trim(), token.value.trim(), trusted.checked), "btn primary");
+    const add = button(this.t("settings.link"), "set-link-add", () => this.link(url.value.trim(), token.value.trim()), "btn primary");
     const via = this.doc?.exit_via;
-    const exitLine = h("p", { className: "set-none", id: "set-exit", textContent: via ? `What aegis starts reaches the internet through ${via}.` : "What aegis starts uses this machine's route. A trusted link's row can make it the exit." });
+    const exitLine = h("p", { className: "set-none", id: "set-exit", textContent: via ? `What aegis starts reaches the internet through ${via}.` : "What aegis starts uses this machine's route. A linked server's row can make it the exit." });
     exitLine.dataset.key = "exit_via";
     const picker =
       this.links.length > 0 &&
       h(
         "div",
         { className: "set-srvpick", id: "set-srvpick" },
-        h("span", { textContent: "Editing the config of" }),
+        h("span", { textContent: this.t("settings.editingConfig") }),
         ...[null, ...this.links.map((l) => l.name)].map((name) => {
           const b = button(name ?? this.home, null, () => this.pick(name), `btn${name === this.server ? " primary" : ""}`);
           b.dataset.server = name ?? "";
@@ -593,14 +591,72 @@ export class Settings {
     return h(
       "section",
       { className: "set-servers", id: "set-servers" },
-      h("h3", { textContent: "Servers" }),
-      h("p", { className: "set-none", textContent: "A linked server's sessions show in the Fleet and the tab bar. Nothing on it can reach this machine, unless the link is trusted: only for a server you alone use." }),
+      h("h3", { textContent: this.t("settings.servers") }),
+      h("p", { className: "set-none", textContent: "A link joins two servers both ways: each one's sessions show in the other's Fleet and tab bar, and agents on each act on the other as at home." }),
       h("table", { className: "tbl" }, ...rows),
       exitLine,
-      h("div", { className: "set-linkrow" }, url, token, trustBox, add),
+      h("div", { className: "set-linkrow" }, url, token, add),
       this.linkError && h("p", { className: "err-text", id: "set-link-error", textContent: this.linkError }),
       picker,
     );
+  }
+
+  // The person's own Chrome (chrome.py): the extension to install, a code to
+  // pair it, and the browsers paired with this server.
+  chromeView() {
+    const ago = (t) => new Date(t * 1000).toLocaleString([], { dateStyle: "short", timeStyle: "short" });
+    const rows = this.chrome.devices.map((d) =>
+      h(
+        "tr",
+        { className: "set-chrome-device" },
+        h("td", {}, h("b", { textContent: d.name })),
+        h("td", { className: "m", textContent: d.version ? `extension ${d.version}` : "" }),
+        h("td", {}, h("span", { className: `set-pill ${d.connected ? "ok" : "bad"}`, textContent: d.connected ? "connected" : `last seen ${ago(d.last_seen)}` })),
+        h("td", {}, button(this.t("settings.unpair"), null, () => this.unpairChrome(d.id))),
+      ),
+    );
+    const code = this.chromeCode;
+    const until = code && new Date(code.expires_at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const get = button(this.t("settings.pairCode"), "set-chrome-code", () => this.pairChrome(), code ? "btn" : "btn primary");
+    const download = h("a", { className: "btn", id: "set-chrome-download", href: "chrome/extension.zip", download: "aegis-chrome.zip", textContent: this.t("settings.downloadExtension") });
+    return h(
+      "section",
+      { className: "set-chrome", id: "set-chrome" },
+      h("h3", { textContent: this.t("settings.chrome") }),
+      h("p", { className: "set-none", textContent: "Pair your own Chrome, Edge or Brave with this server. Agents will use only the tabs you share with them, with your sign-ins. To install: download the extension, unzip it, open chrome://extensions, turn on Developer mode, choose Load unpacked and pick the aegis-chrome folder." }),
+      rows.length ? h("table", { className: "tbl" }, ...rows) : h("p", { className: "set-none", id: "set-chrome-none", textContent: "No browser is paired." }),
+      code &&
+        h(
+          "p",
+          { className: "set-none set-chrome-pair", id: "set-chrome-pair" },
+          document.createTextNode("In the extension's popup, enter the server "),
+          h("code", { textContent: location.origin + location.pathname.replace(/[^/]*$/, "") }),
+          document.createTextNode(" and the code "),
+          h("b", { className: "set-chrome-codeval", textContent: code.code }),
+          document.createTextNode(`, valid until ${until}.`),
+        ),
+      h("div", { className: "set-linkrow" }, download, get),
+      this.chromeError && h("p", { className: "err-text", id: "set-chrome-error", textContent: this.chromeError }),
+    );
+  }
+
+  async pairChrome() {
+    this.chromeError = "";
+    try {
+      this.chromeCode = { ...(await this.conn.call("chrome.code")), at: Date.now() / 1000 - 1 };
+    } catch (e) {
+      this.chromeError = e.message;
+    }
+    this.draw();
+  }
+
+  async unpairChrome(id) {
+    try {
+      await this.conn.call("chrome.unpair", { id });
+    } catch (e) {
+      this.chromeError = e.message;
+    }
+    this.draw();
   }
 
   // Every session paused at once (pause.py): their processes end and nothing
@@ -628,12 +684,12 @@ export class Settings {
     };
     const on = this.paused;
     const since = on && new Date(on.at * 1000).toLocaleString([], { dateStyle: "short", timeStyle: "short" });
-    const b = on ? button("Resume all", "set-resume-all", () => act("server.resume"), "btn primary") : button("Pause all", "set-pause-all", () => act("server.pause"));
+    const b = on ? button(this.t("settings.resumeAll"), "set-resume-all", () => act("server.resume"), "btn primary") : button(this.t("settings.pauseAll"), "set-pause-all", () => act("server.pause"));
     b.disabled = !!this.pauseBusy;
     return h(
       "section",
       { className: "set-pause", id: "set-pause" },
-      h("h3", { textContent: "Sessions" }),
+      h("h3", { textContent: this.t("settings.sessions") }),
       h("p", {
         className: "set-none",
         textContent: on
@@ -644,364 +700,10 @@ export class Settings {
     );
   }
 
-  // Who may use this server (tokens.py) and how much of each pool its members
-  // may spend (quota_gate.py): the pools now, the default policy, a card per
-  // token, and a form to mint one, shown once. Policy edits go out with the
-  // save bar; adding and revoking act at once, because each shows or kills a
-  // secret. The chips are the server's verdict on the saved policies.
-  tokens() {
-    // In multi-user mode a token names the Linux user it runs as: the name
-    // until the field is edited (tokens.py).
-    const user =
-      this.multiUser &&
-      h("input", {
-        className: "set-in",
-        id: "set-token-user",
-        placeholder: "Linux user",
-        spellcheck: false,
-        value: this.tokenUser ?? this.tokenName ?? "",
-        oninput: (e) => (this.tokenUser = e.target.value),
-      });
-    const name = h("input", {
-      className: "set-in",
-      id: "set-token-name",
-      placeholder: "name, e.g. ben or laptop",
-      spellcheck: false,
-      value: this.tokenName || "",
-      oninput: (e) => {
-        this.tokenName = e.target.value;
-        if (user && this.tokenUser == null) user.value = e.target.value;
-      },
-    });
-    const role = select("role", ["member", "admin"], this.tokenRole || "member");
-    role.id = "set-token-role";
-    role.addEventListener("change", () => (this.tokenRole = role.value));
-    const add = button("Add token", "set-token-add", () => this.addToken(name.value.trim(), role.value, user ? user.value.trim() : null), "btn primary");
-    const once = this.tokenOnce;
-    const section = h(
-      "section",
-      { className: "set-tokens", id: "set-tokens" },
-      h("h3", { textContent: "Tokens" }),
-      h("p", { className: "set-none", textContent: "Who may use this server, and how much of each pool a member may spend. A member reads every session and changes only its own; an admin changes anything and is never gated." }),
-      this.pools && this.poolNow(),
-      this.pools && h("div", { className: "set-agents", id: "set-tokcards" }, this.tokenCard(null), ...(this.tokenRows || []).map((t) => this.tokenCard(t))),
-      h("div", { className: "set-linkrow" }, name, user, role, add),
-      this.tokenError && h("p", { className: "err-text", id: "set-token-error", textContent: this.tokenError }),
-      once &&
-        h(
-          "div",
-          { className: "notice set-once", id: "set-token-once" },
-          h("span", { textContent: once.text }),
-          h("code", { textContent: once.token }),
-          button("Copy", null, () => navigator.clipboard?.writeText(once.token)),
-        ),
-    );
-    this.handles(section);
-    return section;
-  }
-
-  // Each pool's gauges now, so lines are set against the real readings.
-  poolNow() {
-    const now = Date.now() / 1000;
-    return h(
-      "div",
-      { className: "poolnow", id: "set-poolnow" },
-      ...this.pools.map((pool) => {
-        const p = this.reading(pool.name);
-        const rows = !pool.windows.length
-          ? [h("div", { className: "kv dim" }, h("span", { textContent: "no gauge" }))]
-          : !p
-            ? [h("div", { className: "kv dim" }, h("span", { textContent: "no reading" }))]
-            : p.windows.flatMap((w) => [
-                h("div", { className: "kv" }, h("span", { textContent: w.label }), h("span", { textContent: `${Math.round(w.percent)}%` })),
-                this.fill("bar", w.percent, elapsed(w, now)),
-              ]);
-        return h("div", { className: `pool-${pool.name}` }, h("h5", { textContent: pool.label }), ...rows);
-      }),
-    );
-  }
-
-  reading(pool) {
-    return (this.quota?.providers || []).find((p) => p.name === pool && p.state !== "failed") || null;
-  }
-
-  // A gauge's track: the fill, and the share of the window gone.
-  fill(cls, pct, gone) {
-    const b = h("div", { className: cls }, h("i", { style: `width:${Math.min(100, Math.max(0, pct))}%` }));
-    if (gone != null) b.append(h("span", { className: "tick", style: `left:${gone * 100}%` }));
-    return b;
-  }
-
-  // One card: the default policy (t null), an admin, or a member with its own
-  // policy or the default's.
-  tokenCard(t) {
-    const key = t ? t.name : "*";
-    const card = h("div", { className: t ? `set-agent set-tok tok-${t.name}` : "set-agent set-tok is-default", id: t ? "" : "set-tok-default" });
-    const chips = (gates) =>
-      this.pools.map((pool) => {
-        const st = gates?.[pool.name] || "closed";
-        return h("span", { className: `set-pill ${st === "open" ? "ok" : st === "stopped" ? "bad" : "warn"}`, textContent: `${pool.label} ${st}` });
-      });
-    const used = (t) => (t.used_at ? `used ${new Date(t.used_at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "not used since start");
-    if (!t) {
-      card.append(
-        h("span", { className: "set-name", textContent: "default" }),
-        h("div", { className: "picks" }, h("span", { className: "set-none", textContent: "every member without a policy of its own" }), ...chips(this.defaultGates)),
-        this.editor(key),
-      );
-      return card;
-    }
-    const member = t.role !== "admin";
-    const own = member && this.pol[key] != null;
-    const policyLink = member && button(own ? "Reset to default" : "Customize", null, () => this.customize(key, !own), "link");
-    const revoke = button(this.armed === t.name ? "Click again to confirm" : t.owner ? "Revoke and regenerate" : "Revoke", null, () => this.revoke(t.name), "link danger");
-    card.append(
-      h("span", { className: "set-name", textContent: t.name }),
-      h(
-        "div",
-        { className: "picks" },
-        h("span", { className: "set-pill", textContent: t.role }),
-        this.multiUser && h("span", { className: "set-pill set-uid", textContent: t.linux_user ? `uid ${t.linux_user}` : "server's user" }),
-        ...(member ? chips(t.gates) : [h("span", { className: "set-pill", textContent: "never gated" })]),
-        h("span", { className: "set-none set-used", textContent: used(t) }),
-        h("span", { className: "set-gap" }),
-        policyLink,
-        revoke,
-      ),
-    );
-    if (member) card.append(own ? this.editor(key) : h("div", { className: "pol" }, h("span", { className: "set-none", textContent: "uses the default" })));
-    return card;
-  }
-
-  // A policy per pool: closed, open without lines, or lines on its windows.
-  editor(key) {
-    const pol = this.pol[key];
-    return h(
-      "div",
-      { className: "pol" },
-      ...this.pools.map((pool) => {
-        const pp = pol[pool.name] || { mode: "closed" };
-        const modes = pool.windows.length ? ["closed", "open", "lines"] : ["closed", "open"];
-        const mode = select("mode", modes, pp.mode, (m) => (m === "open" ? "open, no lines" : m));
-        mode.dataset.pool = pool.name;
-        mode.setAttribute("aria-label", `${key === "*" ? "default" : key} ${pool.label} mode`);
-        mode.addEventListener("change", () => {
-          const cur = pol[pool.name] || {};
-          if (mode.value === "lines") {
-            const lines = cur.lines && Object.keys(cur.lines).length ? cur.lines : { [pool.windows[0].kind]: { launch: 50, stop: 90 } };
-            pol[pool.name] = { mode: "lines", lines };
-          } else pol[pool.name] = { mode: mode.value };
-          this.touchPolicy(true);
-        });
-        const note =
-          pp.mode !== "lines" &&
-          h("span", { className: "wv", textContent: (pp.mode === "open" ? "may start at any reading" : "may not start harnesses here") + (pool.windows.length ? "" : "; no gauge, so no lines") });
-        const rows = pp.mode === "lines" ? pool.windows.map((w) => this.winrow(key, pool, w, pp)) : [];
-        return h("div", { className: `poolrow pool-${pool.name}` }, h("span", { className: "pl", textContent: pool.label }), h("div", {}, h("div", { className: "modeline" }, mode, note), ...rows));
-      }),
-    );
-  }
-
-  winrow(key, pool, w, pp) {
-    pp.lines ||= {}; // a hand-edited "lines" with none: every window unused
-    const l = pp.lines[w.kind];
-    const rw = this.reading(pool.name)?.windows.find((x) => x.kind === w.kind);
-    const pct = rw ? rw.percent : 0;
-    const gone = rw ? elapsed(rw, Date.now() / 1000) : null;
-    const check = (act, checked, disabled, onchange) => h("input", { type: "checkbox", checked, disabled, onchange, className: `set-${act}` });
-    const use = check("use", !!l, false, (e) => {
-      if (e.target.checked) pp.lines[w.kind] = { launch: 50, stop: 90 };
-      else delete pp.lines[w.kind];
-      this.touchPolicy(true);
-    });
-    const pace =
-      w.pace &&
-      h(
-        "label",
-        {},
-        check("pace", l?.launch === "pace", !l, (e) => {
-          l.launch = e.target.checked ? "pace" : Math.min(50, l.stop - 1);
-          this.touchPolicy(true);
-        }),
-        "pace",
-      );
-    const name = h("div", { className: "wl" }, h("label", {}, use, w.label), pace);
-    const track = this.fill("track", pct, null);
-    Object.assign(track.dataset, { key, pool: pool.name, win: w.kind });
-    if (l) {
-      const handle = (which, at) => {
-        const b = h("button", { type: "button", className: `h ${which === "launch" ? "l" : "s"}`, style: `left:${at}%` }, h("span", { textContent: at }));
-        b.dataset.h = which;
-        b.setAttribute("aria-label", `${w.label} ${which} line`);
-        return b;
-      };
-      const lpos = l.launch === "pace" ? (gone ?? 0) * 100 : l.launch;
-      track.append(h("span", { className: "zone closed", style: `left:${lpos}%;width:${Math.max(0, l.stop - lpos)}%` }), h("span", { className: "zone stop", style: `left:${l.stop}%;right:0` }));
-      track.append(l.launch === "pace" ? h("span", { className: "pace", style: `left:${lpos}%` }, h("span", { textContent: "pace" })) : handle("launch", l.launch), handle("stop", l.stop));
-    }
-    return h("div", { className: `winrow win-${w.kind}${l ? "" : " off"}` }, name, track, h("span", { className: "wv" }, h("span", { className: "rd", textContent: l ? readout(l) : "not used" })));
-  }
-
-  // Drag a handle, or move it with the arrows (Shift: five points). The launch
-  // line never reaches the stop line. Moves the handle in place, so a drag
-  // and the focus survive; the save bar says the page is dirty.
-  handles(root) {
-    let drag = null;
-    const at = (b) => ({ ...b.parentElement.dataset, which: b.dataset.h, track: b.parentElement });
-    root.addEventListener("pointerdown", (e) => {
-      const b = e.target.closest(".h");
-      if (!b) return;
-      drag = at(b);
-      b.setPointerCapture(e.pointerId);
-      e.preventDefault();
-    });
-    root.addEventListener("pointermove", (e) => {
-      if (!drag) return;
-      const r = drag.track.getBoundingClientRect();
-      this.setLine(drag, Math.round(((e.clientX - r.left) / r.width) * 100));
-    });
-    const end = () => {
-      if (!drag) return;
-      drag = null;
-      this.touchPolicy(false);
-    };
-    root.addEventListener("pointerup", end);
-    root.addEventListener("pointercancel", end);
-    root.addEventListener("keydown", (e) => {
-      const b = e.target.closest(".h");
-      if (!b || !["ArrowLeft", "ArrowRight"].includes(e.key)) return;
-      e.preventDefault();
-      const d = at(b);
-      const l = this.pol[d.key][d.pool].lines[d.win];
-      this.setLine(d, l[d.which] + (e.key === "ArrowRight" ? 1 : -1) * (e.shiftKey ? 5 : 1));
-      this.touchPolicy(false);
-    });
-  }
-
-  setLine(d, v) {
-    const l = this.pol[d.key][d.pool].lines[d.win];
-    if (d.which === "launch") l.launch = Math.max(0, Math.min(v, l.stop - 1));
-    else l.stop = Math.min(100, Math.max(v, l.launch === "pace" ? 1 : l.launch + 1));
-    const tr = d.track;
-    const pace = tr.querySelector(".pace");
-    const lpos = l.launch === "pace" ? parseFloat(pace?.style.left) || 0 : l.launch;
-    for (const [sel, val] of [[".h.l", l.launch], [".h.s", l.stop]]) {
-      const b = tr.querySelector(sel);
-      if (!b) continue;
-      b.style.left = `${val}%`;
-      b.firstChild.textContent = val;
-    }
-    const zc = tr.querySelector(".zone.closed");
-    zc.style.left = `${lpos}%`;
-    zc.style.width = `${Math.max(0, l.stop - lpos)}%`;
-    tr.querySelector(".zone.stop").style.left = `${l.stop}%`;
-    tr.closest(".winrow").querySelector(".rd").textContent = readout(l);
-  }
-
-  // Customize copies the default into the token; Reset drops its own.
-  customize(key, on) {
-    this.pol[key] = on ? structuredClone(this.pol["*"]) : null;
-    this.touchPolicy(true);
-  }
-
-  touchPolicy(redraw) {
-    this.status = "";
-    if (redraw) this.drawTokens();
-    this.drawBar();
-  }
-
-  // The policies whose edits are not saved: "*" is the default.
-  policyChanges() {
-    return Object.keys(this.pol || {}).filter((k) => JSON.stringify(this.pol[k]) !== this.polSaved[k]);
-  }
-
-  // Each change on its own, so one refused (a token another admin revoked)
-  // keeps no other from saving; then the list as the server holds it.
-  async savePolicies() {
-    const failed = [];
-    for (const name of this.policyChanges()) {
-      try {
-        await this.conn.call("token.policy", { name, policy: this.pol[name] });
-      } catch (e) {
-        failed.push(`${name === "*" ? "default" : name}: ${e.message}`);
-      }
-    }
-    await this.loadTokens();
-    if (failed.length) throw new Error(`Not saved: ${failed.join("; ")}`);
-  }
-
-  // The live quota, for the pools strip: redrawn alone, never under a drag.
-  onQuota(q) {
-    this.quota = q;
-    const old = this.box.querySelector("#set-poolnow");
-    if (old && this.pools) old.replaceWith(this.poolNow());
-  }
-
-  async loadTokens() {
-    try {
-      const r = await this.conn.call("token.list");
-      this.tokenRows = r.tokens;
-      this.multiUser = !!r.multi_user;
-      this.pools = r.pools;
-      this.defaultGates = r.default_gates;
-      // What the server holds now; an unsaved edit survives an add or a revoke.
-      const fresh = { "*": r.default_policy ?? {} };
-      for (const t of r.tokens) if (t.role !== "admin") fresh[t.name] = t.policy;
-      const keep = new Set(this.policyChanges());
-      this.polSaved = Object.fromEntries(Object.entries(fresh).map(([k, v]) => [k, JSON.stringify(v)]));
-      this.pol = Object.fromEntries(Object.entries(fresh).map(([k, v]) => [k, keep.has(k) ? this.pol[k] : structuredClone(v)]));
-    } catch (e) {
-      this.tokenError = e.message;
-    }
-    this.drawTokens();
-    this.drawBar();
-  }
-
-  // Only the Tokens section: a whole-page draw would drop what is being typed
-  // in the agents and queues (draw() waits for that; this need not).
-  drawTokens() {
-    const old = this.box.querySelector("#set-tokens");
-    if (old) old.replaceWith(this.tokens());
-  }
-
-  async addToken(name, role, linuxUser) {
-    this.tokenError = "";
-    try {
-      const r = await this.conn.call("token.add", { name, role, ...(linuxUser ? { linux_user: linuxUser } : {}) });
-      this.tokenOnce = { text: `The token for ${r.name}, shown once: `, token: r.token };
-      this.tokenName = "";
-      this.tokenUser = null;
-    } catch (e) {
-      this.tokenError = e.message;
-    }
-    await this.loadTokens();
-  }
-
-  // The first click arms, the second revokes. Revoking the admin's own token
-  // signs this browser in with the new one before the socket is dropped.
-  async revoke(name) {
-    if (this.armed !== name) {
-      this.armed = name;
-      return this.drawTokens();
-    }
-    this.armed = null;
-    this.tokenError = "";
-    try {
-      const r = await this.conn.call("token.revoke", { name });
-      if (r.token) {
-        await fetch("/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ token: r.token }) });
-        this.tokenOnce = { text: "The new admin token, shown once: ", token: r.token };
-      }
-    } catch (e) {
-      this.tokenError = e.message;
-    }
-    await this.loadTokens();
-  }
-
-  async link(url, token, trusted) {
+  async link(url, token) {
     this.linkError = "";
     try {
-      await this.conn.call("link.add", { url, token, ...(trusted ? { trusted } : {}) });
+      await this.conn.call("link.add", { url, token });
     } catch (e) {
       this.linkError = e.message;
     }
@@ -1035,7 +737,7 @@ export class Settings {
     return h(
       "header",
       { className: "set-head" },
-      h("div", {}, h("h2", { textContent: "Settings" }), h("code", { id: "set-path", textContent: this.wire.path })),
+      h("div", {}, h("h2", { textContent: this.t("settings.title") }), h("code", { id: "set-path", textContent: this.wire.path })),
       harnesses,
     );
   }
@@ -1085,7 +787,7 @@ export class Settings {
           "div",
           { className: "set-queue-line set-accepted" },
           h("span", { className: "set-name", textContent: `${harness} ${v}` }),
-          button("Remove", null, () => {
+          button(this.t("settings.remove"), null, () => {
             hv.accepted[harness] = hv.accepted[harness].filter((x) => x !== v);
             if (!hv.accepted[harness].length) delete hv.accepted[harness];
             this.touch();
@@ -1096,20 +798,69 @@ export class Settings {
     );
     const box = h("div", { className: "set-queue" }, ...rows);
     box.dataset.row = "harness_versions";
-    const head = h("div", { className: "set-section-head" }, h("h3", { textContent: "Untested versions" }));
+    const head = h("div", { className: "set-section-head" }, h("h3", { textContent: this.t("settings.untested") }));
     const note = h("p", { className: "set-none", textContent: "A harness version outside the ones this aegis release was tested with: ask asks the person first, warn starts it with a notice in the transcript, off says nothing." });
     const list = accepted.length
-      ? h("div", { className: "set-queues", id: "set-accepted" }, h("p", { className: "set-none", textContent: "Accepted for good:" }), ...accepted)
-      : h("p", { className: "set-none", id: "set-accepted", textContent: "No version accepted for good." });
+      ? h("div", { className: "set-queues", id: "set-accepted" }, h("p", { className: "set-none", textContent: this.t("settings.accepted") }), ...accepted)
+      : h("p", { className: "set-none", id: "set-accepted", textContent: this.t("settings.noAccepted") });
     list.dataset.key = "harness_versions.accepted";
     return h("section", { id: "set-untested" }, head, note, h("div", { className: "set-queues" }, box), list);
+  }
+
+  // Each harness aegis can sign in (signin/status.py): installed, version,
+  // and the sign-in aegis keeps. Sign in opens the card in the last session.
+  harnesses() {
+    const box = h("section", { id: "set-harnesses" }, h("div", { className: "set-section-head" }, h("h3", { textContent: this.t("settings.harnesses") })));
+    const list = h("div", { className: "set-queues" }, h("p", { className: "set-none", textContent: this.t("settings.reading") }));
+    const note = h("p", { className: "set-none" });
+    box.append(list, note);
+    const server = this.server;
+    this.call("harness.status")
+      .then((rows) => {
+        if (server !== this.server) return;
+        list.replaceChildren(...rows.map((r) => this.harnessRow(r, note)));
+      })
+      .catch((e) => list.replaceChildren(h("p", { className: "set-none", textContent: e.message })));
+    return box;
+  }
+
+  harnessRow(r, note) {
+    const name = { "claude-code": "Claude Code", opencode: "OpenCode" }[r.harness] || r.harness;
+    const day = (t) => new Date(t * 1000).toISOString().slice(0, 10);
+    const state = !r.installed
+      ? "not installed"
+      : r.problem
+        ? r.problem
+        : r.signed_in
+          ? `token until ${day(r.expires)}`
+          : "its own sign-in";
+    const words = h("span", { className: "set-name", textContent: `${name}${r.version ? ` ${r.version.replace(/\s*\(.*\)$/, "")}` : ""} · ${state}` });
+    const line = h("div", { className: "set-queue-line set-harness" }, words);
+    line.dataset.harness = r.harness;
+    if (!r.installed) return line;
+    line.append(
+      button(r.signed_in ? "Sign in again" : "Sign in", null, async () => {
+        const log_id = this.lastSession();
+        if (!log_id) {
+          note.textContent = "Open a session first: the sign-in card opens in its transcript.";
+          return;
+        }
+        try {
+          await this.call("signin.start", { log_id, harness: r.harness });
+          this.openSession(log_id);
+        } catch (e) {
+          note.textContent = e.message;
+        }
+      }),
+    );
+    return line;
   }
 
   // The doctor: one line until it finds something, the full list on demand.
   checks() {
     const f = this.findings;
     const line = h("div", { className: "set-summary", id: "set-summary" });
-    if (f === null) line.append(h("span", { textContent: "Not checked since you opened this page." }));
+    if (f === null) line.append(h("span", { textContent: this.t("settings.notChecked") }));
     else {
       const errors = f.filter((x) => x.level === "error").length;
       const warns = f.filter((x) => x.level === "warn").length;
@@ -1123,7 +874,7 @@ export class Settings {
           }, "link"),
         );
     }
-    line.append(button("Run doctor", "set-doctor", () => this.runDoctor(), "btn"));
+    line.append(button(this.t("settings.runDoctor"), "set-doctor", () => this.runDoctor(), "btn"));
     // Every check when asked; otherwise mark() lists the problems that have
     // no card or row to sit on.
     const list = h("ul", { id: "set-findings", className: "set-findings" });
@@ -1188,7 +939,7 @@ export class Settings {
       const [x, y] = [key(p), key(q)];
       return y[0] - x[0] || y[1] - x[1] || y[2] - x[2];
     };
-    const sort = button("Sort by ranking", null, () => set([...list].sort(order)), "link set-casc-sort");
+    const sort = button(this.t("settings.sortRanking"), null, () => set([...list].sort(order)), "link set-casc-sort");
     const warn = h("p", { className: "set-casc-warn" });
     const attr = h("p", { className: "set-attr" });
     const set = (next, focus) => {
@@ -1208,7 +959,7 @@ export class Settings {
     };
     box.draw = () => {
       const score = (x) => (x?.intelligence == null ? "unranked" : x.intelligence.toFixed(1));
-      const now = Date.now() / 1000;
+      const now = serverNow();
       rows.replaceChildren(
         ...list.map((m, i) => {
           const x = info(m);
@@ -1226,7 +977,7 @@ export class Settings {
           };
           const up = act("up", "↑", "Move up", swap(i - 1));
           const down = act("down", "↓", "Move down", swap(i + 1));
-          const rm = act("rm", "×", "Remove", () => list.filter((_, k) => k !== i));
+          const rm = act("rm", "×", this.t("settings.remove"), () => list.filter((_, k) => k !== i));
           up.disabled = i === 0;
           down.disabled = i === list.length - 1;
           rm.disabled = list.length === 1; // an agent runs at least one model
@@ -1267,11 +1018,11 @@ export class Settings {
   // Every model the installed harnesses run, the ones agents use first:
   // filtered by harness and price, sorted by any column (models.list).
   modelsView() {
-    const head = h("div", { className: "set-section-head" }, h("h3", { textContent: "Models" }));
+    const head = h("div", { className: "set-section-head" }, h("h3", { textContent: this.t("settings.models") }));
     const box = h("section", { id: "set-models" }, head);
     const m = this.models;
     if (!m || m.error) {
-      box.append(h("p", { className: "set-none", textContent: m ? m.error : "Loading…" }));
+      box.append(h("p", { className: "set-none", textContent: m ? m.error : this.t("settings.loading") }));
       return box;
     }
     const view = this.modelView;
@@ -1336,14 +1087,14 @@ export class Settings {
       r.dataset.model = x.value;
       return r;
     };
-    const body = list.length ? list.map(row) : [h("p", { className: "set-none", textContent: "No model matches." })];
+    const body = list.length ? list.map(row) : [h("p", { className: "set-none", textContent: this.t("settings.noModel") })];
     return h("div", { className: "set-mrows" }, hd, ...body);
   }
 
   agents() {
     const v = this.wire.vocab;
-    const head = h("div", { className: "set-section-head" }, h("h3", { textContent: "Agents" }), button("Add agent", "set-add-agent", () => {
-      this.doc.agents.push({ name: "", harness: v.harnesses[0], model: "", models: [], effort: "", permission: "", priming: null, keep_harness_tools: [] });
+    const head = h("div", { className: "set-section-head" }, h("h3", { textContent: this.t("settings.agents") }), button(this.t("settings.addAgent"), "set-add-agent", () => {
+      this.doc.agents.push({ name: "", harness: v.harnesses[0], model: "", models: [], effort: "", permission: "", priming: null, keep_harness_tools: [], mcp: [] });
       this.touch();
       this.draw();
       this.box.querySelector(".set-agent:last-of-type input[name=name]")?.focus();
@@ -1414,7 +1165,7 @@ export class Settings {
     }, isDefault ? "set-default on" : "set-default");
     star.disabled = isDefault || !a.name;
     star.dataset.key = "default_agent";
-    const del = button("Remove", null, () => {
+    const del = button(this.t("settings.remove"), null, () => {
       this.doc.agents.splice(i, 1);
       if (this.doc.default_agent === a.name) this.doc.default_agent = null;
       if (this.doc.max_agents) delete this.doc.max_agents[a.name];
@@ -1422,7 +1173,7 @@ export class Settings {
       this.draw();
     }, "link danger");
     const fold = h("details", { className: "set-priming", open: !!a.priming }, h("summary", { textContent: a.priming ? "Priming" : "Add a priming" }), priming);
-    card.append(name, h("div", { className: "picks" }, harness, effort, permission), casc, h("div", { className: "set-card-foot" }, fold, this.keepFold(a), this.exitFold(a), star, del));
+    card.append(name, h("div", { className: "picks" }, harness, effort, permission), casc, h("div", { className: "set-card-foot" }, fold, this.keepFold(a), this.mcpFold(a), this.scopeFold(a), this.quotaFold(a.quota, "agents.*.quota"), this.budgetFold(a), this.productFold(a), this.exitFold(a), star, del));
     if (isDefault) card.classList.add("is-default");
     return card;
   }
@@ -1450,6 +1201,111 @@ export class Settings {
     });
     const fold = h("details", { className: "set-priming set-keep", open: keep.length > 0 }, summary, h("p", { className: "set-none", textContent: "Claude Code sessions start without these, since aegis has its own; an agent whose work needs one keeps it." }), h("div", { className: "set-tools" }, ...toggles));
     fold.dataset.key = "agents.*.keep_harness_tools";
+    return fold;
+  }
+
+  // The MCP servers this agent attaches (#960): one toggle per server the
+  // mcp: map defines, and any the agent names that it does not.
+  mcpFold(a) {
+    a.mcp ||= [];
+    const on = a.mcp;
+    const names = [...new Set([...(this.doc.mcp || []).map((m) => m.name).filter(Boolean), ...on])];
+    if (!names.length) return null;
+    const summary = h("summary");
+    const say = () => (summary.textContent = on.length ? `MCP ${on.join(", ")}` : "Attach an MCP server");
+    say();
+    const toggles = names.map((n) => {
+      const b = button(n, null, () => {
+        const i = on.indexOf(n);
+        if (i < 0) on.push(n);
+        else on.splice(i, 1);
+        b.setAttribute("aria-pressed", String(i < 0));
+        say();
+        this.touch();
+      }, "set-tool");
+      b.setAttribute("aria-pressed", String(on.includes(n)));
+      return b;
+    });
+    const fold = h("details", { className: "set-priming set-mcp", open: on.length > 0 }, summary, h("p", { className: "set-none", textContent: "Its sessions get these servers beside aegis's own, and call their tools without asking." }), h("div", { className: "set-tools" }, ...toggles));
+    fold.dataset.key = "agents.*.mcp";
+    return fold;
+  }
+
+  // The agent's tools: block (scopes.py, #1066), shown as the file has it; a
+  // save writes it back unchanged. It is edited in .aegis.yaml.
+  scopeFold(a) {
+    const t = a.tools || {};
+    const keys = ["allow", "deny", "queues", "agents"].filter((k) => k in t);
+    if (!keys.length) return null;
+    const lines = keys.map((k) => h("div", { className: "kv" }, h("span", { textContent: k }), h("span", { textContent: t[k].join(", ") || "none" })));
+    const fold = h("details", { className: "set-priming set-scope" }, h("summary", { textContent: "Scope" }), ...lines, h("p", { className: "set-none", textContent: "Its sessions use only these aegis tools, queues and agents. Edit tools: in .aegis.yaml; help: config, Scope an agent." }));
+    fold.dataset.key = "agents.*.tools";
+    return fold;
+  }
+
+  // An agent's or queue's quota: block (guards.py, #1067), shown as the file
+  // has it, with a queue's max_pending; a save writes both back unchanged.
+  quotaFold(quota, key, maxPending) {
+    const q = quota || {};
+    const fmt = (v) => (v !== null && typeof v === "object" ? Object.entries(v).map(([k, x]) => `${k} ${x}`).join(", ") : String(v));
+    const lines = Object.entries(q).flatMap(([k, v]) => (typeof v === "object" && v !== null && !Array.isArray(v) && !["on_closed", "advice"].includes(k)
+      ? Object.entries(v).map(([w, line]) => h("div", { className: "kv" }, h("span", { textContent: `${k} ${w}` }), h("span", { textContent: fmt(line) })))
+      : [h("div", { className: "kv" }, h("span", { textContent: k }), h("span", { textContent: fmt(v) }))]));
+    if (maxPending != null) lines.push(h("div", { className: "kv" }, h("span", { textContent: "max_pending" }), h("span", { textContent: String(maxPending) })));
+    if (!lines.length) return null;
+    const fold = h("details", { className: "set-priming set-quota" }, h("summary", { textContent: "Quota guard" }), ...lines, h("p", { className: "set-none", textContent: "Work waits, is refused or runs with a notice while the pool is over these lines. Edit quota: in .aegis.yaml; help: config, Guard an agent or a queue." }));
+    fold.dataset.key = key;
+    return fold;
+  }
+
+  // An agent's budget: node (budgets.py, #1068), shown as the file has it,
+  // whatever its shape; a save writes it back unchanged. A cap budgets.parse
+  // would refuse shows as invalid, with what the file says.
+  budgetFold(a) {
+    if (a.budget == null) return null;
+    const raw = Array.isArray(a.budget) ? a.budget : [a.budget];
+    if (!raw.length) return null;
+    const span = /^[1-9][0-9]*[hd]$/;
+    const lines = raw.map((c) => {
+      const named = c && typeof c === "object" && !Array.isArray(c) ? ["usd", "tokens"].filter((k) => k in c) : [];
+      const v = named.length === 1 ? c[named[0]] : null;
+      const ok = Array.isArray(a.budget) && named.length === 1 && Object.keys(c).every((k) => k === named[0] || k === "per")
+        && typeof v === "number" && Number.isFinite(v) && v > 0 && (named[0] === "usd" || Number.isInteger(v))
+        && (c.per === "session" || (typeof c.per === "string" && span.test(c.per)));
+      if (!ok) return h("div", { className: "kv" }, h("span", { textContent: "invalid" }), h("span", { textContent: JSON.stringify(c) }));
+      const m = named[0] === "usd" ? `$${v}` : `${v} tokens`;
+      return h("div", { className: "kv" }, h("span", { textContent: `per ${c.per}` }), h("span", { textContent: m }));
+    });
+    const fold = h("details", { className: "set-priming set-budget" }, h("summary", { textContent: "Budget" }), ...lines, h("p", { className: "set-none", textContent: "Past a cap its sessions are told to finish, and no turn a person did not start runs until the cap has room. Edit budget: in .aegis.yaml; help: config, Budget an agent." }));
+    fold.dataset.key = "agents.*.budget";
+    return fold;
+  }
+
+  // A product agent's switches (#983): each toggle turns one away from its
+  // default, so a pressed toggle is a key the file writes.
+  productFold(a) {
+    const switches = [
+      ["harness_tools", true, "No harness tools"],
+      ["isolated", false, "Isolated"],
+      ["primer", true, "No aegis prompt"],
+      ["notices", true, "No notices"],
+    ];
+    const summary = h("summary");
+    const on = () => switches.filter(([k, d]) => (a[k] ?? d) !== d).map(([, , label]) => label);
+    const say = () => (summary.textContent = on().length ? on().join(", ") : "Run as a product agent");
+    say();
+    const toggles = switches.map(([k, d, label]) => {
+      const b = button(label, null, () => {
+        a[k] = (a[k] ?? d) === d ? !d : d;
+        b.setAttribute("aria-pressed", String(a[k] !== d));
+        say();
+        this.touch();
+      }, "set-tool");
+      b.setAttribute("aria-pressed", String((a[k] ?? d) !== d));
+      return b;
+    });
+    const fold = h("details", { className: "set-priming set-product", open: on().length > 0 }, summary, h("p", { className: "set-none", textContent: "For an agent a program runs: only its MCP tools, none of this machine's harness config, the program's prompt alone, and no nudges or notices." }), h("div", { className: "set-tools" }, ...toggles));
+    fold.dataset.key = "agents.*.harness_tools agents.*.isolated agents.*.primer agents.*.notices";
     return fold;
   }
 
@@ -1482,7 +1338,8 @@ export class Settings {
       row.dataset.row = `queues.${q.name}`;
       const name = h("input", { name: "name", value: q.name, spellcheck: false, placeholder: "queue", className: "set-name" });
       const agent = select("agent", names, q.agent);
-      const limit = h("input", { name: "max_parallel", type: "number", min: 1, value: q.max_parallel ?? "", className: "pick set-limit" });
+      // Blank: left out, which reads as 1. Priority 0 pauses the queue.
+      const priority = h("input", { name: "priority", type: "number", min: 0, value: q.priority ?? "", placeholder: "1", className: "pick set-limit" });
       // Left out reads as quiet: "" keeps a quiet: true the file spells out.
       const quiet = select("quiet", ["", "false"], q.quiet === false ? "false" : "", (x) => (x ? "with a tab" : "quiet"));
       quiet.setAttribute("aria-label", "Queue quiet");
@@ -1491,33 +1348,45 @@ export class Settings {
         this.touch();
       });
       agent.dataset.key = "queues.*.agent";
-      limit.dataset.key = "queues.*.max_parallel";
+      priority.dataset.key = "queues.*.priority";
       quiet.dataset.key = "queues.*.quiet";
-      for (const el of [name, agent, limit]) {
+      for (const el of [name, agent, priority]) {
         el.setAttribute("aria-label", `Queue ${el.name}`);
         el.addEventListener("input", () => {
-          q[el.name] = el.name === "max_parallel" ? (el.value === "" ? null : Number(el.value)) : el.value;
+          q[el.name] = el.name === "priority" ? (el.value === "" ? null : Number(el.value)) : el.value;
           if (el.name === "name") row.dataset.row = `queues.${el.value}`;
           this.touch();
         });
       }
-      const del = button("Remove", null, () => {
+      const del = button(this.t("settings.remove"), null, () => {
         this.doc.queues.splice(i, 1);
         this.touch();
         this.draw();
       }, "link danger");
-      row.append(h("div", { className: "set-queue-line" }, name, h("span", { textContent: "runs" }), agent, limit, h("span", { textContent: "at a time" }), quiet, del));
+      row.append(h("div", { className: "set-queue-line" }, name, h("span", { textContent: "runs" }), agent, h("span", { textContent: "at priority" }), priority, quiet, del));
+      const guard = this.quotaFold(q.quota, "queues.*.quota queues.*.max_pending", q.max_pending);
+      if (guard) row.append(guard);
       return row;
     });
-    const head = h("div", { className: "set-section-head" }, h("h3", { textContent: "Queues" }), button("Add queue", "set-add-queue", () => {
-      this.doc.queues.push({ name: "", agent: this.doc.default_agent || names[0] || "", max_parallel: null });
+    const head = h("div", { className: "set-section-head" }, h("h3", { textContent: this.t("settings.queues") }), button(this.t("settings.addQueue"), "set-add-queue", () => {
+      this.doc.queues.push({ name: "", agent: this.doc.default_agent || names[0] || "", priority: null });
       this.touch();
       this.draw();
     }, "link"));
     const body = rows.length
       ? h("div", { className: "set-queues", id: "set-queues" }, ...rows)
       : h("p", { className: "set-none", id: "set-queues", textContent: "No queues. A queue hands tasks to fresh worker sessions of one agent." });
-    return h("section", {}, head, body);
+    // Blank: left out, which reads as the server's default.
+    const workers = h("input", { name: "max_workers", type: "number", min: 1, value: this.doc.max_workers ?? "", placeholder: String(this.wire.max_workers_default ?? 4), className: "pick set-limit" });
+    workers.setAttribute("aria-label", "Queue workers at a time");
+    workers.dataset.key = "max_workers";
+    workers.addEventListener("input", () => {
+      this.doc.max_workers = workers.value === "" ? null : Number(workers.value);
+      this.touch();
+    });
+    const pool = h("div", { className: "set-queue-line", id: "set-max-workers" }, workers, h("span", { textContent: "workers at a time, every queue together. A queue's share of them follows its priority; priority 0 pauses it." }));
+    pool.dataset.row = "max_workers";
+    return h("section", {}, head, pool, body);
   }
 
   // Terminal profiles (term_profiles.py): a command, where it runs, when it
@@ -1552,16 +1421,16 @@ export class Settings {
           this.touch();
         });
       }
-      const del = button("Remove", null, () => {
+      const del = button(this.t("settings.remove"), null, () => {
         this.doc.terminals.splice(i, 1);
         this.touch();
         this.draw();
       }, "link danger");
-      const more = h("details", { className: "set-priming", open: !!(Object.keys(t.env).length || Object.keys(t.access).length) }, h("summary", { textContent: "Environment and access" }), env, access);
+      const more = h("details", { className: "set-priming", open: !!(Object.keys(t.env).length || Object.keys(t.access).length) }, h("summary", { textContent: this.t("settings.envAccess") }), env, access);
       row.append(h("div", { className: "set-queue-line" }, name, cmd, h("span", { textContent: "in" }), cwd, restart, del), more);
       return row;
     });
-    const head = h("div", { className: "set-section-head" }, h("h3", { textContent: "Terminals" }), button("Add terminal", "set-add-terminal", () => {
+    const head = h("div", { className: "set-section-head" }, h("h3", { textContent: this.t("settings.terminals") }), button(this.t("settings.addTerminal"), "set-add-terminal", () => {
       this.doc.terminals.push({ name: "", cmd: "", cwd: ".", restart: "", env: {}, access: {} });
       this.touch();
       this.draw();
@@ -1569,6 +1438,93 @@ export class Settings {
     const body = rows.length
       ? h("div", { className: "set-queues", id: "set-terminals" }, ...rows)
       : h("p", { className: "set-none", id: "set-terminals", textContent: "No terminal profiles. The + view still offers a login shell." });
+    return h("section", {}, head, body);
+  }
+
+  // The mcp: map (#960): a server is a URL with headers or a command with
+  // args and env. Test connects to it as the form holds it, saved or not.
+  mcp() {
+    this.doc.mcp ||= [];
+    this.mcpTests ||= {};
+    // A new entry's kind before any field says it; the document has no key for it.
+    this.mcpKinds ||= new WeakMap();
+    const lines = (m) => Object.entries(m || {}).map(([k, v]) => `${k}=${v}`).join("\n");
+    const parse = (text) =>
+      Object.fromEntries(
+        text.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => {
+          const i = l.indexOf("=");
+          return i < 0 ? [l, ""] : [l.slice(0, i).trim(), l.slice(i + 1).trim()];
+        }),
+      );
+    const keys = { url: "mcp.*.url", headers: "mcp.*.headers", command: "mcp.*.command", args: "mcp.*.args", env: "mcp.*.env" };
+    const rows = this.doc.mcp.map((m, i) => {
+      const row = h("div", { className: "set-queue set-mcp-row" });
+      row.dataset.row = `mcp.${m.name}`;
+      const kind = this.mcpKinds.get(m) || (m.command ? "command" : "url");
+      const name = h("input", { name: "name", value: m.name, spellcheck: false, placeholder: "server", className: "set-name" });
+      const pick = select("kind", ["url", "command"], kind, (x) => (x === "url" ? "URL" : "command"));
+      const fields = kind === "url"
+        ? [
+            h("input", { name: "url", value: m.url, spellcheck: false, placeholder: "https://host/mcp", className: "pick set-cmd" }),
+            h("textarea", { name: "headers", value: lines(m.headers), rows: 2, spellcheck: false, placeholder: "Header=value, one a line; ${VAR} reads aegis's environment" }),
+          ]
+        : [
+            h("input", { name: "command", value: m.command, spellcheck: false, placeholder: "command", className: "pick set-cmd" }),
+            h("textarea", { name: "args", value: (m.args || []).join("\n"), rows: 2, spellcheck: false, placeholder: "one argument a line" }),
+            h("textarea", { name: "env", value: lines(m.env), rows: 2, spellcheck: false, placeholder: "NAME=value, one a line; ${VAR} reads aegis's environment" }),
+          ];
+      const result = h("p", { className: "set-none set-mcp-test", textContent: this.mcpTests[i] || "" });
+      for (const el of [name, ...fields]) {
+        el.setAttribute("aria-label", `MCP server ${el.name}`);
+        if (keys[el.name]) el.dataset.key = keys[el.name];
+        el.addEventListener("input", () => {
+          const v = el.value;
+          if (el.name === "name") {
+            for (const a of this.doc.agents) if (a.mcp) a.mcp = a.mcp.map((n) => (n === m.name ? v : n));
+            row.dataset.row = `mcp.${v}`;
+          }
+          m[el.name] = el.name === "headers" || el.name === "env" ? parse(v) : el.name === "args" ? v.split("\n").map((x) => x.trim()).filter(Boolean) : v;
+          this.touch();
+        });
+      }
+      pick.setAttribute("aria-label", "MCP server kind");
+      pick.addEventListener("input", () => {
+        this.mcpKinds.set(m, pick.value);
+        Object.assign(m, pick.value === "url" ? { command: "", args: [], env: {} } : { url: "", headers: {} });
+        this.touch();
+        this.draw();
+      });
+      const test = button(this.t("settings.test"), null, async () => {
+        result.textContent = "Connecting…";
+        try {
+          const r = await this.call("mcp.test", { entry: m });
+          const n = r.tools.length;
+          this.mcpTests[i] = `${n} ${n === 1 ? "tool" : "tools"}${n ? `: ${r.tools.join(", ")}` : ""}`;
+        } catch (e) {
+          this.mcpTests[i] = e.message;
+        }
+        result.textContent = this.mcpTests[i];
+      }, "link");
+      const del = button(this.t("settings.remove"), null, () => {
+        this.doc.mcp.splice(i, 1);
+        for (const a of this.doc.agents) if (a.mcp) a.mcp = a.mcp.filter((n) => n !== m.name);
+        this.mcpTests = {};
+        this.touch();
+        this.draw();
+      }, "link danger");
+      const filled = kind === "url" ? Object.keys(m.headers || {}).length : (m.args || []).length + Object.keys(m.env || {}).length;
+      const more = h("details", { className: "set-priming", open: !!filled }, h("summary", { textContent: kind === "url" ? "Headers" : "Arguments and environment" }), ...fields.slice(1));
+      row.append(h("div", { className: "set-queue-line" }, name, pick, fields[0], test, del), more, result);
+      return row;
+    });
+    const head = h("div", { className: "set-section-head" }, h("h3", { textContent: this.t("settings.mcp") }), button(this.t("settings.addMcp"), "set-add-mcp", () => {
+      this.doc.mcp.push({ name: "", url: "", headers: {}, command: "", args: [], env: {} });
+      this.touch();
+      this.draw();
+    }, "link"));
+    const body = rows.length
+      ? h("div", { className: "set-queues", id: "set-mcp" }, ...rows)
+      : h("p", { className: "set-none", id: "set-mcp", textContent: "No MCP servers. An agent attaches one by name, and its sessions get it beside aegis's own." });
     return h("section", {}, head, body);
   }
 
@@ -1660,7 +1616,7 @@ export class Settings {
       row.append(h("div", { className: "set-queue-line" }, h("span", { className: "set-name", textContent: name }), h("span", { textContent: "parks after" }), input, h("span", { textContent: "min idle" })));
       return row;
     });
-    const head = h("div", { className: "set-section-head" }, h("h3", { textContent: "Parking" }));
+    const head = h("div", { className: "set-section-head" }, h("h3", { textContent: this.t("settings.parking") }));
     const note = h("p", { className: "set-none", textContent: "An idle session that nothing needs gives its harness's memory back, and the next message resumes it. Blank keeps every session of that harness running." });
     return h("section", {}, head, note, h("div", { className: "set-queues", id: "set-park" }, ...rows));
   }
@@ -1671,7 +1627,7 @@ export class Settings {
   workflows() {
     const file = h("input", { type: "file", id: "set-wf-import", accept: ".yaml,.yml", hidden: true });
     file.addEventListener("change", () => file.files[0] && this.importWorkflow(file.files[0]).finally(() => (file.value = "")));
-    const head = h("div", { className: "set-section-head" }, h("h3", { textContent: "Workflows" }), button("Import…", "set-wf-import-btn", () => file.click()), file);
+    const head = h("div", { className: "set-section-head" }, h("h3", { textContent: this.t("settings.workflows") }), button(this.t("settings.import"), "set-wf-import-btn", () => file.click()), file);
     const note = h("p", { className: "set-none", textContent: "The pool bounds the node sessions every workflow on this server has open at once; blank is the default, 4 in all, and an agent left blank is bound by the total. Saved workflows are files in .aegis/workflows beside .aegis.yaml: Import and Export act on them at once, without Save changes." });
     if (this.savedWf === undefined) this.loadSaved();
     const pool = h("div", { className: "set-queues", id: "set-wf-pool" }, ...this.poolRows());
@@ -1703,7 +1659,7 @@ export class Settings {
     const stray = Object.keys(m).filter((k) => k !== "total" && !names.has(k)).map((k) => {
       const row = h("div", { className: "set-queue" });
       row.dataset.row = `workflows.${k}`;
-      row.append(h("div", { className: "set-queue-line" }, h("span", { className: "set-name", textContent: k }), h("span", { textContent: `at most ${m[k]}: not an agent` }), button("Clear", null, () => {
+      row.append(h("div", { className: "set-queue-line" }, h("span", { className: "set-name", textContent: k }), h("span", { textContent: `at most ${m[k]}: not an agent` }), button(this.t("settings.clear"), null, () => {
         delete m[k];
         row.remove();
         this.touch();
@@ -1736,7 +1692,7 @@ export class Settings {
           r.k = name.value.trim();
           sync();
         });
-        const del = button("Remove", null, () => {
+        const del = button(this.t("settings.remove"), null, () => {
           list.splice(list.indexOf(r), 1);
           row.remove();
           sync();
@@ -1753,7 +1709,7 @@ export class Settings {
       }, "link");
       return h("div", {}, h("div", { className: "set-section-head" }, h("h4", { textContent: label }), more), box);
     };
-    const head = h("div", { className: "set-section-head" }, h("h3", { textContent: "Usage" }));
+    const head = h("div", { className: "set-section-head" }, h("h3", { textContent: this.t("settings.usage") }));
     const note = h("p", { className: "set-none", textContent: "How aegis usage and the usage page split the work. Owners name who owns each local repo, by its directory name; owner names are how each owner is shown. Subscriptions give an account, the part after the colon in aegis usage --split billing, a name and a monthly fee in USD, which is shared over the work that ran on it." });
     return h("section", { id: "set-usage" }, head, note,
       map("usage.owners", "Owners", "Add owner", ["repo", "owner"]),
@@ -1798,14 +1754,14 @@ export class Settings {
       const row = h("div", { className: "set-wf" });
       row.dataset.wf = w.id;
       const steps = h("ul", { className: "set-wf-steps", hidden: true });
-      const show = button("Steps", null, async () => {
+      const show = button(this.t("settings.steps"), null, async () => {
         if (steps.hidden && !steps.childElementCount) {
           const r = await this.call("workflow.read", { id: w.id });
           steps.replaceChildren(...(r.steps || []).map((s) => h("li", { textContent: s.say, style: `padding-left:${s.depth * 14}px` })));
         }
         steps.hidden = !steps.hidden;
       });
-      const exp = button("Export", null, () => this.exportWorkflow(w.id));
+      const exp = button(this.t("settings.export"), null, () => this.exportWorkflow(w.id));
       row.append(
         h("div", { className: "set-wf-line" }, h("span", { className: "set-name", textContent: w.title || w.id }), h("code", { textContent: w.id }), h("span", { className: "set-none", textContent: who }), h("span", { className: "set-wf-acts" }, show, exp)),
         w.error ? h("p", { className: "set-why error", textContent: w.error }) : "",
@@ -1860,14 +1816,13 @@ export class Settings {
   drawBar() {
     const b = this.barEl;
     if (!b) return;
-    const dirty = this.dirty || this.policyChanges().length > 0;
+    const dirty = this.dirty;
     const status = this.status || (dirty ? "Unsaved changes" : "");
     b.classList.toggle("dirty", dirty);
-    const save = button("Save changes", "set-save", () => !offline() && this.save(), "btn primary needs-net");
+    const save = button(this.t("settings.save"), "set-save", () => !offline() && this.save(), "btn primary needs-net");
     save.disabled = !dirty || this.saving;
-    const discard = button("Discard", "set-discard", () => {
+    const discard = button(this.t("settings.discard"), "set-discard", () => {
       this.load(this.wire);
-      for (const k of this.policyChanges()) this.pol[k] = JSON.parse(this.polSaved[k]);
       this.findings = null;
       this.status = "";
       this.draw();
@@ -1893,8 +1848,6 @@ export class Settings {
     }
   }
 
-  // The config first, then the policies (this server's, through token.policy),
-  // which wait for a config the server accepted.
   async save() {
     this.saving = true;
     this.drawBar();
@@ -1906,7 +1859,6 @@ export class Settings {
           this.load(r.config);
         }
         this.findings = null;
-        if (this.policyChanges().length) await this.savePolicies();
         this.status = "Saved";
       } else {
         this.findings = r.problems;
@@ -1923,7 +1875,7 @@ export class Settings {
   }
 
   async runDoctor() {
-    const b = document.getElementById("set-doctor");
+    const b = this.box.querySelector("#set-doctor");
     if (b) {
       b.disabled = true;
       b.textContent = "Checking…";
@@ -1944,15 +1896,15 @@ export class Settings {
         ? `aegis found ${usable.map((f) => `${f.label} ${f.version.replace(/\s*\(.*\)$/, "")}`).join(" and ")} on this machine.`
         : "aegis found no harness on this machine. Install Claude Code or OpenCode, then reload this page."
       : "Looking for the harnesses installed on this machine…";
-    const setup = button("Set up from what is installed", "set-setup", () => this.setup(), "btn primary");
+    const setup = button(this.t("settings.setup"), "set-setup", () => this.setup(), "btn primary");
     setup.disabled = !usable.length;
     return h(
       "div",
       { className: "set-empty" },
-      h("h2", { textContent: "No configuration yet" }),
+      h("h2", { textContent: this.t("settings.noConfig") }),
       h("p", {}, "There is no ", h("code", { textContent: ".aegis.yaml" }), ` in ${this.wire.root}. ${found}`),
       setup,
-      h("p", { className: "set-none", textContent: "You can change every value before it is saved." }),
+      h("p", { className: "set-none", textContent: this.t("settings.canChange") }),
     );
   }
 

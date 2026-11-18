@@ -20,6 +20,9 @@ survives a restart, where the harness's would end with its process.
 Type / in a session's box to open the menu of every command, aegis's first;
 Tab or Enter picks one. Alt+/ opens the same menu over a draft.
 
+A line that starts with `@` instead goes to another session or agent: see
+[mentions](handoffs#mention-from-the-composer).
+
 After the command, the menu completes every argument that comes from a list:
 the model, effort and permission, the tutorial page, the saved workflow, and
 for `/spawn` and `/handoff` the agent, the flags and their values. `/spawn ` lists this
@@ -38,12 +41,12 @@ that is free, such as a prompt, completes nothing.
 | `/title <text>` | set this session's title |
 | `/sleep` | end the process and keep the session, asleep; your next message wakes it |
 | `/stop` | alias of `/sleep` |
-| `/quiet` | hide this session's tab until its turn ends, as Alt+Q does; only a working or waiting session can be quiet |
+| `/quiet` | quiet this session, or unquiet it when it is quiet, as Alt+Q does: its tab shows when a turn ends and hides when the next starts |
 | `/autoclose [on\|off]` | close this session once its agent ends done: `turn_end` done without `close` is refused while it is on; alone, it toggles. See sessions#autoclose |
+| `/autohandoff [N\|off]` | past `N` tokens of context, the agent writes a brief and the session continues in a fresh one on its own, with its monitors, feeds, queue tasks and schedules; alone, `N` is the configured `handoff_at:`. See handoffs#autohandoff |
 | `/restart` | end the process and start a fresh one on the same conversation; nothing is sent. Use it after a change to the agent's MCP config or when the harness hangs |
 | `/btw <question>` | ask a side question about this session, even while the agent works. aegis answers it from the transcript with the agent `btw:` names in `.aegis.yaml`, in one call with no tools, and shows the answer as a block you can fold. The agent never sees the question or the answer. One runs at a time per session; the block's cancel stops it |
 | `/feedback [text]` | report a bug, ask for a feature or point out a docs gap in aegis. The agent reads the help page feedback, asks what it still needs and shows you a draft issue; nothing is filed until you say yes. Claude Code's own /feedback, which reports to Anthropic, is hidden in aegis. The /feedback row under the new tab's chips starts a new session with the chips you picked there, and the agent asks you what to report |
-| `/multiuser [text]` | set this server up for several people, each signed in with their own token and running as their own Linux user. An admin only; the agent reads the help page multi-user, looks at the host, asks who the people are and shows every command before it runs one. On a server already in the mode it starts at adding a person |
 | `/remember <text>` | save a memory every later session can find. The agent writes it with `memory_save` in your own store and says what it saved (help page knowledge) |
 | `/consolidate [text]` | review your skills and memories with the agent. It reads `knowledge_stats`, shows one page with a row per proposal (merge two duplicates, renew or drop an expired memory, fix a stale one, retire an unused skill, mend a broken link), each with its evidence and a checkbox, and applies only the rows you tick, each a commit with Undo on its card (help page consolidate) |
 | `/workflow [id] [text]` | run a saved workflow now: the agent makes its args from your text and starts it, with no card to approve. Alone, it opens the menu of saved workflows |
@@ -76,13 +79,10 @@ and no aegis command is refused before it costs a turn.
 | `aegis init` | write a first `.aegis.yaml` from the harnesses installed here; `--yes` takes every proposal |
 | `aegis doctor` | check `.aegis.yaml`, the harnesses it names and the state directory, and warn where an installed aegis systemd unit differs from what `aegis service install` writes; exits 1 on an error |
 | `aegis service install` | write a systemd unit for `aegis serve` with the recommended settings and print the `sudo` commands that install it; `--yes` takes every default, `--dry-run` prints the unit, `--output` names the file. See the systemd page |
-| `aegis link add <name> <url>` | link another aegis server, reading its token from standard input; `--as` names this server there, `--trusted` asks for a [trusted link](links#trusted-links) |
-| `aegis link list` | the linked servers, by name and URL, and which ask for trust |
-| `aegis link trust <name>` | ask an existing link for trust, or stop asking with `--off` |
+| `aegis link add <name> <url>` | link another aegis server, reading its token from standard input; `--as` names this server there; the link goes both ways ([links](links)) |
+| `aegis link list` | the linked servers, by name and URL |
 | `aegis link remove <name>` | end a link |
-| `aegis token add <name>` | make a token for a person, a linked server or a job; `--role member` (the default) or `--role admin`. The token is printed once |
-| `aegis token list` | the tokens, their roles and quota policies |
-| `aegis token revoke <name>` | end a token; revoking the server's own admin token, the one in `.aegis/state/token`, prints its replacement |
+| `aegis token revoke <name>` | replace the server's token, the one in `.aegis/state/token`, and print the new one; the name is the server's user |
 | `aegis journal search [pattern]` | search what was done: `--since`, `--until`, `--path`, `--session`, `--kind`, `--limit` |
 | `aegis journal rebuild` | rebuild the journal from every transcript |
 | `aegis usage` | what the agents' work cost, from the usage rows aegis counts as each turn ends: `--since`, `--until`, `--split`, `--by`, `--measure`, `--where`, `--json`, `--sessions`, `--tools`; see the usage page |
@@ -104,6 +104,7 @@ and no aegis command is refused before it costs a turn.
 | `aegis map diff [base]` | each definition changed since base (the merge-base with origin/main), its sizes before and after and its users; `--json` |
 | `aegis call <tool> [args]` | from an agent's shell, call one of its aegis tools as that agent; see below |
 | `aegis tools [tool]` | from an agent's shell, list its aegis tools, or print one tool's description and JSON schema |
+| `aegis gc [--days N] [--apply]` | reclaim the disk that sessions archived more than N days ago (7 by default) still hold. Their transcripts are packed: images emptied, the rest gzipped, still read by `peer_read`, the archive and the journal. Their uploads, sent files, stderr logs, browser folders and the harness's own transcript (`~/.claude/projects`) are deleted, so they can no longer resume, and so is every browser profile no browser used in that time. Without `--apply` it only lists what would go and how much |
 | `aegis import-legacy <dir>` | copy the sessions of aegis before 2.0 into the archive, to read |
 | `aegis completions install [shell]` | install tab completion for bash, fish, zsh or nushell; the shell defaults to this one |
 | `aegis completions show [shell]` | print that shell's completion script |

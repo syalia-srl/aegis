@@ -203,6 +203,27 @@ def test_a_schedule_without_quota_keeps_its_weekly_window_on_pace():
     assert Schedule.load("n", Schedule("n", {}, 0, 0, none).dump()).d.quota == {}
 
 
+def test_a_schedule_takes_a_line_on_used_and_projected():
+    raw = {"used": 80, "projected": 90}
+    d = Definition.model_validate(
+        {"clock": {"every": "5m"}, "fire": FIRE, "prompt": "x",
+         "quota": {"claude": {"weekly_all": raw, "session": 50}}}
+    )  # fmt: skip
+    assert d.lines() == {"claude": {"weekly_all": raw, "session": 50}}
+    back = Schedule.load("n", Schedule("n", {}, 0, 0, d).dump())
+    assert back.d.lines() == d.lines()
+    with pytest.raises(ValidationError, match="used, projected or both"):
+        Definition.model_validate(
+            {"clock": {"every": "5m"}, "fire": FIRE, "prompt": "x",
+             "quota": {"claude": {"weekly_all": {"projected": None}}}}
+        )  # fmt: skip
+    with pytest.raises(ValidationError, match="takes no stop"):
+        Definition.model_validate(
+            {"clock": {"every": "5m"}, "fire": FIRE, "prompt": "x",
+             "quota": {"claude": {"weekly_all": {"used": 80, "stop": 90}}}}
+        )  # fmt: skip
+
+
 def test_a_schedule_round_trips_through_its_stored_form():
     d = Definition.model_validate(
         {

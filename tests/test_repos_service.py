@@ -372,3 +372,80 @@ async def test_nothing_is_scheduled_after_stop(world, repo):
     world.repos.request(str(repo))
     world.repos.refresh("L1")
     assert not world.repos._probe_due and not world.repos._build_due
+
+
+def test_pending_names_what_the_session_left_in_its_repos(
+    world, repo, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(gh.shutil, "which", lambda name: "/bin/gh")
+    monkeypatch.setattr(gh, "prs", lambda top, b, user=None: [])
+    wt = tmp_path / "wt"
+    run(repo, "worktree", "add", "-q", "-b", "topic", str(wt))
+    wt = wt.resolve()
+    (wt / "b.py").write_text("b\n")
+    run(wt, "add", "b.py")
+    run(wt, "commit", "-q", "-m", "add b")
+    (wt / "c.py").write_text("c\n")
+    world.wrote("L1", wt, "b.py", main=repo)
+    world.wrote("L1", wt, "c.py", main=repo)
+    world.committed("L1", wt, run(wt, "rev-parse", "HEAD"), "add b", branch="topic")
+    assert world.repos.pending("L1") == [
+        "worktree wt (topic) is still there",
+        "1 uncommitted file(s) you wrote in wt (topic): c.py",
+        "1 unpushed commit(s) in wt (topic)",
+        "branch topic in wt has your commits and no pull request",
+    ]
+
+
+def test_pending_probes_again_instead_of_reading_the_last_probe(world, repo):
+    (repo / "c.py").write_text("c\n")
+    world.wrote("L1", repo, "c.py")
+    assert world.repos.pending("L1") == [
+        "1 uncommitted file(s) you wrote in repo (main): c.py"
+    ]
+    run(repo, "add", "c.py")
+    run(repo, "commit", "-q", "-m", "add c")
+    run(repo, "push", "-q")
+    world.committed("L1", repo, run(repo, "rev-parse", "HEAD"), "add c")
+    # The probe cached above still says c.py is dirty: pending must not read it.
+    assert world.repos.pending("L1") == []
+
+
+def test_a_commit_row_without_a_branch_names_no_branch(world, repo, monkeypatch):
+    # `git commit -q` prints nothing: the journal row is "<hash> <subject>",
+    # with no " · branch" for the subject to be mistaken for (#997).
+    monkeypatch.setattr(gh.shutil, "which", lambda name: "/bin/gh")
+    asked = []
+    monkeypatch.setattr(gh, "prs", lambda top, b, user=None: asked.append(b) or [])
+    (repo / "b.py").write_text("b\n")
+    run(repo, "add", "b.py")
+    run(repo, "commit", "-q", "-m", "fix(area): add b")
+    run(repo, "push", "-q")
+    sha = run(repo, "rev-parse", "HEAD")
+    world.rec += 1
+    db.insert(
+        world.con,
+        db.Entry(
+            "L1", world.rec, 0, 2.0, "h", str(repo), "commit", "",
+            f"{sha[:7]} fix(area): add b", None, False, [], top=str(repo), sha=sha,
+        ),
+    )  # fmt: skip
+    assert world.repos.pending("L1") == []
+    assert "fix(area): add b" not in asked
+
+
+def test_a_pr_the_journal_saw_opened_is_asked_for_its_state(world, repo, monkeypatch):
+    # Merged by someone else, its branch unknown to the journal: only
+    # `gh pr view` can tell it is no longer open (#997).
+    monkeypatch.setattr(gh.shutil, "which", lambda name: "/bin/gh")
+    monkeypatch.setattr(gh, "prs", lambda top, b, user=None: [])
+    asked = []
+    monkeypatch.setattr(
+        gh,
+        "pr",
+        lambda top, n: asked.append(n) or {"n": n, "state": "merged", "ci": ""},
+    )
+    world.pr("L1", repo, "opened https://github.com/o/repo/pull/12 · feat: x")
+    world.pr("L1", repo, "merged #9")
+    assert world.repos.pending("L1") == []
+    assert asked == [12]

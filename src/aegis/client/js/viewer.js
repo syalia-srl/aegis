@@ -154,7 +154,7 @@ async function drawText(f, body, line, isCurrent, drawn) {
 // title and status in the bar, Phone width and Open in a new tab in acts (or the `popout`
 // button a live page's pane or the viewer passes instead), the frame in the body. Who holds the page
 // (entries.hold) is the caller's business.
-export function drawArtifact(e, { bar, body, acts, popout = null }) {
+export function drawArtifact(e, { bar, body, acts, popout = null, base = null }) {
   acts.append(phoneButton(e.id));
   if (popout) acts.append(popout);
   else {
@@ -162,14 +162,14 @@ export function drawArtifact(e, { bar, body, acts, popout = null }) {
     open.append(icon("open"));
     open.title = "Open in a new tab";
     open.setAttribute("aria-label", open.title);
-    open.href = fileUrl(e.detail?.url);
+    open.href = fileUrl(e.detail?.url, base ?? undefined);
     open.target = "_blank";
     open.rel = "noopener noreferrer";
     acts.append(open);
   }
   bar.append(entryIcon(e.glyph), el("span", "fn", e.title), el("span", "fs", e.summary));
   body.dataset.preview = "html";
-  const stage = artifactStage(e);
+  const stage = artifactStage(e, { base: base ?? undefined });
   stage.querySelector("iframe").loading = "eager";
   body.append(stage);
 }
@@ -196,10 +196,11 @@ export function contentUnit(range, root) {
 export class Viewer {
   // `point` is app.js's: items({locator, text, to, comment, leave}) gives a
   // selection's items, send(key, text) writes a session's composer.
-  constructor(root, { entry, point }) {
+  constructor(root, { entry, point, base = null }) {
     this.root = root; // #viewer, inside .col
     this.entry = entry; // (id) -> the shown transcript's entry, or undefined
     this.point = point;
+    this.base = base; // the mount's file prefix; null follows entries.js's fileBase
     this.items = new Map(); // session key -> {files, at, remote, glyph, line?}, {artifact} or {workflow}
     this.key = null; // the session shown
     this.drawn = 0; // bumped by every draw, so a fetch for an older one is dropped
@@ -337,6 +338,17 @@ export class Viewer {
     return b;
   }
 
+  // The open set, one file over, round from the last to the first. The pager
+  // buttons and a swipe call this, and so do Left and Right (keys.js). False
+  // when this view has fewer than two files.
+  step(d) {
+    const item = this.isOpen ? this.items.get(this.key) : null;
+    if (!item?.files || item.files.length < 2) return false;
+    item.at = (item.at + d + item.files.length) % item.files.length;
+    this.render();
+    return true;
+  }
+
   drawFile(item, bar, body, draw) {
     const acts = el("span", "acts");
     const f = item.files[item.at];
@@ -363,23 +375,20 @@ export class Viewer {
       drawn: (content) => tray?.layer(content),
     });
     if (item.files.length > 1) {
-      // Round from the last file to the first, as on the card.
-      const go = (d) => {
-        item.at = (item.at + d + item.files.length) % item.files.length;
-        this.render();
-      };
+      // Round from the last file to the first, as on the card. Left and Right
+      // call step() too (keys.js).
       const pager = el("span", "pager");
-      const step = (d, name, title) => {
+      const stepBtn = (d, name, title) => {
         const b = el("button", "btn icon");
         b.append(icon(name));
         b.title = title;
         b.setAttribute("aria-label", title);
-        b.addEventListener("click", () => go(d));
+        b.addEventListener("click", () => this.step(d));
         return b;
       };
-      pager.append(step(-1, "left", "Previous file"), el("span", "count", `${item.at + 1} / ${item.files.length}`), step(1, "right", "Next file"));
+      pager.append(stepBtn(-1, "left", "Previous file"), el("span", "count", `${item.at + 1} / ${item.files.length}`), stepBtn(1, "right", "Next file"));
       bar.append(pager);
-      swipe(body, go);
+      swipe(body, (d) => this.step(d));
     }
     acts.append(this.closeButton());
     bar.append(acts);
@@ -408,7 +417,7 @@ export class Viewer {
     if (e.status === "live") acts.append(dockButton(e.id));
     // A live page pops out into a window of its own, with the bridge behind
     // it; only an ended one opens raw in a new tab, as its card does.
-    drawArtifact(e, { bar, body, acts, popout: e.status === "live" ? popButton(e.id) : null });
+    drawArtifact(e, { bar, body, acts, popout: e.status === "live" ? popButton(e.id) : null, base: this.base ?? undefined });
     acts.append(this.closeButton());
     bar.append(acts);
     // By the artifact's id: a page the agent sends again is a new file, and
@@ -424,7 +433,7 @@ export class Viewer {
     const item = this.isOpen ? this.items.get(this.key) : null;
     if (item?.artifact !== e.id) return;
     const frame = this.root.querySelector("iframe[data-artifact]");
-    if (frame && frame.dataset.status === e.status && frame.getAttribute("src") === fileUrl(e.detail?.url)) return;
+    if (frame && frame.dataset.status === e.status && frame.getAttribute("src") === fileUrl(e.detail?.url, this.base ?? undefined)) return;
     this.render(e);
   }
 }

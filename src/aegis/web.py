@@ -23,6 +23,15 @@ channel, may not open files on this server's desktop, and is not relayed on.
 A browser message naming another ``server`` goes down the link to it; what
 comes back gets ``server`` stamped on it. Agents' sent files on a linked server
 are streamed through ``/via/<server>/files/…``.
+
+The app's routes are relative, so a Python host can mount it under a prefix of
+its own (``Server(prefix=...)``: ``srv.asgi``). Only the URLs it generates carry
+the prefix: the page's asset links, the manifest, and the redirects. The MCP
+routes stay on the Server's own loopback listener, because harness children
+reach them at ``<base_url>/mcp``; the app a host mounts leaves them out, so
+``<prefix>/mcp`` is not on the host's public origin. That listener serves its
+own copy of the app, so a prefixed server's loopback page is not browsable; the
+host serves the page under its prefix.
 """
 
 from __future__ import annotations
@@ -33,7 +42,6 @@ import hashlib
 import json
 import logging
 import os
-import re
 import time
 import secrets
 from collections.abc import Iterable
@@ -42,6 +50,7 @@ from urllib.parse import urlsplit
 
 from starlette.applications import Starlette
 import httpx
+from starlette.requests import Request
 from starlette.responses import (
     FileResponse,
     HTMLResponse,
@@ -56,12 +65,14 @@ from starlette.staticfiles import StaticFiles
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from . import exit as exit_
+from . import chrome as chrome_
 from . import files, fs_paths
 from .app import App
-from .as_user import Place
 from .channels import Sub
-from .links import PROTO, Backlink
+from .links import BOTH_WAYS_SINCE, PROTO, Backlink
 from .ops import Caller, OpError
+from .policy import Credential, Refused
+from .policy_view import PolicyView
 from .version import running
 from .tokens import load_or_create_token  # noqa: F401 — cli and tests import it from here
 
@@ -72,6 +83,11 @@ CLIENT_DIR = Path(__file__).parent / "client"
 # The service worker lives outside CLIENT_DIR, so /static never serves it: it is
 # served only from the root, where its scope is the whole client.
 SERVICE_WORKER = Path(__file__).parent / "sw.js"
+# The client's public entry, served at <prefix>/aegis.js. It lives outside
+# CLIENT_DIR for the same reason: /static serves files from the URL they sit at,
+# and a copy at /static/js/aegis.js would resolve its relative mount.js import
+# to /static/js/static/js/mount.js.
+ENTRY_MODULE = Path(__file__).parent / "aegis.js"
 
 
 POINT_TAG = b'<script src="/static/js/pagepoint.js"></script>'
@@ -91,75 +107,6 @@ def inject_point(body: bytes) -> bytes:
     if at < 0 or at < low.rfind(b"</script>"):
         return body + POINT_TAG
     return body[:at] + POINT_TAG + body[at:]
-
-
-def _open_as(place: Place, rel: str, download: bool):
-    """On ``place``'s runner: the headers for ``rel``, and its bytes when an
-    HTML preview needs the pointing script, else an open descriptor and its
-    size. Raises OpError or OSError when the file is not there to serve."""
-    path = fs_paths.resolve(place.root, place.guard, rel)
-    if not path.is_file():
-        raise OpError("not_a_file", f"{rel} is a folder")
-    headers = {**files.headers(path, download), "Cache-Control": "no-store"}
-    if not download and files.classify(path)[1] == "html":
-        return headers, inject_point(path.read_bytes()), None
-    fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC)
-    return headers, fd, os.fstat(fd).st_size
-
-
-_RANGE = re.compile(r"bytes=(\d*)-(\d*)")
-_CHUNK = 256 * 1024
-
-
-def _fd_response(request, headers: dict, body: bytes | int, size: int | None):
-    """What ``_open_as`` opened, as a response: bytes as they are, or the
-    descriptor streamed, with one byte range when the request asks for one
-    (a video seeks, a PDF reads pages), as FileResponse does for a path."""
-    headers = dict(headers)
-    media = headers.pop("Content-Type")
-    if isinstance(body, bytes):
-        return Response(body, media_type=media, headers=headers)
-    fd = body
-    assert size is not None
-    start, end, status = 0, size - 1, 200
-    m = _RANGE.fullmatch(request.headers.get("range", "").strip())
-    first, last = (
-        (int(m[1]) if m and m[1] else None),
-        (int(m[2]) if m and m[2] else None),
-    )
-    # A range whose end is before its start is invalid and ignored (RFC 9110).
-    if (
-        m
-        and (first is not None or last is not None)
-        and not (first is not None and last is not None and last < first)
-    ):
-        if first is not None:
-            start, end = first, min(size - 1 if last is None else last, size - 1)
-        else:
-            start = max(size - (last or 0), 0)
-        if start > end:
-            os.close(fd)
-            return Response(
-                status_code=416, headers={"Content-Range": f"bytes */{size}"}
-            )
-        status = 206
-        headers["Content-Range"] = f"bytes {start}-{end}/{size}"
-    headers["Accept-Ranges"] = "bytes"
-    headers["Content-Length"] = str(end - start + 1)
-
-    async def stream():
-        at = start
-        while at <= end:
-            n = min(_CHUNK, end - at + 1)
-            chunk = await asyncio.to_thread(os.pread, fd, n, at)
-            if not chunk:
-                return
-            yield chunk
-            at += len(chunk)
-
-    return _FdStream(
-        fd, stream(), status_code=status, media_type=media, headers=headers
-    )
 
 
 class _FdStream(StreamingResponse):
@@ -219,14 +166,42 @@ def ws_protocol():
     return Protocol
 
 
-def client_files(version: str) -> dict:
-    """The client as the service worker keeps it: every file under CLIENT_DIR by
-    the URL the page asks for it, plus the manifest, and a build id hashed from
-    each file's path, size and mtime, the worker's own and the version, so a
-    change to sw.js alone is a new build with a cache of its own. Computed per
-    request: about a hundred ``stat`` calls, and an edit to the client while
-    the server runs is a new build at once, which is what the browser's byte
-    comparison of ``/sw.js`` needs to see."""
+def normalize_prefix(prefix: str) -> str:
+    """A mount prefix as the URLs use it: ``""`` or one leading slash and no
+    trailing one (``"/aegis"``). ``"/"``, ``""`` and a bare ``"aegis"`` all
+    become one of those two forms."""
+    path = "/" + str(prefix or "").strip().strip("/")
+    return "" if path == "/" else path
+
+
+# path -> (size, mtime_ns, sha256 of its bytes), so a manifest request re-reads
+# only the files that changed. The client is about 4 MB; hashing all of it on
+# every request would be waste, and the service worker only needs to know
+# whether a file moved.
+_hashes: dict[Path, tuple[int, int, str]] = {}
+
+
+def _file_hash(path: Path, st: os.stat_result) -> str:
+    """The content hash of ``path`` as it is now, cached by size and mtime."""
+    seen = _hashes.get(path)
+    if seen is None or seen[0] != st.st_size or seen[1] != st.st_mtime_ns:
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        _hashes[path] = (st.st_size, st.st_mtime_ns, digest)
+        return digest
+    return seen[2]
+
+
+def client_files(version: str, prefix: str = "") -> dict:
+    """The client as a service worker keeps it: every file under CLIENT_DIR by
+    the URL the page asks for it, with a content hash each, and a build id
+    hashed from each file's path, size and mtime, the worker's own and the
+    version, so a change to sw.js alone is a new build with a cache of its
+    own. Computed per request: about two hundred ``stat`` calls, and an edit
+    to the client while the server runs is a new build at once, which is what
+    the browser's byte comparison of ``/sw.js`` needs to see. ``prefix`` is
+    written into every URL, so a host mounts the same listing under its own
+    path; the mount's default (``""``) is the standalone client."""
+    prefix = normalize_prefix(prefix)
     h = hashlib.sha256(version.encode())
     files = []
     for path in sorted(CLIENT_DIR.rglob("*")):
@@ -241,13 +216,21 @@ def client_files(version: str) -> dict:
         h.update(f"{rel}\0{st.st_size}\0{st.st_mtime_ns}\n".encode())
         files.append(
             {
-                "url": "/" if rel == "index.html" else f"/static/{rel}",
+                "url": f"{prefix}/"
+                if rel == "index.html"
+                else f"{prefix}/static/{rel}",
                 "bytes": st.st_size,
+                "hash": _file_hash(path, st),
             }
         )
     st = SERVICE_WORKER.stat()
     h.update(f"sw.js\0{st.st_size}\0{st.st_mtime_ns}\n".encode())
-    return {"build": h.hexdigest()[:12], "version": version, "files": files}
+    return {
+        "build": h.hexdigest()[:12],
+        "version": version,
+        "prefix": prefix,
+        "files": files,
+    }
 
 
 # Close codes, in the 4000 range websockets leave to applications.
@@ -265,6 +248,40 @@ def cookie_name(state_root: Path) -> str:
     host would overwrite each other's under one name; this one is per state
     root, as the token is."""
     return "aegis_" + hashlib.sha256(str(state_root).encode()).hexdigest()[:8]
+
+
+def sign_in_cookie(
+    response: Response,
+    request: Request | None,
+    token: str,
+    cookie: str,
+    origins: Iterable[str] = (),
+) -> Response:
+    """``response`` carrying the session cookie with ``token``: HttpOnly, so no
+    script on the page can read it; Secure behind an https origin.
+
+    The same cookie the page's ``?token=`` sign-in sets (web.py's index), for a
+    host whose own page hands the client a token from ``Server.token_for``: an
+    HTTP fetch of a sent file or a page's frame cannot carry the websocket
+    hello's token, so the browser needs the cookie too. A later token replaces
+    it with another call.
+    """
+    public = {urlsplit(o).netloc: o for o in map(public_origin, origins)}
+    if request is None:
+        secure = any(o.startswith("https://") for o in public.values())
+    else:
+        origin = public.get(request.headers.get("host", ""), "")
+        secure = origin.startswith("https://")
+    response.set_cookie(
+        cookie,
+        token,
+        max_age=COOKIE_MAX_AGE_S,
+        path="/",
+        httponly=True,
+        samesite="strict",
+        secure=secure,
+    )
+    return response
 
 
 class ClientFiles(StaticFiles):
@@ -320,48 +337,60 @@ def public_origin(value: str) -> str:
 
 
 def build_web(
-    app: App, token: str, allowed_hosts: set[str], origins: Iterable[str] = ()
+    app: App,
+    token: str,
+    allowed_hosts: set[str],
+    origins: Iterable[str] = (),
+    prefix: str = "",
+    *,
+    mcp: bool = True,
 ) -> Starlette:
+    """The web app. ``mcp`` adds the MCP routes harness children reach at
+    ``<base_url>/mcp``; a host's public mount leaves them out (#993)."""
+    origins = list(origins)
     # Host header -> the one origin a socket naming that host must come from.
     public = {urlsplit(o).netloc: o for o in map(public_origin, origins)}
     app.push.origins = list(public.values())  # the VAPID contact (push.py)
     cookie = cookie_name(app.roots.state_root)
+    prefix = normalize_prefix(prefix)
 
     # ``token`` is the admin's (tokens.py); any token the store knows signs in.
     app.principals.use_admin(token)
 
-    def valid(given: object) -> bool:
-        return app.principals.resolve(given) is not None
+    async def valid(given: object) -> bool:
+        if not isinstance(given, str) or not given:
+            return False
+        try:
+            await app.identify(Credential(given, "browser"))
+        except Refused:
+            return False
+        return True
 
     def signed_in(response: Response, request, given: str) -> Response:
         """``response`` carrying the cookie with the token that was presented:
         HttpOnly, so no script on the page can read it; Secure behind an https
-        origin."""
-        origin = public.get(request.headers.get("host", ""), "")
-        response.set_cookie(
-            cookie,
-            given,
-            max_age=COOKIE_MAX_AGE_S,
-            path="/",
-            httponly=True,
-            samesite="strict",
-            secure=origin.startswith("https://"),
-        )
-        return response
+        origin. A host's own page uses Server.sign_in for the same cookie."""
+        return sign_in_cookie(response, request, given, cookie, origins)
 
     async def index(request):
         """The page. ``?token=`` from the URL `aegis serve` printed becomes the
-        cookie, and the address bar loses it; a wrong one says so."""
+        cookie, and the address bar loses it; a wrong one says so. The same
+        file serves the standalone at "" and a host under its prefix: the
+        prefix fills the asset links, not the routes."""
         given = request.query_params.get("token")
         if given is not None:
-            if valid(given):
-                return signed_in(RedirectResponse("/", status_code=303), request, given)
-            return RedirectResponse("/?refused=1", status_code=303)
+            if await valid(given):
+                return signed_in(
+                    RedirectResponse(f"{prefix}/", status_code=303), request, given
+                )
+            return RedirectResponse(f"{prefix}/?refused=1", status_code=303)
         # The build the page belongs to, which the welcome repeats: a page
         # older than the server takes the new build by itself (#499).
         html = (CLIENT_DIR / "index.html").read_text()
         return HTMLResponse(
-            html.replace("__AEGIS_BUILD__", listing()["build"]),
+            html.replace("__AEGIS_PREFIX__", prefix).replace(
+                "__AEGIS_BUILD__", listing()["build"]
+            ),
             headers={"Cache-Control": "no-cache"},
         )
 
@@ -372,22 +401,22 @@ def build_web(
         except ValueError:
             body = None
         given = body.get("token") if isinstance(body, dict) else None
-        if not isinstance(given, str) or not valid(given):
+        if not isinstance(given, str) or not await valid(given):
             return JSONResponse({"error": "bad_token"}, status_code=401)
         return signed_in(Response(status_code=204), request, given)
 
     manifest = {
         "name": f"aegis · {app.server_name}",
         "short_name": "aegis",
-        "start_url": "/",
-        "scope": "/",
+        "start_url": f"{prefix}/",
+        "scope": f"{prefix}/",
         "display": "standalone",
         "background_color": "#11100e",
         "theme_color": "#0b0a09",
         # Android lists the installed app as a share target (#735). The service
         # worker takes the POST (sw.js stash); share_fallback below when none runs.
         "share_target": {
-            "action": "/share",
+            "action": f"{prefix}/share",
             "method": "POST",
             "enctype": "multipart/form-data",
             "params": {
@@ -399,17 +428,17 @@ def build_web(
         },
         "icons": [
             {
-                "src": "/static/icons/aegis-192.png",
+                "src": f"{prefix}/static/icons/aegis-192.png",
                 "sizes": "192x192",
                 "type": "image/png",
             },
             {
-                "src": "/static/icons/aegis-512.png",
+                "src": f"{prefix}/static/icons/aegis-512.png",
                 "sizes": "512x512",
                 "type": "image/png",
             },
             {
-                "src": "/static/icons/aegis-maskable-512.png",
+                "src": f"{prefix}/static/icons/aegis-maskable-512.png",
                 "sizes": "512x512",
                 "type": "image/png",
                 "purpose": "maskable",
@@ -419,11 +448,27 @@ def build_web(
 
     version = running()["version"] or "dev"
 
-    def listing() -> dict:
-        doc = client_files(version)
+    def listing(with_entry: bool = False) -> dict:
+        doc = client_files(version, prefix)
+        body = json.dumps(manifest)
         doc["files"].append(
-            {"url": "/manifest.webmanifest", "bytes": len(json.dumps(manifest))}
+            {
+                "url": f"{prefix}/manifest.webmanifest",
+                "bytes": len(body),
+                "hash": hashlib.sha256(body.encode()).hexdigest(),
+            }
         )
+        if with_entry:
+            # The public entry is not under /static, so client_files cannot
+            # name it: a host's worker caches it from here (life#101).
+            st = ENTRY_MODULE.stat()
+            doc["files"].append(
+                {
+                    "url": f"{prefix}/aegis.js",
+                    "bytes": st.st_size,
+                    "hash": _file_hash(ENTRY_MODULE, st),
+                }
+            )
         doc["bytes"] = sum(f["bytes"] for f in doc["files"])
         return doc
 
@@ -431,17 +476,37 @@ def build_web(
         """A share that reached the server: no service worker took it, as when
         the one running predates share targets. The body is never read, since
         the route takes no token; the person gets an empty New session form."""
-        return RedirectResponse("/#new", status_code=303)
+        return RedirectResponse(f"{prefix}/#new", status_code=303)
 
     async def files_list(request):
         """What the service worker downloads to open the client offline (sw.js)."""
         return JSONResponse(listing(), headers={"Cache-Control": "no-cache"})
+
+    async def manifest_json(request):
+        """The client's files for a host's own service worker: the same hashed
+        listing, with the build, the version and the mount prefix, so the
+        host knows what to cache and when it moved. It also names the public
+        entry at <prefix>/aegis.js, which /static does not serve. aegis
+        installs no worker in an embed; the page's is the host's."""
+        return JSONResponse(
+            listing(with_entry=True), headers={"Cache-Control": "no-cache"}
+        )
 
     async def webmanifest(request):
         """What Chrome installs: the server's name, so two servers differ on a
         home screen. The service worker is ``sw.js``, and it keeps this
         manifest with the build it belongs to."""
         return JSONResponse(manifest, media_type="application/manifest+json")
+
+    async def entry_module(request):
+        """The client's public entry, ``<prefix>/aegis.js``: a host imports
+        ``mount`` from it (a2). Read on every request so an edit shows at
+        once, like the rest of the client."""
+        return Response(
+            ENTRY_MODULE.read_text(),
+            media_type="text/javascript",
+            headers={"Cache-Control": "no-cache"},
+        )
 
     async def service_worker(request):
         """The service worker, from the root so its scope is the whole client,
@@ -452,6 +517,27 @@ def build_web(
         return Response(
             text, media_type="text/javascript", headers={"Cache-Control": "no-cache"}
         )
+
+    async def may_read_file(request, file_id: str) -> bool:
+        """Under a policy that hides sessions, a sent file is served to who may
+        read the session that sent it; one sent before aegis 3.0 records no
+        session and is the server's own caller's alone."""
+        if not app.narrows():
+            return True
+        given = request.cookies.get(cookie)
+        scheme, _, bearer = request.headers.get("authorization", "").partition(" ")
+        if scheme.lower() == "bearer" and bearer:
+            given = bearer
+        if not isinstance(given, str) or not given:
+            return False
+        try:
+            principal = await app.identify(Credential(given, "http"))
+        except Refused:
+            return False
+        log_id = files.session_of(app.roots.state_root, file_id)
+        if log_id is None:
+            return principal.name == app.user and principal.who is None
+        return app.sees(principal, log_id, "read")
 
     async def sent_file(request):
         """A file an agent sent. The id is the secret (files.py); a Host the
@@ -464,7 +550,7 @@ def build_web(
             if host in allowed_hosts or host in public
             else None
         )
-        if path is None:
+        if path is None or not await may_read_file(request, p["file_id"]):
             return PlainTextResponse("Not Found", status_code=404)
         return _file_response(path, request.query_params.get("download") == "1")
 
@@ -479,14 +565,6 @@ def build_web(
             return PlainTextResponse("Not Found", status_code=404)
         rel, place = found
         download = request.query_params.get("download") == "1"
-        if place is not None and place.user is not None:
-            # A person's file in multi-user mode: opened as them, then served
-            # from the open descriptor, which the server could not reopen.
-            try:
-                opened = await place.run(_open_as, place, rel, download)
-            except (OpError, OSError):
-                return PlainTextResponse("Not Found", status_code=404)
-            return _fd_response(request, *opened)
         try:
             path = fs_paths.resolve(app.roots.config_root, app.roots.state_root, rel)
         except OpError:
@@ -574,7 +652,7 @@ def build_web(
         return StreamingResponse(body(), headers=headers)
 
     async def tunnel(websocket: WebSocket) -> None:
-        """One stream of a trusted link's exit (exit.py). A program's, like a
+        """One stream of a link's exit (exit.py). A program's, like a
         link's socket: a browser always sends an ``Origin``."""
         host = websocket.headers.get("host", "")
         if websocket.headers.get("origin") is not None or (
@@ -591,7 +669,7 @@ def build_web(
             )
             if principal is None:
                 return "bad token"
-            return app.trust_refusal(principal, via) if via else "no link named"
+            return None if via else "no link named"
 
         await exit_.relay(
             websocket,
@@ -626,8 +704,17 @@ def build_web(
         given = hello.get("token")
         if not isinstance(given, str) and not program:
             given = websocket.cookies.get(cookie)
-        principal = app.principals.resolve(given)
-        if hello.get("t") != "hello" or principal is None:
+        principal = None
+        if hello.get("t") == "hello" and isinstance(given, str) and given:
+            try:
+                principal = await app.identify(
+                    Credential(
+                        given, "link" if isinstance(via, str) else "browser", via
+                    )
+                )
+            except Refused:
+                principal = None
+        if principal is None:
             await websocket.close(code=BAD_TOKEN)
             return
         if hello.get("proto") != PROTO:
@@ -639,6 +726,18 @@ def build_web(
             )
             await websocket.close(code=BAD_PROTO)
             return
+        if isinstance(via, str):
+            # A link goes both ways from 3.0 (links.py); one per pair of servers.
+            code, why = (
+                ("too_old", f"{via} runs an aegis from before 3.0; a link needs "
+                 f"aegis {BOTH_WAYS_SINCE} or newer on both servers")
+                if not isinstance(link, dict) or link.get("both_ways") is not True
+                else ("refused", app.link_refusal(via))
+            )  # fmt: skip
+            if why is not None:
+                await websocket.send_json({"t": "error", "code": code, "message": why})
+                await websocket.close(code=BAD_PROTO)
+                return
 
         # On the server's desktop: a loopback socket (a proxy's public name
         # is a browser elsewhere) on a server with somewhere to open a file.
@@ -651,29 +750,32 @@ def build_web(
             link=via if isinstance(via, str) else None,
             principal=principal,
         )
+        # A host's raw token was checked at the hello; the server's own and a
+        # minted one are checked again at each message (App.checks_itself).
+        recheck = app.checks_itself(given)
+        # A policy that hides sessions narrows every subscription (#959).
+        narrows = app.narrows()
         out: asyncio.Queue[dict] = asyncio.Queue()
         # This socket's subscriptions forwarded down links: <bid>:<channel>.
         bid = secrets.token_hex(6)
-        # A link asking for trust (#684): granted, it is also this server's way
-        # back to the server that opened it (links.Backlink).
-        asked = isinstance(link, dict) and link.get("trusted") is True
-        refused = app.trust_refusal(principal, str(via)) if asked else None
+        # A link is also this server's way back to the server that opened it
+        # (links.Backlink).
         back: Backlink | None = None
-        if asked and refused is None:
+        if isinstance(via, str):
 
             def still() -> str | None:
-                if app.principals.resolve(given) != principal:
+                if recheck and not app.still_valid(given, principal):
                     return "the link's token was revoked"
-                return app.trust_refusal(principal, str(via))
+                return None
 
-            back = Backlink(str(via), out.put_nowait, still, app.links.detach)
+            back = Backlink(via, out.put_nowait, still, app.links.detach)
 
         async def writer() -> None:
             while True:
                 msg = await out.get()
                 # A revoked token reads nothing more, even on a socket that
                 # sends nothing (the reader checks the ones that do).
-                if app.principals.resolve(given) != principal:
+                if recheck and not app.still_valid(given, principal):
                     await websocket.close(code=BAD_TOKEN)
                     return
                 await websocket.send_text(json.dumps(msg, ensure_ascii=False))
@@ -702,15 +804,7 @@ def build_web(
             try:
                 link = far(server)
                 if link is not None:
-                    # A link acts on the far server as its own token, which is
-                    # not this caller's: only an admin here may act through it.
-                    # Subscriptions, which only read, stay open to members.
-                    if not app.who(caller).is_admin:
-                        raise OpError(
-                            "not_for_members",
-                            f"acting on {server} through this server's link is "
-                            "for an admin here",
-                        )
+                    # A link acts on the far server as its own token.
                     reply.update(await link.call_raw(op, msg.get("params")))
                 else:
                     reply["result"] = await app.registry.call(
@@ -741,25 +835,19 @@ def build_web(
                 "proto": PROTO,
                 "server": app.server_name,
                 "build": listing()["build"],
+                # The client measures ages on this clock, not its own (#924).
+                "now": time.time(),
                 # A spawn through a link may say its group (#586): a link
                 # sends it only to a server that says this.
                 "groups": True,
                 "native": desktop,
                 "me": {
                     "name": principal.name,
-                    "role": principal.role,
-                    # Its quota lines, drawn on its gauges (quota_gate.py).
-                    "policy": app.principals.policy_of(principal.name),
                 },
                 # Whose a session with no owner is: the admin's (tokens.py).
                 "owner": app.principals.owner,
             }
-            | (
-                {"trusted": back is not None}
-                | ({"trust_refused": refused} if refused else {})
-                if asked
-                else {}
-            )
+            | ({"both_ways": True} if back is not None else {})
         )
         if back is not None:
             app.links.attach(back)
@@ -781,7 +869,7 @@ def build_web(
                 msg = await websocket.receive_json()
                 # A token revoked while this socket was open stops here, at its
                 # next message, not at its next connection.
-                if app.principals.resolve(given) != principal:
+                if recheck and not app.still_valid(given, principal):
                     await websocket.close(code=BAD_TOKEN)
                     break
                 t = msg.get("t") if isinstance(msg, dict) else None
@@ -791,6 +879,8 @@ def build_web(
                     task.add_done_callback(calls.discard)
                 elif t == "rreply" and back is not None:
                     back.resolve(msg)
+                elif t == "rframe" and back is not None:
+                    back.deliver(msg)
                 elif t in ("sub", "unsub"):
                     ch = str(msg.get("channel"))
                     server = msg.get("server")
@@ -845,7 +935,7 @@ def build_web(
                             send,
                             since,
                             merge=msg.get("merge") is True,
-                            view=app.view_of(caller),
+                            view=PolicyView(app, principal) if narrows else None,
                         )
                     except OpError as e:
                         send(
@@ -895,31 +985,148 @@ def build_web(
 
     @contextlib.asynccontextmanager
     async def lifespan(_):
+        if not mcp:
+            # The host's app has no MCP routes; there is no session manager to
+            # keep running.
+            await app.boot()
+            yield
+            await app.shutdown()
+            return
         # The MCP app keeps its own session manager running for the server's life.
         async with app.mcp_app.router.lifespan_context(app.mcp_app):
             await app.boot()
             yield
             await app.shutdown()
 
-    web = Starlette(
-        routes=[
-            Route("/", index),
-            Route("/login", login, methods=["POST"]),
-            Route("/share", share_fallback, methods=["POST"]),
-            Route("/manifest.webmanifest", webmanifest),
-            Route("/sw.js", service_worker),
-            Route("/client-files.json", files_list),
-            Mount("/static", ClientFiles(directory=CLIENT_DIR)),
-            Route("/files/{file_id}/{name}", sent_file),
-            Route("/fs/{ticket}/{name}", fs_file),
-            Route("/via/{server}/files/{file_id}/{name}", via_file),
-            Route("/dictation/{pin}/{name}", dictation_file),
-            Route("/speech/{pin}/{name:path}", speech_file),
-            WebSocketRoute("/ws", ws),
-            WebSocketRoute("/tunnel", tunnel),
-            *app.mcp_app.routes,
-        ],
-        lifespan=lifespan,
-    )
+    def chrome_cors(request, response: Response) -> Response:
+        """The extension's popup fetches from a chrome-extension:// origin."""
+        origin = request.headers.get("origin", "")
+        if origin.startswith("chrome-extension://"):
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Methods"] = "POST"
+            response.headers["Access-Control-Allow-Headers"] = "content-type"
+            response.headers["Vary"] = "Origin"
+        return response
+
+    async def chrome_pair(request):
+        """Trade a pairing code for the extension's device token (chrome.py)."""
+        if request.method == "OPTIONS":
+            return chrome_cors(request, Response(status_code=204))
+        try:
+            body = await request.json()
+        except ValueError:
+            body = None
+        if not isinstance(body, dict) or not isinstance(body.get("code"), str):
+            return chrome_cors(
+                request, JSONResponse({"error": "bad_request"}, status_code=400)
+            )
+        try:
+            token, dev = app.chrome.pair(
+                body["code"],
+                str(body.get("name") or ""),
+                str(body.get("browser") or ""),
+            )
+        except chrome_.PairError as e:
+            return chrome_cors(
+                request,
+                JSONResponse({"error": e.code, "message": e.message}, status_code=403),
+            )
+        return chrome_cors(
+            request,
+            JSONResponse({"token": token, "id": dev["id"], "server": app.server_name}),
+        )
+
+    async def chrome_socket(websocket: WebSocket) -> None:
+        """The paired extension's one socket. Its device token opens this and
+        nothing else."""
+        host = websocket.headers.get("host", "")
+        origin = websocket.headers.get("origin") or ""
+        if not origin.startswith("chrome-extension://") or (
+            host not in allowed_hosts and host not in public
+        ):
+            await websocket.close(code=BAD_ORIGIN)
+            return
+        await websocket.accept()
+        try:
+            hello = await asyncio.wait_for(websocket.receive_json(), HELLO_TIMEOUT_S)
+        except (TimeoutError, ValueError, WebSocketDisconnect):
+            with contextlib.suppress(Exception):
+                await websocket.close(code=NO_HELLO)
+            return
+        given = hello.get("token") if isinstance(hello, dict) else None
+        dev = app.chrome.device_for(given) if isinstance(given, str) else None
+        if dev is None or hello.get("t") != "hello":
+            await websocket.close(code=BAD_TOKEN)
+            return
+        did = dev["id"]
+
+        async def send(msg: dict) -> None:
+            await websocket.send_json(msg)
+
+        async def close() -> None:
+            with contextlib.suppress(Exception):
+                await websocket.close(code=BAD_TOKEN)
+
+        await send(
+            {
+                "t": "welcome",
+                "server": app.server_name,
+                "id": did,
+                "name": dev["name"],
+                "theme": app.chrome.theme,
+                "requests": list(app.chrome.requests.values()),
+            }
+        )
+        app.chrome.connected(did, send, close, str(hello.get("version") or ""))
+        app.chrome.sync_tabs(did, hello.get("tabs"))
+        try:
+            while True:
+                msg = await websocket.receive_json()
+                if not isinstance(msg, dict):
+                    continue
+                if msg.get("t") == "unpair":
+                    await app.chrome.unpair(did)
+                    return
+                if (reply := await app.chrome.handle(did, msg)) is not None:
+                    await send(reply)
+        except (WebSocketDisconnect, ValueError, RuntimeError):
+            pass
+        finally:
+            app.chrome.disconnected(did, send)
+
+    async def chrome_extension(request):
+        """The unpacked extension, zipped, to load in chrome://extensions."""
+        return Response(
+            chrome_.extension_zip(),
+            media_type="application/zip",
+            headers={"Content-Disposition": 'attachment; filename="aegis-chrome.zip"'},
+        )
+
+    routes = [
+        Route("/", index),
+        Route("/login", login, methods=["POST"]),
+        Route("/share", share_fallback, methods=["POST"]),
+        Route("/manifest.webmanifest", webmanifest),
+        Route("/manifest.json", manifest_json),
+        Route("/aegis.js", entry_module),
+        Route("/sw.js", service_worker),
+        Route("/client-files.json", files_list),
+        Mount("/static", ClientFiles(directory=CLIENT_DIR)),
+        Route("/files/{file_id}/{name}", sent_file),
+        Route("/fs/{ticket}/{name}", fs_file),
+        Route("/via/{server}/files/{file_id}/{name}", via_file),
+        Route("/dictation/{pin}/{name}", dictation_file),
+        Route("/speech/{pin}/{name:path}", speech_file),
+        WebSocketRoute("/ws", ws),
+        WebSocketRoute("/tunnel", tunnel),
+        Route("/chrome/pair", chrome_pair, methods=["POST", "OPTIONS"]),
+        Route("/chrome/extension.zip", chrome_extension),
+        WebSocketRoute("/chrome/socket", chrome_socket),
+    ]
+    if mcp:
+        # Only the Server's own loopback listener serves these; a host's
+        # public mount does not put /mcp on its origin (#993).
+        routes.extend(app.mcp_app.routes)
+    web = Starlette(routes=routes, lifespan=lifespan)
     web.state.aegis = app
     return web

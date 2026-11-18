@@ -21,6 +21,7 @@ to disk, so an upgraded CLI never meets a stale list.
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -63,11 +64,17 @@ AEGIS: dict[str, Command] = {
             "sleep", "", "End the process and keep the session; a message wakes it"
         ),
         Command("stop", "", "Alias of /sleep"),
-        Command("quiet", "", "Hide this tab until the turn ends, as Alt+Q"),
+        Command("quiet", "", "Quiet this session or end its quiet, as Alt+Q"),
         Command(
             "autoclose",
             "[on|off]",
             "Close this session when its agent ends done; alone, toggle it",
+        ),
+        Command(
+            "autohandoff",
+            "[N|off]",
+            "Continue in a fresh session on its own past N tokens of context, "
+            "carrying what it waits on; alone, the configured handoff_at",
         ),
         Command("restart", "", "A fresh process on the same conversation"),
         Command("btw", "<question>", "Ask a side question; the agent never sees it"),
@@ -75,12 +82,6 @@ AEGIS: dict[str, Command] = {
             "feedback",
             "[text]",
             "Report a bug or ask for a feature in aegis; the agent drafts the issue",
-        ),
-        Command(
-            "multiuser",
-            "[text]",
-            "Set up several people on this server, each as their own Linux user; "
-            "the agent guides it",
         ),
         Command(
             "setup",
@@ -271,7 +272,51 @@ def parse_announce(arg: str) -> tuple[str, str, str | None]:
 
 
 def escape(text: str) -> str:
+    if text.startswith("@@"):
+        return text[1:]
     return " " + text[1:] if text.startswith("//") else text
+
+
+@dataclass(frozen=True)
+class Mention:
+    """One ``@name`` at the start of a line (mentions.py). ``urgent``: ``@!``,
+    a note that reaches a busy session at its next tool step. ``session``:
+    ``@s:``, a handle even where an agent has the same name."""
+
+    name: str
+    server: str | None = None
+    urgent: bool = False
+    session: bool = False
+
+    @property
+    def address(self) -> str:
+        return f"{self.name}@{self.server}" if self.server else self.name
+
+
+_MENTION = re.compile(
+    r"@(?P<urgent>!?)(?P<s>s:)?(?P<name>[A-Za-z0-9._-]+)"
+    r"(?:@(?P<server>[A-Za-z0-9._-]+))?(?:\s+|$)"
+)
+
+
+def split_mentions(text: str) -> tuple[list[Mention], str] | None:
+    """The run of ``@name`` words a line starts with, each once, and the rest;
+    None for a line that does not start with one, ``@@`` (an escaped ``@``)
+    included. An ``@`` after the first other word is text."""
+    if not text.startswith("@") or text.startswith("@@"):
+        return None
+    out: list[Mention] = []
+    pos = 0
+    while (m := _MENTION.match(text, pos)) is not None:
+        men = Mention(
+            m["name"], m["server"], urgent=bool(m["urgent"]), session=bool(m["s"])
+        )
+        if all(x.address != men.address for x in out):
+            out.append(men)
+        pos = m.end()
+    if not out:
+        return None
+    return out, text[pos:].strip()
 
 
 def aegis_wire() -> list[dict]:

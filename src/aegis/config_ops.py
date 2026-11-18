@@ -9,12 +9,15 @@ running server picks it up the way it picks up an editor's (config.py).
 
 from __future__ import annotations
 
+import os
 import time
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
-from .config import ConfigDoc, stamp_from, write
+from .config import ConfigDoc, McpDoc, mcp_raw, stamp_from, write
+from . import mcp_servers
+from .ops import OpError
 from . import service
 from .doctor import Found, detect, doctor, propose
 from .doctor_watch import DoctorWatch
@@ -24,6 +27,10 @@ if TYPE_CHECKING:
     from .app import App
 
 DETECT_TTL_S = 60.0
+
+
+class McpTest(BaseModel):
+    entry: McpDoc
 
 
 class WriteParams(BaseModel):
@@ -42,11 +49,12 @@ def register_config_ops(app: App) -> None:
             "opencode": app.opencode_bin,
             "codex": app.codex_bin,
             "cursor": app.cursor_bin,
+            "pi": "pi",
         }
 
     async def checked():
         # What `aegis doctor` prints: the config, the harnesses, the service.
-        return await doctor(app.roots, bins()) + service.check()
+        return await doctor(app.roots, bins(), extra_mcp=app.mcp) + service.check()
 
     app.doctor_watch = DoctorWatch(checked)
 
@@ -58,41 +66,57 @@ def register_config_ops(app: App) -> None:
         cache["found"] = (time.monotonic(), found)
         return found
 
-    @r.op("config.read")
+    @r.op("config.read", access="read")
     async def config_read(_, caller):
         """.aegis.yaml as aegis holds it: the form's document, its stamp, and
         the error when the file on disk does not parse."""
         return app.config.current().wire()
 
-    @r.op("config.write", WriteParams, admin=True)
+    @r.op("config.write", WriteParams, server=True)
     async def config_write(p: WriteParams, caller):
         """Write the Settings form to .aegis.yaml. Refused when the file changed
         since `stamp`; nothing is written when the document has a problem."""
-        problems = write(app.config.path, p.doc, stamp_from(p.stamp))
+        problems = write(app.config.path, p.doc, stamp_from(p.stamp), app.mcp)
         return {
             "saved": not problems,
             "problems": [f.wire() for f in problems],
             "config": app.config.current().wire(),
         }
 
-    @r.op("config.detect")
+    @r.op("mcp.test", McpTest, server=True, local=True)
+    async def mcp_test(p: McpTest, caller):
+        """Connect to an MCP server as the Settings form holds it, saved or
+        not, and name its tools. Runs a stdio server's command on this machine."""
+        name = p.entry.name
+        servers, errors = mcp_servers.parse({name: mcp_raw(p.entry)})
+        if name in errors:
+            raise OpError("mcp_test", f"{name}: {errors[name]}")
+        s = mcp_servers.expand(servers[name], os.environ)
+        try:
+            return {"tools": await mcp_servers.tools_of(s)}
+        except TimeoutError as e:
+            raise OpError("mcp_test", f"{name}: no answer within 10 s") from e
+        except Exception as e:  # whatever the server or its transport raised
+            raise OpError("mcp_test", f"{name}: {str(e) or type(e).__name__}") from e
+
+    @r.op("config.detect", server=True, access="read")
     async def config_detect(_, caller):
         """The harnesses installed on this machine: binary, version, models."""
         return [f.wire() for f in await detected()]
 
-    @r.op("config.doctor", agent=True, read=True)
+    @r.op("config.doctor", agent=True, read=True, access="read")
     async def config_doctor(_, caller):
         """Check .aegis.yaml, the harnesses it names and the state directory.
         Each finding has a level (ok, warn, error), where it is, and what is
         wrong."""
-        return [f.wire() for f in await doctor(app.roots, bins())]
+        return [f.wire() for f in await doctor(app.roots, bins(), extra_mcp=app.mcp)]
 
-    @r.op("config.propose", admin=True)
+    @r.op("config.propose", server=True)
     async def config_propose(_, caller):
         """The first configuration `aegis init` would write here."""
         return propose(await detected()).model_dump()
 
-    @r.op("models.list", agent=True, read=True)
+    @r.op("models.list", agent=True, read=True, access="read")
     async def models_list(_, caller):
         """Every model the installed harnesses can run, with its rank among
         its harness's models, Artificial Analysis's Coding and Intelligence
@@ -106,6 +130,8 @@ def register_config_ops(app: App) -> None:
         rows = []
         for f in await detected():
             for m in f.models:
+                if not app.offers(caller, harness=f.harness, model=m.value):
+                    continue
                 used = [
                     {"agent": a.name, "at": a.models.index(v)}
                     for a in agents

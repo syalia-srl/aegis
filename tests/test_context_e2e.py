@@ -177,7 +177,7 @@ async def test_the_archive_survives_a_restart_before_the_first_turn(world):
     await until(lambda: log_a in reg.archived, 8, "archived after restart")
 
 
-async def test_peer_read_reaches_the_archived_predecessor_for_its_successor_only(world):
+async def test_peer_read_reaches_an_archived_session_for_any_agent(world):
     a, b = await handed(world)
     reg = world.app.sessions
     await until(lambda: a.log_id in reg.archived, 8, "archived")
@@ -185,9 +185,21 @@ async def test_peer_read_reaches_the_archived_predecessor_for_its_successor_only
     got = await world.app.registry.call("peer.read", read, Caller("agent", b.log_id))
     assert "ctx 342000" in got
     c = await world.spawn()
+    got = await world.app.registry.call("peer.read", read, Caller("agent", c.log_id))
+    assert "ctx 342000" in got
+    from aegis.gc import pack
+
+    pack(world.app.sessions.store_path(a.log_id))  # what aegis gc leaves
+    got = await world.app.registry.call("peer.read", read, Caller("agent", c.log_id))
+    assert "ctx 342000" in got
+    by_id = {"target": a.log_id, "last": 5}
+    got = await world.app.registry.call("peer.read", by_id, Caller("agent", c.log_id))
+    assert "ctx 342000" in got
     with pytest.raises(OpError) as e:
-        await world.app.registry.call("peer.read", read, Caller("agent", c.log_id))
-    assert e.value.code == "archived"
+        await world.app.registry.call(
+            "peer.read", {"target": "no-such-one"}, Caller("agent", c.log_id)
+        )
+    assert e.value.code == "no_session"
 
 
 async def test_the_line_asks_outright_at_a_break_and_conditionally_on_a_question(world):
@@ -264,13 +276,14 @@ async def child(world, parent):
 async def test_a_handoff_takes_the_old_sessions_place_in_its_group(world):
     a = await world.spawn()
     k = await child(world, a)
+    key = a.spec.group
     await turn(a, "/ctx 342000")
     await end(world, a, handoff="Brief.")
     b = world.session((await handoff(world, a))["log_id"])
-    assert b.spec.group == a.log_id and b.spec.leads
+    assert b.spec.group == key  # no session heads the group (#1039)
     await until(lambda: any(e["kind"] == "user" for e in b.entries()), 8, "b's prompt")
     said = first_message(b)
-    assert k.handle in said and "peer_handoff" in said and "you head it now" in said
+    assert k.handle in said and "peer_handoff" in said
     reg = world.app.sessions
     await until(lambda: a.log_id in reg.archived, 8, "the old session archived")
     assert k.spec.spawned_by == b.log_id
@@ -281,10 +294,11 @@ async def test_a_handoff_takes_the_old_sessions_place_in_its_group(world):
 async def test_a_handoff_of_a_member_stays_in_its_group_without_heading_it(world):
     a = await world.spawn()
     k = await child(world, a)
+    assert k.spec.group == a.spec.group
     await turn(k, "/ctx 342000")
     await end(world, k, handoff="Brief.")
     b = world.session((await handoff(world, k))["log_id"])
-    assert b.spec.group == a.log_id and not b.spec.leads
+    assert b.spec.group == a.spec.group
     assert b.spec.spawned_by == a.log_id
     await until(lambda: any(e["kind"] == "user" for e in b.entries()), 8, "b's prompt")
     assert "peer_handoff" not in first_message(b)  # k started nobody

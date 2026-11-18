@@ -1,5 +1,7 @@
+import asyncio
 import json
 import os
+import time
 from pathlib import Path
 
 import pytest
@@ -150,6 +152,37 @@ async def test_interrupt_ends_the_turn_and_marks_the_call(cx):
     (t,) = [e for e in cx.session.entries() if e["kind"] == "tool"]
     assert t["status"] == "err"
     assert cx.done_lines() == 1  # the interrupted turn still gets its line
+
+
+async def test_interrupt_kills_a_child_that_ignores_a_closed_stdin(
+    tmp_path, fake_cursor, monkeypatch
+):
+    """cursor-agent keeps a running turn after stdin closes (measured
+    2026-11-01). Waiting out that close lets the turn continue, and the
+    lines that follow put the session back to work."""
+    monkeypatch.setenv("FAKE_CURSOR_HANG", "1")
+    h = CX(tmp_path, fake_cursor)
+    await h.session.start()
+    try:
+        await h.session.send("/linger")
+        await until(lambda: "linger-1" in " ".join(h.prose()), what="the first chunk")
+        pids = h.pids("START")
+        started = time.monotonic()
+        await h.session.interrupt()
+        # The old path waited TERM_GRACE_S (5s) for stdin before any signal.
+        assert time.monotonic() - started < 2
+        await until(lambda: h.session.status == "idle", timeout=2, what="idle")
+        seen = " ".join(h.prose())
+        await asyncio.sleep(0.4)
+        assert h.session.status == "idle"
+        assert " ".join(h.prose()) == seen  # a late chunk must not reopen it
+        await until(
+            lambda: not any(alive(p) for p in pids),
+            timeout=2,
+            what="the child gone",
+        )
+    finally:
+        await h.session.stop()
 
 
 async def test_stop_and_resume_keep_the_conversation(cx):

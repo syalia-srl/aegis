@@ -73,7 +73,7 @@ yourself starts at once.
 
 ### On another server
 
-Over a [trusted link](links#trusted-links), every `schedule_*` tool takes a
+Across a [link](links#what-agents-can-do-across-a-link), every `schedule_*` tool takes a
 schedule on the other server as `name@server`, as `queue_enqueue` does with
 `queue@server`. Put one there when the clock must keep ticking while this
 machine sleeps:
@@ -86,7 +86,7 @@ The schedule lives and ticks on that server, and it fires there. A
 `fire.cwd`, a `fire.session` and an agent's name are that server's; with no
 `cwd`, a fire starts in that server's working directory. A reply names the
 schedule `name@server` and adds `server`. `schedule_list` gives this server's
-schedules and then each trusted server's, in the same form, and leaves out a
+schedules and then each linked server's, in the same form, and leaves out a
 server that cannot answer now. `schedule_test` takes `name@server` to try a clock
 and a check there, and that schedule need not exist yet.
 
@@ -108,8 +108,7 @@ Schedules view instead:
   session's own server, so a far session can never aim your click somewhere
   else. Pick the server in the Schedules view here.
 
-A plain link refuses all of this, as it does `queue@server`, and a member's agent
-is refused. Nothing is relayed to a third server.
+A plain link refuses all of this, as it does `queue@server`. Nothing is relayed to a third server.
 
 ## Fire a workflow
 
@@ -184,19 +183,24 @@ own last `turn_end`.
 
 A fire waits while the pool it draws on is over the schedule's own launch
 line, and goes once, at most one tick, when it drops back under. `quota` maps
-a pool to its windows and each window to a percent from 0 to 99 or to
+a pool to its windows and each window to a percent from 0 to 99, to
 `"pace"`, which holds while the window is projected to pass 100% by its
-reset. The pool claude has the windows session and weekly_all, and the pool
+reset, or to a map of `used` and `projected` (either or both), which holds
+when either is reached. A schedule's line takes no `stop`: a schedule only
+holds its fires, and a stop line, which cuts running turns, belongs on an
+agent or a queue. The pool claude has the windows session and weekly_all, and the pool
 opencode-go has rolling, weekly and monthly. Without `quota` a
 schedule holds while either weekly window is off pace; `{}` sets no line.
 
 ```json
-{"claude": {"session": 60, "weekly_all": "pace"}}
+{"claude": {"session": 60, "weekly_all": {"used": 80, "projected": 90}}}
 ```
 
 The lines apply to a fire into an open session too. They only hold what has
-not started: a live run goes on. A pool aegis has never read sets no line, and
-a token's own quota gate still applies on top of them.
+not started: a live run goes on. A pool aegis has never read sets no line.
+Agents and queues take the same lines (config, [Guard an agent or a
+queue](config#guard-an-agent-or-a-queue)): a run whose agent's guard is
+closed with `on_closed: refuse` is skipped, with why in its run log.
 
 ## Change, pause and fire
 
@@ -207,8 +211,7 @@ ticks that fell during the pause do not fire. `schedule_fire` fires at once,
 skipping the clock and the check but not the overlap rule. `schedule_delete`
 removes a schedule, and a live run keeps going.
 
-An agent changes only the schedules it created, a member only the ones it
-owns, and an admin any. A schedule an agent creates never starts an agent
+An agent changes only the schedules it created; a person changes any. A schedule an agent creates never starts an agent
 with more permission than its creator had.
 
 ## Read the runs

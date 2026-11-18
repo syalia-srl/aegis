@@ -22,19 +22,23 @@ string (the Workspace's own form), and a nested ``provider:`` mapping whose
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from ruamel.yaml import YAML, YAMLError
 
 from .claude.process import PERMISSION_MODE, REPLACED_TOOLS
+from .guards import AGENT_ACTIONS, Guard
+from . import budgets, guards
 from .ops import OpError
+from . import scopes
 from .roots import CONFIG_FILE
-from .session import SpawnSpec
+from .scopes import Scope
+from .session import SWITCHES, SpawnSpec
 
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
-HARNESSES = ("claude-code", "opencode", "codex", "cursor")
+HARNESSES = ("claude-code", "opencode", "codex", "cursor", "pi")
 SUPPORTED_HARNESSES = HARNESSES
 FIELDS = ("harness", "model", "effort", "permission")
 # Least to most: an agent spawns sessions with at most its own permission.
@@ -71,12 +75,27 @@ class Agent:
     keep_harness_tools: tuple[str, ...] = ()
     # A linked server to exit through, or "off"; blank: the server's exit_via.
     exit: str = ""
+    # The MCP servers the agent attaches, by name, from the mcp: map (#960).
+    mcp: tuple[str, ...] = ()
     # Why this agent cannot be spawned as written; None when it can.
     error: str | None = None
     # The cascade, head first; (model,) for a one-model agent.
     models: tuple[str, ...] = ()
     # Models ``models:`` listed more than once; the repeats are dropped.
     repeated: tuple[str, ...] = ()
+    # A product agent's switches (session.SWITCHES, #983).
+    harness_tools: bool = True
+    isolated: bool = False
+    primer: bool = True
+    notices: bool = True
+    # What its sessions may use (scopes.py, #1066), and its tools: block as
+    # the file writes it; the scope that allows everything without one.
+    scope: Scope = scopes.ANY
+    tools: dict = field(default_factory=dict)
+    # Its quota guard (guards.py, #1067); None: unguarded.
+    guard: Guard | None = None
+    # Its spending caps (budgets.py, #1068); (): no cap.
+    budget: tuple[budgets.Cap, ...] = ()
 
     @property
     def enabled(self) -> bool:
@@ -93,6 +112,7 @@ class Agent:
             "enabled": self.enabled,
             "error": self.error,
             "has_priming": bool(self.priming),
+            **({"tools": self.tools} if self.tools else {}),
         }
 
 
@@ -131,16 +151,51 @@ def _agent(name: str, raw: Any) -> Agent:
     error = models_error or error
     priming = d.get("priming")
     keep, keep_error = _keep(d.get("keep_harness_tools"))
+    mcp = d.get("mcp")
+    mcp_ok = mcp is None or (
+        isinstance(mcp, list) and all(isinstance(n, str) and n for n in mcp)
+    )
+    mcp_error = None if mcp_ok else "mcp must be a list of MCP server names"
+    scope, scope_error = scopes.parse(d.get("tools"))
+    guard, guard_error = guards.parse(d.get("quota"), AGENT_ACTIONS)
+    budget, budget_error = budgets.parse(d.get("budget"))
+    switches = {k: d.get(k, default) for k, default in SWITCHES.items()}
+    switch_error = next(
+        (f"{k} must be true or false" for k, v in switches.items()
+         if not isinstance(v, bool)),
+        None,
+    )  # fmt: skip
     return Agent(
         name=str(name),
         **values,
         priming=str(priming) if priming else None,
         keep_harness_tools=keep,
         exit=str(d.get("exit") or ""),
-        error=error or keep_error,
+        mcp=tuple(mcp) if mcp_ok and mcp else (),
+        error=error
+        or keep_error
+        or mcp_error
+        or switch_error
+        or scope_error
+        or guard_error
+        or budget_error,
         models=models or ((values["model"],) if values["model"] else ()),
         repeated=repeated,
+        harness_tools=_flag(switches, "harness_tools"),
+        isolated=_flag(switches, "isolated"),
+        primer=_flag(switches, "primer"),
+        notices=_flag(switches, "notices"),
+        scope=scope,
+        tools=scopes.form(d.get("tools")),
+        guard=guard,
+        budget=budget,
     )
+
+
+def _flag(switches: dict, key: str) -> bool:
+    """A switch as the file has it, or its default when it is not a bool."""
+    v = switches[key]
+    return v if isinstance(v, bool) else SWITCHES[key]
 
 
 def _models(d: dict) -> tuple[tuple[str, ...], tuple[str, ...], str | None]:
@@ -224,9 +279,11 @@ def resolve(
     spawned_by: str | None = None,
     group: str | None = None,
     owner: str | None = None,
+    within: Scope | None = None,
 ) -> SpawnSpec:
     """The spec a spawn runs: the agent's fields, each replaced by its override
-    when one is given. The priming is always the agent's."""
+    when one is given. The priming is always the agent's. Its scope is the
+    agent's met with ``within``, the scope of the session that starts it."""
     name = name or default
     if not name:
         raise OpError("no_agent", "no agent given and no default_agent in .aegis.yaml")
@@ -260,9 +317,11 @@ def resolve(
         harness=fields["harness"],
         priming=agent.priming,
         keep_harness_tools=agent.keep_harness_tools,
+        **{k: getattr(agent, k) for k in SWITCHES},
         cascade=cascade,
         overridden=overridden,
         spawned_by=spawned_by,
         group=group,
         owner=owner,
+        scope=agent.scope.meet(within),
     )

@@ -1,7 +1,7 @@
 ---
 title: Configuration
 kind: concept
-when: adding or changing agents, the default agent, queues, recaps, side notes, the per-session memory cap, notices about disk, memory, CPU and quota, an agent's status and stalled monitors, when aegis nudges a silent agent, parking idle sessions, untested harness versions, search embeddings for skills and memories, the disks the Host rows list or the network readings in .aegis.yaml, or picking a theme
+when: adding or changing agents, an agent's spending budget, settings that differ per server (hosts:), the default agent, queues, recaps, side notes, the per-session memory cap, notices about disk, memory, CPU and quota, an agent's status and stalled monitors, when aegis nudges a silent agent, parking idle sessions, untested harness versions, search embeddings for skills and memories, the disks the Host rows list or the network readings in .aegis.yaml, or picking a theme
 hints:
   - Add an agent with its own harness, model and effort in .aegis.yaml. #add-an-agent
   - A cascade starts on a cheap model and moves up when the task needs it. #cascades
@@ -25,10 +25,13 @@ agents:
   quick: {harness: claude-code, model: haiku, effort: low, permission: write}
   deepseek: {harness: opencode, model: opencode-go/deepseek-v4-pro, effort: high, permission: full}
   reviewer: {harness: claude-code, model: opus, effort: max, permission: read, priming: You review code and change nothing.}
+max_workers: 4
 queues:
-  general: {agent: opus, max_parallel: 3}
+  general: {agent: opus, priority: 2}
+  research: {agent: deepseek}
 recap: {agent: quick}
 btw: {agent: opus}
+group_names: {agent: quick}
 context: {handoff_at: 300000, cold_after: 3600, cold_min: 100000}
 notices: {disk: {on: 90, critical: 97, clear: 85}, cpu: false}
 park: {claude-code: 1200}
@@ -39,12 +42,14 @@ park: {claude-code: 1200}
 To add an agent to `.aegis.yaml`, map its name under `agents:` to a preset.
 Each one has:
 
-- `harness:` one of claude-code, opencode, codex or cursor. Each aegis release
+- `harness:` one of claude-code, opencode, codex, cursor or pi. Each aegis release
   is tested with a range of versions of each harness; for OpenCode that is
-  OpenCode 2 (`npm install -g @opencode/cli`). A version outside the range is
-  named, with the command that installs a tested one (below);
+  OpenCode 2 (`npm install -g @opencode/cli`), and for pi
+  `npm install -g @earendil-works/pi-coding-agent` (the older
+  `@mariozechner/pi-coding-agent` is the stale old name). A version outside
+  the range is named, with the command that installs a tested one (below);
 - `model:` the model to run, such as opus or haiku for Claude Code. OpenCode
-  and Codex models are written provider/model, Cursor models by their
+  Codex and pi models are written provider/model, Cursor models by their
   catalog's plain id (an id's own bracketed overrides — effort, context,
   flags — come with it when it is set). `models:` instead names an
   ordered list, a cascade (below);
@@ -52,10 +57,17 @@ Each one has:
   inside its id, so a change while it runs is accepted only when it is that
   same effort, and any other is refused;
 - `permission:` read, write, auto or full (the sessions page says what each
-  allows);
+  allows). pi asks before nothing and fences no path, so it applies a level as
+  the tools it may use: read keeps read, grep, find and ls, write adds edit
+  and write, and auto is the same as full. A change takes effect between
+  turns, when aegis restarts pi on the same conversation;
 - `priming:` (optional) a system prompt every session from this agent gets;
 - `keep_harness_tools:` (optional, Claude Code) a list of Claude Code tools
-  this agent keeps although aegis replaces them (below).
+  this agent keeps although aegis replaces them (below);
+- `harness_tools:`, `isolated:`, `primer:` and `notices:` (optional; set
+  to false, true, false and false) make it a product agent: only its MCP tools,
+  none of the machine's harness config, its priming as the whole prompt, and
+  no nudges or notices. `help_read library#product-agents` says what each does.
 
 The harness can also be written as `provider:` with the harness's name, or as
 a nested `provider:` map whose `name` is the harness and whose other keys are
@@ -87,8 +99,9 @@ higher on [Artificial Analysis](https://artificialanalysis.ai)'s Intelligence In
 breaking ties, naming the first such pair:
 "b (50.1) is above a (54.0) in the ranking", or "x (unranked) is above a
 (54.0) in the ranking" for a model with no Intelligence Index. The scores
-ship with aegis and are refreshed at each release, so a model released since
-is unranked. The order is still yours: the warning changes nothing.
+are refreshed every night (see [Models](#models)), so a model is ranked
+about a day after Artificial Analysis scores it. The order is still yours:
+the warning changes nothing.
 
 Every start from the agent (a new tab, `session_spawn`, a handoff, a queue
 worker, a workflow node, a schedule) runs the first model that is not cooling
@@ -150,6 +163,22 @@ the agent's models, 0 first) and the epoch it stops cooling, or
 answer carries the ranking's date and its source,
 [Artificial Analysis](https://artificialanalysis.ai).
 
+The ranking is rebuilt from Artificial Analysis every night and published on
+the aegis repository's `model-ranking` branch. aegis downloads it when it
+starts and then once a day (an hour later after a failure) into
+`models.json` in its state directory, and reads it while it is newer than
+the ranking packaged with the installed version, so new models are ranked
+without a release. A download that fails, or does not parse as a ranking,
+leaves the last good one in place; an offline server reads the packaged
+ranking. The date under the Models list is the date of whichever it reads.
+To read only the packaged ranking, and make no request, set:
+
+```yaml
+model_ranking: false
+```
+
+or turn off "model_ranking" under Model ranking in Settings.
+
 ## Claude Code tools aegis replaces
 
 A Claude Code session starts without the Claude Code tools aegis has its own
@@ -171,6 +200,238 @@ agents:
 A name that is not on that list stops the agent with an error rather than
 keeping nothing. Like the priming, the list is fixed when a session starts.
 
+## Scope an agent
+
+An agent may carry `tools:`, which fences what its sessions use of aegis.
+Without it the agent gets every aegis tool, as before.
+
+```yaml
+agents:
+  fair:
+    harness: claude-code
+    model: sonnet
+    effort: low
+    permission: full
+    tools:
+      deny: [spawn, workflows, schedules]
+      queues: [fair-work]          # queue_enqueue only here
+      agents: []                   # may start no session of any agent
+  helper:
+    harness: claude-code
+    model: haiku
+    effort: low
+    permission: write
+    tools:
+      allow: [turn_end, plan_update, toast, file_send, queue_enqueue, task_status, help]
+      queues: [helper]
+```
+
+`allow:` names the tools the agent keeps, `deny:` the ones it loses; give one
+of them, not both. Each takes tool names and these groups:
+
+| Group | Tools |
+|---|---|
+| `spawn` | session_spawn, session_handoff, peer_handoff, session_close |
+| `queues` | queue_enqueue, task_status, task_cancel, task_resume |
+| `workflows` | every workflow_* tool |
+| `schedules` | every schedule_* tool |
+| `browser` | every browser_* tool, signin_open |
+| `secrets` | secret_send, secret_request |
+| `config` | config_suggest, layout_set, skill_save, skill_delete, notice_announce |
+| `help` | help_search, help_read, meta |
+
+`turn_end` is always kept: a session without it cannot hand back its turn.
+`queues:` lists the queues `queue_enqueue` may name, and `agents:` the agents
+`session_spawn` and `session_handoff` may start and `peer_handoff` may reach;
+leaving either out means any, and `[]` means none. A `session_handoff` that
+continues on the session's own agent is always allowed, so a scoped agent can
+still hand off when its context fills. A name aegis does not know
+stops the agent with an error rather than leaving a tool open.
+
+A session lists only the tools in its scope, and its workplace prompt leaves
+out the paragraphs about the others. A call to a tool outside it, as a tool or
+through `aegis call`, is refused with out_of_scope and what the scope
+allows. The scope is fixed when the session starts, so editing the agent never
+widens a running session. A session started by another one (a spawn, a
+handoff, a queue worker, a workflow node, a schedule run made by an agent) gets
+its own agent's scope met with its starter's: a worker of `fair-work` that
+`fair` enqueued cannot start workflows even if its own agent can. `aegis
+doctor` shows an agent's scope on its row.
+
+## Guard an agent or a queue
+
+An agent or a queue may carry `quota:`, which holds its work back while the
+pool it draws on is over a line. Without it the agent or queue is never held,
+as before.
+
+```yaml
+agents:
+  fair:
+    harness: claude-code
+    model: sonnet
+    effort: low
+    permission: full
+    quota:
+      claude: {weekly_all: {used: 80, projected: 90, stop: 97}}
+      on_closed: warn
+      advice: Answer in the group in one short message and file the request as an issue.
+queues:
+  fair-work:
+    agent: deepseek
+    max_pending: 50
+    quota:
+      opencode-go: {monthly: {projected: 95, stop: 99}}
+      on_closed: reject
+```
+
+`quota:` maps a pool to its windows, as a schedule's quota does (schedules,
+[Quota lines](schedules#quota-lines)): the pool claude has session and
+weekly_all, opencode-go has rolling, weekly and monthly. Each window takes a
+line: a percent, the launch line on the percent used; `pace`, closed while
+the window is projected to pass 100% by its reset; or a map of `used`,
+`projected` and `stop`, naming used, projected or both. A map is closed when
+either launch line is reached (`projected: 90` at 90%), and stopped at
+`stop`, which is on the percent used. A stop cuts the running turns it covers,
+and continues them once a fresh reading finds the guard open: a stale reading
+or none keeps them cut. A stop never cuts a turn a person started, and a
+person's message to a cut session runs. A pool aegis has never read sets no
+line, and a reading older than 15 minutes closes the guard and never stops it.
+A `quota:` with `on_closed:` or `advice:` and no pool is an error.
+
+Beside the pools sit `on_closed:` and, for an agent, `advice`:
+
+| | `on_closed:` | What happens while the guard is closed |
+|---|---|---|
+| agent | `warn` (default) | every turn starts with the notice below |
+| agent | `refuse` | a wake no person started (a monitor, a task's result, a workflow step in its session) waits until the guard opens; a feed's batch stays in the feed, which delivers it when the guard opens; a schedule run is skipped, with why in its run log; a `peer_handoff` from an agent is refused with quota_closed. A person's message runs, with the notice, and the wakes held with it keep waiting |
+| queue | `hold` (default) | `queue_enqueue` takes the task, which waits |
+| queue | `warn` | the task is taken and waits; the reply carries a `warning` with why and when it opens |
+| queue | `reject` | `queue_enqueue` is refused with queue_closed, why and when it opens |
+
+`max_pending:` on a queue, a whole number from 1 up, refuses with queue_full
+any task that would go past that many pending tasks, whatever the guard says.
+
+The gate a turn or a worker passes is the most restrictive of its agent's
+guard, its queue's for a worker, and the guards of the agents up its chain of
+starters (the session that enqueued or spawned it, and so on). The agent's
+and the queue's are read on the pool the session draws on, and each
+starter's on the pool that starter's own model draws on. So a guarded agent
+cannot spend through an open queue on any pool: while `fair`'s Claude line is
+closed, a worker it enqueued on an OpenCode queue is closed too, and that
+queue's `on_closed:` decides what `fair`'s enqueue gets. A handoff carries the
+old session's guards only when the new session runs the same agent. A held
+queue leaves its share of `max_workers:` to the others; a model that is
+cooling only ever holds a task, whatever `on_closed:` says. Guards are read
+from the file as it is now: a line tightened on disk applies to sessions
+already running.
+
+While its guard is closed, a session is told so by an aegis notice, its own
+row in the transcript. It rides on the next prompt or, mid-turn, on the next
+tool call:
+
+```text
+> from aegis:notice · guard:closed · warn · 2026-11-15T09:12:00Z
+Your agent's quota guard is closed: agent fair: Claude weekly is at 86%, launch line 80%.
+While it is closed: queue fair-work rejects new tasks. Start no long work.
+Answer in the group in one short message and file the request as an issue.
+It opens again when Claude weekly drops below 80% used (agent fair), at the latest at Mon 02:00.
+```
+
+The second line names the queues in the agent's scope that reject or hold its
+tasks now, the third is `advice` or a default, and the last names every
+window that holds the guard, with the part of its line that tripped, and the
+latest of their resets. A stopped guard says `critical`. The notice comes
+once per change: after the guard opens, `guard:closed · clear` says it is
+open again. While it is closed the session is not also sent the pool's own
+quota notice. `notices: {guard: false}` turns it off for every agent, and an
+agent with `notices: false` gets no notice at all: under `on_closed: warn`
+such an agent runs its turns as if unguarded, held back only by its queues
+and the stop line. A wrong `quota:` or `max_pending:` stops the agent or
+queue with the error `aegis doctor` shows, and Settings shows both read-only.
+
+## Budget an agent
+
+An agent may carry `budget:`, a list of spending caps. Unlike `quota:`, which
+reads the pool's gauges, a budget counts what the agent's own sessions spent.
+Without it the agent spends without limit, as before.
+
+```yaml
+agents:
+  fair:
+    harness: claude-code
+    model: sonnet
+    effort: low
+    permission: full
+    budget:
+      - {usd: 2, per: session}
+      - {usd: 25, per: 7d}
+      - {tokens: 2000000, per: 24h}
+  deepseek:
+    harness: opencode
+    model: opencode-go/deepseek-v4-pro
+    effort: high
+    permission: full
+    budget: [{usd: 1, per: session}]   # bounds every task of a queue it runs
+```
+
+Each cap is `usd` or `tokens` and a `per:`. `usd` is each turn's cost as the
+harness reports it, the API-equivalent cost on a subscription, a finite
+number above 0; `tokens` is a whole number of input plus output tokens, not
+cache reads or cache writes. `per: session` caps one session; a duration in
+hours or days up to `366d` (`24h`, `7d`, `30d`) caps a rolling window that
+ends now. A cap counts turns once they end, from the usage rows (usage,
+[Split by any dimension](usage#split-by-any-dimension)): aegis estimates
+nothing before a turn.
+
+Spend is charged by lineage. A session's turns count for its own agent and
+for every agent up its chain of starters: the session that enqueued it,
+spawned it or handed off to it, and so on. Unlike a guard's chain, a handoff
+onto another agent stays on the old line: the new session's turns count for
+the old session's caps, so `session_handoff(agent=...)` does not escape a
+cap. A starter that was archived long ago still counts: its usage rows name
+its agent and its starter. So a worker that `fair` enqueued on a queue
+of `deepseek` counts for `deepseek`'s caps and for `fair`'s: for the
+per-session cap of the session that enqueued it, and for `fair`'s windows.
+
+- A session cap sums the session and every session started from it. Once
+  spent it never frees: an agent that keeps one session for weeks, such as a
+  feed reader, fits a window better. An enqueue from its line is refused with
+  queue_closed whatever the queue's `on_closed:` says, a task already
+  pending from it fails with the why, and a schedule run into it is skipped
+  with the why: none of them could ever start.
+- A window sums every session of the agent, and every session started from
+  one, over the window. It has room again when enough of its oldest spend
+  ages out, and aegis names that time.
+
+Past a cap, the session, and every running session whose chain holds the
+agent, is told once by an aegis notice, its own row in the transcript. It
+rides on the next prompt or, mid-turn, on the next tool call:
+
+```text
+> from aegis:notice · budget:spent:fair:7d · warn · 2026-11-15T09:12:00Z
+agent fair has spent $25.40 of $25 in the last 7d. Finish what you are doing as soon as possible and end your turn. aegis starts no turn here that a person did not start until it has room again, at Fri 14:05.
+```
+
+A Claude Code session reads it mid-turn on any tool call. OpenCode, Codex,
+Cursor and Pi sessions read it on their next aegis tool call, or with their
+next prompt. When that turn ends, the session starts no turn that a person
+did not start, as under a guard's `on_closed: refuse`, whatever its own
+`on_closed:` says. A wake waits, a feed's batch stays in the feed, a schedule
+run is skipped, and a `peer_handoff` from an agent is refused. A person's
+message runs, with the notice. Its enqueues meet each queue's `on_closed:`, as
+under a closed guard, past a window. Only a guard's stop line outranks a
+budget. When a window has room again, `budget:spent:fair:7d · clear` says so
+and what was held goes out; a session told of one cap is told again, with its
+own time, when another one names the gate.
+
+While usage is rebuilt or backfilled (`aegis journal rebuild`, an upgrade)
+the rows are not all there: each cap keeps what it last read, a capped line
+with nothing read yet stays closed with `usage is being rebuilt`, and no
+notice, clear or held work moves until the rows are back. `notices: {budget: false}` turns the notice off and leaves the
+caps. A wrong `budget:` stops the agent with the error `aegis doctor` shows,
+whose row also lists the caps. Settings shows them read-only, a wrong cap as
+invalid, and a save there writes `budget:` back as the file has it.
+
 ## The default agent
 
 `default_agent:` names the agent `session_spawn` starts from when it is given
@@ -180,10 +441,23 @@ started a session yet.
 ## Queues
 
 `queues:` maps a queue's name to `agent:` (the agent its workers start from)
-and `max_parallel:` (how many workers run at once, a positive number). A queue
-missing either is reported and takes no tasks. `quiet:` is true unless set to
-false: a worker then has no tab, only a dimmed card in the Fleet, unless it
-fails. See the queues page for how
+and `priority:` (its share of the workers, a whole number from 0 up; 1 when
+left out). A queue with no agent, or a priority that is not such a number, is
+reported and takes no tasks. `quiet:` is true unless set to false: a worker
+then has no tab, only a dimmed card in the Fleet, unless it fails.
+
+`max_workers:` is how many queue workers run at once on the server, every
+queue together: a positive number, 4 when left out. A queue at priority 2
+gets two of them for each one a queue at priority 1 gets, and priority 0
+pauses a queue. Name queues by the goal their work serves (development,
+research, a client) rather than by the model that runs it, and move the
+priorities as the goals change: aegis reads the file again at once.
+
+`quota:` and `max_pending:` hold a queue's work back on the quota and bound
+its length; see [Guard an agent or a queue](#guard-an-agent-or-a-queue).
+
+`max_parallel:`, each queue's own bound before `max_workers:` existed, is ignored: a queue that
+still sets it runs, and `aegis doctor` warns. See the queues page for how
 tasks run.
 
 ## Recaps
@@ -204,6 +478,15 @@ navigation pill asks for a fresh one.
 up to the last ten turns of the session, about 32,000
 tokens, and the side notes asked before. Without it, `/btw` says which line to
 add. A side note may need more model than a recap, so the two keys are separate.
+
+## Group names
+
+`group_names:` with `agent:` names an agent that names each group of tabs from
+what its members work on: two or three hyphenated words and a one-line title.
+It runs once each time a member joins or leaves, 15 seconds after the last
+change, so a queue batch costs one call, and it reads each member's handle,
+title, open plan items and last report. A name you or an agent chose stays;
+only its title changes. Without the key a group keeps its random name.
 
 ## Context size and the cache
 
@@ -277,7 +560,7 @@ mistake.
 ## Notices about an agent's own work
 
 The same block sets what aegis tells an agent about its own work: its plan,
-its monitors and the queue tasks it has out (the sessions page shows the
+its monitors, its feeds and the queue tasks it has out (the sessions page shows the
 status block they make). Each is a source that declares its keys; these are
 the defaults:
 
@@ -285,8 +568,10 @@ the defaults:
 notices:
   plan:     {stale_min: 10}
   monitors: {stall_min: 15, broken_checks: 3, overdue_min: 10, wake: true}
+  feeds:    {wake: true}
   queues:   true
   held:     true
+  guard:    true
   status:   {lines: 5}
 ```
 
@@ -295,7 +580,7 @@ agent is warned. `monitors.stall_min` is the minutes a monitor's progress may
 sit still (and at least three intervals), `monitors.broken_checks` how many intervals a
 check may fail to run, and `monitors.overdue_min` how far past its ETA a monitor may
 run, before its owner is warned; with `wake: true` the warning wakes an idle
-owner. `held` warns a busy agent of each message held for its turn's end. `status.lines` caps the status block. Minutes may be fractions.
+owner. `feeds` warns a busy agent that a feed's items wait for its turn's end, and an idle one, with `wake: true`, that a feed paused after three failed reads. `held` warns a busy agent of each message held for its turn's end. `guard` tells an agent its quota guard is closed ([Guard an agent or a queue](#guard-an-agent-or-a-queue)). `status.lines` caps the status block. Minutes may be fractions.
 `false` in place of a source turns it off; `status: false` drops the status
 block and keeps the warnings. A name no installed source declares is ignored,
 and `aegis doctor` warns about it.
@@ -363,8 +648,8 @@ park:
 A harness the block does not name never parks, and without the block nothing
 does. A block with a harness aegis does not know, or a value that is not a
 positive whole number of seconds, parks nothing, and `aegis doctor` names the
-mistake. Only an admin can change it, in the file or in the Parking section
-of the Settings page, which takes minutes and which members do not see.
+mistake. Change it in the file or in the Parking section of the Settings
+page, which takes minutes.
 
 Only Claude Code's and Cursor's resumes have been measured — Cursor's runs
 `session/load` on the same session id. Codex and OpenCode sessions park when
@@ -505,11 +790,68 @@ Settings → Search embeddings edits it.
 `know-how/` docs when it reaches that repository (help_read knowledge). Set it to
 false to turn that off. It is read when aegis starts.
 
+## Quota projection
+
+`quota:` sets how far back "the current rate" of a quota gauge looks
+(help_read usage#where-a-quota-gauge-says-it-will-land). Each window length
+takes a half-life: a shorter one follows a stop or a burst sooner, a longer one
+moves less with each pause.
+
+```yaml
+quota:
+  projection:
+    half_life:
+      5h: 30m      # the default: the window's length / 28, at least 30m
+      week: 6h
+      month: 1d
+```
+
+A value is a number and `m`, `h` or `d`, from 10 minutes to the window's
+length. `half_life: average` keeps the window's own average instead, for every
+window. A wrong block keeps the defaults, and `aegis doctor` says what is wrong.
+It is read on every reading, so a change takes effect without a restart.
+
 ## Exit through a link
 
-`exit_via:` names a trusted link: what aegis starts reaches the internet from
-that server's address. `exit:` on an agent names another link, or `off` for the
-machine's own route. See [links](links#exit-through-a-trusted-link).
+`exit_via:` names a link: what aegis starts reaches the internet from that
+server's address. `exit:` on an agent names another link, or `off` for the
+machine's own route. See [links](links#exit-through-a-link).
+
+## Per-host overrides
+
+When several servers serve checkouts of one repository, they read one
+`.aegis.yaml` from git. What differs per server goes under `hosts:`, in a block
+named after the server: its `aegis serve --name`, else its hostname. Each server
+applies the top level, then its own block, and ignores the others.
+
+```yaml
+agents:
+  opus: {harness: claude-code, model: opus, effort: high, permission: full}
+  fable: {harness: claude-code, model: fable, effort: high, permission: full}
+max_workers: 4
+
+hosts:
+  laptop:
+    exit_via: always-on
+    agents:
+      opus: {effort: medium}
+      fable: null
+  always-on:
+    max_workers: 8
+```
+
+A mapping in a block merges into the shared one key by key, so
+`opus: {effort: medium}` changes one field of one agent. Any other value,
+a list included, replaces the shared one. A `null` removes the shared key on
+that server: above, `laptop` has no `fable`. Commit the file as it is: nothing
+per server is left as an edit git has to step around.
+
+A block can set any key but `multi_user:`, which aegis reads before it knows the
+server's name. `aegis doctor` says which block it applied, and refuses a block
+that sets `multi_user:` or a `hosts:` that is not a mapping of mappings; such a
+file applies no block at all. The Settings page edits the shared layer and keeps
+the `hosts:` block as it is; Exit here, on a link's row, writes this server's
+block.
 
 ## Terminals
 
@@ -521,6 +863,68 @@ others still can, and `aegis doctor` names the mistake. See the terminals page.
 `terminal_memory_max:` caps the memory of each terminal's processes, as
 `session_memory_max:` caps a session's, and takes the same values. Its default
 is the session cap's, 40%.
+
+## MCP servers
+
+`mcp:` maps a server's name to an MCP server. An agent attaches servers by name
+with its own `mcp:` list, and each session of that agent gets them beside
+aegis's own, on every harness.
+
+```yaml
+mcp:
+  notes:
+    url: https://notes.example/mcp
+    headers: {Authorization: "Bearer ${NOTES_TOKEN}"}
+  phone:
+    command: uv
+    args: [run, phone-mcp]
+    env: {PHONE_STATE: /var/lib/phone}
+agents:
+  clerk: {harness: claude-code, model: sonnet, effort: high, permission: write, mcp: [notes, phone]}
+```
+
+An entry is HTTP, a `url` with optional `headers`, or stdio, a `command` with
+optional `args` and `env`. An entry with both or neither is an error on its row.
+A name takes letters, digits, `-` and `_`; `aegis`, and the name Codex gives it, are
+reserved for aegis's own server.
+
+`${VAR}` in a header or env value is read from aegis's own environment when a
+session starts, so a token stays out of the file. aegis never puts a header or
+env value in a harness's command line or in a file: each harness gets it through
+its environment or its stdin. A `${VAR}` in a `url`, `command` or argument is an
+error on its row, since those reach a command line every user on the host can
+read; pass a key as a header or an env value instead.
+
+The harness's environment is also its shell's and its stdio servers', so the
+agent can read every attached server's values, as it can read aegis's own
+session token. Codex hides them from its shell. Attach a server holding a secret
+only to an agent you trust with that secret. Codex gives a stdio server its env
+under the keys you wrote, so it refuses a key that is `PATH`, `HOME`, an
+`AEGIS_` variable, one aegis's environment holds with another value, or one two
+servers set to different values.
+
+A session's servers come in this order: aegis's own, then its agent's `mcp:`
+list, then what the host policy's `mcp` adds (see
+[library](library#host-policy)). aegis refuses to start the session, and the
+transcript says why, when:
+
+- a `${VAR}` is not set in aegis's environment;
+- the agent names a server no source defines;
+- two servers have one name, from the file, `Server(mcp=...)` or the policy, or
+  two of their header or env values would travel in one variable;
+- the harness cannot take a server's transport. Every harness aegis drives takes
+  both today.
+
+The list is read at each start, so an edit applies at a session's next start,
+and a running session keeps its servers. A server's tools run without asking, at
+every permission level, as aegis's own do. On Claude Code, `read` runs in plan
+mode, which refuses a tool its server does not mark read-only.
+
+Settings has an MCP servers section: add a server as a URL or a command, edit
+its headers or env, and press Test, which connects to it as the form holds it
+and lists its tools. An agent's card lists each server to attach. `aegis doctor`
+checks that each stdio command exists and each URL answers, and warns about a
+`${VAR}` that is not set.
 
 ## Editing it
 

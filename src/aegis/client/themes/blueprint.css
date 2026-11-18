@@ -1,5 +1,5 @@
 /* Blueprint: a drafting sheet; white linework on a grid, square corners, the panel as a title block. */
-[data-theme=blueprint] #a2{
+.aegis[data-theme=blueprint]{
   --bg:#0e3d78;--chrome:#0a3060;--side:#0c376c;--surface:#114583;--raised:#164e92;--rule:#5b88c4;
   --ink:#e4eeff;--strong:#ffffff;--muted:#a8c2e8;--faint:#7c9dce;
   --accent:#ffffff;--accent-soft:rgba(255,255,255,.13);--on-accent:#0e3d78;
@@ -12,16 +12,16 @@
   --grid:linear-gradient(rgba(255,255,255,.08) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.08) 1px,transparent 1px),
     linear-gradient(rgba(255,255,255,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.035) 1px,transparent 1px);
 }
-[data-theme=blueprint] #a2 .tr{background-image:var(--grid);background-size:120px 120px,120px 120px,24px 24px,24px 24px;background-attachment:local}
-[data-theme=blueprint] #a2 .row .g{background:none}
-[data-theme=blueprint] #a2 .row.user .body{background:rgba(14,61,120,.75);border:1px solid #fff}
-[data-theme=blueprint] #a2 .row.tool .line{border-bottom:1px dashed rgba(255,255,255,.2)}
-[data-theme=blueprint] #a2 .tab.on{box-shadow:inset 0 -2px 0 #fff;background:var(--bg)}
-[data-theme=blueprint] #a2 .tabs{border-bottom-color:#fff}
-[data-theme=blueprint] #a2 .side{gap:0;border-left:1px solid #fff}
-[data-theme=blueprint] #a2 .side>.sec{border:1px solid var(--rule);padding:9px 11px 11px;margin-top:-1px}
-[data-theme=blueprint] #a2 .side h4{font-size:11px;letter-spacing:.04em}
-[data-theme=blueprint] #a2 .side .title{font-size:17px;font-weight:600}
-[data-theme=blueprint] #a2 .md h1,[data-theme=blueprint] #a2 .md h2,[data-theme=blueprint] #a2 .md h3{font-size:1.2em;border-bottom:1px solid var(--rule);padding-bottom:3px}
-[data-theme=blueprint] #a2 .composer .box{border-color:#fff;background:rgba(14,61,120,.6)}
-[data-theme=blueprint] #a2 .md pre,[data-theme=blueprint] #a2 .diff{border:1px solid var(--rule);background:rgba(10,48,96,.6)}
+.aegis[data-theme=blueprint] .tr{background-image:var(--grid);background-size:120px 120px,120px 120px,24px 24px,24px 24px;background-attachment:local}
+.aegis[data-theme=blueprint] .row .g{background:none}
+.aegis[data-theme=blueprint] .row.user .body{background:rgba(14,61,120,.75);border:1px solid #fff}
+.aegis[data-theme=blueprint] .row.tool .line{border-bottom:1px dashed rgba(255,255,255,.2)}
+.aegis[data-theme=blueprint] .tab.on{box-shadow:inset 0 -2px 0 #fff;background:var(--bg)}
+.aegis[data-theme=blueprint] .tabs{border-bottom-color:#fff}
+.aegis[data-theme=blueprint] .side{gap:0;border-left:1px solid #fff}
+.aegis[data-theme=blueprint] .side>.sec{border:1px solid var(--rule);padding:9px 11px 11px;margin-top:-1px}
+.aegis[data-theme=blueprint] .side h4{font-size:11px;letter-spacing:.04em}
+.aegis[data-theme=blueprint] .side .title{font-size:17px;font-weight:600}
+.aegis[data-theme=blueprint] .md h1,.aegis[data-theme=blueprint] .md h2,.aegis[data-theme=blueprint] .md h3{font-size:1.2em;border-bottom:1px solid var(--rule);padding-bottom:3px}
+.aegis[data-theme=blueprint] .composer .box{border-color:#fff;background:rgba(14,61,120,.6)}
+.aegis[data-theme=blueprint] .md pre,.aegis[data-theme=blueprint] .diff{border:1px solid var(--rule);background:rgba(10,48,96,.6)}

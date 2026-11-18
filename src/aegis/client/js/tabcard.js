@@ -4,6 +4,7 @@
 // tab onto the card. A key, a press elsewhere or a change of view closes it.
 // The session panel's Waiting on rows open the same card (#667).
 import { icon } from "./glyphs.js";
+import { rootOf } from "./root.js";
 
 export const OPEN_MS = 300;
 export const CLOSE_MS = 220;
@@ -16,8 +17,9 @@ export function attachTabCard(list, { meta, card, items, item = ".tab", place = 
   const sel = `${item}[data-id]`;
   const box = Object.assign(document.createElement("div"), { className: "tabcard" });
   box.hidden = true;
-  // Inside #a2, where the theme's variables and the Fleet card's rules apply (#657).
-  document.getElementById("a2").append(box);
+  // Inside the mount's root, where the theme's variables and the Fleet card's
+  // rules apply (#657).
+  rootOf(list).append(box);
   let key = null;
   let tab = null;
   let asSheet = false;
@@ -68,12 +70,18 @@ export function attachTabCard(list, { meta, card, items, item = ".tab", place = 
     }
     place(box, tab.getBoundingClientRect());
   };
+  // The list redrawn under a held finger or a hovered tab: the row that was
+  // pressed is gone, but its session may still be there, so find it again
+  // rather than hide the card draw() would have hidden for a stale node.
+  const again = (t) => (t.isConnected ? t : list.querySelector(`${item}[data-id="${CSS.escape(t.dataset.id)}"]`));
   const show = (t) => {
     clearTimeout(closeT);
     clearTimeout(openT);
     openT = setTimeout(() => {
-      key = t.dataset.id;
-      tab = t;
+      const now = again(t);
+      if (!now) return hide();
+      key = now.dataset.id;
+      tab = now;
       draw();
     }, OPEN_MS);
   };
@@ -130,8 +138,10 @@ export function attachTabCard(list, { meta, card, items, item = ".tab", place = 
   // A phone has no hover: a long press opens the same card as a sheet.
   const sheet = (t) => {
     clearTimeout(openT);
-    key = t.dataset.id;
-    tab = t;
+    const now = again(t);
+    if (!now) return false;
+    key = now.dataset.id;
+    tab = now;
     asSheet = true;
     draw();
     return true;

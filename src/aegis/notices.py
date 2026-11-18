@@ -34,7 +34,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from . import host
+from . import host, notice_sources
+from .guards import SOURCE as GUARD
 from .notice_sources import Item
 from .monitors import iso_now
 from .quota_gate import pool_for
@@ -204,12 +205,12 @@ LEAD = {
 }
 CRITICAL = " This is critical."
 ACT = {
-    "disk": "Free what this session created and no longer needs (your merged worktrees, build output, temporary files), re-measuring with df before you delete. Do not touch shared caches, another session's work or anything tracked by git. Start no large download or build.",
+    "disk": "Free what this session created and no longer needs (your merged worktrees, build output, temporary files), re-measuring with df before you delete. Do not touch shared caches, another session's work or anything tracked by git. Run `aegis gc` to see what the sessions archived over a week ago still hold (their uploads, sent files, browsers and the harness's copy of their transcripts), and `aegis gc --apply` to free it: their history stays readable with peer_read. Start no large download or build.",
     "memory": "Stop the servers and watchers you started and no longer use. Run no parallel test lane or build, and enqueue no more workers.",
     "cpu": "Run tests with fewer workers. Re-run a timing failure or a make bench number before you trust it, and say the host was loaded when you report one.",
     "quota": "Use the cheapest queue for workers, spawn no new session, and finish what you started before you start more.",
 }
-DISK_OTHER = "Free what this session created and no longer needs (your merged worktrees, build output, temporary files), re-measuring with df before you delete. Do not touch shared caches, another session's work or anything tracked by git. {mount} has {free_gb} GB free: as far as you can, put new large files there (clones, build output, caches, downloads) instead of on this disk, and move nothing another session or git owns."
+DISK_OTHER = "Free what this session created and no longer needs (your merged worktrees, build output, temporary files), re-measuring with df before you delete. Do not touch shared caches, another session's work or anything tracked by git. {mount} has {free_gb} GB free: as far as you can, put new large files there (clones, build output, caches, downloads) instead of on this disk, and move nothing another session or git owns. Run `aegis gc` to see what the sessions archived over a week ago still hold (their uploads, sent files, browsers and the harness's copy of their transcripts), and `aegis gc --apply` to free it: their history stays readable with peer_read."
 QUOTA_CRITICAL = " Tell the person before you enqueue anything."
 # The session's own share (load.py, #762), and who holds the most. The
 # heaviest is named only above a floor: on a quiet host the top session may
@@ -459,15 +460,16 @@ class Notices:
         A source turned off in .aegis.yaml sets nothing."""
         if source not in self._order:
             self._order.append(source)
-        if self.cfg(source) is None:
-            items = []
+        s = self._app.sessions.sessions.get(log_id)
+        if self.cfg(source) is None or (s is not None and not s.spec.notices):
+            items = []  # off in .aegis.yaml, or a product agent's (#983)
         mine = self._items.setdefault(log_id, {})
         prefix = f"{source}:"
+        fit = _cut if notice_sources.cuts(source) else str.strip
         new = {
-            prefix + i.key: Item(i.key, i.level, _cut(i.text), _cut(i.clear), i.wake)
+            prefix + i.key: Item(i.key, i.level, fit(i.text), fit(i.clear), i.wake)
             for i in items
         }
-        s = self._app.sessions.sessions.get(log_id)
         sent = s.items_sent if s is not None else {}
         for full in [k for k in mine if k.startswith(prefix) and k not in new]:
             gone = mine.pop(full)
@@ -814,8 +816,14 @@ class Notices:
             for k, v in self.levels().items()
             if not k.startswith("quota:") or k.partition(":")[2] == pool
         }
+        # While its quota guard is closed the session is told that instead
+        # (App.guard_items): the pool's own advice would contradict it, so
+        # the quota kinds are neither told nor cleared until it opens.
+        guarded = any(k.startswith(f"{GUARD}:") for k in self._items.get(s.log_id, {}))
         blocks = []
         for key, (level, reading) in active.items():
+            if guarded and key.startswith("quota:"):
+                continue
             # A level kept from before a restart has no reading to print yet.
             if s.notices_sent.get(key) == level or not reading:
                 continue
@@ -826,7 +834,11 @@ class Notices:
                 reading = reading | self._own(s, key, reading)
             blocks.append(block(key, level, reading, role))
             s.notices_sent[key] = level
-        for key in [k for k in s.notices_sent if k not in active]:
+        for key in [
+            k
+            for k in s.notices_sent
+            if k not in active and not (guarded and k.startswith("quota:"))
+        ]:
             blocks.append(self._clear(key))
             del s.notices_sent[key]
         before = dict(s.items_sent)

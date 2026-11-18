@@ -1,7 +1,7 @@
 ---
 title: Getting started
 kind: tutorial
-when: the first hour with aegis, from one session to plans, files and pages, monitors, helpers and a queue of workers
+when: using aegis for the first time: the first hour, from one session to plans, files and pages, monitors, helpers and a queue of workers
 hints:
   - New here? The getting-started page goes from one session to queues in five levels.
 ---
@@ -38,7 +38,7 @@ This level starts one agent and spends quota.
    have read it.
 3. Steer it while it works. Ask "Read the README and summarize each section",
    and while it works send "Also count the Markdown files". Claude Code reads
-   a message sent during a turn at its next tool call. Esc interrupts a turn.
+   a message sent during a turn at its next tool call. Esc Esc interrupts a turn. One Esc does not, so an accidental press leaves the turn running.
    You should see one answer that covers both requests.
 4. Sleep and wake. Open the session panel with Alt+B and press Sleep, or
    type `/sleep`. Its card in the Fleet shows `zz slept`. Then send "What did
@@ -112,9 +112,10 @@ This level starts up to three workers and spends quota.
 
 1. Enqueue. Ask "Enqueue three tasks on the general queue with
    queue_enqueue: each counts the lines of one file in this directory and
-   ends on the number." You should see worker cards appear in the Fleet's
-   last group, dimmed, marked zz and marked as workers of their queue: a
-   worker starts quiet, with no tab. If the agent reports that there is no
+   ends on the number." You should see worker cards appear in the Fleet,
+   dimmed, marked zz and marked as workers of their queue, inside their
+   group's stack: a worker starts quiet, with no tab. If the agent reports
+   that there is no
    such queue, this server has none configured: whoever runs it adds one as
    the configuration page shows, and you run this step again.
 2. Wait for the results. You should see the first session wake once per task
@@ -145,5 +146,3 @@ Each of these is a tutorial of its own, for after this one:
   this one.
 - [Phone: install, offline, push](tutorial-phone): aegis as an app on a
   phone.
-- [Running a server for others](tutorial-server): tokens, quota lines and
-  running aegis as a service.

@@ -1,7 +1,7 @@
 ---
 title: Reading a transcript
 kind: concept
-when: reading what an agent did, its tool rows and replies, the files it sent and the paths it named
+when: reading what an agent did, its tool rows and replies, the files it sent and the paths it named, or where to dock a file or a page beside it
 hints:
   - Fold the tool rows to read only the agent's replies. #folding
   - Click a path in a reply to open that file at that line. #paths-in-replies
@@ -11,7 +11,32 @@ hints:
 A session's transcript is everything that happened in it, one row per thing:
 your messages, the agent's replies and thinking, a row for each tool call with
 its result, the messages other sessions and monitors sent it, and the files
-and pages it sent you. Select a row with j and k, or the arrow keys.
+and pages it sent you. Select a row with j and k, or with ↑ and ↓.
+
+## While the agent works
+
+While a turn runs, the last row of the transcript shows that the agent is
+working. Its verb types out, and a thin cursor blinks after it. Then it erases
+the verb and types the next one. Beside it are the seconds since the turn
+started and two token counts for this turn: ↑ counts the new input fed to the
+model (your message, tool results, files read), and ↓ counts what the model
+wrote. ↑ leaves out the cached context that the model rereads on every call.
+Both counts start at zero with each turn and flash when a call adds to them.
+Esc Esc interrupts the turn: one Esc arms it and the row says
+"Esc again to interrupt" for a second. With reduced motion set in your system, the row keeps
+one verb and stops moving.
+
+While a tool call runs, the working row shows that call instead of its
+asterisk: the call's icon pulses and the verb says what kind of work it is,
+so you see it even when its run of rows is folded.
+The verbs come from the call itself, with no model involved: reading for
+reads, searches and shell commands that change nothing; editing; testing for
+test runners, linters and CI checks; debugging for a test or a read while the
+last shell command failed; server work such as ssh, docker or systemctl;
+committing; the web; other agents; showing you a page or a file; and
+bookkeeping such as the plan. A call that ends at once keeps the row for
+about three seconds after it started, so you can see it go by; then the
+asterisk and the general verbs come back.
 
 ## Tool rows
 
@@ -22,7 +47,9 @@ way an editor does:
 - A file the agent read shows its last 40 lines, numbered and coloured by the
   file's language. A file it wrote shows the same way. Show the file, on a
   row that read, wrote or edited a file, adds a card with the whole file as it
-  is now; Open on the card shows it.
+  is now; Open on the card shows it. On a session of a linked server the
+  button reads Fetch the file from <server>: that server copies its own file
+  and the card shows it through the link.
 - A shell command is coloured.
 - An edit shows the old and new lines side by side when the transcript is at
   least 680 px wide, and as one compact column when it is narrower, with the
@@ -111,8 +138,13 @@ an address that opens the session at that row, selected and in view.
 A file an agent sends with `file_send`, a file you attach to your message, and
 a page it sends with `artifact_send` arrive as a card in the transcript. A
 local file path the agent links in a reply opens the same viewer when you click
-it. Open shows the item inside aegis, over the transcript and the message box,
-and leaves the tabs and the session panel usable. Markdown renders in the
+it. When the card holds several files and that row is selected, Left and Right
+move through them and wrap from the last back to the first, the same way the
+‹ › buttons and a sideways swipe do. The same keys do this while the set is
+open in the viewer. They leave the picture where it is while the message box
+is focused, and on a card that holds one file. Open shows the item inside
+aegis, over the transcript and the message box, and leaves the tabs and the
+session panel usable. Markdown renders in the
 theme, source shows with line numbers and syntax colours, PDFs, HTML and images
 fill the view, and media plays. A live page runs there and answers the agent
 from there.
@@ -124,9 +156,9 @@ desktop.
 
 ## The canvas
 
-A page, a sent or attached file, or a local file opened from a reply can stay
-on screen beside the transcript instead of scrolling away with its card or
-viewer. Dock, on its card or on the viewer's bar, opens it in a pane to the
+Dock a page, a sent or attached file, or a local file opened from a reply,
+and it stays on screen beside the transcript instead of scrolling away with
+its card or viewer. Dock, on its card or on the viewer's bar, opens it in a pane to the
 right of the transcript. The card keeps one line,
 docked · show, and Show outlines the pane; Open on a docked card outlines it
 too. The panes and the transcript make up the session's canvas, columns of

@@ -15,6 +15,8 @@
 
 const WAIT_MS = 120; // after the last keystroke, before searching
 
+import { labelsFor } from "./labels.js";
+
 // The text a row draws from its entry, as the client holds it.
 function held(e) {
   const d = e.detail || {};
@@ -67,8 +69,10 @@ const paint = (name, rs) => globalThis.Highlight && CSS.highlights.set(name, new
 
 export class Find {
   // search: q -> Promise of the ids of entries whose withheld detail holds q.
-  constructor(bar, transcript, search) {
+  // t is the mount's label table; the standalone page passes none.
+  constructor(bar, transcript, search, t = labelsFor("en")) {
     this.bar = bar;
+    this.label = t;
     this.t = transcript;
     this.search = search;
     this.input = bar.querySelector("input");
@@ -194,7 +198,13 @@ export class Find {
   // The count now, the highlights once a frame.
   draw() {
     const n = this.hits.length;
-    this.count.textContent = !this.q ? "" : n ? `${this.at + 1} of ${n}` : this.asking ? "searching…" : "no matches";
+    this.count.textContent = !this.q
+      ? ""
+      : n
+        ? this.label("find.count", { at: this.at + 1, n })
+        : this.asking
+          ? this.label("find.searching")
+          : this.label("find.none");
     this.bar.querySelector(".prev").disabled = this.bar.querySelector(".next").disabled = !n;
     if (!this.frame) this.frame = requestAnimationFrame(() => this.highlight());
   }

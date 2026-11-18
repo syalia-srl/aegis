@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from ..transcript.store import open_text
+
 
 @dataclass
 class StoredSession:
@@ -36,12 +38,19 @@ def iso(ts: float | None) -> str | None:
     return datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
+def stores(tdir: Path) -> list[Path]:
+    """Every store in ``tdir`` by its plain path, packed ones included."""
+    plain = {p.name for p in tdir.glob("*.jsonl")}
+    plain |= {p.name[: -len(".gz")] for p in tdir.glob("*.jsonl.gz")}
+    return [tdir / n for n in sorted(plain)]
+
+
 def sessions(state_dir: Path) -> Iterator[StoredSession]:
     """Every stored transcript, with its meta's handle when it has one."""
     tdir = state_dir / "transcripts"
     if not tdir.is_dir():
         return
-    for path in sorted(tdir.glob("*.jsonl")):
+    for path in stores(tdir):
         meta: dict = {}
         try:
             meta = json.loads(
@@ -72,7 +81,7 @@ def lines(path: Path) -> Iterator[Line]:
     """The intact records of one store, the harness's lines parsed. A damaged
     line is skipped, never fatal."""
     try:
-        f = path.open(encoding="utf-8", errors="replace")
+        f = open_text(path)
     except OSError:
         return
     with f:

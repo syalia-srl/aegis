@@ -22,6 +22,8 @@ class Ops:
     @property
     def btw(self) -> _btw: ...
     @property
+    def chrome(self) -> _chrome: ...
+    @property
     def claude(self) -> _claude: ...
     @property
     def commands(self) -> _commands: ...
@@ -30,9 +32,15 @@ class Ops:
     @property
     def dictation(self) -> _dictation: ...
     @property
+    def feed(self) -> _feed: ...
+    @property
     def file(self) -> _file: ...
     @property
     def fs(self) -> _fs: ...
+    @property
+    def group(self) -> _group: ...
+    @property
+    def harness(self) -> _harness: ...
     @property
     def help(self) -> _help: ...
     @property
@@ -44,7 +52,11 @@ class Ops:
     @property
     def link(self) -> _link: ...
     @property
+    def mcp(self) -> _mcp: ...
+    @property
     def memory(self) -> _memory: ...
+    @property
+    def mention(self) -> _mention: ...
     async def meta(self) -> Any:
         """How aegis works for you, and its tools."""
     @property
@@ -79,6 +91,8 @@ class Ops:
     def session(self) -> _session: ...
     @property
     def setup(self) -> _setup: ...
+    @property
+    def signin(self) -> _signin: ...
     @property
     def skill(self) -> _skill: ...
     @property
@@ -176,7 +190,9 @@ class _artifact:
         """Move a file the page uploaded (attachment.begin and .put) into the session's inbox and wake the agent with its path. It counts as an event, and the count comes first, so a refused file stays staged and reaches nobody. The page gets the record, for the person to see."""
 
 class _attachment:
-    async def begin(self, *, log_id: str, name: str, size: int) -> Any:
+    async def begin(
+        self, *, log_id: str, name: str, size: int, recorded_ms: int | None = ...
+    ) -> Any:
         """Start uploading a file to a session: its upload id. The file waits, staged, until a session.send names it (attachments.py)."""
     async def drop(self, *, log_id: str, upload_id: str) -> Any:
         """Forget an upload the person removed before sending."""
@@ -216,6 +232,8 @@ class _browser:
         """Give the page to the person, with what they should do (pass a captcha, sign in, try a step), then end your turn. You are woken with > from browser:<id> · back, and what they did, when they give it back."""
     async def input(self, *, id: str, events: builtins.list[dict[str, Any]]) -> Any:
         """browser.input"""
+    async def list(self) -> Any:
+        """Every browser you may use: the server's (kind server) and the tabs of the person's own browser they gave you (kind person, id chrome:<name>). Their tabs arrive through aegis's own Chrome extension (Settings → Chrome), not any other: when none is listed, ask for one with browser_request."""
     async def nav(
         self,
         *,
@@ -225,15 +243,23 @@ class _browser:
     ) -> Any:
         """browser.nav"""
     async def open(
-        self, *, url: str, profile: str | None = ..., dock: str | None = ...
+        self,
+        *,
+        url: str,
+        profile: str | None = ...,
+        dock: str | None = ...,
+        where: Literal["server", "person"] = ...,
+        why: str = ...,
     ) -> Any:
-        """Start a browser on the server and load a URL. It docks beside your transcript (dock=) and shows as a tab, where the person watches and clicks in it; you hold the page until you hand it over. Its profile keeps sign-ins between opens."""
+        """Start a browser on the server and load a URL. It docks beside your transcript (dock=) and shows as a tab, where the person watches and clicks in it; you hold the page until you hand it over. Its profile keeps sign-ins between opens. With where="person", ask the person to open the URL in a new tab of their own browser instead, through aegis's own Chrome extension (Settings → Chrome)."""
     async def press(
         self, *, browser: str | None = ..., key: str, target: str | None = ...
     ) -> Any:
         """Press a key or chord on an element, or on whatever has focus."""
     async def reopen(self, *, id: str) -> Any:
         """browser.reopen"""
+    async def request(self, *, match: str, why: str = ...) -> Any:
+        """Ask the person for one of the tabs open in their own browser, with their sign-ins. Say what you want in match and why. End your turn: you are woken with granted, naming the tab's id, or denied. You never learn which other tabs exist. It goes through aegis's own Chrome extension; chrome_unavailable means the person has not paired it (Settings → Chrome) or their browser is closed."""
     async def resize(
         self, *, browser: str | None = ..., width: int, height: int
     ) -> Any:
@@ -265,9 +291,25 @@ class _btw:
     async def cancel(self, *, log_id: str, id: str) -> Any:
         """Cancel a running side note; its block keeps the question, folded."""
 
+class _chrome:
+    async def answer(self, *, request: str, give: bool) -> Any:
+        """Give or refuse an agent's request for a tab, from its card."""
+    async def code(self) -> Any:
+        """A one-time code the extension's popup trades for its device token, valid ten minutes."""
+    async def release(self, *, tab: str) -> Any:
+        """Give a tab the person holds back to its agents: Done after a handover, Resume after a pause."""
+    async def revoke(self, *, tab: str, log_id: str | None = ...) -> Any:
+        """Disconnect an agent from a shared tab, or with no log_id stop sharing the tab."""
+    async def scripts(self, *, tab: str, on: bool) -> Any:
+        """Let the agents on a shared tab run scripts in it (browser_eval), or stop them."""
+    async def theme(self, *, vars: dict[str, str]) -> Any:
+        """The CSS variables of the theme the person picked, for the extension's popup."""
+    async def unpair(self, *, id: str) -> Any:
+        """Forget a paired browser: its token stops working and its socket closes."""
+
 class _claude:
     async def token(self, *, log_id: str, id: str, secret: str) -> Any:
-        """The sign-in card's field (claude/login.py): check a setup-token, keep it, restart the sessions that failed to sign in."""
+        """The sign-in card's paste-a-token field (signin/core.py): check a setup-token, keep it, restart the sessions that failed to sign in."""
 
 class _commands:
     async def list(self, *, log_id: str) -> Any:
@@ -296,6 +338,28 @@ class _config:
 class _dictation:
     async def prepare(self) -> Any:
         """The engine and model the browser transcribes with, on disk and verified, and the words to bias it toward (dictation.py)."""
+
+class _feed:
+    async def cancel(self, *, name: str) -> Any:
+        """Remove a feed. Items still waiting are not sent."""
+    async def list(self) -> Any:
+        """Your feeds, with their state, what waits and what was delivered."""
+    async def pause(self, *, name: str) -> Any:
+        """Stop a feed waking you. It keeps reading, and what came while it was paused goes as the next batch when you feed_resume it."""
+    async def resume(self, *, name: str) -> Any:
+        """Start a paused feed again, its error count cleared."""
+    async def send(self, *, name: str) -> Any:
+        """A person's Send now: what waits goes without the debounce, or when the session's turn ends."""
+    async def start(
+        self,
+        *,
+        name: str,
+        source: dict[str, Any],
+        debounce_s: float = ...,
+        max_items: int = ...,
+        cwd: str | None = ...,
+    ) -> Any:
+        """Start a feed: a file that grows, or a command with a cursor, read every interval_s. Each batch of new items wakes you as one message `> from feed:<name> · batch#<n> · …`, after debounce_s with no new item, or when your turn ends if you are working. aegis keeps the cursor; the feed stays until feed_cancel or your session closes. Use it instead of re-arming a monitor on a file that grows."""
 
 class _file:
     async def open(self, *, file_id: str, name: str) -> Any:
@@ -332,7 +396,7 @@ class _fs:
     async def move(self, *, path: str, to: str) -> Any:
         """Rename or move a file or folder; refuses a target that exists."""
     async def open(self, *, path: str) -> Any:
-        """Open a file in the desktop's app for it, as file.open does for a sent file: only from a browser on the server's desktop, and never in multi-user mode, whose server has no person at its desktop."""
+        """Open a file in the desktop's app for it, as file.open does for a sent file: only from a browser on the server's desktop."""
     async def read(self, *, path: str) -> Any:
         """A file's kind, size, mtime and hash, its text when it is text, and a ticket URL for every kind a browser element draws itself."""
     async def restore(self, *, trash_id: str) -> Any:
@@ -343,6 +407,16 @@ class _fs:
         """A ticket URL for one file, such as an image a Markdown file links to."""
     async def write(self, *, path: str, content: str, base: str | None) -> Any:
         """Save a text file, only if it still has the hash ``base``; a null base creates it and refuses a file that exists."""
+
+class _group:
+    async def rename(self, *, group: str, name: str) -> Any:
+        """Rename a group: every browser draws its members under the new name. An empty, multi-line or 61-character name is refused."""
+    async def set(self, *, log_ids: builtins.list[str], group: str | None = ...) -> Any:
+        """Move sessions into a group, into a fresh one with group "new", or out of their group with null. This server's sessions only, and only your own. Returns the group's key, null when they left."""
+
+class _harness:
+    async def status(self) -> Any:
+        """Each harness with a sign-in: installed, its version, signed in and until when."""
 
 class _help:
     async def dismiss(self, *, what: Literal["tutorial", "whats_new"]) -> Any:
@@ -478,20 +552,20 @@ class _layout:
         """layout.undock"""
 
 class _link:
-    async def add(
-        self, *, url: str, token: str, name: str | None = ..., trusted: bool = ...
-    ) -> Any:
+    async def add(self, *, url: str, token: str, name: str | None = ...) -> Any:
         """Link another aegis server: connect once with its token, take the name it gives itself, and keep the link in links.json."""
     async def exit(self, *, name: str | None = ...) -> Any:
         """Make a link this server's exit, or stop exiting: what aegis starts from now on reaches the internet from there (exit.py)."""
     async def incoming(self) -> Any:
-        """The servers that linked this one with trust, so their agents reach this one over their link, and what each took as an exit."""
+        """The servers that linked this one, so their agents reach this one over their link, and what each took as an exit."""
     async def list(self) -> Any:
         """The servers this one links, with their state; never their tokens."""
     async def remove(self, *, name: str) -> Any:
         """link.remove"""
-    async def trust(self, *, name: str, trusted: bool) -> Any:
-        """Ask a link for trust (both ways, agents unrestricted), or stop asking. The link reconnects; the far server decides."""
+
+class _mcp:
+    async def test(self, *, entry: dict[str, Any]) -> Any:
+        """Connect to an MCP server as the Settings form holds it, saved or not, and name its tools. Runs a stdio server's command on this machine."""
 
 class _memory:
     async def delete(self, *, name: str) -> Any:
@@ -513,6 +587,12 @@ class _memory:
         """Save a memory: one fact that later sessions should know, such as who the person is, how they want you to work, or where something runs. Saving an existing name replaces that memory. Set asked: true when the person's message that began this turn asked you to remember it; it is then saved at once, with a card that lets them undo it. Otherwise a new memory is proposed: a card in your transcript asks the person to approve it, and it is not hinted until then; a change to an approved one applies at once, and its card lets the person undo it."""
     async def search(self, *, query: str, limit: int = ...) -> Any:
         """Search your memories (facts about the person, their projects and how they want you to work) with your own words. Returns the best names with their description, score, status and flags; read one with memory_read. Proposed and expired memories are included and marked."""
+
+class _mention:
+    async def reply(self, *, id: str, text: str) -> Any:
+        """Answer an @ mention that asked you: a note whose last line names `mention_reply id=...`. The person reads your text in the session they typed the note in, and a committee waits for it there; it starts no turn anywhere."""
+    async def skip(self, *, log_id: str, id: str) -> Any:
+        """Skip a committee's merge before it goes out; its answers stay."""
 
 class _models:
     async def list(self) -> Any:
@@ -569,7 +649,7 @@ class _peer:
     async def close(
         self, *, target: str, token: str | None = ..., sender: dict[str, Any]
     ) -> Any:
-        """session_close from an agent on a server linked with trust, under the same rule as here: a session it started closes at once when done, any other on a second call with the token it was given."""
+        """session_close from an agent on a linked server, under the same rule as here: a session it started closes at once when done, any other on a second call with the token it was given."""
     async def deliver(
         self,
         *,
@@ -583,9 +663,9 @@ class _peer:
     async def handoff(
         self, *, target: str, context: str, interrupt: bool = ..., urgent: bool = ...
     ) -> Any:
-        """Give another session context or an instruction; it arrives as a user turn headed `> from agent:<you>`. A busy target gets it when its turn ends, and is told meanwhile who waits; urgent reaches it inside the turn instead, at its next tool step, and interrupt cuts that turn first. `handle@server` reaches a session on a server this one links; nothing there can reach you back, unless the link is trusted."""
+        """Give another session context or an instruction; it arrives as a user turn headed `> from agent:<you>`. A busy target gets it when its turn ends, and is told meanwhile who waits; urgent reaches it inside the turn instead, at its next tool step, and interrupt cuts that turn first. `handle@server` reaches a session on a server this one links."""
     async def read(self, *, target: str, last: int = ..., tools: bool = ...) -> Any:
-        """The last entries of another session's transcript, one line each. `handle@server` reads a session on a server this one links with trust."""
+        """The last entries of another session's transcript, one line each. `handle@server` reads a session on a server this one links."""
 
 class _plan:
     async def update(self, *, items: builtins.list[dict[str, Any]]) -> Any:
@@ -631,13 +711,13 @@ class _queue:
         outcome: Literal["ok", "error"],
         body: str,
     ) -> Any:
-        """A task's result from a server linked with trust, for the agent here that enqueued it. Only that link may call it; the header is composed here from values checked here."""
+        """A task's result from a linked server, for the agent here that enqueued it. Only that link may call it; the header is composed here from values checked here."""
     async def enqueue(self, *, queue: str, payload: str, callback: bool = ...) -> Any:
-        """Hand a self-contained task to a fresh worker on a queue. Returns at once with the task id; the worker's final message reaches your inbox when it finishes (with callback). Keep working meanwhile. `queue@server` enqueues on a server linked with trust; the result still reaches your inbox, and the task id comes back as `task-id@server`."""
+        """Hand a self-contained task to a fresh worker on a queue. Returns at once with the task id; the worker's final message reaches your inbox when it finishes (with callback). Keep working meanwhile. `queue@server` enqueues on a linked server; the result still reaches your inbox, and the task id comes back as `task-id@server`. A queue past its max_pending refuses with queue_full; one whose quota guard is closed refuses with queue_closed, or takes the task with a warning that it waits."""
 
 class _quota:
     async def read(self) -> Any:
-        """How much of each subscription window is left: per provider, each window's percent used, severity, projected percent at reset and reset time (epoch seconds). Reads the last reading; never asks the vendor, so calling it costs nothing."""
+        """How much of each subscription window is left: per provider, each window's percent used, severity, projected percent at reset, the rate behind it (points per hour, or null for the window average) and reset time (epoch seconds). Reads the last reading; never asks the vendor, so calling it costs nothing."""
 
 class _recap:
     async def request(self, *, log_id: str, force: bool = ...) -> Any:
@@ -652,26 +732,26 @@ class _schedule:
         check: dict[str, Any] | None = ...,
         fire: dict[str, Any],
         prompt: str,
-        quota: dict[str, dict[str, int | Literal["pace"]]] = ...,
+        quota: dict[str, dict[str, int | Literal["pace"] | dict[str, Any]]] = ...,
         name: str,
     ) -> Any:
-        """Fire a prompt on a clock: every 5m, a cron line, or once at a time, into a new session from an agent or into an existing session's inbox. With a bash check, a tick fires only when the check exits 0 with a stdout different from the last fire's, and that stdout is appended to the prompt. You own what you create; schedule_delete removes it. A schedule you create or change waits, paused, until a person approves it from the card under your call. `name@server` makes it on a server linked with trust: it lives and ticks there, its runs start there, and a directory or a session in it is that server's."""
+        """Fire a prompt on a clock: every 5m, a cron line, or once at a time, into a new session from an agent or into an existing session's inbox. With a bash check, a tick fires only when the check exits 0 with a stdout different from the last fire's, and that stdout is appended to the prompt. You own what you create; schedule_delete removes it. A schedule you create or change waits, paused, until a person approves it from the card under your call. `name@server` makes it on a linked server: it lives and ticks there, its runs start there, and a directory or a session in it is that server's."""
     async def delete(self, *, name: str) -> Any:
-        """Delete a schedule you own. A live run keeps going. `name@server` is one on a server linked with trust."""
+        """Delete a schedule you own. A live run keeps going. `name@server` is one on a linked server."""
     async def fire(self, *, name: str) -> Any:
-        """Fire a schedule you own now, skipping its clock and its check. The overlap rule still holds: with a live run, wait holds it and skip drops it. A schedule that fires a workflow fires only on its clock for an agent: the person approved the clock, not runs on demand. `name@server` is one on a server linked with trust, and its run starts there."""
+        """Fire a schedule you own now, skipping its clock and its check. The overlap rule still holds: with a live run, wait holds it and skip drops it. A schedule that fires a workflow fires only on its clock for an agent: the person approved the clock, not runs on demand. `name@server` is one on a linked server, and its run starts there."""
     async def list(self) -> Any:
-        """Every schedule on this server: its clock, layers and owner, its next tick, its live runs, and whether it is paused. An agent also gets each server's linked with trust, named `name@server` and with `server`."""
+        """Every schedule on this server: its clock, layers and owner, its next tick, its live runs, and whether it is paused. An agent also gets each linked server's, named `name@server` and with `server`."""
     async def pause(self, *, name: str) -> Any:
-        """Stop a schedule you own from ticking until it is resumed. `name@server` is one on a server linked with trust."""
+        """Stop a schedule you own from ticking until it is resumed. `name@server` is one on a linked server."""
     async def pools(self) -> Any:
         """The pools a schedule's quota lines may name, with their windows, and the lines a schedule gets when it names none: for the view's editor."""
     async def resume(self, *, name: str, workflow: str | None = ...) -> Any:
-        """Start a paused schedule again from now, its error count cleared. The ticks that fell during the pause do not fire. `name@server` is one on a server linked with trust; one waiting for a person stays a person's to unpause there too."""
+        """Start a paused schedule again from now, its error count cleared. The ticks that fell during the pause do not fire. `name@server` is one on a linked server; one waiting for a person stays a person's to unpause there too."""
     async def runs(
         self, *, name: str, offset: int = ..., limit: int = ..., quiet: bool = ...
     ) -> Any:
-        """One schedule's fires and ticks, newest first, a page at a time. The ticks that changed nothing are left out unless you pass quiet. `name@server` reads one on a server linked with trust."""
+        """One schedule's fires and ticks, newest first, a page at a time. The ticks that changed nothing are left out unless you pass quiet. `name@server` reads one on a linked server."""
     async def test(
         self,
         *,
@@ -681,7 +761,7 @@ class _schedule:
         cwd: str | None = ...,
         name: str | None = ...,
     ) -> Any:
-        """Try a clock and a check without saving anything: the next three ticks, and whether the check would fire now and why. With `name@server` both are tried on a server linked with trust."""
+        """Try a clock and a check without saving anything: the next three ticks, and whether the check would fire now and why. With `name@server` both are tried on a linked server."""
     async def update(
         self,
         *,
@@ -690,10 +770,10 @@ class _schedule:
         check: dict[str, Any] | None = ...,
         fire: dict[str, Any],
         prompt: str,
-        quota: dict[str, dict[str, int | Literal["pace"]]] = ...,
+        quota: dict[str, dict[str, int | Literal["pace"] | dict[str, Any]]] = ...,
         name: str,
     ) -> Any:
-        """Replace a schedule you own with a new definition. It applies from the next tick; a live run is not touched. `name@server` is one on a server linked with trust."""
+        """Replace a schedule you own with a new definition. It applies from the next tick; a live run is not touched. `name@server` is one on a linked server."""
 
 class _secret:
     async def provide(self, *, log_id: str, id: str, secret: str) -> Any:
@@ -719,12 +799,16 @@ class _server:
         """The pause in force (pause.py), or null."""
     async def resume(self) -> Any:
         """Resume every session the pause held, and the work it held."""
+    async def update(self) -> Any:
+        """Upgrade aegis with the installer that owns it, check the new build, and restart onto it (self_update.py). Progress is on the update channel."""
     async def version(self) -> Any:
         """server.version"""
 
 class _session:
     async def autoclose(self, *, log_id: str, on: bool) -> Any:
         """session.autoclose"""
+    async def autohandoff(self, *, log_id: str, on: bool, at: int | None = ...) -> Any:
+        """Turn a session's autohandoff on or off (#1019): past ``at`` tokens of context, its turn_end with a brief continues it fresh."""
     async def close(self, *, handle: str | None = ..., token: str | None = ...) -> Any:
         """Close a session: its tab goes away and it stays in the archive. A session you spawned, or whose queue task you enqueued, closes at once when its attention is done; any other, your own included, is refused with a one-time token and what to weigh first, and closes on a second call that passes the token."""
     async def configure(
@@ -736,6 +820,14 @@ class _session:
         permission: Literal["read", "write", "full", "auto"] | None = ...,
     ) -> Any:
         """session.configure"""
+    async def group(
+        self,
+        *,
+        handles: builtins.list[str] | None = ...,
+        name: str | None = ...,
+        group: str | None = ...,
+    ) -> Any:
+        """Put sessions in one group of the tab bar, or give a group a new name. A group holds any number of your sessions and has no head: what a member spawns joins it by itself. With handles and a new name they get a group called that; with the name of one you have, they join it; with no name they leave theirs. With group and name and no handles, rename that group. Groups are flat, and a session is in at most one."""
     async def handoff(
         self,
         *,
@@ -747,15 +839,15 @@ class _session:
         permission: Literal["read", "write", "full", "auto"] | None = ...,
         cwd: str | None = ...,
     ) -> Any:
-        """Continue your work in a new session and end this one: from this call nobody can write to it. The new session starts when your turn ends, with `msg`, your turn_end brief and your last turns, so end your turn right after this call. Pass `agent` to continue on another agent, with at most your permission, and `host` to continue on a linked server. Refused while a monitor, a background task, a queue task or a held message waits for you. A workflow you own follows the new session, except across a link, where it and any open session you started refuse the call."""
+        """Continue your work in a new session and end this one: from this call nobody can write to it. The new session starts when your turn ends, with `msg`, your turn_end brief and your last turns, so end your turn right after this call. Pass `agent` to continue on another agent, with at most your permission, and `host` to continue on a linked server. Your monitors, feeds, queue tasks, the schedules that fire into you and a workflow you own follow the new session, which they wake from then on. Refused while a background task or a held message waits for you, and across a link while any of those, or an open session you started, does."""
     async def interrupt(self, *, log_id: str) -> Any:
         """session.interrupt"""
     async def kills(self, *, log_id: str) -> Any:
         """What Sleep would end with the process, one plain line each: what a park waits for, the stray processes included (park.kills). Asked when Sleep is chosen, since the /proc scan is too dear per publish."""
     async def list(self) -> Any:
-        """The open sessions on this server, each with its state, what it needs (attention and its line, what it waits on), its plan and what it is doing now, its model (`model` as configured, `model_id` as the harness resolved it, null until it has), spend, and `load`: the CPU in cores over the last minute and the RAM in GB of it and everything it started, null while it has no process; then each linked server's by handle and state alone, as `handle@server`: reach one with peer_handoff. A server linked with trust lists its sessions in full, with `server`."""
+        """The open sessions on this server, each with its state, what it needs (attention and its line, what it waits on), its plan and what it is doing now, its model (`model` as configured, `model_id` as the harness resolved it, null until it has), spend, and `load`: the CPU in cores over the last minute and the RAM in GB of it and everything it started, null while it has no process; then each linked server's sessions in full, with `server`: reach one as `handle@server`."""
     async def quiet(self, *, handle: str | None = ...) -> Any:
-        """Hide a session's tab while it works: it stays in the Fleet, dimmed, and its tab comes back by itself when its turn ends done, review, needs_you or error. Only a working or waiting session can be quiet. Use it for a session doing background work the person need not watch, your own included."""
+        """Put a session in the background, in any state: its tab hides and it stays in the Fleet, dimmed. Its tab comes back by itself when a turn ends done, review, needs_you or error, and hides again when the next turn starts, until the person unquiets it. Use it for a session doing background work the person need not watch, your own included."""
     async def read(self, *, log_id: str, ids: builtins.list[str]) -> Any:
         """A person read these agent messages, on any browser."""
     async def rename(
@@ -796,7 +888,7 @@ class _session:
         prompt: str | None = ...,
         quiet: bool = ...,
     ) -> Any:
-        """Start a new session from an agent, overriding its harness, model, effort or permission if you need to, and send it `prompt` as its first message. Its permission can be at most yours. Returns its log id and handle. It does not report back: read it with peer_read, message it with peer_handoff. With agent@server it starts on that linked server, as this server's link there, and that server's quota policy for the link decides; you can hand off to it, not read it."""
+        """Start a new session from an agent, overriding its harness, model, effort or permission if you need to, and send it `prompt` as its first message. Its permission can be at most yours. Returns its log id and handle. It does not report back: read it with peer_read, message it with peer_handoff. With agent@server it starts on that linked server, as this server's link there, and that server's quota gate decides."""
     async def stop(self, *, log_id: str) -> Any:
         """session.stop"""
     async def unquiet(self, *, log_id: str) -> Any:
@@ -820,6 +912,18 @@ class _setup:
         knowledge: Literal["native", "side-by-side"] | None = ...,
     ) -> Any:
         """Save what this /setup run applied and declined, for the person whose session this is, so their next run proposes only what is new. Call it once, at the end of a run (help_read setup record)."""
+
+class _signin:
+    async def answer(self, *, log_id: str, id: str, secret: str) -> Any:
+        """Type the code the sign-in page gave into the waiting login."""
+    async def cancel(self, *, log_id: str, id: str) -> Any:
+        """Stop the login; the sessions keep waiting."""
+    async def choose(self, *, log_id: str, id: str, option: str) -> Any:
+        """Pick one of the login's offered options."""
+    async def open(self, *, harness: str = ...) -> Any:
+        """Open a sign-in card for a harness in your transcript, to renew its sign-in before it expires or when the person asks. aegis runs the harness's own login; the person answers the card, never you. Returns the card's id at once; when the sign-in is done you are woken with `> from aegis:login · renewed`. Only claude-code has a sign-in today."""
+    async def start(self, *, log_id: str, harness: str) -> Any:
+        """Open a sign-in card in this session's transcript, or name the one open."""
 
 class _skill:
     async def delete(self, *, name: str) -> Any:
@@ -863,7 +967,7 @@ class _task:
     async def resume(self, *, task_id: str) -> Any:
         """Put a failed or cancelled task's worker back to work, with its conversation intact."""
     async def status(self, *, task_id: str) -> Any:
-        """A task's status, its worker, and its result once finished. `task-id@server` reads one on a server linked with trust."""
+        """A task's status, its worker, and its result once finished. `task-id@server` reads one on a linked server."""
 
 class _term:
     async def close(self, *, id: str) -> Any:
@@ -882,19 +986,6 @@ class _term:
         """Start a terminal from a profile, in its folder or in ``cwd``; the caller owns it."""
 
 class _token:
-    async def add(
-        self,
-        *,
-        name: str,
-        role: Literal["admin", "member"] = ...,
-        linux_user: str | None = ...,
-        no_linux_user: bool = ...,
-    ) -> Any:
-        """Mint a token; the only time it is shown."""
-    async def list(self) -> Any:
-        """The tokens that may use this server, the admin's first, the policy of every member without its own, the pools a policy names, and each member's gate on each pool now."""
-    async def policy(self, *, name: str, policy: dict[str, Any] | None) -> Any:
-        """Set a member's quota policy, or with name * the default one. The gate applies it at the next reading."""
     async def revoke(self, *, name: str) -> Any:
         """End a token. The admin's is replaced, and the new one returned to whoever revoked it, so that browser can sign in again. Its devices stop hearing pushes (push.py)."""
 
@@ -920,7 +1011,7 @@ class _turn:
 
 class _usage:
     async def import_(self, *, people: builtins.list[str] | None = ...) -> Any:
-        """Count once the sessions Claude Code ran outside aegis: each person's ~/.claude/projects, read as their Linux user, as mode outside. Messages aegis already counts are skipped, and a file already imported is not read again. Claude Code purges its files after 30 days, so run it soon after upgrading, on each server."""
+        """Count once the sessions Claude Code ran outside aegis: each person's ~/.claude/projects, as mode outside. Messages aegis already counts are skipped, and a file already imported is not read again. Claude Code purges its files after 30 days, so run it soon after upgrading, on each server."""
     async def page(
         self,
         *,

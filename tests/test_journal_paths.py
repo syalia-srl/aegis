@@ -94,9 +94,9 @@ def test_checkout_of_finds_the_top_whose_origin_is_the_slug(tmp_path):
     a = git_repo(tmp_path / "atlas", origin="git@github.com:acme-co/atlas.git")
     b = git_repo(tmp_path / "notes", origin="https://github.com/ana/notes")
     assert paths.remote_slug(str(b)) == "ana/notes"
-    assert paths.checkout_of("acme-co/atlas", [str(b), str(a)], None) == str(a)
-    assert paths.checkout_of("Acme-Co/Atlas", [str(a)], None) == str(a)
-    assert paths.checkout_of("acme-co/ledger", [str(a)], None) is None
+    assert paths.checkout_of("acme-co/atlas", [str(b), str(a)]) == str(a)
+    assert paths.checkout_of("Acme-Co/Atlas", [str(a)]) == str(a)
+    assert paths.checkout_of("acme-co/ledger", [str(a)]) is None
     assert paths.remote_slug(str(tmp_path / "gone")) is None
 
 

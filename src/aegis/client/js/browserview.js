@@ -15,15 +15,6 @@ const BUTTON = ["left", "middle", "right"];
 const NAV_ICON = { back: "left", forward: "right", reload: "again" };
 const views = new Set(); // every mounted view, for card updates
 
-// The card of a browser by id, and the person's sessions to give one to; app.js sets both.
-let cardOf = () => null;
-let sessionsOf = () => [];
-export function browserSources({ card, sessions }) {
-  cardOf = card;
-  sessionsOf = sessions;
-}
-export const browserCard = (id) => cardOf(id);
-
 function el(tag, cls, text) {
   const n = document.createElement(tag);
   if (cls) n.className = cls;
@@ -38,8 +29,11 @@ function button(cls, text, label) {
 }
 
 // Mount a view of browser ``id`` in ``host``; returns {draw(card), dispose()}.
-export function mountBrowser(host, id, card, { conn, server = null }) {
-  const v = { id, conn, server, card, queue: [], sending: false, decoding: false, pending: null, moveFrame: 0, lastMove: null };
+// `sources` is the page's: card(id) names a browser by the log id its pane
+// holds, and sessions() lists the sessions it can be given to. A mount names
+// its own, so two mounts never overwrite each other's hooks.
+export function mountBrowser(host, id, card, { conn, server = null, sources = {} } = {}) {
+  const v = { id, conn, server, card, sources, queue: [], sending: false, decoding: false, pending: null, moveFrame: 0, lastMove: null };
   const bar = el("header", "br-bar");
   const name = el("span", "br-name");
   const nav = ["back", "forward", "reload"].map((a) => {
@@ -98,7 +92,7 @@ export function mountBrowser(host, id, card, { conn, server = null }) {
   reopen.addEventListener("click", () => call(v, "browser.reopen"));
   close.addEventListener("click", () => call(v, "browser.shut"));
   give.addEventListener("click", () => {
-    const list = sessionsOf();
+    const list = v.sources?.sessions?.() || [];
     giveList.replaceChildren(
       ...(list.length
         ? list.map((s) => {
@@ -293,17 +287,26 @@ function fit(v) {
 }
 
 // -- the browser's own tab (app.js) ----------------------------------------
+// The part (parts/browser.js) owns the view and its host node; this controller
+// mounts one browser into it and lets go of it when the route leaves. A
+// browser docked in a session's canvas is a second mountBrowser, not this one.
 
-let tab = null; // {id, view}
+export class BrowserTab {
+  constructor(host, sources = {}) {
+    this.host = host;
+    this.sources = sources; // {card(id), sessions()}: the page's, per mount
+    this.tab = null; // {id, view}
+  }
 
-export function openBrowser(id, card, { conn, server = null }) {
-  if (tab?.id === id) return tab.view.draw(card);
-  closeBrowser();
-  tab = { id, view: mountBrowser(document.getElementById("br-tab"), id, card, { conn, server }) };
-}
+  open(id, card, { conn, server = null } = {}) {
+    if (this.tab?.id === id) return this.tab.view.draw(card);
+    this.close();
+    this.tab = { id, view: mountBrowser(this.host, id, card, { conn, server, sources: this.sources }) };
+  }
 
-export function closeBrowser() {
-  tab?.view.dispose();
-  tab = null;
-  document.getElementById("br-tab").replaceChildren();
+  close() {
+    this.tab?.view.dispose();
+    this.tab = null;
+    this.host.replaceChildren();
+  }
 }

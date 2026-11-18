@@ -22,7 +22,6 @@ from pathlib import Path
 
 from . import launch
 from .config import Finding
-from .users import UNIT_LINES
 
 UNIT = """\
 [Unit]
@@ -93,25 +92,10 @@ class Unit:
     path: str
     memory_high: str
     memory_max: str
-    multi_user: bool = False
-
-
-# In multi-user mode the unit gives the server the capabilities it needs to
-# start each child as its person and drop every capability (users.py).
-MULTI_USER = (
-    "# The server switches each child to its person's Linux user and drops\n"
-    "# every capability (multi_user in .aegis.yaml).\n"
-    + "".join(f"{line}\n" for line in UNIT_LINES)
-)
 
 
 def render(u: Unit) -> str:
-    fields = {k: v for k, v in u.__dict__.items() if k != "multi_user"}
-    text = UNIT.format(**fields)
-    if u.multi_user:
-        user = f"User={u.user}\n"
-        text = text.replace(user, user + MULTI_USER, 1)
-    return text
+    return UNIT.format(**u.__dict__)
 
 
 def mem_total(meminfo: str) -> int:
@@ -196,7 +180,7 @@ def cat(unit: Path, user: bool) -> str:
     systemctl cannot say."""
     cmd = ["systemctl", *(["--user"] if user else []), "cat", unit.name]
     try:
-        r = launch.run(cmd, text=True, timeout=5, user=None)
+        r = launch.run(cmd, text=True, timeout=5)
         if r.returncode == 0:
             return r.stdout
     except (OSError, subprocess.TimeoutExpired):

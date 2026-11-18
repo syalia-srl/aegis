@@ -16,15 +16,15 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
 
 from aegis import push
-from aegis.ops import Caller, OpError, Principal
+from aegis.ops import Caller, OpError
 from aegis.webpush import b64d, b64e, raw_public
 
 from .conftest import until
 from .test_agents import CONFIG, World, mcp, turn
 from .test_webpush import decrypt
 
-BEN = Principal("ben", "member")
-CARA = Principal("cara", "member")
+# The server's one person: a call with no principal is theirs.
+BEN = None
 UA_PUBLIC = "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4"
 AUTH = "BTBZMqHH6r4Tts7J_aSIgg"
 
@@ -35,8 +35,6 @@ async def world(tmp_path, fake_claude, monkeypatch):
     monkeypatch.setenv("AEGIS_PUSH_HOSTS", "push.example.test, other.example.test")
     (tmp_path / ".aegis.yaml").write_text(CONFIG)
     w = await World(tmp_path, fake_claude).start()
-    w.app.principals.add("ben", "member")
-    w.app.principals.add("cara", "member")
     yield w
     await w.stop()
 
@@ -75,7 +73,7 @@ async def test_a_subscription_is_its_callers_with_the_default_sources(world):
     )
     assert r["id"].startswith("p_") and len(r["id"]) == 10
     [row] = world.app.push.subscriptions.list()
-    assert row["owner"] == "ben" and row["device"] == "Chrome on Android"
+    assert row["owner"] == world.app.user and row["device"] == "Chrome on Android"
     assert row["sources"] == ["needs_you", "error", "toast"]
     assert (
         row["endpoint"] == "https://push.example.test/abc"
@@ -152,88 +150,6 @@ async def test_the_known_push_services_are_accepted(world, endpoint):
     assert [r["endpoint"] for r in world.app.push.subscriptions.list()] == [endpoint]
 
 
-async def test_a_member_keeps_at_most_ten_devices(world):
-    ids = [
-        (
-            await call(
-                world,
-                "push.subscribe",
-                {
-                    "subscription": sub(endpoint=f"https://push.example.test/{i}"),
-                    "device": "x",
-                },
-                BEN,
-            )
-        )["id"]
-        for i in range(10)
-    ]
-    with pytest.raises(OpError) as e:
-        await call(
-            world,
-            "push.subscribe",
-            {
-                "subscription": sub(endpoint="https://push.example.test/10"),
-                "device": "x",
-            },
-            BEN,
-        )
-    assert e.value.code == "too_many_devices"
-    # A device already counted subscribes again, by its id or its endpoint.
-    await call(
-        world,
-        "push.subscribe",
-        {
-            "subscription": sub(endpoint="https://push.example.test/new"),
-            "device": "x",
-            "id": ids[0],
-        },
-        BEN,
-    )
-    await call(
-        world,
-        "push.subscribe",
-        {"subscription": sub(endpoint="https://push.example.test/1"), "device": "y"},
-        BEN,
-    )
-    # Another member is counted apart.
-    await call(world, "push.subscribe", {"subscription": sub(), "device": "x"}, CARA)
-    assert len(world.app.push.subscriptions.list()) == 11
-
-
-async def test_one_endpoint_is_one_row_whoever_subscribes_it(world):
-    first = await call(
-        world, "push.subscribe", {"subscription": sub(), "device": "x"}, BEN
-    )
-    again = await call(
-        world, "push.subscribe", {"subscription": sub(), "device": "x"}, BEN
-    )
-    assert again == first
-    # Another token signs in on the same browser: the row is now theirs.
-    theirs = await call(
-        world,
-        "push.subscribe",
-        {"subscription": sub(), "device": "y", "sources": ["done"]},
-        CARA,
-    )
-    [row] = world.app.push.subscriptions.list()
-    assert row["id"] == theirs["id"] and row["owner"] == "cara"
-    assert row["device"] == "y" and row["sources"] == ["done"]
-    # A rotation onto an endpoint another row has leaves one row too.
-    other = await call(
-        world,
-        "push.subscribe",
-        {"subscription": sub(endpoint="https://push.example.test/2"), "device": "z"},
-        CARA,
-    )
-    await call(
-        world,
-        "push.subscribe",
-        {"subscription": sub(), "device": "z", "id": other["id"]},
-        CARA,
-    )
-    assert [r["id"] for r in world.app.push.subscriptions.list()] == [other["id"]]
-
-
 async def test_an_id_given_replaces_that_subscription(world):
     first = await call(
         world,
@@ -257,76 +173,6 @@ async def test_an_id_given_replaces_that_subscription(world):
     assert row["endpoint"] == "https://push.example.test/new" and row["sources"] == [
         "done"
     ]
-    # Another member cannot take it over.
-    with pytest.raises(OpError) as e:
-        await call(
-            world,
-            "push.subscribe",
-            {"subscription": sub(), "device": "y", "id": first["id"]},
-            CARA,
-        )
-    assert e.value.code == "not_owner"
-
-
-async def test_only_the_owner_or_an_admin_updates_or_removes(world):
-    r = await call(world, "push.subscribe", {"subscription": sub(), "device": "x"}, BEN)
-    with pytest.raises(OpError) as e:
-        await call(world, "push.update", {"id": r["id"], "sources": ["done"]}, CARA)
-    assert e.value.code == "not_owner"
-    with pytest.raises(OpError) as e:
-        await call(world, "push.remove", {"id": r["id"]}, CARA)
-    assert e.value.code == "not_owner"
-    await call(
-        world,
-        "push.update",
-        {"id": r["id"], "sources": ["done", "review"], "device": "Pixel"},
-        BEN,
-    )
-    await call(world, "push.update", {"id": r["id"], "sources": ["error"]})  # the admin
-    [row] = world.app.push.subscriptions.list()
-    assert row["sources"] == ["error"] and row["device"] == "Pixel"
-    with pytest.raises(OpError) as e:
-        await call(world, "push.update", {"id": r["id"], "sources": ["nope"]}, BEN)
-    assert e.value.code == "bad_params"
-    await call(world, "push.remove", {"id": r["id"]}, BEN)
-    assert world.app.push.subscriptions.list() == []
-    with pytest.raises(OpError) as e:
-        await call(world, "push.remove", {"id": r["id"]}, BEN)
-    assert e.value.code == "unknown_subscription"
-
-
-async def test_the_list_hides_keys_and_shows_a_member_only_their_own(world):
-    await call(world, "push.subscribe", {"subscription": sub(), "device": "ben's"}, BEN)
-    await call(
-        world,
-        "push.subscribe",
-        {
-            "subscription": sub(endpoint="https://push.example.test/c"),
-            "device": "cara's",
-        },
-        CARA,
-    )
-    mine = await call(world, "push.list", who=BEN)
-    assert [r["device"] for r in mine["subscriptions"]] == ["ben's"]
-    assert all("keys" not in r for r in mine["subscriptions"])
-    everyone = await call(world, "push.list")
-    assert sorted(r["owner"] for r in everyone["subscriptions"]) == ["ben", "cara"]
-    assert all("keys" not in r for r in everyone["subscriptions"])
-
-
-async def test_revoking_a_members_token_deletes_their_subscriptions(world):
-    await call(world, "push.subscribe", {"subscription": sub(), "device": "ben's"}, BEN)
-    await call(
-        world,
-        "push.subscribe",
-        {
-            "subscription": sub(endpoint="https://push.example.test/c"),
-            "device": "cara's",
-        },
-        CARA,
-    )
-    await call(world, "token.revoke", {"name": "ben"})
-    assert [r["owner"] for r in world.app.push.subscriptions.list()] == ["cara"]
 
 
 async def test_subscriptions_survive_a_restart(world):
@@ -639,9 +485,6 @@ async def test_push_test_reaches_one_device(world, service):
         "kind": "test",
         "tag": "test",
     }
-    with pytest.raises(OpError) as e:
-        await call(world, "push.test", {"id": one}, CARA)
-    assert e.value.code == "not_owner"
 
 
 async def test_a_long_line_is_cut_to_fit_three_kilobytes(world, service):
@@ -691,3 +534,63 @@ async def test_a_long_title_or_toast_is_cut_and_still_pushes(world, service):
     await until(lambda: service.got, what="the push")
     [payload] = service.payloads()
     assert payload["body"].startswith("x") and payload["tag"].endswith("…")
+
+
+async def test_at_most_ten_devices_and_a_counted_one_subscribes_again(world):
+    ids = [
+        (
+            await call(
+                world,
+                "push.subscribe",
+                {
+                    "subscription": sub(endpoint=f"https://push.example.test/{i}"),
+                    "device": "x",
+                },
+            )
+        )["id"]
+        for i in range(10)
+    ]
+    with pytest.raises(OpError) as e:
+        await call(
+            world,
+            "push.subscribe",
+            {
+                "subscription": sub(endpoint="https://push.example.test/10"),
+                "device": "x",
+            },
+        )
+    assert e.value.code == "too_many_devices"
+    # A device already counted subscribes again, by its id or its endpoint.
+    await call(
+        world,
+        "push.subscribe",
+        {
+            "subscription": sub(endpoint="https://push.example.test/new"),
+            "device": "x",
+            "id": ids[0],
+        },
+    )
+    await call(
+        world,
+        "push.subscribe",
+        {"subscription": sub(endpoint="https://push.example.test/1"), "device": "y"},
+    )
+    assert len(world.app.push.subscriptions.list()) == 10
+
+
+async def test_one_endpoint_is_one_row(world):
+    first = await call(world, "push.subscribe", {"subscription": sub(), "device": "x"})
+    again = await call(world, "push.subscribe", {"subscription": sub(), "device": "x"})
+    assert again == first
+    # A rotation onto an endpoint another row has leaves one row too.
+    other = await call(
+        world,
+        "push.subscribe",
+        {"subscription": sub(endpoint="https://push.example.test/2"), "device": "z"},
+    )
+    await call(
+        world,
+        "push.subscribe",
+        {"subscription": sub(), "device": "z", "id": other["id"]},
+    )
+    assert [r["id"] for r in world.app.push.subscriptions.list()] == [other["id"]]

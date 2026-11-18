@@ -44,6 +44,7 @@ composer's chips and the Fleet card.
 | `g-h-opencode` | The harness is OpenCode | session panel, model chip, Fleet cards |
 | `g-h-codex` | The harness is Codex | session panel, model chip, Fleet cards |
 | `g-h-cursor` | The harness is Cursor | session panel, model chip, Fleet cards |
+| `g-h-pi` | The harness is pi | session panel, model chip, Fleet cards |
 | `g-e-low` | Effort low: one bar of five | session panel, effort chip |
 | `g-e-medium` | Effort medium: two bars of five | session panel, effort chip |
 | `g-e-high` | Effort high: three bars of five | session panel, effort chip |
@@ -70,7 +71,7 @@ The buttons of the session panel and the menus of a tab or a card.
 | `g-reopen` | Reopen an archived session in a live tab | the archived session's panel |
 | `g-again` | Do it again: reopen, reload | tab menu, a page's reload button |
 | `g-archive` | Archive the session | session panel, tab menu |
-| `g-quiet` | Quiet: hide the tab until the turn ends | session panel, tab menu, quiet Fleet cards |
+| `g-quiet` | Quiet: hide the tab while the session works | session panel, tab menu, quiet Fleet cards |
 | `g-unquiet` | Unquiet: show the tab again | tab menu |
 | `g-handoff` | Hand the session off to another agent | tab menu |
 | `g-pencil` | Rename, edit and resend; a journal note | menus, the Files view, the journal |

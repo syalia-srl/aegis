@@ -19,10 +19,10 @@ from .conftest import until
 from .test_artifacts_e2e import landed
 from .test_knowledge_cards import worker_cards
 from .knowledge_samples import mem
-from .test_acts_for import BEN, recorded  # noqa: F401
+from .one_person import BEN, recorded  # noqa: F401
 from .test_agents import inbox, mcp, turn, world  # noqa: F401  (fixture)
-from .test_member_view import homes, spawn  # noqa: F401
-from .test_member_view import world as members  # noqa: F401
+from .one_person import homes, spawn  # noqa: F401
+from .one_person import world as members  # noqa: F401
 
 BINARY = bytes(range(256)) * 4
 
@@ -188,28 +188,6 @@ async def test_reads_never_run_on_the_event_loop(world, tmp_path, monkeypatch):
     monkeypatch.setattr(importer, "load", load)
     await bring(s, {"source": str(skill_dir(tmp_path)), "kind": "skill"})
     assert threads and loop not in threads
-
-
-async def test_a_member_imports_from_their_own_home_only(members, homes, monkeypatch):
-    app = members.app
-    ben = app.sessions.sessions[await spawn(members, BEN)]
-    home = __import__("pathlib").Path(homes["ben"].pw_dir)
-    src = skill_dir(home / ".claude" / "skills")
-    threads = []
-    real = importer.load
-
-    def load(*a):
-        threads.append(threading.current_thread().name)
-        return real(*a)
-
-    monkeypatch.setattr(importer, "load", load)
-    got = await bring(ben, {"source": str(src), "kind": "skill"})
-    assert [i["name"] for i in got["imported"]] == ["release"]
-    assert threads and all(t.startswith("as-ben") for t in threads)
-    assert app.knowledge.store.get("ben", "release") is not None
-    assert app.knowledge.store.get(app.user, "release") is None
-    assert app.setup_records.imported("ben")[0]["source"] == str(src)
-    assert app.setup_records.imported(app.user) == []
 
 
 async def test_the_record_keeps_the_import_and_the_next_setup_names_it(world, tmp_path):

@@ -13,6 +13,7 @@ from ruamel.yaml import YAML
 
 from aegis import config
 from aegis.config import doc_from, validate, write
+from aegis.mcp_servers import HTTP_KEYS, STDIO_KEYS
 from aegis.net.config import KEYS as NET_KEYS
 from aegis.term_profiles import PROFILE_KEYS
 
@@ -20,28 +21,32 @@ JS = Path(__file__).parents[1] / "src" / "aegis" / "client" / "js" / "settings.j
 
 # Spelled another way in the file, edited by the control of the key it names.
 ALIASES = {"agents.*.provider": "agents.*.harness"}
-# Keys the form leaves out on purpose. multi_user changes what the host must
-# provide (a service user, capabilities) and applies at the next start, so a
-# click in the browser could leave a server that refuses to boot. It is set by
-# hand or by the setup page (#548).
-HOST_ONLY = {"multi_user.env_file"}
+# Keys the form leaves out on purpose. hosts holds what differs per server, and
+# the form edits the shared layer every server reads (#950).
+HOST_ONLY = {"hosts.*"}
 
 # A file that sets every key, none to its default.
 FULL = """\
 default_agent: opus
 exit_via: far
 agents:
-  opus: {exit: "off", harness: claude-code, model: opus, effort: high, permission: full, priming: Be brief., keep_harness_tools: [Agent]}
+  opus: {exit: "off", harness: claude-code, model: opus, effort: high, permission: full, priming: Be brief., keep_harness_tools: [Agent], mcp: [notes, phone], harness_tools: false, isolated: true, primer: false, notices: false, tools: {deny: [workflows], queues: [general], agents: [quick]}, quota: {claude: {weekly_all: {used: 80, projected: 90, stop: 97}}, on_closed: refuse, advice: File it.}, budget: [{usd: 2, per: session}, {tokens: 2000000, per: 24h}]}
   quick: {harness: claude-code, models: [haiku, sonnet], effort: low, permission: read}
 queues:
-  general: {agent: opus, max_parallel: 3, quiet: false}
+  general: {agent: opus, priority: 3, quiet: false, quota: {opencode-go: {weekly: pace}, on_closed: reject}, max_pending: 50}
+max_workers: 7
+model_ranking: false
 recap: {agent: quick}
 btw: {agent: opus}
+group_names: {agent: opus}
 context: {handoff_at: 200000, cold_after: 1800, cold_min: 50000}
 session_memory_max: 3G
 terminal_memory_max: 1G
 terminals:
   api: {cmd: uvicorn app:app, cwd: app, restart: on-failure, env: {PORT: "8000"}, access: {ops: read}}
+mcp:
+  notes: {url: "http://notes/mcp", headers: {Authorization: "Bearer ${NOTES_TOKEN}"}}
+  phone: {command: uv, args: [run, phone], env: {PHONE_STATE: /var/phone}}
 park: {claude-code: 1200, opencode: 600, codex: 900}
 network:
   enabled: false
@@ -61,6 +66,7 @@ usage:
 harness_versions: {person: warn, agent: "off", startup: "off", accepted: {opencode: ["2.0.33"]}}
 nudges: {silent_s: false, plan_min: 20}
 knowledge: {embeddings: minishlab/potion-multilingual-128M, know_how: false}
+quota: {projection: {half_life: {5h: 45m, week: 12h, month: 2d}}}
 notices:
   disk: {on: 80, critical: 95, clear: 70}
   memory: {on: 85, critical: 92, clear: 80, psi_full: 10}
@@ -68,9 +74,12 @@ notices:
   quota: false
   status: {lines: 3}
   monitors: {stall_min: 20, broken_checks: 5, overdue_min: 15, wake: false}
+  feeds: {wake: false}
   plan: {stale_min: 5}
   queues: false
   held: false
+  guard: false
+  budget: false
 """
 
 
@@ -86,6 +95,7 @@ def reader_keys() -> list[str]:
         "agents": [f"*.{k}" for k in config.AGENT_KEYS],
         "queues": [f"*.{k}" for k in config.QUEUE_KEYS],
         "terminals": [f"*.{k}" for k in PROFILE_KEYS],
+        "mcp": [f"*.{k}" for k in HTTP_KEYS + STDIO_KEYS],
         "park": ["*"],  # a harness's name
         "workflows": ["max_agents"],
         "usage": list(config.USAGE_DEFAULTS),
@@ -93,14 +103,23 @@ def reader_keys() -> list[str]:
         "context": list(config.CONTEXT_DEFAULTS),
         "nudges": list(config.NUDGES_DEFAULTS),
         "knowledge": list(config.KNOWLEDGE_DEFAULTS),
+        "quota": [f"projection.half_life.{n}" for n in config.QUOTA_SPANS],
         "network": list(NET_KEYS),
         "host": ["hide_mounts", "add_mounts"],
         "notices": notices,
         "recap": ["agent"],
         "btw": ["agent"],
-        "multi_user": ["env_file"],
+        "group_names": ["agent"],
+        "hosts": ["*"],  # a server's name
     }
-    scalars = {"default_agent", "exit_via", "session_memory_max", "terminal_memory_max"}
+    scalars = {
+        "default_agent",
+        "exit_via",
+        "session_memory_max",
+        "terminal_memory_max",
+        "max_workers",
+        "model_ranking",
+    }
     out = []
     for top in config.TOP_KEYS:
         if top in scalars:
@@ -117,7 +136,7 @@ def paths(node: object, prefix: str = "") -> set[str]:
         return {prefix}
     out = set()
     for k, v in node.items():
-        named = prefix in ("agents", "queues", "terminals", "park")
+        named = prefix in ("agents", "queues", "terminals", "park", "mcp")
         p = f"{prefix}.{'*' if named else k}" if prefix else str(k)
         leaf = p in (
             "workflows.max_agents",
@@ -125,7 +144,10 @@ def paths(node: object, prefix: str = "") -> set[str]:
             "usage.owners",
             "usage.owner_names",
             "usage.subscriptions",
-        ) or (p.startswith("terminals.*.") and p.count(".") == 2)
+            "agents.*.tools",
+            "agents.*.quota",
+            "queues.*.quota",
+        ) or (p.startswith(("terminals.*.", "mcp.*.")) and p.count(".") == 2)
         out |= {p} if leaf else paths(v, p)
     return out
 

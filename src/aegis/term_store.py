@@ -16,7 +16,8 @@ never holds more than twice that on disk. The newest RING_BYTES of events also
 live in memory, so a browser that resubscribes reads no file.
 
 A person's input is never stored: the program's echo already is, and with
-echo off nothing would be.
+echo off nothing would be. A store made with ``persist=False`` (a sign-in's,
+#946) keeps only the ring in memory and opens no file.
 """
 
 from __future__ import annotations
@@ -46,8 +47,10 @@ class CastStore:
         dir: Path,
         segment_bytes: int = SEGMENT_BYTES,
         ring_bytes: int = RING_BYTES,
+        persist: bool = True,
     ) -> None:
         self.dir = dir
+        self.persist = persist
         self.path = dir / "cast.jsonl"
         self.older = dir / "cast.1.jsonl"
         self._segment_bytes = segment_bytes
@@ -68,6 +71,8 @@ class CastStore:
         if self._loaded:
             return
         self._loaded = True
+        if not self.persist:
+            return
         events: list[Event] = []
         for path in (self.older, self.path):
             if path.exists():
@@ -80,8 +85,10 @@ class CastStore:
     def open(self, cols: int, rows: int, aegis: dict) -> None:
         """Start appending; a new or empty segment gets its header first."""
         self.load()
-        self.dir.mkdir(parents=True, exist_ok=True)
         self.cols, self.rows, self._aegis = cols, rows, aegis
+        if not self.persist:
+            return
+        self.dir.mkdir(parents=True, exist_ok=True)
         if self.path.exists() and self.path.stat().st_size:
             _cut_partial_line(self.path)
             with self.path.open("rb") as f:
@@ -160,6 +167,9 @@ class CastStore:
 
     def _event(self, code: str, data: str) -> int:
         self.rev += 1
+        if not self.persist:
+            self._remember((self.rev, code, data))
+            return self.rev
         line = json.dumps(
             [round(time.time() - self._t0, 6), code, data], ensure_ascii=False
         )

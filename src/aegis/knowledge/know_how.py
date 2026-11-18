@@ -16,8 +16,7 @@ nothing and a compaction, which can drop the menu, tells it again.
 
 A cloned repository's text reaches the agent with no approval, so each
 description is one flattened, cut line behind the doc's path and can never look
-like a message header. Files are read as the session's Linux user, off the
-event loop.
+like a message header. Files are read off the event loop.
 """
 
 from __future__ import annotations
@@ -27,7 +26,6 @@ import logging
 import os
 import re
 import subprocess
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -65,12 +63,12 @@ def describe(text: str) -> str:
     return line[:DESCRIPTION_CHARS]
 
 
-def read_docs(top: str, user: str | None) -> tuple[list[tuple[str, str]], int]:
+def read_docs(top: str) -> tuple[list[tuple[str, str]], int]:
     """(name, description) of the first docs in ``top``'s know-how folder, and
     how many it holds in all. A folder that cannot be read holds none."""
     folder = os.path.join(top, FOLDER)
     try:
-        r = launch.run(["ls", "-1", folder], user=user, text=True, timeout=5)
+        r = launch.run(["ls", "-1", folder], text=True, timeout=5)
     except (OSError, subprocess.TimeoutExpired):
         return [], 0
     if r.returncode != 0:
@@ -81,7 +79,6 @@ def read_docs(top: str, user: str | None) -> tuple[list[tuple[str, str]], int]:
         try:
             r = launch.run(
                 ["head", "-c", str(HEAD_BYTES), os.path.join(folder, name)],
-                user=user,
                 text=True,
                 errors="replace",
                 timeout=5,
@@ -140,8 +137,7 @@ class _Seen:
 
 
 class KnowHow:
-    def __init__(self, user_of: Callable[[str], str | None]) -> None:
-        self._user_of = user_of
+    def __init__(self) -> None:
         self._seen: dict[str, _Seen] = {}
 
     def _state(self, s: "Session") -> _Seen:
@@ -191,16 +187,15 @@ class KnowHow:
 
     async def _look(self, s: "Session", found: list[str]) -> None:
         st = self._state(s)
-        user = self._user_of(s.log_id)
         known = {*s.know_how_sent, *st.owed, *st.empty}
 
         def read() -> dict[str, tuple[str, list[tuple[str, str]], int]]:
             out: dict[str, tuple[str, list[tuple[str, str]], int]] = {}
             for p in found:
-                main, _, top = paths.place(p, user)
+                main, _, top = paths.place(p)
                 if main is None or top is None or main in known or main in out:
                     continue
-                docs, n = read_docs(top, user)
+                docs, n = read_docs(top)
                 out[main] = (top, docs, n)
             return out
 

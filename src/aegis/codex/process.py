@@ -144,9 +144,12 @@ class CodexProcess:
                 mcp[0] if mcp else None,
                 person_excludes(),
                 native=self._launch.knowledge_native,
+                servers=self._launch.extra_mcp,
             ),
             cwd=self._launch.cwd,
-            env=session_env(self._launch, child_env(os.environ, mcp)),
+            env=session_env(
+                self._launch, child_env(os.environ, mcp, self._launch.extra_mcp)
+            ),
             stdin=launch.PIPE,
             stdout=launch.PIPE,
             stderr=launch.PIPE,
@@ -154,7 +157,6 @@ class CodexProcess:
             new_session=True,
             cgroup=self._launch.cgroup,
             oom=True,
-            user=self._launch.user,
             via=self._launch.via,
         )
         self._keep(self._drain(self._proc.stderr))
@@ -261,9 +263,7 @@ class CodexProcess:
         self._fail_pending(ConnectionResetError("codex app-server was stopped"))
 
     async def _signal(self, proc: asyncio.subprocess.Process, sig: int) -> None:
-        await launch.signal_process_async(
-            proc.pid, sig, user=self._launch.user, group=True
-        )
+        await launch.signal_process_async(proc.pid, sig, group=True)
 
     def _fail_pending(self, err: Exception) -> None:
         pending, self._pending = self._pending, {}

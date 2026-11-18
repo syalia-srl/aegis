@@ -1,6 +1,9 @@
 // How long a plan has taken and how long it has left. The fold accrues time
 // only at a plan record or a turn boundary (transcript/plan_clock.py), so the
-// time running since `plan_clock.at` is added here, against the browser's clock.
+// time running since `plan_clock.at` is added here, against the server's clock
+// as the browser tells it (clock.js).
+
+import { serverNow } from "./clock.js";
 
 export function dur(s) {
   const m = Math.floor(s / 60);
@@ -9,7 +12,7 @@ export function dur(s) {
   return `${Math.floor(m / 60)}h${m % 60}m`;
 }
 
-export function planTimes(m, now = Date.now() / 1000) {
+export function planTimes(m, now = serverNow()) {
   const c = m.plan_clock;
   if (!c) return null;
   const plan = m.plan || [];

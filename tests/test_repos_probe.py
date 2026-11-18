@@ -167,3 +167,28 @@ def test_gh_missing_is_none(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", str(tmp_path))
     gh._cache.clear()
     assert gh.prs(str(tmp_path), "topic") is None
+
+
+def test_gh_pr_reads_one_pr_by_number(fake_gh, tmp_path):
+    out, calls = fake_gh
+    out.write_text(
+        json.dumps(
+            {
+                "number": 12,
+                "url": "https://github.com/o/r/pull/12",
+                "title": "t",
+                "state": "MERGED",
+                "statusCheckRollup": [],
+            }
+        )
+    )
+    want = {
+        "n": 12,
+        "url": "https://github.com/o/r/pull/12",
+        "title": "t",
+        "state": "merged",
+        "ci": "",
+    }
+    assert gh.pr(str(tmp_path), 12) == want
+    assert gh.pr(str(tmp_path), 12) == want
+    assert calls.read_text().count("x") == 1

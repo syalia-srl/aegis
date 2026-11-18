@@ -4,7 +4,9 @@ aegis is a web-native workplace for coding agents. `aegis serve` runs Claude Cod
 OpenCode and Codex sessions on one machine and serves them to browser tabs: a Fleet view, shared tabs,
 a transcript per session, and an archive. Agents in it get aegis's tools over MCP:
 monitors, queues of workers, handoffs, reading a peer, and an inbox that delivers
-what those produce. It is published on PyPI as `aegis-harness`, and it is the
+what those produce. It is one person's server: open-source aegis has no
+multi-user mode, and a program that wants several people builds that on the
+host policy (#957). It is published on PyPI as `aegis-harness`, and it is the
 workplace Alex and his agents use for multi-agent work in this workspace.
 
 Until 2.0 aegis was a terminal app. That tree lives under `legacy/` as reference:
@@ -23,7 +25,7 @@ A change is done when:
    test files you touched and their neighbours while you iterate, plus
    `make lint-docs` when a doc or help page changed. The whole suite is CI's
    job, not yours;
-2. CI is green on the PR. It runs the fast and multi-user suites with
+2. CI is green on the PR. It runs the fast suite with
    format, lint, typecheck, rift and the changelog check, and compares the
    bench of the PR's base and head in its job summary. Copy that table into
    the PR body: CI warns on a regression and never fails on one, so a reader

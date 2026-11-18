@@ -1,0 +1,61 @@
+# The nightly model ranking (#1031): rebuild models.json from Artificial
+# Analysis and publish it on the model-ranking branch, which every aegis
+# downloads once a day (src/aegis/ranking.py). The refresh re-scores every
+# model the packaged file maps and adds what this runner's catalogs list; it
+# writes nothing when it scores fewer than half of them, so a broken night
+# keeps the last good file. One request of the free API's daily allowance.
+name: model-ranking
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: model-ranking
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    # Install, one paginated fetch and a push: about two minutes.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - run: pip install uv
+      - run: uv sync --locked
+      - name: harnesses
+        run: |
+          npm install --prefix "$RUNNER_TEMP/npm" --no-fund --no-audit --silent \
+            @anthropic-ai/claude-code@latest @opencode/cli@latest
+          echo "$RUNNER_TEMP/npm/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: refresh
+        env:
+          AA_API_KEY: ${{ secrets.AA_API_KEY }}
+        run: |
+          uv run scripts/refresh-model-ranking \
+            --base src/aegis/data/models.json --out "$RUNNER_TEMP/models.json"
+      - name: publish
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git fetch --depth 1 origin model-ranking; then
+            git switch -C model-ranking FETCH_HEAD
+          else
+            git switch --orphan model-ranking
+            git rm -rfq . || true
+          fi
+          git clean -fdxq
+          cp "$RUNNER_TEMP/models.json" models.json
+          git add models.json
+          if git diff --cached --quiet; then
+            echo "unchanged"
+          else
+            git commit -qm "chore(ranking): nightly refresh $(date -u +%F)"
+            git push origin model-ranking
+          fi
+          echo "$(jq '[.models[] | select(.intelligence != null)] | length' models.json) models scored"

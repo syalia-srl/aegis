@@ -6,7 +6,6 @@ import json
 import httpx
 import pytest
 
-from aegis.ops import Caller, OpError, Principal
 
 from .conftest import until
 from .test_agents import CONFIG, World, mcp, turn
@@ -76,20 +75,6 @@ async def test_an_agent_cannot_change_another_agents_schedule(world):
     said = await turn(b, mcp("schedule_pause", name="a-owns"))
     assert "agents can change only the schedules they created" in said
     assert world.app.schedules.items["a-owns"].paused["by"] == "approval"
-
-
-async def test_a_member_cannot_change_another_members_schedule(world):
-    app = world.app
-    for name in ("ben", "cara"):
-        app.principals.add(name, "member")
-    ben = Caller("user", principal=Principal("ben", "member"))
-    cara = Caller("user", principal=Principal("cara", "member"))
-    await app.registry.call("schedule.create", {"name": "ben-owns", **NEW}, ben)
-    with pytest.raises(OpError) as e:
-        await app.registry.call("schedule.pause", {"name": "ben-owns"}, cara)
-    assert e.value.code == "not_owner"
-    await app.registry.call("schedule.pause", {"name": "ben-owns"}, Caller("user"))
-    assert app.schedules.items["ben-owns"].paused["by"] == "user"
 
 
 async def test_an_agent_with_write_cannot_make_a_schedule_that_starts_full(world):
