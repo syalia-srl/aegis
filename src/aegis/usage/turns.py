@@ -71,6 +71,11 @@ class SessionInfo:
     kind: str = "foreground"  # foreground, worker, workflow, schedule or outside
     harness: str = "claude-code"
     continues: str | None = None
+    # The agent preset, the queue for a worker, and the nearest starter's log
+    # id (guards.LINKS): what a budget charges by lineage (budgets.py).
+    agent: str | None = None
+    queue: str | None = None
+    starter: str | None = None
     account: Callable[[str], str | None] = lambda harness: None
     replay_start: int = START  # successors' median start context here
 
@@ -98,6 +103,9 @@ class TurnRow:
     ctx_start: int
     ctx_peak: int
     continues: str | None
+    agent: str | None = None
+    queue: str | None = None
+    starter: str | None = None
 
 
 @dataclass
@@ -684,6 +692,9 @@ class UsageDeriver:
             ctx_start=ctx[0] if ctx else 0,
             ctx_peak=max(ctx) if ctx else 0,
             continues=self.info.continues if first else None,
+            agent=self.info.agent,
+            queue=self.info.queue,
+            starter=self.info.starter,
         )
         out = Derived(turns=[turn])
         out.bands, out.whatifs = self._context(i, msgs, prices, cost)

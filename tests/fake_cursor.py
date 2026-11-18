@@ -8,6 +8,9 @@ answers (spec ``2026-10-19-aegis-2-cursor-harness-design.md``, fixture
     sleep N        a Bash call left running for N seconds, then text. An
                    interrupt kills the fake mid-call, so the call never
                    completes.
+    linger         message chunks forever, one every 0.05 s. With
+                   FAKE_CURSOR_HANG the process also ignores a closed
+                   stdin, which is what cursor-agent does during a turn.
     stream N       N single-word chunks, one every 0.15 s, then text.
     bash D => OUT  a Bash call of D whose output is OUT.
     edit P         an edit call of P completed with a diff.
@@ -37,7 +40,7 @@ an unknown id, or ``FAKE_CURSOR_FAIL_LOAD=1``, answers an error, so the
 driver falls back to a new session.
 
 ``FAKE_CURSOR_LOG=<file>`` gets ``START <pid>`` and one line per request
-method. ``FAKE_CURSOR_HANG=1`` ignores a closed stdin, so only a signal ends
+method, and ``mcp <names>`` for each session/new and session/load. ``FAKE_CURSOR_HANG=1`` ignores a closed stdin, so only a signal ends
 it. ``AEGIS_FAKE_HARNESS_VERSION`` overrides ``--version``, shared with the
 other fakes.
 """
@@ -382,6 +385,16 @@ def turn(rid: int, p: dict) -> None:
             rawOutput={"exitCode": 0, "stdout": "", "stderr": ""},
         )
         say(sid, "slept")
+    elif word == "linger":
+        n = 0
+        while True:
+            n += 1
+            update(
+                sid,
+                sessionUpdate="agent_message_chunk",
+                content={"type": "text", "text": f"linger-{n} "},
+            )
+            time.sleep(0.05)
     elif word == "bash":
         cmd, _, out = args.partition(" => ")
         tool(
@@ -454,6 +467,9 @@ def turn(rid: int, p: dict) -> None:
 def handle(msg: dict):
     method, p = msg.get("method"), msg.get("params") or {}
     log(str(method))
+    if method in ("session/new", "session/load"):
+        # The names only: the log is a file, and a value must not reach one.
+        log("mcp " + " ".join(m.get("name", "") for m in p.get("mcpServers") or []))
     if method == "initialize":
         return {"protocolVersion": 1, "agentCapabilities": {}, "authMethods": []}
     if method == "session/new":

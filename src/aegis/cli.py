@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import errno
 import socket
+import sys
 import threading
 import time
 from pathlib import Path
@@ -182,7 +183,7 @@ def _detach(
         log.write(f"== {time.strftime('%Y-%m-%dT%H:%M:%S%z')} aegis serve --detach\n")
         log.flush()
         child = launch.detach(
-            cmd, cwd=roots.config_root, stdout=log, stderr=subprocess.STDOUT, user=None
+            cmd, cwd=roots.config_root, stdout=log, stderr=subprocess.STDOUT
         )
     pid_path.write_text(f"{child.pid}\n")
     deadline = time.monotonic() + DETACH_BOOT_S
@@ -284,7 +285,7 @@ def serve(
     )
 
     from .app import App
-    from .server import StartError, allowed_hosts, prepare
+    from .server import StartError, allowed_hosts, listening, prepare
     from .web import build_web, load_or_create_token, ws_protocol
 
     try:
@@ -340,7 +341,6 @@ def serve(
         cursor_bin=cursor,
         base_url=f"http://{local}:{port}",
         server_name=name or _socket.gethostname(),
-        multi_user=prepared.multi_user,
     )
     web = build_web(app, token, allowed, origin)
     typer.echo(f"aegis serving {roots.config_root}")
@@ -349,7 +349,19 @@ def serve(
         typer.echo(f"open {o}/?token={token}")
     if window:
         _open_when_listening(local, port, url, browser)
-    uvicorn.run(web, host=host, port=port, log_level="warning", ws=ws_protocol())
+    from . import launch, self_update
+
+    server = uvicorn.Server(
+        uvicorn.Config(web, host=host, port=port, log_level="warning", ws=ws_protocol())
+    )
+    self_update.on_stop(lambda: setattr(server, "should_exit", True))
+    # Listening before the lifespan boots, so the harnesses boot resumes reach
+    # /mcp (server.listening, #1024); uvicorn would bind after it.
+    server.run(sockets=[listening(host, port)])
+    if (argv := self_update.pending()) is not None:
+        typer.echo("aegis restarting on the updated build")
+        sys.stdout.flush()
+        launch.replace(argv)
 
 
 def _bins(claude: str, opencode: str, codex: str, cursor: str) -> dict[str, str]:
@@ -358,6 +370,7 @@ def _bins(claude: str, opencode: str, codex: str, cursor: str) -> dict[str, str]
         "opencode": opencode,
         "codex": codex,
         "cursor": cursor,
+        "pi": "pi",
     }
 
 
@@ -395,6 +408,27 @@ def doctor(
     )
     findings += service_check()
     raise typer.Exit(1 if _report(findings) else 0)
+
+
+@app.command()
+def gc(
+    root: Path | None = typer.Option(
+        None, help="Config root; default: the nearest ancestor holding .aegis.yaml."
+    ),
+    days: int = typer.Option(
+        7, min=1, help="Reclaim sessions archived longer ago than this."
+    ),
+    apply: bool = typer.Option(
+        False, "--apply", help="Delete and pack; without it, only list."
+    ),
+) -> None:
+    """Pack old sessions' transcripts and delete their files, uploads and browsers."""
+    from .gc import run
+    from .roots import make_roots
+
+    roots = make_roots(start=Path.cwd(), root=root)
+    for line in run(roots.state_root, days=days, apply=apply).lines():
+        typer.echo(line)
 
 
 @app.command("import-legacy")
@@ -453,7 +487,7 @@ def _count(text: str, default: int, least: int = 1) -> int:
 def _ask(doc, found):
     """``doc`` as the person answers for it, each value offered as the default."""
     from .agents import EFFORTS, PERMISSION_ORDER
-    from .config import ConfigDoc, QueueDoc
+    from .config import DEFAULT_MAX_WORKERS, ConfigDoc, QueueDoc
 
     agents = []
     for a in doc.agents:
@@ -487,17 +521,22 @@ def _ask(doc, found):
     if typer.confirm(
         f"Add a queue 'general' of workers running {default}?", default=True
     ):
-        n = _count("  workers at a time", 3)
-        queues.append(QueueDoc(name="general", agent=default, max_parallel=n))
+        queues.append(QueueDoc(name="general", agent=default))
     for q in doc.queues:
         if q.name == "general" or q.agent not in names or q.agent == default:
             continue
         if typer.confirm(
             f"Add a queue {q.name!r} of workers running {q.agent}?", default=True
         ):
-            n = _count("  workers at a time", q.max_parallel or 3)
-            queues.append(QueueDoc(name=q.name, agent=q.agent, max_parallel=n))
-    return ConfigDoc(agents=agents, default_agent=default, queues=queues)
+            queues.append(QueueDoc(name=q.name, agent=q.agent, priority=q.priority))
+    workers = (
+        _count("Queue workers at a time, every queue together", DEFAULT_MAX_WORKERS)
+        if queues
+        else None
+    )
+    return ConfigDoc(
+        agents=agents, default_agent=default, queues=queues, max_workers=workers
+    )
 
 
 @app.command()
@@ -587,8 +626,8 @@ def _open_running(state_root: Path, host: str, port: int, browser: str | None) -
 
 link_app = typer.Typer(
     add_completion=False,
-    help="Link other aegis servers: this one becomes their client, and they "
-    "can never reach it, unless the link is trusted (--trusted).",
+    help="Link other aegis servers: one link joins two servers both ways, and "
+    "agents on each act on the other as at home.",
 )
 app.add_typer(link_app, name="link")
 
@@ -612,17 +651,10 @@ def link_add(
     server: str | None = typer.Option(
         None, "--as", help="This server's name, if serve runs with --name."
     ),
-    trusted: bool = typer.Option(
-        False,
-        "--trusted",
-        help="Both ways, agents unrestricted: only for a server you alone use.",
-    ),
 ) -> None:
-    """Link the server at URL. Reads its token from stdin, so it stays out of
-    the shell history: `ssh far cat .aegis/state/token | aegis link add far URL`.
-    With --trusted, the far server also reaches this one over the link, and
-    agents on both act across it as at home; it grants that only to its admin
-    token while nobody else holds one."""
+    """Link the server at URL, both ways. Reads its token from stdin, so it
+    stays out of the shell history:
+    `ssh far cat .aegis/state/token | aegis link add far URL`."""
     import getpass
     import sys
 
@@ -636,7 +668,7 @@ def link_add(
     store = _link_store(root)
     own = server or socket.gethostname()
     try:
-        welcome = asyncio.run(probe(url, token, own, getpass.getuser(), trusted))
+        welcome = asyncio.run(probe(url, token, own, getpass.getuser()))
     except LinkError as e:
         typer.echo(f"not linked: {e.message}", err=True)
         raise typer.Exit(1) from e
@@ -660,36 +692,12 @@ def link_add(
             "token": token,
             "added": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
-        | ({"trusted": True} if trusted else {})
     )
     store.save(entries)
-    how = "trusted, both ways" if trusted else "one way"
     typer.echo(
-        f"linked {name} at {url}, {how}; a running server picks it up within a second"
+        f"linked {name} at {url}, both ways; a running server picks it up "
+        "within a second"
     )
-
-
-@link_app.command("trust")
-def link_trust(
-    name: str = typer.Argument(...),
-    off: bool = typer.Option(False, "--off", help="Stop asking for trust."),
-    root: Path | None = _ROOT_OPTION,
-) -> None:
-    """Ask an existing link for trust (both ways, agents unrestricted), or stop
-    with --off. The link reconnects; the far server decides, and Settings
-    shows whether it granted it."""
-    store = _link_store(root)
-    entries = store.load()
-    if not any(e["name"] == name for e in entries):
-        typer.echo(f"no link named {name}", err=True)
-        raise typer.Exit(1)
-    for e in entries:
-        if e["name"] == name:
-            e.pop("trusted", None)
-            if not off:
-                e["trusted"] = True
-    store.save(entries)
-    typer.echo(f"{name}: {'one way' if off else 'trust asked'}")
 
 
 @link_app.command("remove")
@@ -711,8 +719,7 @@ def link_list(root: Path | None = _ROOT_OPTION) -> None:
     """The links this server holds: names and URLs, never tokens."""
     entries = _link_store(root).load()
     for e in entries:
-        trust = "  trusted" if e.get("trusted") is True else ""
-        typer.echo(f"{e['name']:<16} {e['url']}{trust}")
+        typer.echo(f"{e['name']:<16} {e['url']}")
     typer.echo(f"{len(entries)} links")
 
 
@@ -753,11 +760,6 @@ def service_install(
     yes: bool = typer.Option(
         False, "--yes", "-y", help="Take every default without asking."
     ),
-    multi_user: bool = typer.Option(
-        False,
-        "--multi-user",
-        help="Give the server the capabilities multi_user in .aegis.yaml needs.",
-    ),
 ) -> None:
     """Write a systemd unit for `aegis serve` and print the commands that
     install it. Never runs sudo."""
@@ -780,14 +782,7 @@ def service_install(
         path=os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
         memory_high=_ask_or(memory_high, "MemoryHigh", high, yes),
         memory_max=_ask_or(memory_max, "MemoryMax", top, yes),
-        multi_user=multi_user,
     )
-    if multi_user and unit.user == "root":
-        typer.echo(
-            "multi-user mode runs the server as an unprivileged user, never root",
-            err=True,
-        )
-        raise typer.Exit(1)
     for key, v in (("MemoryHigh", unit.memory_high), ("MemoryMax", unit.memory_max)):
         if parse_size(v, total) is None:
             typer.echo(f"{key}={v} is not a size systemd reads, such as 5.5G", err=True)
@@ -806,8 +801,7 @@ def service_install(
 
 token_app = typer.Typer(
     add_completion=False,
-    help="The tokens that may use this server: one per person, linked server "
-    "or job. A running server applies a change at its next request.",
+    help="The server's token. A running server applies a change at its next request.",
 )
 app.add_typer(token_app, name="token")
 
@@ -815,60 +809,11 @@ app.add_typer(token_app, name="token")
 def _token_store(root: Path | None):
     import getpass
 
-    from .config import Config
     from .roots import make_roots
     from .tokens import TokenStore
 
     roots = make_roots(start=Path.cwd(), root=root)
-    return TokenStore(
-        roots.state_root,
-        getpass.getuser(),
-        multi_user=Config(roots.config_root).current().multi_user is not None,
-    )
-
-
-@token_app.command("add")
-def token_add(
-    name: str = typer.Argument(..., help="Who it is: lowercase, e.g. ben or laptop."),
-    role: str = typer.Option("member", help="member or admin."),
-    linux_user: str | None = typer.Option(
-        None,
-        "--linux-user",
-        help="The Linux user it runs as, in multi-user mode; default: NAME.",
-    ),
-    no_linux_user: bool = typer.Option(
-        False,
-        "--no-linux-user",
-        help="An admin that runs as the server's own user, in multi-user mode.",
-    ),
-    root: Path | None = _ROOT_OPTION,
-) -> None:
-    """Mint a token and print it, alone on stdout: the only time it is shown."""
-    from .ops import OpError
-
-    try:
-        token = _token_store(root).add(name, role, linux_user, no_linux_user)
-    except OpError as e:
-        typer.echo(e.message, err=True)
-        raise typer.Exit(1) from e
-    typer.echo(token)
-
-
-@token_app.command("list")
-def token_list(root: Path | None = _ROOT_OPTION) -> None:
-    """Names, roles and quota policies, never tokens."""
-    from .quota_gate import describe
-
-    store = _token_store(root)
-    rows = store.rows()
-    for r in rows:
-        own = "" if r["policy"] is not None or r["role"] == "admin" else " (default)"
-        user = f"{r['linux_user'] or '-':<16} " if store.multi_user else ""
-        typer.echo(
-            f"{r['name']:<16} {r['role']:<7} {user}{describe(store.policy_of(r['name']))}{own}"
-            f"{'  (this server)' if r['owner'] else ''}"
-        )
-    typer.echo(f"{len(rows)} tokens")
+    return TokenStore(roots.state_root, getpass.getuser())
 
 
 @token_app.command("revoke")
@@ -876,7 +821,7 @@ def token_revoke(
     name: str = typer.Argument(..., help="Whose token to end."),
     root: Path | None = _ROOT_OPTION,
 ) -> None:
-    """End a token. Revoking the admin's prints its replacement."""
+    """Replace the server's token and print the new one."""
     from .ops import OpError
 
     try:
@@ -884,7 +829,7 @@ def token_revoke(
     except OpError as e:
         typer.echo(e.message, err=True)
         raise typer.Exit(1) from e
-    typer.echo(new if new else f"revoked {name}")
+    typer.echo(new)
 
 
 @app.command("call")

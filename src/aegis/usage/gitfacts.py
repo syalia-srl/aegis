@@ -44,7 +44,7 @@ class GitFacts:
 
 
 def _sh(repo_path: Path, *args: str) -> str:
-    proc = launch.run(["git", "-C", str(repo_path), *args], text=True, user=None)
+    proc = launch.run(["git", "-C", str(repo_path), *args], text=True)
     if proc.returncode != 0:
         raise RuntimeError(f"git {' '.join(args)} failed: {proc.stderr.strip()[:400]}")
     return proc.stdout

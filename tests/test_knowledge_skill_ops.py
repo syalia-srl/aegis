@@ -5,10 +5,10 @@ import base64
 import json
 
 from .knowledge_samples import skill
-from .test_acts_for import BEN, recorded  # noqa: F401
+from .one_person import BEN, recorded  # noqa: F401
 from .test_agents import mcp, turn
 from .test_agents import world as agents_world  # noqa: F401
-from .test_member_view import homes, spawn, world  # noqa: F401
+from .one_person import homes, spawn, world  # noqa: F401
 
 
 def ok(said: str):
@@ -81,20 +81,6 @@ async def test_an_agent_saves_a_skill_with_files(agents_world):
         s, mcp("skill_save", name="x", description="d", body="b", files={"a": "!!"})
     )
     assert said.startswith("mcp error: bad_params"), said
-
-
-async def test_a_member_cannot_read_anothers_skill(world):
-    app = world.app
-    await app.knowledge.store.save(
-        app.user, skill("admin-release", "Cut a release"), "t"
-    )
-    ben = app.sessions.sessions[await spawn(world, BEN)]
-    said = await turn(ben, mcp("skill_read", name="admin-release"))
-    assert said.startswith("mcp error: not_found"), said
-    assert ok(await turn(ben, mcp("skill_search", query="cut a release"))) == {
-        "hits": []
-    }
-    assert ben.skills == []
 
 
 async def test_read_permission_sessions_read_skills_but_not_save(agents_world):

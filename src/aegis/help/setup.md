@@ -191,8 +191,7 @@ Apply the ticked rows, each through its own door:
 Call `setup_record` once, at the end: `applied` and `declined` as keys,
 each declined key with the evidence count you showed, and
 `sources_until=<ISO time>`, the newest transcript time you read. Add
-`knowledge="native"` when the person ticked `knowledge:native`. The record is the person's own, so a
-member's run never sees another's.
+`knowledge="native"` when the person ticked `knowledge:native`.
 
 ## Check
 

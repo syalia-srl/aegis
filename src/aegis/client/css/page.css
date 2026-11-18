@@ -1,0 +1,7 @@
+/* The page around a standalone client: the box model, the sheet and the
+   artifact probes. A host page keeps its own, so only index.html loads this;
+   client.css carries everything the mount itself draws. */
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:#000}
+#probes{position:fixed;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none}

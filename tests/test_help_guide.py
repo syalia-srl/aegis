@@ -1,5 +1,5 @@
 """help.state, help.dismiss and help.guide on the real app, the fake claude
-behind it, called as the admin and as a member."""
+behind it."""
 
 import pytest
 
@@ -9,7 +9,7 @@ from aegis.help_ops import tutorial_prompt
 from aegis.helppages import load
 from aegis.helpstate import installed
 from aegis.names import TITLE_MAX
-from aegis.ops import USER, Caller, OpError, Principal
+from aegis.ops import USER, OpError
 from aegis.roots import make_roots
 from aegis.transcript.store import read_store
 
@@ -20,7 +20,6 @@ CONFIG = (
     "  opus: {harness: claude-code, model: opus, effort: high, permission: full}\n"
     "  quick: {harness: claude-code, model: sonnet, effort: low, permission: full}\n"
 )
-BEN = Caller("user", principal=Principal("ben", "member"))
 PAGES = {p.id: p for p in load()}
 
 
@@ -29,9 +28,6 @@ async def app(tmp_path, fake_claude):
     (tmp_path / ".aegis.yaml").write_text(CONFIG)
     a = App(make_roots(tmp_path, None), claude_bin=fake_claude, interrupt_timeout=0.5)
     await a.boot()
-    a.principals.add("ben", "member")
-    # A member with no policy starts nothing (quota_gate.py): open the pool.
-    a.principals.set_default_policy({"claude": {"mode": "open"}})
     yield a
     await a.shutdown()
 
@@ -142,18 +138,6 @@ async def test_a_mistyped_page_starts_nothing_and_any_real_page_can_be_toured(ap
     assert s.title == f"Tour: {PAGES['monitors'].title}"
 
 
-async def test_a_dismiss_is_recorded_for_that_person_only(app):
-    assert await call(app, "help.dismiss", {"what": "tutorial"}) == "noted"
-    assert (await call(app, "help.state"))["tutorial"] is True
-    await call(app, "session.spawn", {"agent": "opus"}, BEN)
-    assert await offers(app, BEN) == {
-        "tutorial": False,
-        "whats_new": installed(),
-    }
-    await call(app, "help.dismiss", {"what": "whats_new"}, BEN)
-    assert (await call(app, "help.state", caller=BEN))["whats_new"] is None
-
-
 async def test_slash_tutorial_runs_on_default_agent_in_the_sessions_directory(
     app, tmp_path
 ):
@@ -244,16 +228,6 @@ async def test_every_page_s_hints_reach_the_new_tab(app):
     assert {"text", "ref"} == set(hints[0])
 
 
-async def test_the_doctor_row_is_an_admin_s_and_only_with_a_problem(app):
-    doctor_finds(app)
-    assert (await call(app, "help.state"))["doctor"] is None
-    doctor_finds(app, WARN, ERR)
-    row = (await call(app, "help.state"))["doctor"]
-    assert (row["errors"], row["warns"]) == (1, 1)
-    assert [f["level"] for f in row["findings"]] == ["error", "warn"]
-    assert (await call(app, "help.state", caller=BEN))["doctor"] is None
-
-
 async def test_doctor_is_listed_only_for_an_admin_with_a_problem(app):
     s = await call(app, "session.spawn", {"agent": "opus"})
 
@@ -277,13 +251,6 @@ async def test_doctor_refuses_when_a_fresh_run_finds_nothing(app):
     with pytest.raises(OpError) as e:
         await call(app, "help.guide", {"kind": "doctor"})
     assert e.value.code == "nothing_to_fix"
-
-
-async def test_doctor_is_not_for_a_member(app):
-    doctor_finds(app, ERR)
-    with pytest.raises(OpError) as e:
-        await call(app, "help.guide", {"kind": "doctor"}, caller=BEN)
-    assert e.value.code == "not_for_members"
 
 
 async def test_doctor_starts_a_session_with_the_report(app):

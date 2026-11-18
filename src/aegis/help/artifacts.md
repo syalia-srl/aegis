@@ -151,7 +151,7 @@ opens the browser's own menu inside the page.
 
 ## Send a file instead
 
-When the person only needs to look at something, such as a screenshot, a
+To send the person something they only need to look at, such as a screenshot, a
 rendered PDF or a draft, `file_send` is enough. Pass `paths` (1 to 20
 absolute paths, shown as one card that pages through them with ‹ › or a
 sideways swipe on a touch screen, going round from the last to the first) and an optional

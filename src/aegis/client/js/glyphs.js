@@ -3,7 +3,7 @@
 // badges come first; Python decides a session's attention, this only maps it
 // to a symbol and a word. A new symbol needs a row on help/icons.md, and
 // nothing outside this file draws SVG of its own (tests/test_glyphs.py). Drawn in currentColor; the knocked-out glyph inside a badge
-// uses --knock, which base.css sets to the theme's background.
+// uses --knock, which client.css sets to the theme's background.
 
 import { MARK } from "./mark.js";
 
@@ -33,7 +33,6 @@ const SPRITE = `<defs>
 <symbol id="g-sparkle" viewBox="0 0 16 16" fill="currentColor"><path d="M7 1.8l1.2 3.4 3.4 1.2-3.4 1.2L7 11 5.8 7.6 2.4 6.4l3.4-1.2z"/><path d="M12.2 9.6l.6 1.6 1.6.6-1.6.6-.6 1.6-.6-1.6-1.6-.6 1.6-.6z"/></symbol>
 <symbol id="g-btw" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5.9 5.9a2.1 2.1 0 1 1 2.9 1.95c-.55.22-.8.6-.8 1.15v.5"/><circle cx="8" cy="11.9" r=".75" fill="currentColor" stroke="none"/></symbol>
 <symbol id="g-send" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 3v4.6a2 2 0 0 1-2 2H3.8M6.6 6.8L3.8 9.6l2.8 2.8"/></symbol>
-<symbol id="g-stop" viewBox="0 0 16 16"><rect x="3.5" y="3.5" width="9" height="9" rx="1.8" fill="currentColor"/></symbol>
 <symbol id="g-prompt" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 3.5L10 8l-4.5 4.5"/></symbol>
 <symbol id="g-think" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.5v11M3.24 5.25l9.52 5.5M3.24 10.75l9.52-5.5"/></symbol>
 <symbol id="g-caret-r" viewBox="0 0 16 16" fill="currentColor" stroke="currentColor" stroke-width="1" stroke-linejoin="round"><path d="M6 4.5l4.5 3.5L6 11.5z"/></symbol>
@@ -102,6 +101,7 @@ const SPRITE = `<defs>
 <symbol id="g-h-opencode" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 2.5H5A1.5 1.5 0 0 0 3.5 4v2.5L2 8l1.5 1.5V12A1.5 1.5 0 0 0 5 13.5h.5M10.5 2.5h.5A1.5 1.5 0 0 1 12.5 4v2.5L14 8l-1.5 1.5V12a1.5 1.5 0 0 1-1.5 1.5h-.5"/></symbol>
 <symbol id="g-h-codex" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.8l5.4 3.1v6.2L8 14.2l-5.4-3.1V4.9z"/><circle cx="8" cy="8" r="2"/></symbol>
 <symbol id="g-h-cursor" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M3.5 2.5l9 5.2-4 1-1.8 3.8z"/></symbol>
+<symbol id="g-h-pi" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2.5 4.5h11M6 4.5v8M10.5 4.5v6.5c0 1 .5 1.5 1.5 1.5"/></symbol>
 <symbol id="g-e-low" viewBox="0 0 16 16" fill="currentColor"><rect x="1.6" y="10.5" width="1.6" height="3" rx=".5"/><rect x="4.4" y="8.5" width="1.6" height="5" rx=".5" opacity=".3"/><rect x="7.2" y="6.5" width="1.6" height="7" rx=".5" opacity=".3"/><rect x="10.0" y="4.5" width="1.6" height="9" rx=".5" opacity=".3"/><rect x="12.8" y="2.5" width="1.6" height="11" rx=".5" opacity=".3"/></symbol>
 <symbol id="g-e-medium" viewBox="0 0 16 16" fill="currentColor"><rect x="1.6" y="10.5" width="1.6" height="3" rx=".5"/><rect x="4.4" y="8.5" width="1.6" height="5" rx=".5"/><rect x="7.2" y="6.5" width="1.6" height="7" rx=".5" opacity=".3"/><rect x="10.0" y="4.5" width="1.6" height="9" rx=".5" opacity=".3"/><rect x="12.8" y="2.5" width="1.6" height="11" rx=".5" opacity=".3"/></symbol>
 <symbol id="g-e-high" viewBox="0 0 16 16" fill="currentColor"><rect x="1.6" y="10.5" width="1.6" height="3" rx=".5"/><rect x="4.4" y="8.5" width="1.6" height="5" rx=".5"/><rect x="7.2" y="6.5" width="1.6" height="7" rx=".5"/><rect x="10.0" y="4.5" width="1.6" height="9" rx=".5" opacity=".3"/><rect x="12.8" y="2.5" width="1.6" height="11" rx=".5" opacity=".3"/></symbol>
@@ -128,8 +128,13 @@ export const LABEL = {
   done: "done",
 };
 
-export function installGlyphs() {
-  if (document.getElementById("glyphs")) return;
+// The sprite goes inside the mount that draws it, so a mount's icons are
+// removed with it. Idempotent per root: a second call for the same root is a
+// no-op, while another mount on the page gets its own sprite (the ids repeat
+// between them, as every other id does; a <use> finds the first one, and they
+// are the same symbols).
+export function installGlyphs(root = document.body) {
+  if (root.querySelector(":scope > #glyphs")) return;
   const svg = document.createElementNS(NS, "svg");
   svg.id = "glyphs";
   svg.setAttribute("width", "0");
@@ -137,7 +142,7 @@ export function installGlyphs() {
   svg.setAttribute("aria-hidden", "true");
   svg.style.position = "absolute";
   svg.innerHTML = SPRITE;
-  document.body.prepend(svg);
+  root.prepend(svg);
 }
 
 export function glyph(attention) {
@@ -188,7 +193,7 @@ export function entryIcon(name) {
 // The Gorgoneion (mark.js) in the theme: the head and serpents in
 // currentColor, the eye knocked out in the background. The favicon keeps
 // its fixed amber; a page copy follows the theme, and moves (#348): the eye,
-// drawn 1.2 times the favicon's, looks left, right and blinks (base.css),
+// drawn 1.2 times the favicon's, looks left, right and blinks (client.css),
 // and each serpent bends so its tip crosses from one side of its body to
 // the other, the six out of phase so the wave travels round the head.
 const BEAT = 4.5; // seconds per serpent bend
@@ -244,7 +249,7 @@ export function gorgoneion() {
     p.setAttribute("class", "serpent");
     p.setAttribute("fill", "currentColor");
     p.setAttribute("d", d);
-    // SMIL ignores CSS, so reduced motion is honoured here and not in base.css.
+    // SMIL ignores CSS, so reduced motion is honoured here and not in client.css.
     if (!STILL.matches) {
       const anim = document.createElementNS(NS, "animate");
       anim.setAttribute("attributeName", "d");

@@ -8,7 +8,7 @@ from aegis.agent_ops import LISTED
 from aegis.ops import OpError
 
 from .conftest import until
-from .test_agents import CONFIG, World, mcp, turn
+from .test_agents import CONFIG, ONE_WORKER, World, mcp, turn
 
 
 @pytest.fixture
@@ -160,6 +160,7 @@ async def test_a_parent_waits_on_a_child_that_waits(world, published):
 
 
 async def test_a_cancelled_queue_task_leaves_the_published_card(world, published):
+    (world.root / ".aegis.yaml").write_text(ONE_WORKER)
     a = await world.spawn()
     said = await turn(
         a, mcp("queue_enqueue", queue="solo", payload="/busy 30", callback=False)

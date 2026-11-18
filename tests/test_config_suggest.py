@@ -14,10 +14,10 @@ from aegis.ops import OpError
 from .conftest import until
 from .test_agents import CONFIG, inbox, mcp, turn, world  # noqa: F401  (fixture)
 
-QUEUE = "  tests: {agent: opus, max_parallel: 2}\n"
-# The agents fixture's CONFIG holds a queue with no max_parallel on purpose;
+QUEUE = "  tests: {agent: opus, priority: 2}\n"
+# The agents fixture's CONFIG holds a queue with no agent on purpose;
 # a suggestion must validate, so these tests start from a file that does.
-BASE = CONFIG.replace("  broken: {agent: opus}\n", "")
+BASE = CONFIG.replace("  broken: {priority: 1}\n", "")
 
 
 @pytest.fixture(autouse=True)
@@ -94,9 +94,7 @@ async def test_a_file_changed_since_makes_the_card_stale(world):
 async def test_two_suggestions_from_one_stamp_the_second_goes_stale(world):
     a = await world.spawn()
     first = (await suggest(a, BASE + QUEUE))["id"]
-    second = (await suggest(a, BASE + "  other: {agent: opus, max_parallel: 1}\n"))[
-        "id"
-    ]
+    second = (await suggest(a, BASE + "  other: {agent: opus}\n"))["id"]
     await apply(world, a, first)
     with pytest.raises(OpError) as e:
         await apply(world, a, second)

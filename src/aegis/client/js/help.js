@@ -8,6 +8,7 @@
 import { markdown } from "./entries.js";
 import { icon } from "./glyphs.js";
 import { paint } from "./highlight.js";
+import { rootOf } from "./root.js";
 
 // The list's groups, in the spec's order; help.pages sorts concepts first.
 const GROUPS = [
@@ -317,7 +318,7 @@ export class Help {
       // itself before the name, in the theme.
       for (const c of doc.querySelectorAll("code")) {
         const name = /^g-([a-z0-9-]+)$/.exec(c.textContent)?.[1];
-        if (name && document.getElementById(`g-${name}`)) c.before(glyphSample(name));
+        if (name && rootOf(this.box)?.querySelector(`#g-${CSS.escape(name)}`)) c.before(glyphSample(name));
       }
       this.title.textContent = meta.title;
       this.when.textContent = `${page} · ${meta.when}`;

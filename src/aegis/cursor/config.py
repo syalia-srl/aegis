@@ -28,9 +28,13 @@ Measured on cursor-agent 2026.10.14 (spec
 from __future__ import annotations
 
 import re
-from typing import Any
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any
 
 from ..claude.control import Catalog, Model, _doc
+
+if TYPE_CHECKING:
+    from ..policy import McpServer
 
 SERVER = "aegis"
 PERMISSIONS = ("read", "write", "auto", "full")
@@ -60,20 +64,38 @@ def argv(bin: str) -> list[str]:
     return [bin, "acp", "--trust"]
 
 
-def mcp_servers(mcp: tuple[str, str] | None) -> list[dict]:
+def mcp_servers(
+    mcp: tuple[str, str] | None, servers: Sequence[McpServer] = ()
+) -> list[dict]:
     """What ``session/new`` and ``session/load`` get as ``mcpServers``: the
-    aegis endpoint, with this session's token as a header, or nothing."""
-    if mcp is None:
-        return []
-    url, token = mcp
-    return [
-        {
-            "name": SERVER,
-            "type": "http",
-            "url": url,
-            "headers": [{"name": "X-Aegis-Session", "value": token}],
-        }
-    ]
+    aegis endpoint, with this session's token as a header, and ``servers``
+    (#960). They travel in JSON-RPC on the child's stdin, values and all."""
+    out: list[dict] = []
+    if mcp is not None:
+        url, token = mcp
+        out.append(
+            {
+                "name": SERVER,
+                "type": "http",
+                "url": url,
+                "headers": [{"name": "X-Aegis-Session", "value": token}],
+            }
+        )
+    for s in servers:
+        if s.transport == "http":
+            pairs = [{"name": k, "value": v} for k, v in s.headers.items()]
+            out.append({"name": s.name, "type": "http", "url": s.url, "headers": pairs})
+        else:
+            pairs = [{"name": k, "value": v} for k, v in s.env.items()]
+            out.append(
+                {
+                    "name": s.name,
+                    "command": s.command,
+                    "args": list(s.args),
+                    "env": pairs,
+                }
+            )
+    return out
 
 
 def mode_for(permission: str) -> str:

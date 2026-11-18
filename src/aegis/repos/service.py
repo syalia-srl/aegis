@@ -50,13 +50,8 @@ class Repos:
         open_sessions: Callable[[], dict[str, str]],
         subscribers: Callable[[str], int],
         root: Path,
-        user_of: Callable[[str], str | None] = lambda log_id: None,
     ) -> None:
         self.db_path = db_path
-        # git and gh run as the Linux user of the session that names a top
-        # (users.py): git refuses a repository another user owns.
-        self.user_of = user_of
-        self._users: dict[str, str | None] = {}
         self._publish = publish
         self._open = open_sessions
         self._subscribers = subscribers
@@ -189,9 +184,7 @@ class Repos:
 
     async def _probe_and_refresh(self, top: str) -> None:
         try:
-            self._probes[top] = await asyncio.to_thread(
-                probe.probe, top, self._users.get(top)
-            )
+            self._probes[top] = await asyncio.to_thread(probe.probe, top)
         except Exception:
             log.exception("repos: probing %s failed", top)
             self._probes[top] = None
@@ -205,16 +198,11 @@ class Repos:
     ) -> None:
         if self._loop is None:
             return
-        user = self.user_of(log_id)
-        places = [(p, *paths.place(p, user)) for p in written]
-        tops = [paths.place(d, user)[2] for d in dirs]
+        places = [(p, *paths.place(p)) for p in written]
+        tops = [paths.place(d)[2] for d in dirs]
         self._loop.call_soon_threadsafe(self._on_live, log_id, places, tops)
 
     def _on_live(self, log_id: str, places: list, tops: list[str | None]) -> None:
-        user = self.user_of(log_id)
-        for top in [t for *_, t in places] + list(tops):
-            if top is not None:
-                self._users[top] = user
         mine = dict(self._live.get(log_id, {}))
         now = time.time()
         for _, main, rel, top in places:
@@ -233,29 +221,34 @@ class Repos:
 
     # -- building one session's list (in a thread) --------------------------
     def build(
-        self, log_id: str, live: dict | None = None, open_: dict | None = None
+        self,
+        log_id: str,
+        live: dict | None = None,
+        open_: dict | None = None,
+        fresh: bool = False,
     ) -> dict:
         """One session's list. ``live`` and ``open_`` are copies the loop took;
-        a caller on the loop's own thread (a test) may leave them out."""
+        a caller on the loop's own thread (a test) may leave them out. ``fresh``
+        probes every worktree again instead of reading the last probe."""
         if live is None:
             live = {k: dict(v) for k, v in self._live.items()}
         if open_ is None:
             open_ = dict(self._open())
         con = db.open_read(self.db_path) if self.db_path.exists() else None
         try:
-            return self._build(con, log_id, live, open_)
+            return self._build(con, log_id, live, open_, fresh)
         finally:
             if con is not None:
                 con.close()
 
-    def _build(self, con, log_id: str, live: dict, open_: dict) -> dict:
+    def _build(
+        self, con, log_id: str, live: dict, open_: dict, fresh: bool = False
+    ) -> dict:
         repos: dict[str, dict[str, Any]] = {}
-        user = self.user_of(log_id)
 
         def at(top: str, main: str, ts: float) -> dict:
             r: dict[str, Any] | None = repos.get(top)
             if r is None:
-                self._users[top] = user
                 r = repos[top] = {
                     "top": top,
                     "main": main,
@@ -311,7 +304,7 @@ class Repos:
         gh_ok = True
         out = []
         for r in sorted(repos.values(), key=lambda r: -r["ts"]):
-            line, ok = self._line(r)
+            line, ok = self._line(r, fresh)
             gh_ok &= ok
             out.append(line)
         # A PR opened in a worktree is often merged from the main checkout:
@@ -329,13 +322,11 @@ class Repos:
         self._peers(log_id, out, con, live, open_)
         return {"repos": out, "gh": gh_ok}
 
-    def _line(self, r: dict) -> tuple[dict, bool]:
+    def _line(self, r: dict, fresh: bool = False) -> tuple[dict, bool]:
         top, main = r["top"], r["main"]
-        # A member's checkout may be hidden from the server: its user's git
-        # decides (probe.probe).
-        exists = os.path.isdir(top) or self._users.get(top) is not None
-        if top not in self._probes and exists:
-            self._probes[top] = probe.probe(top, self._users.get(top))
+        exists = os.path.isdir(top)
+        if (fresh or top not in self._probes) and exists:
+            self._probes[top] = probe.probe(top)
             self._probed_at[top] = time.monotonic()
         p = self._probes.get(top) if exists else None
         rel = os.path.relpath(top, self.root)
@@ -369,22 +360,35 @@ class Repos:
             if not (p and p.slug and pr["url"] and probe.slug(pr["url"]) != p.slug)
         }
         merged_branches = set()
+        answered = set()  # PRs gh just told the state of
+        no_pr = []
         # gh answers from any checkout of the repo: a removed worktree asks
         # its main checkout.
         ask = top if exists else (main if os.path.isdir(main) else None)
         for b in sorted(branches):
-            found = gh.prs(ask, b, self._users.get(top)) if ask else None
+            found = gh.prs(ask, b) if ask else None
             if found is None:
                 ok = False
                 continue
+            if not found:
+                no_pr.append(b)
             for pr in found:
+                answered.add(pr["n"])
                 prs[pr["n"]] = {**prs.get(pr["n"], {}), **pr}
                 if pr["state"] == "merged":
                     merged_branches.add(b)
+        # A PR the journal saw opened whose branch gh was not asked about
+        # (merged elsewhere, a commit row with no branch): ask it by number.
+        for n, pr in list(prs.items()):
+            if ask and pr["state"] == "open" and n not in answered:
+                found = gh.pr(ask, n)
+                if found is None:
+                    ok = False
+                else:
+                    prs[n] = {**pr, **found}
         shas = [s for s, _, _, b in commits if s and b not in merged_branches]
-        user = self._users.get(top)
-        base = probe.base(top, p.upstream, user) if p else ""
-        found_left = probe.unpushed(top, shas, base, user) if p else []
+        base = probe.base(top, p.upstream) if p else ""
+        found_left = probe.unpushed(top, shas, base) if p else []
         if found_left is None:
             line["stale"] = True  # git could not tell: never read as pushed
         left = set(found_left or ())
@@ -396,6 +400,9 @@ class Repos:
         ]
         line["left_n"] = len(commits)
         line["prs"] = sorted(prs.values(), key=lambda pr: -pr["n"])
+        # The default branch takes no PR of its own.
+        default = probe.base(top, "").removeprefix("origin/") if no_pr else ""
+        line["no_pr"] = [b for b in no_pr if b != default]
         line["clean"] = (
             exists
             and p is not None
@@ -405,6 +412,14 @@ class Repos:
         )
         line["ts"] = r["ts"]
         return line, ok
+
+    def pending(self, log_id: str) -> list[str]:
+        """What the session left undone in its repos, one line each, probed
+        now: what turn_end done tells the agent (#977). Runs git and gh, so
+        call it in a thread."""
+        return [
+            item for ln in self.build(log_id, fresh=True)["repos"] for item in _left(ln)
+        ]
 
     def _peers(
         self, log_id: str, lines: list[dict], con, live: dict, open_: dict
@@ -447,7 +462,39 @@ class Repos:
 
 
 def _subject(text: str) -> tuple[str, str, str]:
-    """(short hash, subject, branch) from a commit row's text."""
+    """(short hash, subject, branch) from a commit row's text. A commit that
+    printed no line of its own has no " · branch" (#997)."""
     h, _, rest = text.partition(" ")
-    subject, _, branch = rest.rpartition(" · ")
-    return h, (subject or rest), branch
+    subject, sep, branch = rest.rpartition(" · ")
+    return (h, subject, branch) if sep else (h, rest, "")
+
+
+def _left(ln: dict) -> list[str]:
+    """One repo line's unfinished work, as lines an agent can act on."""
+    if ln["removed"]:
+        return []
+    where = f"{ln['path']} ({ln['branch']})" if ln["branch"] else ln["path"]
+    out = []
+    if ln["worktree"]:
+        out.append(f"worktree {where} is still there")
+    if ln["dirty_n"]:
+        files = ", ".join(d["path"] for d in ln["dirty"])
+        more = (
+            f" and {ln['dirty_n'] - len(ln['dirty'])} more"
+            if ln["dirty_n"] > len(ln["dirty"])
+            else ""
+        )
+        out.append(
+            f"{ln['dirty_n']} uncommitted file(s) you wrote in {where}: {files}{more}"
+        )
+    if ln["unpushed_n"]:
+        out.append(f"{ln['unpushed_n']} unpushed commit(s) in {where}")
+    for b in ln["no_pr"]:
+        out.append(f"branch {b} in {ln['path']} has your commits and no pull request")
+    for pr in ln["prs"]:
+        if pr["state"] == "open":
+            ci = f", {pr['ci']}" if pr["ci"] else ""
+            out.append(
+                f"pull request #{pr['n']} is open{ci}: {pr['url'] or ln['path']}"
+            )
+    return out

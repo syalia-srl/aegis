@@ -44,9 +44,8 @@
 // browser lets a click open a tab only for a few seconds (Chrome) or not at
 // all after an await (Safari).
 
-import { browserCard } from "./browserview.js";
 import { drawArtifact, drawFile } from "./viewer.js";
-import { DOCKED, entryFiles, fileUrl, fillWorkflow, hold, inWindow, popButton, workflowTitle } from "./entries.js";
+import { DOCKED, entryFiles, fileUrl, fillWorkflow, hold, inWindow, paneFile, popButton, workflowTitle } from "./entries.js";
 import { icon, iconText } from "./glyphs.js";
 import * as menu from "./menu.js";
 
@@ -86,7 +85,7 @@ function fit(cols, width) {
 }
 
 export class Canvas {
-  constructor(root, { transcriptPane, entryOf, latestFile, call, onChange, refuse, openWindow, mountBrowser }) {
+  constructor(root, { transcriptPane, entryOf, latestFile, call, onChange, refuse, openWindow, mountBrowser, browserCard }) {
     this.root = root; // #canvas
     this.tr = transcriptPane; // #tr-pane
     this.entryOf = entryOf; // (id) -> the shown transcript's entry, or undefined
@@ -96,6 +95,7 @@ export class Canvas {
     this.refuse = refuse; // (message): a refusal the person should read
     this.openWindow = openWindow; // (n, tab?) -> the tab of window n, focused or opened; or `tab` pointed at it
     this.mountBrowser = mountBrowser; // (host, id) -> a browser view {draw, dispose}, or null (browserview.js)
+    this.browserCard = browserCard; // (id) -> that browser's card, for its pane's label
     this.key = null; // the session shown
     this.n = 1; // the window this tab draws
     this.layout = null; // the card's layout; null is the default
@@ -362,7 +362,7 @@ export class Canvas {
     if (id === TRANSCRIPT) return "transcript";
     if (id.startsWith("art-")) return this.entryOf(id)?.title || "page";
     if (id.startsWith("wf-")) return workflowTitle(id.slice(3)) || "workflow";
-    if (id.startsWith("b-")) return browserCard(id)?.name || "browser";
+    if (id.startsWith("b-")) return this.browserCard?.(id)?.name || "browser";
     return this.latestFile(id)?.name || "file";
   }
 
@@ -524,9 +524,10 @@ export class Canvas {
       fillWorkflow(card);
       return;
     } else {
-      const f = e || this.latestFile(id);
-      if (!f) return this.loading(node, bar, acts, "Loading the file…");
-      drawFile(f, { remote: false, glyph: "file", bar, body, acts, isCurrent: () => node._drawn === drawn });
+      const found = e || this.latestFile(id);
+      if (!found) return this.loading(node, bar, acts, "Loading the file…");
+      const { file: f, remote } = paneFile(found);
+      drawFile(f, { remote, glyph: "file", bar, body, acts, isCurrent: () => node._drawn === drawn });
       // A pane can be narrow: its bar keeps the name and the version, and the
       // size and type move to the bar's tooltip.
       bar.querySelector(".fs")?.remove();

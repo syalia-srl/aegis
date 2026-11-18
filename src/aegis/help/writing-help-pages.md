@@ -63,7 +63,7 @@ The checks read names, so each kind of name is written one way:
   backticked word with an underscore and nothing else is always read as a
   tool;
 - a parameter with an underscore, with its value: `timeout_s=600`, and a
-  configuration key with its colon: `max_parallel:`;
+  configuration key with its colon: `max_workers:`;
 - an aegis slash command with its slash, in backticks: `/spawn`;
 - a harness's own command in plain text with the harness named, as in
   Claude Code's /compact, never in backticks, because it is not aegis's;

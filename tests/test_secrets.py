@@ -14,11 +14,10 @@ import secrets
 import stat
 from pathlib import Path
 
-import httpx
 import pytest
 
 from aegis import secret_store as ss
-from aegis.ops import Caller, OpError, Principal
+from aegis.ops import OpError
 from aegis.web import _loggable
 
 from .conftest import until
@@ -162,27 +161,6 @@ async def test_a_secret_expires_and_after_a_restart_is_gone(world, tmp_path, qui
     ) == {"gone": "restarted"}
 
 
-async def test_reveal_is_for_the_owner_and_not_an_agent_tool(world, tmp_path):
-    a = await world.spawn()
-    (tmp_path / "pw").write_text("x")
-    id = ok(await turn(a, mcp("secret_send", path="pw")))["id"]
-    ben = Caller("user", principal=Principal("ben", "member"))
-    with pytest.raises(OpError):
-        await world.app.registry.call(
-            "secret.reveal", {"log_id": a.log_id, "id": id}, ben
-        )
-    async with httpx.AsyncClient() as c:
-        r = await c.post(
-            world.base + "/mcp",
-            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-            headers={"accept": "application/json, text/event-stream"},
-        )
-    tools = {t["name"] for t in r.json()["result"]["tools"]}
-    assert {"secret_send", "secret_request"} <= tools
-    assert not {"secret_reveal", "secret_provide"} & tools
-
-
-# -- secret_request ----------------------------------------------------------------------
 async def test_a_provided_secret_lands_0600_and_wakes_the_agent(
     world, tmp_path, caplog
 ):

@@ -333,23 +333,6 @@ async def test_an_ended_runs_pane_keeps_its_title_after_a_boot(world):
     assert p["title"] == "Two steps", p
 
 
-async def test_a_member_cannot_open_a_see_of_a_run_they_do_not_own(world):
-    from aegis.ops import Caller, OpError, Principal
-
-    (world.root / "docs").mkdir()
-    (world.root / "docs" / "plan.html").write_text("<h2 id=slice-1>One</h2>")
-    world.app.principals.add("ben", "member")
-    a = await world.spawn()
-    run = ok(await turn(a, mcp("workflow_arm", definition=SEEN, args={})))["run"]
-    with pytest.raises(OpError) as e:
-        await world.app.registry.call(
-            "workflow.see",
-            {"run": run, "node": "one"},
-            Caller("user", principal=Principal("ben", "member")),
-        )
-    assert e.value.code == "not_owner", e.value
-
-
 async def test_the_runs_channel_has_summaries_and_a_runs_channel_has_it_whole(world):
     """#525: every run's tree and story went to every browser, 96% of the
     workflows channel's bytes; only a card draws them."""

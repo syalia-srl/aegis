@@ -9,10 +9,18 @@ request of the free API's daily allowance), and writes, for each catalog model
 it can map, the Coding and Intelligence Indexes and the list price per million
 tokens, sorted by Intelligence Index, with today's date. It prints every catalog
 model it could not map: those stay unranked until an alias below covers them.
+
+``--base FILE --out FILE`` is the nightly run (.github/workflows/model-ranking.yml):
+it keeps every model ``FILE`` maps, re-scored under its recorded slug, so the
+models a logged-in machine's catalog lists survive a runner that cannot list
+them; a harness that fails to start is skipped rather than fatal; and it writes
+nothing, exiting 1, when the result scores fewer than half the models the base
+does, so a broken night never reaches an aegis.
 """
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import json
 import os
@@ -86,7 +94,15 @@ def entry(m: dict) -> dict:
     }
 
 
+def scored(models: dict[str, dict]) -> int:
+    return sum(1 for v in models.values() if v.get("intelligence") is not None)
+
+
 def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--base", type=Path, help="keep and re-score this file's models")
+    ap.add_argument("--out", type=Path, default=OUT)
+    args = ap.parse_args()
     key = os.environ.get("AA_API_KEY")
     if not key:
         print("AA_API_KEY is not set", file=sys.stderr)
@@ -96,11 +112,18 @@ def main() -> int:
     if broken := [f for f in found if f.error]:
         for f in broken:
             print(f"{f.harness}: {f.error}", file=sys.stderr)
-        return 1
+        if args.base is None:
+            return 1
     aa = fetch(key)
     models: dict[str, dict] = {}
     unmapped: list[str] = []
+    base = json.loads(args.base.read_text())["models"] if args.base else {}
+    for value, old in base.items():
+        if old.get("aa") in aa:
+            models[value] = entry(aa[old["aa"]])
     for f in found:
+        if f.error:
+            continue
         for m in f.models:
             slug = slug_for(m.value, m.resolved, set(aa))
             if slug is None:
@@ -122,7 +145,13 @@ def main() -> int:
         "refreshed": date.today().isoformat(),
         "models": dict(ordered),
     }
-    OUT.write_text(json.dumps(data, indent=2) + "\n")
+    if base and scored(models) < scored(base) / 2:
+        print(
+            f"refused: {scored(models)} models scored, the base scores {scored(base)}",
+            file=sys.stderr,
+        )
+        return 1
+    args.out.write_text(json.dumps(data, indent=2) + "\n")
     for u in unmapped:
         print(f"unmapped: {u}")
     print(f"{len(models)} models scored, {len(unmapped)} unmapped")

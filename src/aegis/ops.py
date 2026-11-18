@@ -14,10 +14,13 @@ an action that is not an operation (DESIGN.md, "One registry, every caller").
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ValidationError
+
+if TYPE_CHECKING:
+    from .policy import CallerInfo, HostPolicy, SessionView
 
 
 class OpError(Exception):
@@ -32,15 +35,12 @@ class OpError(Exception):
 
 @dataclass(frozen=True)
 class Principal:
-    """Who a token is (tokens.py): a person, a linked server or a job. The
-    role decides what it may change; a session's owner is a principal's name."""
+    """Who a caller is: ``name`` is what aegis stores as an owner, the host
+    policy's ``key(who)``, and ``who`` the host's own object for it, never
+    read by aegis (policy.py). ``who`` is None for the server's own caller."""
 
     name: str
-    role: str  # "admin" | "member"
-
-    @property
-    def is_admin(self) -> bool:
-        return self.role == "admin"
+    who: Any = field(default=None, compare=False)
 
 
 @dataclass(frozen=True)
@@ -69,6 +69,16 @@ class Caller:
 
 USER = Caller("user")
 
+# What a named id is, and the code an operation answers when the caller may
+# not read its session: the code it answers for one that does not exist.
+KINDS = {
+    "session": "no_session",
+    "task": "no_task",
+    "run": "no_run",
+    "browser": "unknown_browser",
+    "monitor": "no_monitor",
+}
+
 # What a schedule's run with spawn: false may not call: each starts other work
 # (schedules.py). schedule.create is here so a run cannot start agents through
 # a schedule of its own.
@@ -86,13 +96,23 @@ class Operation:
     doc: str = ""
     # Open to an agent whose session runs with read permission.
     read: bool = False
-    # Only an admin may call it (tokens.py).
-    admin: bool = False
-    # The param naming the session it changes: a member must own that session.
-    owned: str | None = None
     # Refused to a caller acting through a link: a far server never reads or
     # writes this server's files (fs_ops.py).
     local: bool = False
+    # The params that name something a session owns, as (field, kind) with
+    # kind one of KINDS, and whether the operation reads or writes it: the
+    # host policy's can decides (Registry.call, #959).
+    names: tuple[tuple[str, str], ...] = ()
+    access: str = "write"
+    # Acts on the whole server (its config, links, files, shells, harness
+    # sign-ins): HostPolicy.guard refuses it to every caller a host
+    # identified; StandalonePolicy's one person keeps it (#959).
+    server: bool = False
+    # Starts work when it names no session (a spawn, a queue task, a schedule
+    # fire or resume, a workflow run, a monitor, a browser, a script, a shell,
+    # a sign-in, a server resume or update): can(who, "spawn", None) decides
+    # (#993). Other session-less operations ask can(who, "read"|"write", None).
+    work: bool = False
 
     @property
     def tool_name(self) -> str:
@@ -103,24 +123,63 @@ class NoParams(BaseModel):
     model_config = {"extra": "forbid"}
 
 
+def default_guard(op: Operation, caller: CallerInfo) -> None:
+    """The checks that are not about people (HostPolicy.guard's default):
+    operations closed to agents, a read-permission session, a schedule run
+    with spawn: false, and operations closed to linked servers."""
+    agent = caller.kind == "agent"
+    if agent and not op.agent:
+        raise OpError("not_for_agents", f"{op.name} is not open to agents")
+    if agent and caller.tools is not None and op.tool_name not in caller.tools:
+        raise OpError("not_for_agents", f"{op.tool_name} is not open to this session")
+    if agent and not op.read and caller.permission == "read":
+        raise OpError(
+            "read_only",
+            f"{op.tool_name} is not open to a session with read permission; "
+            "it can call " + ", ".join(caller.read_tools),
+        )
+    if agent and op.name in NO_SPAWN:
+        run = caller.schedule
+        if run is not None and not run.get("spawn"):
+            raise OpError(
+                "spawn_off",
+                f"run {run['run']} of {run['name']} may not start other work "
+                "(spawn: false)",
+            )
+    if op.local and caller.link:
+        raise OpError("not_across_links", f"{op.name} is not open to a linked server")
+
+
+async def _nothing(caller: Caller) -> None:
+    return None
+
+
 class Registry:
     def __init__(self) -> None:
         self._ops: dict[str, Operation] = {}
+        self._read: tuple[str, ...] | None = None  # read_tools, cached
         # A session's current permission by log id; set by the app.
         self.permission_of: Callable[[str], str | None] = lambda log_id: None
         # The principal a caller acts as, and a session's owner by log id; both
         # set by the app. Without an app every caller is an admin.
-        self.who: Callable[[Caller], Principal] = lambda c: (
-            c.principal or Principal("", "admin")
-        )
+        self.who: Callable[[Caller], Principal] = lambda c: c.principal or Principal("")
         self.owner_of: Callable[[str], str | None] = lambda log_id: None
-        # What a caller may not know exists (multi-user mode, app.py): the
-        # error a missing thing gives, or None when it may see it.
-        self.hides: Callable[[Principal, str, BaseModel], OpError | None] = (
-            lambda who, name, params: None
-        )
         # A session's schedule meta by log id (session.py); set by the app.
         self.schedule_of: Callable[[str], dict | None] = lambda log_id: None
+        # Makes sure the who behind a caller is known before the call runs
+        # (App.ensure_who); set by the app.
+        self.ensure_who: Callable[[Caller], Awaitable[None]] = _nothing
+        # The host policy (policy.py); set by the app. Without one, the
+        # default guard runs and nothing wraps a handler.
+        self.policy: HostPolicy | None = None
+        # Whether the policy hides anything (App.narrows); set by the app.
+        self.narrows: Callable[[], bool] = lambda: False
+        # The session a named id belongs to, None when it names none here, and
+        # a session as the policy sees it; both set by the app.
+        self.session_of: Callable[[str, str], str | None] = lambda kind, value: None
+        self.view_of: Callable[[str], SessionView | None] = lambda log_id: None
+        # The aegis tools the policy gave a session's process; None is all.
+        self.tools_of: Callable[[str], frozenset[str] | None] = lambda log_id: None
 
     def op(
         self,
@@ -130,13 +189,16 @@ class Registry:
         agent: bool = False,
         doc: str = "",
         read: bool = False,
-        admin: bool = False,
-        owned: str | None = None,
         local: bool = False,
+        names: tuple[tuple[str, str], ...] = (),
+        access: str = "write",
+        server: bool = False,
+        work: bool = False,
     ) -> Callable[[Handler], Handler]:
         def register(handler: Handler) -> Handler:
             if name in self._ops:
                 raise ValueError(f"operation {name!r} registered twice")
+            self._read = None
             self._ops[name] = Operation(
                 name,
                 params,
@@ -144,9 +206,11 @@ class Registry:
                 agent,
                 doc or (handler.__doc__ or "").strip(),
                 read,
-                admin,
-                owned,
                 local,
+                names,
+                access,
+                server,
+                work,
             )
             return handler
 
@@ -155,6 +219,65 @@ class Registry:
     def names(self) -> list[str]:
         return sorted(self._ops)
 
+    def _check_sessionless(self, op: Operation, who: Any, caller: Caller) -> None:
+        """Ask ``can`` for an operation that names no session, before it starts
+        work or changes state (#993). An agent's operation names its own
+        session instead, so ``_check_named`` decides it."""
+        assert self.policy is not None
+        if op.names or (caller.is_agent and caller.log_id):
+            return
+        from .policy import Action, Refused
+
+        action: Action = (
+            "spawn" if op.work else ("read" if op.access == "read" else "write")
+        )
+        if not self.policy.can(who, action, None):
+            raise Refused(f"you may not run {op.name}")
+
+    def _check_named(
+        self, op: Operation, params: Any, who: Any, caller: Caller
+    ) -> None:
+        """Refuse a call naming a session ``who`` may not read as if it did not
+        exist, and one it may read but not change as refused. An agent's own
+        session counts as named."""
+        assert self.policy is not None
+        named = [
+            (kind, value, self.session_of(kind, value))
+            for field_, kind in op.names
+            if isinstance(value := getattr(params, field_, None), str) and value
+        ]
+        if caller.is_agent and caller.log_id:
+            named.append(("session", caller.log_id, caller.log_id))
+        for kind, value, log_id in named:
+            view = self.view_of(log_id) if log_id else None
+            if view is None:
+                continue  # not here: the handler answers for it
+            if not self.policy.can(who, "read", view):
+                raise OpError(KINDS[kind], f"no {kind} {value!r}")
+            if op.access == "write" and not self.policy.can(who, "write", view):
+                from .policy import Refused
+
+                raise Refused(f"you may read {value} but not change it")
+
+    def caller_info(self, caller: Caller) -> CallerInfo:
+        from .policy import CallerInfo
+
+        log_id = caller.log_id if caller.is_agent else None
+        return CallerInfo(
+            kind=caller.kind,
+            log_id=caller.log_id,
+            link=caller.link,
+            permission=self.permission_of(log_id) if log_id else None,
+            schedule=self.schedule_of(log_id) if log_id else None,
+            read_tools=self._read_tools(),
+            tools=self.tools_of(log_id) if log_id else None,
+        )
+
+    def _read_tools(self) -> tuple[str, ...]:
+        if self._read is None:
+            self._read = tuple(o.tool_name for o in self.agent_ops() if o.read)
+        return self._read
+
     def agent_ops(self) -> list[Operation]:
         return [op for _, op in sorted(self._ops.items()) if op.agent]
 
@@ -162,50 +285,31 @@ class Registry:
         op = self._ops.get(name)
         if op is None:
             raise OpError("unknown_op", f"no operation named {name!r}")
-        if caller.is_agent and not op.agent:
-            raise OpError("not_for_agents", f"{name} is not open to agents")
-        if (
-            caller.is_agent
-            and not op.read
-            and self.permission_of(caller.log_id or "") == "read"
-        ):
-            raise OpError(
-                "read_only",
-                f"{op.tool_name} is not open to a session with read permission; "
-                "it can call "
-                + ", ".join(o.tool_name for o in self.agent_ops() if o.read),
-            )
-        if caller.is_agent and name in NO_SPAWN:
-            run = self.schedule_of(caller.log_id or "")
-            if run is not None and not run.get("spawn"):
-                raise OpError(
-                    "spawn_off",
-                    f"run {run['run']} of {run['name']} may not start other work "
-                    "(spawn: false)",
-                )
-        if op.local and caller.link:
-            raise OpError("not_across_links", f"{name} is not open to a linked server")
+        await self.ensure_who(caller)
+        info = self.caller_info(caller)
+        who = self.who(caller).who
+        if self.policy is not None:
+            self.policy.guard(op, who, info)
+        else:
+            default_guard(op, info)
+        if self.policy is not None and self.narrows():
+            # Before validation: a session-less operation needs no params to
+            # know whether it may run at all, and a policy that refuses it
+            # must answer that rather than a bad-params error (#993).
+            self._check_sessionless(op, who, caller)
         try:
             params = op.params.model_validate(raw if raw is not None else {})
         except ValidationError as e:
             raise OpError("bad_params", str(e)) from e
-        who = self.who(caller)
-        if op.admin and not who.is_admin:
-            raise OpError("not_for_members", f"{name} is for an admin of this server")
-        # Before not_owner, which would say whose it is.
-        if (hidden := self.hides(who, name, params)) is not None:
-            raise hidden
-        if op.owned and not who.is_admin:
-            target = getattr(params, op.owned, None)
-            owner = self.owner_of(target) if isinstance(target, str) else None
-            if owner is not None and owner != who.name:
-                raise OpError(
-                    "not_owner",
-                    f"{target} belongs to {owner}; you can read it, not change it",
-                )
+        if self.policy is not None and self.narrows():
+            self._check_named(op, params, who, caller)
         try:
-            return await op.handler(params, caller)
+            if self.policy is None:
+                return await op.handler(params, caller)
+            return await self.policy.around(
+                name, who, params, lambda p: op.handler(p, caller)
+            )
         except PermissionError as e:
-            # Nothing may act as this person (users.py, as_user.py): fail
-            # closed, and say so rather than as an internal error.
+            # A refused file or process action: say so rather than as an
+            # internal error.
             raise OpError("forbidden", str(e)) from e

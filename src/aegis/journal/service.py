@@ -40,12 +40,14 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
+from ..guards import LINKS
 from ..quota.core import PACE_HISTORY_LONG, PACE_HISTORY_SHORT
 from ..transcript.store import read_store
 from ..usage import tables
 from ..usage.context import successor_start
 from ..usage.owners import owner_of
 from ..usage.store import sessions as stored_sessions
+from ..usage.store import stores
 from ..usage.turns import Derived, SessionInfo, UsageDeriver
 from . import db, paths
 from .derive import Deriver, Row
@@ -102,30 +104,30 @@ class Journal:
         publish,
         db_path: Path | None = None,
         on_live=None,
-        user_of=lambda log_id: None,
         meta_of: Callable[[str], dict] = lambda log_id: {},
         accounts: Callable[[], dict[str, str]] = dict,
     ) -> None:
         self.state_root = state_root
-        # The Linux user of a session by log id: its git runs as that user.
-        self.user_of = user_of
         # Called on the writer thread with (log_id, handle, new paths, dirs)
         # when a live record wrote files, or committed, opened or merged a PR
         # or pushed in dirs: the Repos row must see a write before the turn
         # that made it closes.
         self.on_live = on_live
+        # Called on the loop when usage rows were written (budgets.py).
+        self.on_usage: Callable[[], None] | None = None
         self._seen: dict[str, int] = {}
         self.path = db_path or state_root / "journal.db"
         self._publish = publish
         self._derivers: dict[str, Deriver] = {}
-        # A session's meta (owner, kind, harness, continues) and the account
-        # each harness is logged in as, read when its usage deriver is made.
+        # A session's meta (owner, kind, harness, continues, agent, worker
+        # queue, starter) and the account each harness is logged in as, read
+        # when its usage deriver is made.
         self.meta_of = meta_of
         self.accounts = accounts
         self._usage: dict[str, UsageDeriver] = {}
         self._start: tuple[float, int] | None = None  # (read at, replay start)
         # A directory's repo, and the repos whose owner has been read.
-        self._repos: dict[tuple[str, str | None], str | None] = {}
+        self._repos: dict[str, str | None] = {}
         self._owned: set[str] = set()
         self._progress: dict = {}
         self._usage_at = 0.0
@@ -240,6 +242,8 @@ class Journal:
             n = self._backfill(con, token)
             tables.ensure(con)
             token = _token()
+            # In progress before the rows go, so no budget reads them gone.
+            self._progress = {"done": 0, "total": 0}
             tables.clear(con, token)
             self._usage_backfill(con, token)
             return n
@@ -360,10 +364,13 @@ class Journal:
             kind=_kind(meta),
             harness=str(meta.get("harness") or "claude-code"),
             continues=meta.get("continues") or None,
+            agent=meta.get("agent") or None,
+            queue=(meta.get("worker") or {}).get("queue") or None,
+            starter=next((meta[k] for k in LINKS if meta.get(k)), None),
             account=lambda harness: self.accounts().get(harness),
             replay_start=self._replay_start(con),
         )
-        return UsageDeriver(info, self._repo_of(con, self.user_of(log_id)))
+        return UsageDeriver(info, self._repo_of(con))
 
     def _replay_start(self, con) -> int:
         """Successors' median start context, read at most once a minute: a
@@ -373,21 +380,21 @@ class Journal:
             self._start = (now, successor_start(con))
         return self._start[1]
 
-    def _repo_of(self, con, user: str | None) -> Callable[[str], str | None]:
+    def _repo_of(self, con) -> Callable[[str], str | None]:
         """A directory's main checkout, or a ``gh:owner/name`` slug's, cached
         per directory; a scratch directory names none."""
 
         def repo_of(d: str) -> str | None:
-            key = (d, user)
+            key = d
             if key in self._repos:
                 return self._repos[key]
             if d.startswith("gh:"):
-                hit = self._checkout_of(con, d[3:], user)
+                hit = self._checkout_of(con, d[3:])
                 if hit is None:
                     return None  # a repo the journal first sees later may match
-                repo = paths.place(hit, user)[0]
+                repo = paths.place(hit)[0]
             else:
-                repo = None if _scratch(d) else paths.place(d, user)[0]
+                repo = None if _scratch(d) else paths.place(d)[0]
             self._repos[key] = repo
             return repo
 
@@ -397,18 +404,17 @@ class Journal:
         if not d:
             return 0
         n = tables.insert(con, log_id, d)
-        user = self.user_of(log_id)
         for repo in {p.repo for p in d.parts if p.repo} - self._owned:
             self._owned.add(repo)
             if os.path.isdir(repo):
-                owner_of(con, repo, repo, user, {})
+                owner_of(con, repo, repo, {})
         return n
 
     def _usage_backfill(self, con, token: int | None = None) -> int:
         if token is None:
             token = _token()
             tables.mark(con, token)
-        total = sum(1 for _ in (self.state_root / "transcripts").glob("*.jsonl"))
+        total = len(stores(self.state_root / "transcripts"))
         self._progress = {"done": 0, "total": total}
         n = 0
         for k, s in enumerate(stored_sessions(self.state_root)):
@@ -434,6 +440,20 @@ class Journal:
         a window's percent or reset moved."""
         self._q.put(("quota", snapshot))
 
+    def quota_rows(
+        self, billing: str, window: str, since: float
+    ) -> list[tuple[float, float, float | None]]:
+        """The rows a projection replays (tables.quota_rows); empty when the
+        file or its table is not there yet."""
+        try:
+            con = db.open_read(self.path)
+            try:
+                return tables.quota_rows(con, billing, window, since)
+            finally:
+                con.close()
+        except sqlite3.Error:
+            return []
+
     def usual_spend(self, billing: str, window: str, span_s: float) -> float | None:
         """What the last finished windows of this kind spent (tables.usual_spend).
         None when the file or its table is not there yet, as before a backfill."""
@@ -456,6 +476,8 @@ class Journal:
             self._loop.call_soon_threadsafe(
                 self._publish, "usage", [{"set": self.usage_snapshot()}]
             )
+        if self.on_usage is not None and self._loop is not None:
+            self._loop.call_soon_threadsafe(self.on_usage)
 
     def _insert(self, con, log_id: str, rows: list[Row]) -> int:
         return sum(
@@ -464,10 +486,9 @@ class Journal:
         )
 
     def _entry(self, log_id: str, n: int, row: Row, con=None) -> db.Entry:
-        user = self.user_of(log_id)
         touches = []
         for op, p in row.touches:
-            repo, rel, top = paths.place(p, user)
+            repo, rel, top = paths.place(p)
             touches.append((op, repo, rel, paths.full(repo, rel), top))
         repo = touches[0][1] if touches else None
         top = touches[0][4] if touches else None
@@ -483,30 +504,30 @@ class Journal:
                 found = h
                 if not h:  # it printed none: its subject is all there is
                     subject = row.text.partition(" ")[2]
-                    found = paths.commit_by_subject(d, subject, row.ts, user)
+                    found = paths.commit_by_subject(d, subject, row.ts)
                     if not found:
                         continue
                     text = f"{found[:7]} {subject}"
                     h = found
-                files = paths.commit_files(d, found, user)
+                files = paths.commit_files(d, found)
                 if files is not None:
                     directory = d
                     break
             repo, _, top = (
-                paths.place(directory, user) if files is not None else (None, "", None)
+                paths.place(directory) if files is not None else (None, "", None)
             )
-            sha = paths.full_sha(directory, h, user) if files is not None else None
+            sha = paths.full_sha(directory, h) if files is not None else None
             unknown = files is None
             if not h:  # no ref holds it any more, but the command named its repo
-                repo, _, top = paths.place(directory, user)
+                repo, _, top = paths.place(directory)
             touches += [
                 ("commit", repo, f, paths.full(repo, f), top) for f in files or []
             ]
         workdir = row.workdir
         if row.slug and not workdir and con is not None:
-            workdir = self._checkout_of(con, row.slug, user) or ""
+            workdir = self._checkout_of(con, row.slug) or ""
         if workdir:
-            repo, _, top = paths.place(workdir, user)
+            repo, _, top = paths.place(workdir)
         return db.Entry(
             log_id,
             row.rec,
@@ -524,7 +545,7 @@ class Journal:
             sha,
         )
 
-    def _checkout_of(self, con, slug: str, user: str | None) -> str | None:
+    def _checkout_of(self, con, slug: str) -> str | None:
         """The checkout of a --repo owner/name among the repos the journal
         has seen. Only a hit is kept: a repo first seen later may still match."""
         key = slug.lower()
@@ -535,7 +556,7 @@ class Journal:
                     "SELECT DISTINCT repo FROM entries WHERE repo IS NOT NULL"
                 )
             ]
-            hit = paths.checkout_of(slug, repos, user)
+            hit = paths.checkout_of(slug, repos)
             if hit is None:
                 return None
             self._slugs[key] = hit

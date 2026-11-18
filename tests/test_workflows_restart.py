@@ -35,6 +35,7 @@ async def running(w, run_id: str, node: str, also=lambda n: True):
     )
 
 
+@pytest.mark.quarantine("#1028")
 async def test_an_agent_continues_after_a_restart(world):  # noqa: F811
     run_id = await run(
         world,

@@ -5,9 +5,10 @@
 // (openCard), so a quiet session gets its tab back. It reads only the metas the
 // client holds: opening it never waits on the network.
 
+import { labelsFor, stateLabel } from "./labels.js";
 import { fuzzy } from "./commands.js";
 import { ago, markNode } from "./fleet.js";
-import { icon, LABEL } from "./glyphs.js";
+import { icon } from "./glyphs.js";
 
 // Attention first, as Alt+J walks: needs_you, error, review, the longest
 // waiting first; then working, waiting and the rest, the most recent first.
@@ -45,7 +46,7 @@ function match(q, m) {
 
 // [{name, server, off, quiet, total, needs, rows: [{m, score, positions}]}].
 // `here` names this server; `links` is the links channel's list, in its order.
-export function switcherRows(metas, here, links, query = "") {
+export function switcherRows(metas, here, links, query = "", t = labelsFor("en")) {
   const q = query.trim();
   const take = (ms) => {
     const rows = ms.flatMap((m) => {
@@ -69,7 +70,7 @@ export function switcherRows(metas, here, links, query = "") {
   }
   const quiet = metas.filter((m) => m.quiet);
   const rows = take(quiet.slice().sort((a, b) => at(a) - at(b) || (b.last_activity || 0) - (a.last_activity || 0)));
-  if (rows.length) groups.push({ name: "Quiet", server: null, off: false, quiet: true, total: quiet.length, needs: 0, rows });
+  if (rows.length) groups.push({ name: t("header.quiet"), server: null, off: false, quiet: true, total: quiet.length, needs: 0, rows });
   return groups;
 }
 
@@ -86,25 +87,26 @@ const el = (tag, cls, text) => {
 export class Switcher {
   constructor(box, src) {
     Object.assign(this, { box, src });
+    this.t = src.t || labelsFor("en");
     this.flat = []; // [{key, node}] in drawn order, headers left out
     this.at = 0;
     this.back = null;
     const panel = el("div", "panel");
     panel.setAttribute("role", "dialog");
-    panel.setAttribute("aria-label", "Sessions");
+    panel.setAttribute("aria-label", this.t("header.sessionsAria"));
     panel.tabIndex = -1;
     this.q = el("input");
     this.q.id = "switcher-q";
     this.q.spellcheck = false;
     this.q.autocomplete = "off";
-    this.q.placeholder = "Switch to a session";
+    this.q.placeholder = this.t("header.switchPlaceholder");
     this.q.setAttribute("role", "combobox");
     this.q.setAttribute("aria-controls", "switcher-rows");
     this.q.setAttribute("aria-expanded", "true");
     // A phone's way out: its panel leaves no backdrop to tap and it has no Esc (#901).
     const x = el("button", "x");
     x.type = "button";
-    x.setAttribute("aria-label", "Close");
+    x.setAttribute("aria-label", this.t("find.close"));
     x.append(icon("close"));
     x.addEventListener("click", () => this.close());
     const head = el("div", "head");
@@ -113,7 +115,7 @@ export class Switcher {
     this.rows.id = "switcher-rows";
     this.rows.setAttribute("role", "listbox");
     const foot = el("div", "foot");
-    for (const t of ["↑↓ Alt+P move", "PgUp PgDn server", "Enter open", "Esc close"]) foot.append(el("span", null, t));
+    for (const hint of ["header.switchMove", "header.switchServer", "header.switchOpen", "header.switchClose"]) foot.append(el("span", null, this.t(hint)));
     panel.append(head, this.rows, foot);
     box.replaceChildren(panel);
     this.panel = panel;
@@ -158,7 +160,7 @@ export class Switcher {
     if (!this.isOpen) return;
     const keep = this.flat[this.at]?.key;
     const query = this.q.value.trim();
-    const groups = switcherRows(this.src.metas(), this.src.here(), this.src.links(), query);
+    const groups = switcherRows(this.src.metas(), this.src.here(), this.src.links(), query, this.t);
     const out = [];
     this.flat = [];
     let best = 0;
@@ -172,7 +174,7 @@ export class Switcher {
         out.push(node);
       }
     }
-    if (!this.flat.length) out.push(el("div", "empty", "No session matches"));
+    if (!this.flat.length) out.push(el("div", "empty", this.t("header.noMatch")));
     this.rows.replaceChildren(...out);
     const kept = this.flat.findIndex((f) => f.key === keep);
     if (!reselect && kept >= 0) this.at = kept;
@@ -183,9 +185,9 @@ export class Switcher {
 
   header(g) {
     const h = el("div", "sw-gh");
-    h.append(el("span", "nm", g.name), `${g.total} session${g.total === 1 ? "" : "s"}`);
-    if (g.needs) h.append(` · ${g.needs} need${g.needs === 1 ? "s" : ""} you`);
-    if (g.off) h.append(el("span", "off", "offline"));
+    h.append(el("span", "nm", g.name), this.t(g.total === 1 ? "header.sessionCount.one" : "header.sessionCount.other", { n: g.total }));
+    if (g.needs) h.append(this.t(g.needs === 1 ? "header.needs.one" : "header.needs.other", { n: g.needs }));
+    if (g.off) h.append(el("span", "off", this.t("header.offline")));
     return h;
   }
 
@@ -198,8 +200,8 @@ export class Switcher {
     [...(m.handle || m.name || "")].forEach((ch, j) => h.append(hit.has(j) ? el("b", null, ch) : ch));
     if (g.quiet && m.server) h.append(el("span", "at", m.server));
     const st = el("span", "st");
-    if (m.key === this.src.current()) st.append(el("span", "here", "here"));
-    const label = m.attention === "waiting" && m.waiting_on ? `waiting · ${m.waiting_on}` : LABEL[m.attention] || m.state || "";
+    if (m.key === this.src.current()) st.append(el("span", "here", this.t("header.here")));
+    const label = m.attention === "waiting" && m.waiting_on ? this.t("header.waitingOn", { on: m.waiting_on }) : stateLabel(this.t, m.attention) || m.state || "";
     st.append([label, ago(m.last_activity)].filter(Boolean).join(" · "));
     const mk = el("span", "mk");
     mk.append(markNode(m));

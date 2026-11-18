@@ -25,6 +25,7 @@ from typing import Any
 
 from .. import files
 from .. import layout as canvas
+from ..usage.kinds import activity
 from ..artifacts import EVENTS_KEPT
 from ..dictation import without_note
 from ..claude.stream import (
@@ -47,6 +48,7 @@ from ..claude.stream import (
 from ..claude.stream import Parser as ClaudeParser
 from ..codex.stream import Parser as CodexParser
 from ..cursor.stream import Parser as CursorParser
+from ..pi.stream import Parser as PiParser
 from ..opencode.stream import Parser as OpenCodeParser
 from . import describe as d
 from .plan_clock import replan, switch
@@ -60,6 +62,7 @@ PARSERS: dict[str, Any] = {
     "opencode": OpenCodeParser,
     "codex": CodexParser,
     "cursor": CursorParser,
+    "pi": PiParser,
 }
 
 
@@ -76,6 +79,15 @@ FOLD_LEVEL = {
     "error": 2,
     "recap": 2,
 }
+
+
+def _mention_status(det: dict) -> str:
+    settled = all(m["state"] in ("answered", "failed") for m in det["members"])
+    if det["committee"]:
+        return "ok" if det["merge"] else "running"
+    if det["members"] and det["members"][0]["kind"] == "agent":
+        return "ok" if settled else "running"
+    return "ok"
 
 
 def _entry(
@@ -194,6 +206,9 @@ class Fold:
         # that text, while the pending entry shows what the person typed.
         self._said: dict[str, str] = {}
         self._calls: dict[str, ToolCall] = {}
+        # Whether the last shell command failed: a test or a read after it is
+        # debugging, for the running row's verb (#1012).
+        self._shell_failed = False
         self._seen_init = False
         self._interrupted = False
         self._last_cost = 0.0
@@ -232,6 +247,7 @@ class Fold:
         self._recaps: list[str] = []  # recap entry ids no send has folded yet
         self.last_recap_upto: int | None = None
         self._btws: dict[str, str] = {}  # side note id -> entry id
+        self._mentions: dict[str, str] = {}  # @ mention id -> entry id
 
     def _dockable_copies(self, records: list[dict]) -> list[dict]:
         """Stored copies that are not ``file_send`` records, with stable pane ids.
@@ -504,6 +520,77 @@ class Fold:
         return [{"remove": id}]
 
     # -- what aegis itself did ---------------------------------------
+    def _mention(self, kind: str, rec: dict, i: int, ts: float | None) -> list[dict]:
+        """An @ mention's line, its members and their answers, as one entry
+        (mentions.py). Waiting while an answer it expects or its committee's
+        merge has not come; a note alone expects none."""
+        if kind == "mention":
+            mid = str(rec.get("id"))
+            self._mentions[mid] = f"e{i}"
+            members = [
+                {
+                    "name": str(m.get("name") or ""),
+                    "kind": m.get("kind") if m.get("kind") == "agent" else "session",
+                    "state": m.get("state") if m.get("state") == "held" else "asked",
+                    "answer": "",
+                    "why": "",
+                }
+                for m in rec.get("members") or []
+                if isinstance(m, dict)
+            ]
+            det = {
+                "id": mid,
+                "body": str(rec.get("body") or ""),
+                "committee": bool(rec.get("committee")),
+                "members": members,
+                "merge": None,
+                "carried": False,
+            }
+            return self._upsert(
+                _entry(
+                    f"e{i}",
+                    "mention",
+                    _mention_status(det),
+                    ts,
+                    d.MENTION_GLYPH,
+                    title="mention",
+                    summary=det["body"],
+                    detail=det,
+                )
+            )
+        if kind == "mention_carried":
+            ops = []
+            for mid in rec.get("ids") or []:
+                prev = self._entries.get(self._mentions.get(str(mid), ""))
+                if prev is not None:
+                    det = {**prev["detail"], "carried": True}
+                    ops += self._upsert({**prev, "detail": det})
+            return ops
+        prev = self._entries.get(self._mentions.get(str(rec.get("id")), ""))
+        if prev is None:
+            return []  # its line is missing: a damaged store
+        det = dict(prev["detail"])
+        if kind == "mention_merge":
+            how = rec.get("how")
+            det["merge"] = how if how in ("sent", "skipped") else "sent"
+        else:
+            who = str(rec.get("member") or "")
+            ok = rec.get("status") == "ok"
+            det["members"] = [
+                {
+                    **m,
+                    "state": "answered" if ok else "failed",
+                    "answer": str(rec.get("answer") or "") if ok else "",
+                    "why": "" if ok else str(rec.get("why") or ""),
+                }
+                if m["name"] == who
+                else m
+                for m in det["members"]
+            ]
+            if not det["committee"]:
+                det["carried"] = False  # a new answer the agent has not seen
+        return self._upsert({**prev, "status": _mention_status(det), "detail": det})
+
     def _settle_btws(self, why: str, fold: bool) -> list[dict]:
         """Fail every side note still running; with ``fold``, fold them all.
         One runs at a time per session, so a new question means any earlier
@@ -659,6 +746,8 @@ class Fold:
             if status == "cancelled":
                 detail["folded"] = True
             return self._upsert({**prev, "status": status, "detail": detail})
+        if kind in ("mention", "mention_answer", "mention_merge", "mention_carried"):
+            return self._mention(kind, rec, i, ts)
         if kind == "recap":
             # A refresh replaces the recap on screen: one full box, never two.
             folded = []
@@ -804,6 +893,22 @@ class Fold:
             return self._upsert(
                 _entry(f"e{i}", "system", "ok", ts, d.SYSTEM_GLYPH, summary=line)
             )
+        if kind in ("handoff_to", "handoff_from", "autohandoff"):
+            # A handoff seen from each tab, and autohandoff firing (#1022).
+            if kind == "autohandoff":
+                line = (
+                    f"autohandoff at {d.tokens_k(rec.get('tokens') or 0)} tokens"
+                    f" (from {d.tokens_k(rec.get('at') or 0)})"
+                )
+            else:
+                way = "in" if kind == "handoff_to" else "from"
+                what = ", ".join(rec.get("carried") or [])
+                line = f"continued {way} {rec.get('handle')}, " + (
+                    f"carrying {what}" if what else "nothing to carry"
+                )
+            return self._upsert(
+                _entry(f"e{i}", "system", "ok", ts, d.SYSTEM_GLYPH, summary=line)
+            )
         if kind == "server_paused":
             # The person paused every session (app.pause_all); the stop's
             # own record follows.
@@ -838,7 +943,7 @@ class Fold:
                 "name": str(rec.get("name")),
                 "action": str(rec.get("action")),
             }
-            # On another server: the agent named it across a trusted link.
+            # On another server: the agent named it across a link.
             if rec.get("server"):
                 det["server"] = str(rec["server"])
             return self._upsert(
@@ -1028,6 +1133,41 @@ class Fold:
                     detail=det,
                 )
             )
+        if kind == "chrome_request":
+            # An agent's ask for a tab of the person's browser (chrome_ops):
+            # Give and Refuse until answered, then one line.
+            rid = str(rec.get("request_id"))
+            det = {
+                "request": rid,
+                "kind": str(rec.get("req_kind")),
+                "match": str(rec.get("match") or ""),
+                "url": str(rec.get("url") or ""),
+                "why": str(rec.get("why") or ""),
+            }
+            return self._upsert(
+                _entry(
+                    f"cr-{rid}",
+                    "chrome_request",
+                    "asked",
+                    ts,
+                    d.SYSTEM_GLYPH,
+                    title=det["url"] or det["match"],
+                    summary="asked",
+                    detail=det,
+                )
+            )
+        if kind == "chrome_answer":
+            e = self._entries.get(f"cr-{rec.get('request_id')}")
+            if e is None:
+                return []
+            det = {**e["detail"]}
+            for k in ("tab", "title", "url"):
+                if rec.get(k):
+                    det["tab_" + k] = str(rec[k])
+            status = str(rec.get("answer"))
+            return self._upsert(
+                {**e, "status": status, "summary": status, "detail": det}
+            )
         if kind == "claude_login":
             # The Claude sign-in card (claude/login.py): a later record with the
             # same id adds the sessions that failed since.
@@ -1058,6 +1198,34 @@ class Fold:
             return self._upsert(
                 {**e, "status": "renewed", "summary": "renewed", "detail": det}
             )
+        if kind == "sign_in":
+            # A harness sign-in card (signin/core.py): each record is the whole
+            # card at its current step, upserted by its id.
+            cid = str(rec.get("card_id"))
+            prev = self._entries.get(cid)
+            det = {k: v for k, v in rec.items() if k not in ("kind", "ts")}
+            det.setdefault(
+                "restarted", prev["detail"].get("restarted") if prev else None
+            )
+            step = str(rec.get("step"))
+            return self._upsert(
+                _entry(
+                    cid,
+                    "sign_in",
+                    step,
+                    prev["ts"] if prev else ts,
+                    d.ERROR_GLYPH,
+                    title=f"{rec.get('label') or rec.get('harness')} sign-in",
+                    summary=step,
+                    detail=det,
+                )
+            )
+        if kind == "sign_in_done":
+            e = self._entries.get(str(rec.get("card_id")))
+            if e is None:
+                return []
+            det = {**e["detail"], "restarted": list(rec.get("restarted") or [])}
+            return self._upsert({**e, "detail": det})
         if kind in ("secret_gone", "secret_provided"):
             e = self._entries.get(str(rec.get("secret_id")))
             if e is None:
@@ -1486,6 +1654,10 @@ class Fold:
                 detail["path"] = path  # what the row's "show file" copies (file.peek)
             if lang := d.tool_lang(ev.name, ev.input):
                 detail["lang"] = lang  # the views' language (client/js/highlight.js)
+            act = activity(ev.name, ev.input)
+            if self._shell_failed and act in ("reading", "testing"):
+                act = "debugging"
+            detail["activity"] = act  # the running row's verbs (#1012)
             return self._upsert(
                 _entry(
                     ev.id,
@@ -1504,6 +1676,8 @@ class Fold:
             name = call.name if call else "result"
             inp = call.input if call else {}
             pair = d.edit_pair(name, inp)
+            if name == "Bash":
+                self._shell_failed = ev.is_error
             prev = self._entries.get(ev.id)
             detail: dict[str, Any] = (
                 dict(prev["detail"]) if prev else {"args": "", "steps": 0}
@@ -1565,7 +1739,7 @@ class Fold:
             error = ""
             if ev.is_error and not interrupted:
                 error = (
-                    "Claude sign-in failed"
+                    "Sign-in failed"
                     if ev.auth_failed
                     else f"turn failed ({ev.subtype or 'error'})"
                 )

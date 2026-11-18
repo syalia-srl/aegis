@@ -193,16 +193,6 @@ async def test_an_idle_browser_stops_and_reopens_signed_in(tmp_path, site, monke
         await w.br.shutdown()
 
 
-async def test_multi_user_mode_has_no_browsers(tmp_path, site):
-    async def deliver(*a):
-        return True
-
-    br = Browsers(tmp_path, lambda *a: None, lambda ch: 0, deliver, multi_user=True)
-    with pytest.raises(OpError) as e:
-        await br.open_("ana", site)
-    assert e.value.code == "browser_unavailable"
-
-
 async def test_an_agent_drives_its_browser_through_the_tools(
     tmp_path, site, fake_claude
 ):

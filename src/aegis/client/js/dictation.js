@@ -5,12 +5,18 @@
 // "Audio never leaves the browser"). The numbers below were measured on Alex's
 // own dictations and phone (docs/superpowers/specs/2026-10-08-dictation-design.md
 // and 2026-10-09-dictation-live-text-design.md).
+//
+// A mount may hand the engine a `transcribe` hook instead (a host's speech
+// service, spec 06): the mic and the chunker stay, the model is never loaded,
+// and each piece's samples go to the hook on the main thread.
 
 export const SR = 16000;
 // Two lanes (docs/superpowers/specs/2026-10-09-dictation-live-text-design.md):
 // provisional pieces of 4 to 8 s that show words a second after a pause, and
 // final pieces of 20 to 28 s made of them, whose text replaces the provisional
 // text. Joined-up finals measured 29.4% WER against 30.4% for a plain 20 s cut.
+import { labelsFor } from "./labels.js";
+
 const PREVIEW_MIN = 4 * SR;
 const PREVIEW_MAX = 8 * SR;
 const FINAL_MIN = 20 * SR;
@@ -149,8 +155,8 @@ export class Chunker {
 
 // A stop the person did not ask for says why; the four they ask for say nothing.
 const STOPPED = {
-  track: "Microphone stopped: the browser ended the microphone",
-  suspended: "Microphone stopped: the browser suspended the audio",
+  track: "dictation.stoppedTrack",
+  suspended: "dictation.stoppedSuspended",
 };
 
 // The microphone, mono at 16 kHz. Resolves to the function that stops it.
@@ -311,8 +317,8 @@ export async function store(base) {
 }
 
 export class Dictation {
-  constructor({ prepare, onState = () => {}, onLevel = () => {}, onError = () => {} }) {
-    Object.assign(this, { prepare, onState, onLevel, onError });
+  constructor({ prepare, transcribe = null, onState = () => {}, onLevel = () => {}, onError = () => {}, t = labelsFor("en") }) {
+    Object.assign(this, { prepare, transcribe, onState, onLevel, onError, t });
     this.state = "idle";
     this.target = null;
     this.rec = null; // the recording that is listening
@@ -367,7 +373,9 @@ export class Dictation {
     this.rec = rec;
     this.target = target;
     this.recs.add(rec);
-    this.setState(this.up ? "listening" : "loading");
+    // A host's hook needs no model, so there is nothing to load: the mic and
+    // the pieces are all this path uses (spec 06, "transcribe").
+    this.setState(this.transcribe || this.up ? "listening" : "loading");
     try {
       rec.stopCapture = await source(
         (s) => {
@@ -377,15 +385,19 @@ export class Dictation {
         (why) => this.rec === rec && this.stop(why),
       );
     } catch (e) {
-      return this.abort(rec, `Microphone unavailable: ${e?.message ?? e}`);
+      return this.abort(rec, this.t("dictation.unavailable", { error: e?.message ?? e }));
     }
     if (rec.stopped) await rec.stopCapture(); // stopped while asking for the mic
     try {
-      const p = await this.prepare();
-      rec.keywords = (p.keywords || []).join("\n");
-      await this.boot(p.base);
+      // A host's transcribe hook replaces the workers, so neither the model
+      // (17.8 MB) nor the server's keywords are needed.
+      if (!this.transcribe) {
+        const p = await this.prepare();
+        rec.keywords = (p.keywords || []).join("\n");
+        await this.boot(p.base);
+      }
     } catch (e) {
-      return this.abort(rec, `Dictation model unavailable: ${e?.message ?? e}`);
+      return this.abort(rec, this.t("dictation.modelUnavailable", { error: e?.message ?? e }));
     }
     if (this.rec === rec) this.setState("listening");
     this.dispatch();
@@ -399,8 +411,8 @@ export class Dictation {
     if (rec.stopCapture) await rec.stopCapture();
     this.onLevel(0);
     for (const p of rec.chunker.finish(rec.emitted === 0)) this.enqueue(rec, p);
-    this.settle();
-    if (STOPPED[reason]) this.onError(STOPPED[reason]);
+    this.settleState();
+    if (STOPPED[reason]) this.onError(this.t(STOPPED[reason]));
   }
 
   boot(base) {
@@ -443,6 +455,24 @@ export class Dictation {
   }
 
   dispatch() {
+    // A host's hook takes each piece as it is cut, on the main thread: no
+    // worker, no transfer, and the engine never waits for a model to load.
+    if (this.transcribe) {
+      while (this.queue.length) {
+        const job = this.queue.shift();
+        // Promise.resolve().then also catches a hook that throws before its
+        // first await, which must land as a failed piece like a worker error.
+        Promise.resolve()
+          .then(() => this.transcribe(job.audio))
+          .then((text) => this.settle(job, String(text || ""), false))
+          .catch((e) => this.settle(job, "", true, e?.message ?? String(e)))
+          .finally(() => {
+            this.dispatch();
+            this.settleState();
+          });
+      }
+      return;
+    }
     if (!this.up) return;
     for (const w of this.workers) {
       if (w.job || !this.queue.length) continue;
@@ -456,18 +486,26 @@ export class Dictation {
     const job = w.job;
     w.job = null;
     if (!job) return;
+    if (data.type === "text") this.settle(job, data.text, false);
+    else this.settle(job, "", true, data.message);
+    this.dispatch();
+    this.settleState();
+  }
+
+  // One piece's result lands in the transcript, from a worker or a host's
+  // hook alike. Provisional pieces land in order. A final lands as soon as
+  // its parts are done and the pieces it covers are placed, so it never holds
+  // back the provisional text behind it. A final with a failed part leaves
+  // the provisional text as it is: a wrong half must not wipe words on screen.
+  settle(job, text, failed = false, message = "") {
     const { rec, item } = job;
-    if (data.type === "text") item.texts[job.i] = data.text;
+    if (!failed) item.texts[job.i] = text;
     else {
       item.texts[job.i] = "";
       item.failed = true;
-      this.onError(`A piece of ${job.secs.toFixed(1)} s could not be transcribed: ${data.message}`);
+      this.onError(this.t("dictation.pieceFailed", { secs: job.secs.toFixed(1), message }));
     }
     item.jobs--;
-    // Provisional pieces land in order. A final lands as soon as its parts are
-    // done and the pieces it covers are placed, so it never holds back the
-    // provisional text behind it. A final with a failed part leaves the
-    // provisional text as it is: a wrong half must not wipe words on screen.
     for (let i = 0; i < rec.items.length; ) {
       const it = rec.items[i];
       if (it.jobs > 0 || (it.final && !it.covers.every((c) => c.done))) {
@@ -477,15 +515,13 @@ export class Dictation {
       }
       rec.items.splice(i, 1);
       it.done = true;
-      const text = it.texts.filter(Boolean).join(" ");
-      if (!it.final) insert(rec, it, text);
-      else if (!it.failed) replace(rec, it, text);
+      const joined = it.texts.filter(Boolean).join(" ");
+      if (!it.final) insert(rec, it, joined);
+      else if (!it.failed) replace(rec, it, joined);
     }
-    this.dispatch();
-    this.settle();
   }
 
-  settle() {
+  settleState() {
     for (const r of this.recs) if (r !== this.rec && !r.items.length) this.recs.delete(r);
     if (!this.rec) this.setState(this.recs.size ? "finishing" : "idle");
   }
@@ -499,6 +535,6 @@ export class Dictation {
     rec.items = [];
     this.recs.delete(rec);
     this.onError(message);
-    this.settle();
+    this.settleState();
   }
 }

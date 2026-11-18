@@ -2,15 +2,25 @@
 srv.ops, with the fake claude behind it (spec 2026-10-23-library-server)."""
 
 import asyncio
+import json
 import signal
+import socket
 import subprocess
 import sys
 from pathlib import Path
 
 import httpx
 import pytest
+import uvicorn
+from starlette.applications import Starlette
+from starlette.responses import PlainTextResponse
+from starlette.routing import Mount, Route
+from websockets.asyncio.client import connect
 
 from aegis import OpError, Server, Session, SessionNotFound, StartError, Turn
+from aegis.web import PROTO
+
+from .policies import Named, Who
 from aegis.api import (
     Prose,
     RunInfo,
@@ -27,13 +37,23 @@ from aegis.api.stubs import render
 
 CONFIG = """\
 default_agent: opus
+max_workers: 1
 agents:
   opus: {harness: claude-code, model: opus, effort: low, permission: full}
 queues:
-  work: {agent: opus, max_parallel: 1}
+  work: {agent: opus}
 """
 
 STUB = Path(__file__).parents[1] / "src" / "aegis" / "api" / "ops.pyi"
+
+
+class NoSpawn(Named):
+    """A host policy that refuses every start, whoever asks."""
+
+    def can(self, who, action, session):
+        if action == "spawn":
+            return False
+        return super().can(who, action, session)
 
 
 @pytest.fixture
@@ -48,6 +68,33 @@ async def test_it_listens_on_a_free_port_and_serves_the_client(srv: Server):
     async with httpx.AsyncClient(follow_redirects=True) as c:
         r = await c.get(srv.url)
     assert r.status_code == 200
+
+
+async def test_the_port_accepts_while_boot_resumes_sessions(
+    tmp_path: Path, fake_claude: str, monkeypatch
+):
+    # A harness boot resumes connects to /mcp at once; a refusal there costs
+    # a Claude session aegis's tools until its process ends (#1024).
+    from aegis.app import App
+
+    seen: list[str] = []
+    boot = App.boot
+
+    async def probing(self):
+        port = int(self.sessions.mcp_url.split(":")[2].split("/")[0])
+        try:
+            _, w = await asyncio.open_connection("127.0.0.1", port)
+            w.close()
+            seen.append("accepted")
+        except OSError as e:
+            seen.append(type(e).__name__)
+        await boot(self)
+
+    monkeypatch.setattr(App, "boot", probing)
+    (tmp_path / ".aegis.yaml").write_text(CONFIG)
+    async with Server(tmp_path, claude=fake_claude):
+        pass
+    assert seen == ["accepted"]
 
 
 async def test_a_spawned_turn_ends_with_its_text(srv: Server):
@@ -142,6 +189,30 @@ async def test_the_committed_stub_matches_the_registry(srv: Server):
     assert fresh == STUB.read_text(), "run `make ops-stubs` and commit ops.pyi"
 
 
+async def test_a_policy_that_refuses_spawn_refuses_the_api_and_the_websocket(
+    tmp_path: Path, fake_claude: str
+):
+    (tmp_path / ".aegis.yaml").write_text(CONFIG)
+    async with Server(
+        tmp_path, claude=fake_claude, name="lab", policy=NoSpawn()
+    ) as srv:
+        with pytest.raises(OpError) as e:
+            await srv.sessions.spawn()
+        assert e.value.code == "refused"
+        token = srv.token_for(Who("ana"))
+        async with connect(
+            f"{srv.base_url.replace('http', 'ws')}/ws", origin=srv.base_url
+        ) as ws:
+            await ws.send(json.dumps({"t": "hello", "token": token, "proto": PROTO}))
+            assert json.loads(await ws.recv())["t"] == "welcome"
+            await ws.send(
+                json.dumps({"t": "call", "id": 1, "op": "session.spawn", "params": {}})
+            )
+            reply = json.loads(await ws.recv())
+            assert reply["t"] == "reply"
+            assert reply["error"]["code"] == "refused"
+
+
 async def test_one_server_per_process(tmp_path: Path, fake_claude: str):
     (tmp_path / ".aegis.yaml").write_text(CONFIG)
     async with Server(tmp_path, claude=fake_claude):
@@ -193,7 +264,7 @@ async def test_a_task_runs_on_a_worker_and_returns_its_result(srv: Server):
 async def test_a_pending_task_cancels(srv: Server):
     busy = await srv.queues.enqueue("work", "/busy 30")
     queued = await srv.queues.enqueue("work", "/md never")
-    assert (await queued.info()).status == "pending"  # max_parallel: 1
+    assert (await queued.info()).status == "pending"  # max_workers: 1
     assert (await queued.cancel()).status == "cancelled"
     assert (await busy.cancel()).status == "cancelled"
 
@@ -274,3 +345,161 @@ async def test_a_schedule_is_created_fired_paused_and_deleted(srv: Server):
     await sch.delete()
     with pytest.raises(ScheduleNotFound):
         await srv.schedules.get("hourly-tick")
+
+
+# -- a host mounts the client under a prefix (plan 2026-11-08, slice a1) ------
+
+
+def free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+@pytest.fixture
+async def host_srv(tmp_path: Path, fake_claude: str):
+    """A Server for a host: named people, a prefix, and the host's origin."""
+    (tmp_path / ".aegis.yaml").write_text(CONFIG)
+    port = free_port()
+    async with Server(
+        tmp_path,
+        claude=fake_claude,
+        name="lab",
+        policy=Named(),
+        prefix="/aegis",
+        origins=[f"http://127.0.0.1:{port}"],
+    ) as s:
+        yield s, port
+
+
+async def serve_host(
+    srv: Server, port: int, app: Starlette | None = None
+) -> tuple[uvicorn.Server, asyncio.Task]:
+    """A host app with aegis mounted, on the port the fixture named."""
+    host = app or Starlette(
+        routes=[
+            Route("/", lambda _r: PlainTextResponse("host page")),
+            Mount("/aegis", srv.asgi),
+        ]
+    )
+    server = uvicorn.Server(
+        uvicorn.Config(host, host="127.0.0.1", port=port, log_level="warning")
+    )
+    task = asyncio.create_task(server.serve())
+    for _ in range(1000):
+        if server.started:
+            return server, task
+        await asyncio.sleep(0.01)
+    raise AssertionError("the host app did not start")
+
+
+async def test_asgi_mounts_at_the_hosts_prefix(host_srv):
+    srv, port = host_srv
+    server, task = await serve_host(srv, port)
+    try:
+        async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}") as c:
+            page = await c.get("/aegis/")
+            assert page.status_code == 200
+            assert 'href="/aegis/static/css/client.css"' in page.text
+            entry = await c.get("/aegis/aegis.js")
+            assert entry.status_code == 200
+            assert entry.headers["content-type"].startswith("text/javascript")
+            manifest = (await c.get("/aegis/manifest.json")).json()
+            assert manifest["prefix"] == "/aegis"
+        async with connect(
+            f"ws://127.0.0.1:{port}/aegis/ws",
+            origin=f"http://127.0.0.1:{port}",
+        ) as ws:
+            await ws.send(
+                json.dumps(
+                    {"t": "hello", "token": srv.token_for(Who("ana")), "proto": PROTO}
+                )
+            )
+            welcome = json.loads(await ws.recv())
+            assert welcome["t"] == "welcome" and welcome["me"]["name"] == "ana"
+    finally:
+        server.should_exit = True
+        await task
+
+
+async def test_the_hosts_mount_serves_no_mcp_while_the_loopback_listener_does(
+    host_srv,
+):
+    """Harness children reach the tools on the Server's listener at /mcp; the
+    app a host mounts at /aegis must not put them on its public origin."""
+    srv, port = host_srv
+    server, task = await serve_host(srv, port)
+    try:
+        payload = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
+        async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}") as c:
+            gone = await c.post("/aegis/mcp", json=payload)
+            assert gone.status_code == 404
+        async with httpx.AsyncClient() as c:
+            here = await c.post(
+                f"{srv.base_url}/mcp",
+                json=payload,
+                headers={"accept": "application/json, text/event-stream"},
+            )
+            assert here.status_code == 200
+            assert here.json()["result"]["tools"]
+        s = await srv.as_who(Who("ana")).sessions.spawn("/mcp meta {}")
+        turn = await s.wait(timeout=20)
+        assert "mcp ok:" in turn.text
+    finally:
+        server.should_exit = True
+        await task
+
+
+async def test_a_prefixed_server_keeps_the_loopback_sign_in_url(host_srv):
+    srv, _ = host_srv
+    assert srv.url == f"{srv.base_url}/?token={srv.token}"
+    assert srv.token_for(Who("ana")) != srv.token
+
+
+async def test_a_host_signs_the_browser_in_for_sent_files(host_srv, tmp_path: Path):
+    """A minted token is enough for the websocket, but a sent file is fetched
+    over HTTP, which cannot carry that hello. The host sets the same session
+    cookie the standalone sign-in does; without it a narrowing policy refuses
+    the file."""
+    from aegis import files
+
+    srv, port = host_srv
+    who = Who("ana")
+    sid = (await srv.as_who(who).sessions.spawn()).log_id
+    src = tmp_path / "host-note.txt"
+    src.write_text("a note for the browser")
+    rec = files.store(srv.app.roots.state_root, src, log_id=sid)
+    path = "/aegis" + files.url(rec["file_id"], rec["name"])
+    token = srv.token_for(who)
+
+    async def page(request):
+        return srv.sign_in(PlainTextResponse("host page"), token, request)
+
+    host = Starlette(
+        routes=[Route("/", page), Mount("/aegis", srv.asgi)],
+    )
+    server, task = await serve_host(srv, port, app=host)
+    try:
+        async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}") as c:
+            refused = await c.get(path)
+            assert refused.status_code == 404
+            signed = await c.get("/")
+            assert signed.status_code == 200
+            cookie = signed.headers["set-cookie"].lower()
+            assert "httponly" in cookie and "samesite=strict" in cookie
+            got = await c.get(path)
+            assert got.status_code == 200
+            assert got.content == b"a note for the browser"
+    finally:
+        server.should_exit = True
+        await task
+
+
+async def test_the_host_fixture_spawns_or_reuses_one_session(host_srv, tmp_path: Path):
+    from .host_fixture import read_or_spawn
+
+    srv, _ = host_srv
+    first = await read_or_spawn(srv, Who("ana"), tmp_path / "session")
+    again = await read_or_spawn(srv, Who("ana"), tmp_path / "session")
+    assert (first, again) == (first, first)
+    assert await srv.as_who(Who("ana")).sessions.get(first) is not None

@@ -6,7 +6,7 @@ from aegis.ops import Caller, OpError
 
 from .conftest import until
 from .test_agents import mcp, turn
-from .test_links import OPEN, member_link, pair  # noqa: F401
+from .test_links import admin_link, pair  # noqa: F401
 
 
 def far_session(beta):
@@ -24,7 +24,7 @@ async def send(node, s, text):
 
 async def test_an_agents_far_handoff_archives_when_the_far_side_takes_it(pair):  # noqa: F811
     alpha, beta = pair
-    await member_link(alpha, beta, OPEN)
+    await admin_link(alpha, beta)
     here = await alpha.spawn(permission="write")
     log_id = here.log_id
     await turn(here, mcp("session_handoff", host="beta", msg="implement the plan"))
@@ -42,7 +42,7 @@ async def test_an_agents_far_handoff_archives_when_the_far_side_takes_it(pair): 
 
 async def test_a_persons_far_handoff_answers_with_the_far_server(pair):  # noqa: F811
     alpha, beta = pair
-    await member_link(alpha, beta, OPEN)
+    await admin_link(alpha, beta)
     here = await alpha.spawn()
     r = await send(alpha, here, "/handoff --agent opus@beta go on")
     assert r["server"] == "beta" and here.log_id in alpha.app.sessions.archived
@@ -51,7 +51,7 @@ async def test_a_persons_far_handoff_answers_with_the_far_server(pair):  # noqa:
 
 async def test_it_cannot_be_reopened(pair):  # noqa: F811
     alpha, beta = pair
-    await member_link(alpha, beta, OPEN)
+    await admin_link(alpha, beta)
     here = await alpha.spawn()
     await send(alpha, here, "/handoff --agent opus@beta go on")
     with pytest.raises(OpError) as e:
@@ -61,7 +61,8 @@ async def test_it_cannot_be_reopened(pair):  # noqa: F811
 
 async def test_a_refused_far_spawn_leaves_it_open_and_unlocked(pair):  # noqa: F811
     alpha, beta = pair
-    await member_link(alpha, beta, {})  # every pool closed for the link
+    await admin_link(alpha, beta)
+    await beta.app.registry.call("server.pause", {})  # beta starts nothing
     here = await alpha.spawn()
     with pytest.raises(OpError) as e:
         await send(alpha, here, "/handoff --agent opus@beta go on")
@@ -72,7 +73,8 @@ async def test_a_refused_far_spawn_leaves_it_open_and_unlocked(pair):  # noqa: F
 
 async def test_a_refused_far_spawn_after_the_turn_gives_the_agent_its_session(pair):  # noqa: F811
     alpha, beta = pair
-    await member_link(alpha, beta, {})
+    await admin_link(alpha, beta)
+    await beta.app.registry.call("server.pause", {})
     here = await alpha.spawn()
     await turn(here, mcp("session_handoff", host="beta"))
     await until(lambda: here.continued_by is None, 8, "the handoff called off")
@@ -82,7 +84,7 @@ async def test_a_refused_far_spawn_after_the_turn_gives_the_agent_its_session(pa
 
 async def test_open_children_refuse_a_far_handoff(pair):  # noqa: F811
     alpha, beta = pair
-    await member_link(alpha, beta, OPEN)
+    await admin_link(alpha, beta)
     here = await alpha.spawn()
     await alpha.app.registry.call(
         "session.spawn", {"agent": "opus"}, Caller("agent", here.log_id)
@@ -94,7 +96,7 @@ async def test_open_children_refuse_a_far_handoff(pair):  # noqa: F811
 
 async def test_a_live_run_refuses_a_far_handoff(pair, monkeypatch):  # noqa: F811
     alpha, beta = pair
-    await member_link(alpha, beta, OPEN)
+    await admin_link(alpha, beta)
     here = await alpha.spawn()
 
     class Run:

@@ -28,3 +28,12 @@ package = "cursor-agent"
 min = "2026.10.14"
 max = "2026.10.14"
 hint = "cursor-agent comes from Cursor's installer, not npm."
+
+[pi]
+# pi moved from @mariozechner/pi-coding-agent (stale at 0.73.1, no MCP) to
+# this package. min was exercised by hand against pi 1.5.0 (spec
+# 2026-11-05-pi-harness-design.html); the canary does not cover it yet.
+package = "@earendil-works/pi-coding-agent"
+min = "1.5.0"
+max = "1.5.0"
+hint = "The @mariozechner/pi-coding-agent package is the stale old name."

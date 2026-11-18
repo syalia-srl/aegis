@@ -39,13 +39,13 @@ function ranked(query, rows, key) {
 }
 
 // The values an argument kind takes. `model` picks the efforts it offers.
-function values(kind, catalog, model) {
+function values(kind, catalog, model, t) {
   if (kind === "models")
     return catalog.models.map((m) => ({ v: m.value, doc: `${m.label} · ${modelMeta(m)}. ${m.doc}`, source: m.efforts.length ? "effort" : "" }));
   if (kind === "permissions") return catalog.permissions.map((p) => ({ v: p, doc: "", source: "" }));
   if (kind === "tutorials") return (catalog.tutorials || []).map((t) => ({ v: t.id, doc: t.title, source: "" }));
   if (kind === "workflows")
-    return (catalog.workflows || []).map((w) => ({ v: w.id, doc: w.title, source: w.source === "builtin" ? "built in" : "" }));
+    return (catalog.workflows || []).map((w) => ({ v: w.id, doc: w.title, source: w.source === "builtin" ? t("commands.builtIn") : "" }));
   if (kind === "efforts") {
     const m = catalog.models.find((x) => model && (x.value === model || x.resolved === model)) || null;
     return (m ? m.efforts : ["low", "medium", "high", "xhigh", "max"]).map((e) => ({ v: e, doc: "", source: "" }));
@@ -56,17 +56,17 @@ function values(kind, catalog, model) {
 // /spawn's flags as commands.parse_spawn reads them: each before the prompt,
 // each but --quiet followed by its value. null: a value with no fixed list.
 const SPAWN_FLAGS = {
-  quiet: [null, "no tab until its turn ends; needs a prompt"],
-  model: ["models", "the new session's model"],
-  effort: ["efforts", "its reasoning effort"],
-  permission: ["permissions", "what it may do, at most yours"],
-  cwd: [null, "the directory it works in"],
+  quiet: [null, "commands.flag.quiet"],
+  model: ["models", "commands.flag.model"],
+  effort: ["efforts", "commands.flag.effort"],
+  permission: ["permissions", "commands.flag.spawnPermission"],
+  cwd: [null, "commands.flag.cwd"],
 };
 
 // `before`: the whole words after `/spawn`; `partial`: the one being typed.
 // The first word is the agent, `agent@server` for a linked server's; flags
 // follow; the first other word starts the prompt, which completes nothing.
-function spawnChoices(before, partial, catalog) {
+function spawnChoices(before, partial, catalog, t) {
   const agents = catalog.agents || [];
   if (!before.length) return agents;
   let pending = null;
@@ -81,25 +81,25 @@ function spawnChoices(before, partial, catalog) {
     if (!flag) return [];
     if (w !== "--quiet") pending = w.slice(2);
   }
-  if (pending) return values(SPAWN_FLAGS[pending][0], catalog, model);
+  if (pending) return values(SPAWN_FLAGS[pending][0], catalog, model, t);
   if (!partial.startsWith("-")) return [];
   return Object.entries(SPAWN_FLAGS)
     .filter(([f]) => !before.includes(`--${f}`))
-    .map(([f, [, doc]]) => ({ v: `--${f}`, doc, source: "" }));
+    .map(([f, [, doc]]) => ({ v: `--${f}`, doc: t(doc), source: "" }));
 }
 
 // /handoff's flags as commands.parse_handoff reads them: each before the text.
 const HANDOFF_FLAGS = {
-  agent: ["agents", "the agent that continues, agent@server for a linked server's"],
-  model: ["models", "the new session's model"],
-  effort: ["efforts", "its reasoning effort"],
-  permission: ["permissions", "what it may do"],
-  cwd: [null, "the directory it works in"],
+  agent: ["agents", "commands.flag.handoffAgent"],
+  model: ["models", "commands.flag.model"],
+  effort: ["efforts", "commands.flag.effort"],
+  permission: ["permissions", "commands.flag.handoffPermission"],
+  cwd: [null, "commands.flag.cwd"],
 };
 
 // `before`: the whole words after `/handoff`; the first that is no flag starts
 // the text, which completes nothing.
-function handoffChoices(before, partial, catalog, meta) {
+function handoffChoices(before, partial, catalog, meta, t) {
   let pending = null;
   let model = meta && meta.model;
   for (const w of before) {
@@ -112,27 +112,79 @@ function handoffChoices(before, partial, catalog, meta) {
     pending = w.slice(2);
   }
   if (pending === "agent") return catalog.agents || [];
-  if (pending) return values(HANDOFF_FLAGS[pending][0], catalog, model);
+  if (pending) return values(HANDOFF_FLAGS[pending][0], catalog, model, t);
   if (!partial.startsWith("-")) return [];
   return Object.entries(HANDOFF_FLAGS)
     .filter(([f]) => !before.includes(`--${f}`))
-    .map(([f, [, doc]]) => ({ v: `--${f}`, doc, source: "" }));
+    .map(([f, [, doc]]) => ({ v: `--${f}`, doc: t(doc), source: "" }));
 }
 
 // /announce's flags stand anywhere (commands.parse_announce); a word that
 // does not start with "-" is the text, which completes nothing.
-function announceChoices(before, partial) {
+function announceChoices(before, partial, t) {
   if (!partial.startsWith("-") || before.at(-1) === "--until") return [];
   return [
-    ["--until", "HH:MM: end it then"],
-    ["--critical", "mark it critical"],
+    ["--until", t("commands.flag.until")],
+    ["--critical", t("commands.flag.critical")],
   ]
     .filter(([f]) => !before.includes(f))
     .map(([v, doc]) => ({ v, doc, source: "" }));
 }
 
+// The @ word being typed at `caret` (mentions.py): in the run of mentions a
+// line starts with, it names an agent or a session; after the first other
+// word it only puts a session's handle into the text. null when the caret is
+// in no such word, or the line starts with @@, an escaped @.
+export function mentionAt(line, caret) {
+  if (line.startsWith("@@")) return null;
+  const before = line.slice(0, caret);
+  const m = /(^|\s)@(!?(?:s:)?)([A-Za-z0-9._-]*)$/.exec(before);
+  if (!m) return null;
+  const start = caret - m[3].length - m[2].length - 1;
+  const lead = /^(@!?(s:)?[A-Za-z0-9._@-]+\s+)*$/.test(line.slice(0, start));
+  return { start, end: caret, flag: m[2], q: m[3], lead };
+}
+
+// The rows for the @ word at `caret`. `sessions`: {handle, title, busy} of the
+// open sessions this one may mention. Each row's insert is the whole new line,
+// with `caret` just after the name it put in.
+export function completeMention(line, caret, catalog, sessions, t) {
+  const at = mentionAt(line, caret);
+  if (!at) return { items: [] };
+  // A linked server's agent (name@server) runs nowhere from here: not listed.
+  const agents = at.lead && !at.flag ? (catalog.agents || []).filter((a) => !a.v.includes("@")).map((a) => ({ v: a.v, doc: a.doc, source: t("commands.mention.agent") })) : [];
+  const live = sessions.map((s) => ({ v: s.handle, doc: s.title || "", source: t(s.busy ? "commands.mention.busy" : "commands.mention.session") }));
+  const rest = line.slice(at.end).replace(/^\S*\s*/, "");
+  const items = ranked(at.q, [...agents, ...live], (c) => c.v).map((c) => {
+    const head = `${line.slice(0, at.start)}@${at.flag}${c.v} `;
+    return {
+      insert: head + rest,
+      caret: head.length,
+      label: `@${c.v}`,
+      positions: c.positions.map((p) => p + 1),
+      hint: "",
+      doc: c.doc,
+      source: c.source,
+    };
+  });
+  return { items };
+}
+
+// The names a line's leading mentions use that are neither an agent nor a
+// session here, for the composer's outline. A name@server is the far
+// server's to check.
+export function unknownMentions(line, catalog, sessions) {
+  if (!line.startsWith("@") || line.startsWith("@@")) return [];
+  const names = new Set([...(catalog.agents || []).map((a) => a.v), ...sessions.map((s) => s.handle)]);
+  const out = [];
+  for (const m of line.matchAll(/@!?(?:s:)?([A-Za-z0-9._-]+)(@[A-Za-z0-9._-]+)?(?:\s+|$)/gy)) {
+    if (!m[2] && !names.has(m[1])) out.push(m[1]);
+  }
+  return out;
+}
+
 // What a line can become. `meta` is the session's card: its model, for /effort.
-export function complete(line, catalog, meta) {
+export function complete(line, catalog, meta, t) {
   if (!line.startsWith("/") || line.startsWith("//")) return { items: [] };
   const sp = line.indexOf(" ");
   if (sp < 0) {
@@ -157,15 +209,15 @@ export function complete(line, catalog, meta) {
     const before = words.filter(Boolean);
     choices =
       cmd.args === "spawn"
-        ? spawnChoices(before, partial, catalog)
+        ? spawnChoices(before, partial, catalog, t)
         : cmd.args === "handoff"
-          ? handoffChoices(before, partial, catalog, meta)
-          : announceChoices(before, partial);
+          ? handoffChoices(before, partial, catalog, meta, t)
+          : announceChoices(before, partial, t);
   } else {
     partial = line.slice(sp + 1).trim();
     if (partial.includes(" ")) return { items: [] };
     head = `/${name} `;
-    choices = values(cmd.args, catalog, meta && meta.model);
+    choices = values(cmd.args, catalog, meta && meta.model, t);
   }
   const items = ranked(partial, choices, (c) => c.v).map((c) => ({
     insert: `${head}${c.v} `,
@@ -204,8 +256,10 @@ function rowNode(item, on) {
 export class CommandMenu {
   // load(): Promise<catalog> for the focused session, or null when there is none.
   // run(line): send a line from the overlay. getLine/setLine: the composer.
-  constructor({ box, rows, filter, load, run, getLine, setLine, meta }) {
-    Object.assign(this, { box, rows, filter, load, run, getLine, setLine, meta });
+  // getCaret/sessions: where the caret is in the line, and the sessions an @
+  // completes (completeMention); without them the menu completes / alone.
+  constructor({ box, rows, filter, load, run, getLine, setLine, meta, t, getCaret, sessions }) {
+    Object.assign(this, { box, rows, filter, load, run, getLine, setLine, meta, t, getCaret, sessions });
     this.items = [];
     this.at = 0;
     this.catalog = null;
@@ -237,9 +291,15 @@ export class CommandMenu {
     return this.overlay ? this.filter.value : this.getLine();
   }
 
-  setText(v) {
+  setText(v, caret) {
     if (this.overlay) this.filter.value = v;
-    else this.setLine(v);
+    else this.setLine(v, caret);
+  }
+
+  // The @ word at the caret, inline only: the overlay types commands.
+  mention() {
+    if (this.overlay || !this.sessions || !this.getCaret) return null;
+    return mentionAt(this.getLine(), this.getCaret());
   }
 
   async show() {
@@ -272,11 +332,12 @@ export class CommandMenu {
   refresh() {
     if (!this.catalog) return;
     const line = this.line();
-    if (!line.startsWith("/") || line.startsWith("//")) {
+    const at = this.mention();
+    if (!at && (!line.startsWith("/") || line.startsWith("//"))) {
       if (!this.overlay) this.close();
       return;
     }
-    this.items = complete(line, this.catalog, this.meta()).items.slice(0, 50);
+    this.items = (at ? completeMention(line, this.getCaret(), this.catalog, this.sessions(), this.t) : complete(line, this.catalog, this.meta(), this.t)).items.slice(0, 50);
     this.at = 0;
     this.rows.replaceChildren(...this.items.map((it, i) => rowNode(it, i === this.at)));
     // Nothing to offer, as in /spawn's prompt (#764): the inline menu stays
@@ -287,6 +348,7 @@ export class CommandMenu {
   // Whether the line names a known command, for the composer's outline. An
   // incomplete catalog (claude gave no command list) cannot tell.
   known(line) {
+    if (line.startsWith("@")) return !this.catalog || !this.sessions || !unknownMentions(line, this.catalog, this.sessions()).length;
     if (!this.catalog || !this.catalog.complete) return true;
     const name = line.slice(1).split(/\s/)[0];
     return !name || this.catalog.commands.some((c) => c.name === name);
@@ -302,7 +364,7 @@ export class CommandMenu {
   accept() {
     const it = this.items[this.at];
     if (!it) return;
-    this.setText(it.insert);
+    this.setText(it.insert, it.caret);
     this.refresh();
   }
 

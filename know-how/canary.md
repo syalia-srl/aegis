@@ -36,6 +36,13 @@ passed on Claude Code 2.1.296 and failed on 2.1.301 (#442).
 Run several workers on a quiet machine only. At a load average of 29 a run
 reported 62 failures that a rerun a few minutes later did not.
 
+`tests/canary/test_sign_in.py` is the sign-in recipes' canary (#946): it runs
+each harness's real login command (`data/sign-in.toml`) in a scratch home and
+reads its screen with the recipe until the first step a person answers, then
+stops it. Nothing signs in and nothing reaches a provider but the login's own
+first request. A red one means the login redrew its screens: record them again
+with `tests/data/sign-in/record.py` and fix the recipe's rules.
+
 ## Read a failure
 
 Each failing test writes `.canary/<test>.json`, and CI turns it into the

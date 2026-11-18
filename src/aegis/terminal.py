@@ -68,7 +68,6 @@ class Terminal:
         self._on_output = on_output
         self._on_exit = on_exit
         self.proc: asyncio.subprocess.Process | None = None
-        self.user: str | None = None
         self.fd: int | None = None
         self.bytes_read = 0
         self.exited = asyncio.Event()
@@ -83,6 +82,9 @@ class Terminal:
         self._writing = False
         self._waiter: asyncio.Task | None = None
         self._starting = asyncio.Lock()
+        # Sees each chunk of output first and returns what may be kept and
+        # shown: a sign-in's masks tokens (#946). feed(text) -> str, flush() -> str.
+        self.tap = None
 
     @property
     def id(self) -> str:
@@ -111,13 +113,12 @@ class Terminal:
         cwd: Path,
         env: dict[str, str],
         cgroup: Path | None,
-        user: str | None = None,
         via: str | None = None,
     ) -> None:
         if self.running or self.starting:
             raise OpError("running", f"terminal {self.meta['name']} is running")
         async with self._starting:
-            await self._start(argv, cwd, env, cgroup, user, via)
+            await self._start(argv, cwd, env, cgroup, via)
 
     async def _start(
         self,
@@ -125,7 +126,6 @@ class Terminal:
         cwd: Path,
         env: dict[str, str],
         cgroup: Path | None,
-        user: str | None,
         via: str | None,
     ) -> None:
         cols, rows = self.meta["cols"], self.meta["rows"]
@@ -134,14 +134,13 @@ class Terminal:
         os.set_blocking(master, False)
         try:
             self.proc = await launch.pty(
-                argv, tty=slave, cwd=cwd, env=env, cgroup=cgroup, user=user, via=via
+                argv, tty=slave, cwd=cwd, env=env, cgroup=cgroup, via=via
             )
         except BaseException:
             os.close(master)
             raise
         finally:
             os.close(slave)
-        self.user = user
         self.fd = master
         self.exited = asyncio.Event()
         self._decoder.reset()
@@ -203,22 +202,20 @@ class Terminal:
     async def _signal(self, groups: set[int], sig: int) -> None:
         for pgid in groups:
             try:
-                await launch.signal_process_async(pgid, sig, user=self.user, group=True)
+                await launch.signal_process_async(pgid, sig, group=True)
             except OSError as e:
                 log.warning(
-                    "aegis: could not signal terminal group %s as %s: %s",
+                    "aegis: could not signal terminal group %s: %s",
                     pgid,
-                    self.user,
                     e,
                 )
         if self.proc is not None:
             try:
-                await launch.signal_process_async(self.proc.pid, sig, user=self.user)
+                await launch.signal_process_async(self.proc.pid, sig)
             except OSError as e:
                 log.warning(
-                    "aegis: could not signal terminal process %s as %s: %s",
+                    "aegis: could not signal terminal process %s: %s",
                     self.proc.pid,
-                    self.user,
                     e,
                 )
 
@@ -258,7 +255,10 @@ class Terminal:
 
     def _take(self, data: bytes) -> None:
         self.bytes_read += len(data)
-        if text := self._decoder.decode(data):
+        text = self._decoder.decode(data)
+        if text and self.tap is not None:
+            text = self.tap.feed(text)
+        if text:
             self._pending.append({"rev": self.store.output(text), "o": text})
 
     def _schedule(self) -> None:
@@ -332,7 +332,10 @@ class Terminal:
         if self._tick is not None:
             self._tick.cancel()
             self._tick = None
-        if rest := self._decoder.decode(b"", final=True):
+        rest = self._decoder.decode(b"", final=True)
+        if self.tap is not None:
+            rest = (self.tap.feed(rest) if rest else "") + self.tap.flush()
+        if rest:
             self._pending.append({"rev": self.store.output(rest), "o": rest})
         self.store.marker(f"exit {code}")
         self._flush()

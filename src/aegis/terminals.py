@@ -24,7 +24,6 @@ import asyncio
 import json
 import logging
 import os
-import pwd
 import secrets
 import time
 from collections.abc import Callable
@@ -51,13 +50,6 @@ META_KEYS = {"id", "name", "profile", "spec", "title", "cwd", "owner",
              "started_by", "cols", "rows", "state", "code", "reason"}  # fmt: skip
 
 
-def _passwd(user: str) -> pwd.struct_passwd:
-    try:
-        return pwd.getpwnam(user)
-    except KeyError:
-        raise PermissionError(f"Linux user {user} does not exist") from None
-
-
 def mint_term_id() -> str:
     return f"t-{time.strftime('%Y%m%d-%H%M%S')}-{secrets.token_hex(3)}"
 
@@ -70,19 +62,12 @@ class Terminals:
         profiles: Callable[[], dict[str, dict]],
         publish: Callable[[str, list[dict]], None],
         cgroups: Callable[[], SessionCgroups | None] = lambda: None,
-        acts_for: Callable[[str], str | None] = lambda owner: None,
-        role_of: Callable[[str], str | None] = lambda owner: None,
-        multi_user: bool = False,
     ) -> None:
         self.dir = state_root / "terminals"
         self.config_root = config_root
         self._profiles = profiles
         self._publish = publish
         self._cgroups = cgroups
-        # Who a terminal runs as, in multi-user mode (users.py).
-        self._acts_for = acts_for
-        self._role_of = role_of
-        self._multi_user = multi_user
         self.open: dict[str, Terminal] = {}
         self.archived: dict[str, dict] = {}
         self.closing: dict[str, Terminal] = {}  # closed, their program not yet ended
@@ -105,19 +90,7 @@ class Terminals:
             raise OpError("no_profile", f"no terminal profile named {profile!r}")
         if "error" in p:
             raise OpError("bad_profile", f"terminal profile {profile}: {p['error']}")
-        try:
-            user = self._acts_for(owner)
-            if user and cwd is None and self._role_of(owner) == "member":
-                # The aegis root is the server's: a member's terminal starts home.
-                where = Path(_passwd(user).pw_dir)
-            else:
-                where = None
-        except PermissionError as e:
-            raise OpError("no_linux_user", str(e)) from None
-        if where is None:
-            where = self._cwd(
-                p["cwd"] if cwd is None else cwd, under_root=cwd is not None
-            )
+        where = self._cwd(p["cwd"] if cwd is None else cwd, under_root=cwd is not None)
         tid = mint_term_id()
         meta = {
             "id": tid,
@@ -127,7 +100,6 @@ class Terminals:
             "title": p["cmd"] or login_shell(),
             "cwd": str(where),
             "owner": owner,
-            "linux_user": user,
             "started_by": started_by,
             "cols": COLS,
             "rows": ROWS,
@@ -146,18 +118,37 @@ class Terminals:
             raise
         return t
 
-    def _user(self, t: Terminal) -> str | None:
-        """The Linux user a terminal runs as: the one recorded when it was
-        opened, in multi-user mode. One opened before the mode for an owner
-        who now has a user may not start as the server."""
-        if not self._multi_user:
-            return None
-        user = t.meta.get("linux_user")
-        if user is None and self._acts_for(t.meta["owner"]) is not None:
-            raise PermissionError(
-                "this terminal was opened before multi-user mode; open a new one"
-            )
-        return user
+    async def spawn_ephemeral(
+        self,
+        name: str,
+        cmd: list[str],
+        env: dict[str, str],
+        unset: list[str],
+        cols: int,
+        owner: str,
+        tap,
+    ) -> Terminal:
+        """A terminal that leaves nothing on disk, for a sign-in (#946): no
+        cast, no meta.json, never archived. ``tap`` sees each chunk first
+        and returns what the ring and the browser get."""
+        spec = {"cmd": " ".join(cmd), "argv": cmd, "cwd": ".", "restart": "no",
+                "env": env, "unset": unset, "access": {}}  # fmt: skip
+        tid = mint_term_id()
+        meta = {"id": tid, "name": self._name(name), "profile": name, "spec": spec,
+                "title": " ".join(cmd), "cwd": str(self.config_root), "owner": owner,
+                "started_by": "aegis", "cols": cols, "rows": ROWS,
+                "state": "running", "code": None, "reason": None,
+                "created": time.time(), "archived": False, "ephemeral": True}  # fmt: skip
+        t = Terminal(meta, CastStore(self.dir / tid, persist=False),
+                     self._on_output, self._on_exit)  # fmt: skip
+        t.tap = tap
+        self.open[tid] = t
+        try:
+            await self._start(t)
+        except OpError:
+            del self.open[tid]
+            raise
+        return t
 
     def _cwd(self, rel: str, under_root: bool) -> Path:
         if under_root:
@@ -186,7 +177,8 @@ class Terminals:
             state="ended", reason="closed", archived=True, closed_at=time.time()
         )
         del self.open[tid]
-        self.archived[tid] = t.meta
+        if not t.meta.get("ephemeral"):
+            self.archived[tid] = t.meta
         self._save(t)
         self._publish("sessions", [{"remove": tid}])
         if t.running:
@@ -274,6 +266,10 @@ class Terminals:
         meta = json.loads(path.read_text())
         if missing := META_KEYS - set(meta):
             raise ValueError(f"meta.json lacks {sorted(missing)}")
+        if meta.get("linux_user") and not meta.get("archived"):
+            # A former member's terminal (#958): it ran as another Linux user.
+            meta.update(archived=True, state="ended", reason="multi_user_removed")
+            path.write_text(json.dumps(meta))
         if meta.get("archived"):
             self.archived[meta["id"]] = meta
             return
@@ -315,20 +311,19 @@ class Terminals:
         spec = t.meta["spec"]
         env = {**os.environ, **spec["env"],
                "TERM": "xterm-256color", "AEGIS_TERMINAL": t.meta["name"]}  # fmt: skip
+        for key in spec.get("unset", ()):
+            env.pop(key, None)
         cg = self._cgroups()
         cgroup = cg.create(t.id) if cg is not None else None
         try:
-            user = self._user(t)
-            cmd = argv(spec)
-            if user and spec["cmd"] is None:
-                cmd = [_passwd(user).pw_shell or "/bin/sh", "-l"]
+            cmd = spec.get("argv") or argv(spec)
             # A profile that names a proxy of its own keeps it.
             own = {k.lower() for k in spec["env"]} & {"https_proxy", "http_proxy"}
             via = None if own else launch.resolve_via()
-            await t.start(cmd, Path(t.meta["cwd"]), env, cgroup, user=user, via=via)
+            await t.start(cmd, Path(t.meta["cwd"]), env, cgroup, via=via)
         except OSError as e:
             if cg is not None:
-                cg.release(t.id, user=t.meta.get("linux_user"))
+                cg.release(t.id)
             raise OpError("spawn_failed", f"terminal {t.meta['name']}: {e}") from e
         t.meta.update(state="running", code=None, reason=None, started_at=time.time())
         self._save(t)
@@ -343,7 +338,7 @@ class Terminals:
         if t.meta["state"] == "running":
             t.meta["state"] = "exited"
         if (cg := self._cgroups()) is not None:
-            cg.release(t.id, user=t.meta.get("linux_user"))
+            cg.release(t.id)
         t.store.close()
         self._save(t)
         if not t.meta["archived"]:
@@ -360,6 +355,8 @@ class Terminals:
         return name
 
     def _save(self, t: Terminal) -> None:
+        if t.meta.get("ephemeral"):
+            return
         d = self.dir / t.id
         d.mkdir(parents=True, exist_ok=True)
         tmp = d / "meta.json.tmp"

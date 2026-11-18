@@ -9,8 +9,7 @@ principal, finds a file changed by hand; the scan parses only changed files
 (store.py). The usage log is pruned at most once a day, on a hint.
 
 Flags (checks.py) are computed when a memory is saved and in the app's daily
-pass, through a runner the caller gives, which in multi-user mode reads the
-member's files as the member. They are kept here, in memory, and in the
+pass, through a runner the caller gives. They are kept here, in memory, and in the
 usage db's ``flags`` table, which a principal's first check after a restart
 reads back: a flag an item did not have before, across restarts too, writes
 one ``flagged`` usage row.
@@ -231,8 +230,7 @@ class Knowledge:
         roots: list[str],
         everything: bool = False,
     ) -> None:
-        """Flag ``items`` (checks.flags), reading files through ``run``, as
-        the member in multi-user mode. With ``everything``, ``items`` is the
+        """Flag ``items`` (checks.flags), reading files through ``run``. With ``everything``, ``items`` is the
         whole store and an item no longer in it loses its flags."""
         today = date.today()
 

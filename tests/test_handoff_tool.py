@@ -107,10 +107,9 @@ async def test_held_messages_refuse_the_call(world):
     assert e.value.code == "held_messages" and a.continued_by is None
 
 
-async def test_a_monitor_refuses_the_call(world):
+async def test_a_background_task_refuses_the_call(world):
     a = await world.spawn()
-    params = {"description": "w", "done": "false", "progress": None, "source": None}
-    await world.app.registry.call("monitor.start", params, Caller("agent", a.log_id))
+    a.open_tasks.add("bg-1")  # a monitor follows the new session (#1019)
     with pytest.raises(OpError) as e:
         await ask(world, a)
     assert e.value.code == "has_wakers"

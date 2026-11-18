@@ -1,4 +1,5 @@
-"""A harness is the agent CLI a session runs: Claude Code, OpenCode or Codex.
+"""A harness is the agent CLI a session runs: Claude Code, OpenCode, Codex,
+Cursor or pi.
 
 ``Session`` keeps the store, the fold, the status, the inbox and the card.
 Everything it asks of the agent's process goes through ``Process``, and the
@@ -15,13 +16,15 @@ uses it, because how a token reaches the CLI is the harness's business
 from __future__ import annotations
 
 import os
+import tempfile
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from .claude.control import Catalog
+    from .policy import McpServer
     from .session import SpawnSpec
 
 
@@ -78,13 +81,38 @@ class Launch:
     # Harness tools the agent keeps although aegis replaces them
     # (claude/process.py REPLACED_TOOLS); other harnesses ignore it.
     keep_harness_tools: tuple[str, ...] = ()
-    # The Linux user the process runs as, in multi-user mode (launch.py).
-    user: str | None = None
     # The owner's knowledge setting is native: the harness starts without its
     # own skills and memory, which aegis's knowledge tools replace.
     knowledge_native: bool = False
     # The linked server this process reaches the internet through (exit.py).
     via: str | None = None
+    # What a host's spawn adds to the child's environment (#959).
+    env: Mapping[str, str] = field(default_factory=dict)
+    # The MCP servers beside aegis's own, values expanded (App.mcp_for, #960);
+    # a driver that writes them into an argv or a file calls mcp_servers.by_ref.
+    extra_mcp: tuple[McpServer, ...] = ()
+    # False: none of the harness's own tools, only MCP tools (#983).
+    harness_tools: bool = True
+    # An isolated session's own config directory (isolated_dirs); None reads
+    # the person's, as every other session does.
+    home: Path | None = None
+
+
+# The switches a driver may guarantee (Harness.contains, #983).
+CONTAINS = ("harness_tools", "isolated")
+
+
+def isolated_dirs(state_root: Path, harness: str, log_id: str) -> tuple[Path, Path]:
+    """An isolated session's working folder and its harness's config dir. The
+    folder is empty and outside any project, since harnesses look up from
+    their cwd for project config (a state root inside a project would not do),
+    and keeps its path across starts for the harnesses that key a resume by
+    cwd. The config dir is one per harness, under the state root."""
+    cwd = Path(tempfile.gettempdir()) / f"aegis-{os.getuid()}" / log_id
+    cwd.mkdir(mode=0o700, parents=True, exist_ok=True)
+    home = state_root / "harness-home" / harness
+    home.mkdir(parents=True, exist_ok=True)
+    return cwd, home
 
 
 SESSION_VAR = "AEGIS_SESSION"
@@ -105,7 +133,11 @@ def session_env(
     None (inherit) when there is no base either."""
     if launch.log_id is None:
         return None if base is None else dict(base)
-    env = {**(os.environ if base is None else base), SESSION_VAR: launch.log_id}
+    env = {
+        **(os.environ if base is None else base),
+        **launch.env,
+        SESSION_VAR: launch.log_id,
+    }
     if launch.mcp is not None:
         # `aegis call` reads these: the same endpoint and token as the MCP tools.
         env[URL_VAR], env[TOKEN_VAR] = launch.mcp
@@ -147,6 +179,11 @@ class Harness(Protocol):
     # new request.
     steers_notices: bool
     bin: str
+    # The transports of the MCP servers it can take besides aegis's (#960).
+    mcp_transports: frozenset[str]
+    # The product-agent switches it guarantees, out of CONTAINS (#983); a
+    # start asking for one it lacks is refused.
+    contains: frozenset[str]
 
     def process(self, launch: Launch) -> Process: ...
     async def probe(self, spec: SpawnSpec, stderr_path: Path) -> Catalog: ...
@@ -158,6 +195,7 @@ def harness_for(
     opencode_bin: str,
     codex_bin: str = "codex",
     cursor_bin: str = "cursor-agent",
+    pi_bin: str = "pi",
 ) -> Harness:
     if name == "claude-code":
         from .claude.harness import ClaudeCode
@@ -175,4 +213,8 @@ def harness_for(
         from .cursor.harness import Cursor
 
         return Cursor(cursor_bin)
+    if name == "pi":
+        from .pi.harness import Pi
+
+        return Pi(pi_bin)
     raise ValueError(f"no harness named {name!r}")

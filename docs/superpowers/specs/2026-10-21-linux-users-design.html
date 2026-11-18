@@ -130,7 +130,7 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)} pre .s{color:var(--ok)}
 <div class="chrome">
   <span>aegis</span>
   <span class="tab">spec · multi-user mode: tokens as Linux users</span>
-  <span class="st"><span class="pill acc">draft, in review</span><span class="pill">2026-10-21</span><span class="pill">follows #311</span></span>
+  <span class="st"><span class="pill acc">built, then removed in aegis 3.0 (#958)</span><span class="pill">2026-10-21</span><span class="pill">follows #311</span></span>
 </div>
 
 <div class="wrap">
@@ -160,7 +160,7 @@ pre .c{color:var(--faint)} pre .k{color:var(--accent)} pre .s{color:var(--ok)}
 
 <main>
 <h1>Multi-user mode: each token runs as a Linux user</h1>
-<div class="meta"><span>docs/superpowers/specs/2026-10-21-linux-users-design.html</span><span>·</span><span>not started</span></div>
+<div class="meta"><span>docs/superpowers/specs/2026-10-21-linux-users-design.html</span><span>·</span><span>removed in aegis 3.0 (#958)</span></div>
 <p class="lede">The tokens spec (#311) gave a shared server owners and roles, and left one gap open: every session still runs as the same Linux user, so one member's agent can write into another member's checkout, push with their GitHub credentials, and read the server's own token. This spec adds an opt-in multi-user mode in which each token names a Linux user, and every process a person starts, and every file the server reads or writes for them, runs as that user. The kernel enforces the boundary. aegis knows about Linux users and nothing about git or GitHub.</p>
 
 <h2 id="delivers"><span class="n">01</span>What this delivers</h2>

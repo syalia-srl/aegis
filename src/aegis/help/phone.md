@@ -153,7 +153,7 @@ service refuses it, or that fails five times in a row, is removed.
 ## The header on a phone
 
 Under 760 px wide the header is one row: the menu button, the session tabs,
-the button that lists every open session, and + for a new one. The menu button
+the button that lists every open session, and the + button for a new one. The menu button
 opens a drawer with the server and its connection, Fleet, and what a wider top
 bar shows as buttons: Schedules, Settings, Files, Journal, Knowledge, Usage,
 Notifications and Help.

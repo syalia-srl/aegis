@@ -3,12 +3,12 @@ agents.
 
 Reading is open to anyone, as with sessions. Changing follows the rule the
 queues apply to tasks (agent_ops.mine): an agent changes only the schedules it
-created, a member only the ones it owns, an admin any. A schedule an agent
+created; a person changes any. A schedule an agent
 creates records the agent's permission as its ceiling, and a new fire never
 starts an agent above it. A run with ``spawn: false`` may not call
 schedule_create (ops.NO_SPAWN), or it could start agents through a schedule.
 
-Across a trusted link an agent names a schedule ``name@server`` (agent_ops.across,
+Across a link an agent names a schedule ``name@server`` (agent_ops.across,
 as ``queue@server``), and the operation runs there. The far server keeps every
 rule, because the near server sends the agent as ``from_agent``: an agent there
 makes a schedule that waits for a person, and changes only what it made. A call
@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, Field
 from pydantic.json_schema import SkipJsonSchema
 
-from .agent_ops import FarAgent, across, far_error, from_trusted, split_address
+from .agent_ops import FarAgent, across, far_error, from_link, split_address
 from .agents import PERMISSION_ORDER
 from .clock import ClockError, clock_from
 from .ops import Caller, NoParams, OpError
@@ -35,7 +35,7 @@ from .schedule_log import DEFAULT_QUOTA, Check, Definition
 if TYPE_CHECKING:
     from .app import App
 
-AT_SERVER = "`name@server` is one on a server linked with trust."
+AT_SERVER = "`name@server` is one on a linked server."
 NAME = (
     "Two or three lowercase words joined by hyphens, unique on its server. " + AT_SERVER
 )
@@ -46,7 +46,7 @@ class _Strict(BaseModel):
 
 
 class FarOwner(FarAgent):
-    """An agent on a server linked with trust, as that server's link names it.
+    """An agent on a linked server, as that server's link names it.
     Its log id is what stays the same through a rename."""
 
     log_id: str
@@ -55,7 +55,7 @@ class FarOwner(FarAgent):
 
 class ScheduleName(_Strict):
     name: str = Field(description="The schedule's name. " + AT_SERVER)
-    # Set only by a trusted link, for the agent there that called.
+    # Set only by a link, for the agent there that called.
     from_agent: SkipJsonSchema[FarOwner | None] = Field(None, exclude=True)
 
 
@@ -68,7 +68,7 @@ class ScheduleResume(ScheduleName):
 
 class ScheduleDef(Definition):
     name: str = Field(description=NAME)
-    # Set only by a trusted link, for the agent there that called.
+    # Set only by a link, for the agent there that called.
     from_agent: SkipJsonSchema[FarOwner | None] = Field(None, exclude=True)
 
 
@@ -89,7 +89,7 @@ class ScheduleTest(_Strict):
     name: str | None = Field(
         None,
         description="The schedule being edited, whose last fire the check compares "
-        "with. `name@server` tries it on a server linked with trust, and that "
+        "with. `name@server` tries it on a linked server, and that "
         "schedule need not exist yet.",
     )
 
@@ -104,13 +104,13 @@ def register_schedule_ops(app: App) -> None:
         """The far agent a call speaks for, checked, or None."""
         if p.from_agent is None:
             return None
-        from_trusted(app, caller, p.from_agent)
+        from_link(app, caller, p.from_agent)
         if p.from_agent.permission not in PERMISSION_ORDER:
             raise OpError("bad_sender", "a sender's permission is one of ours")
         return p.from_agent
 
     async def far_call(op: str, p, caller: Caller, *, speaks: bool = True):
-        """A schedule on a server linked with trust, ``name@server``: the call
+        """A schedule on a linked server, ``name@server``: the call
         goes there, and what comes back carries the address. None when the
         schedule is here, with ``p.name`` left as its name on this server."""
         name, server = split_address(p.name or "", app.server_name)
@@ -133,7 +133,7 @@ def register_schedule_ops(app: App) -> None:
         try:
             r = await link.call(op, params)
         except OpError as e:
-            raise far_error(e, server, trusted=True) from None
+            raise far_error(e, server) from None
         return {"result": addressed(r, server)}
 
     def addressed(r, server: str):
@@ -180,6 +180,9 @@ def register_schedule_ops(app: App) -> None:
             "log_id": s.log_id,
             "principal": who.name,
             "ceiling": s.spec.permission,
+            **({"scope": s.spec.scope.record()} if not s.spec.scope.any else {}),
+            # Its runs stay where the maker's host put it (#959).
+            **({"tags": dict(s.spec.tags)} if s.spec.tags else {}),
         }
 
     def cwd(raw: str | None, caller: Caller) -> Path:
@@ -188,7 +191,7 @@ def register_schedule_ops(app: App) -> None:
 
     def mine(name: str, caller: Caller, far: FarOwner | None = None):
         s = sch.items.get(name)
-        if s is None:
+        if s is None or not app.owns_schedule(app.who(caller), name):
             raise OpError("no_schedule", f"no schedule {name!r}")
         o = s.owner
         made = o.get("far") or {}
@@ -203,11 +206,6 @@ def register_schedule_ops(app: App) -> None:
         if refused:
             raise OpError(
                 "not_yours", "agents can change only the schedules they created"
-            )
-        who = app.who(caller)
-        if not who.is_admin and o.get("principal") != who.name:
-            raise OpError(
-                "not_owner", f"{name} belongs to {o.get('principal')}; you can read it"
             )
         return s
 
@@ -235,28 +233,22 @@ def register_schedule_ops(app: App) -> None:
     def definition(p: ScheduleDef) -> Definition:
         return Definition.model_validate(p.model_dump(exclude={"name"}))
 
-    @r.op("schedule.list", NoParams, agent=True, read=True)
+    @r.op("schedule.list", NoParams, agent=True, read=True, access="read")
     async def schedule_list(_, caller):
         """Every schedule on this server: its clock, layers and owner, its next
         tick, its live runs, and whether it is paused. An agent also gets each
-        server's linked with trust, named `name@server` and with `server`."""
-        who = app.who(caller)
-        out = [
-            w
-            for w in sch.wire_all()
-            if app.sees(who, sch.items[w["name"]].owner.get("principal"))
-        ]
-        if caller.is_agent and who.is_admin:
+        linked server's, named `name@server` and with `server`."""
+        me = app.who(caller)
+        out = [w for w in sch.wire_all() if app.owns_schedule(me, w["name"])]
+        if caller.is_agent:
             out += await far_schedules()
         return out
 
     async def far_schedules() -> list[dict]:
-        """Every trusted server's schedules; one that cannot answer now has
+        """Every linked server's schedules; one that cannot answer now has
         none, as in session_list."""
         out = []
         for link in app.links.up():
-            if not app.links.trusted(link.name):
-                continue
             try:
                 listed = await link.call("schedule.list")
             except OpError:
@@ -266,18 +258,18 @@ def register_schedule_ops(app: App) -> None:
                     out.append(addressed(w, link.name))
         return out
 
-    @r.op("schedule.runs", ScheduleRuns, agent=True, read=True)
+    @r.op("schedule.runs", ScheduleRuns, agent=True, read=True, access="read")
     async def schedule_runs(p: ScheduleRuns, caller):
         """One schedule's fires and ticks, newest first, a page at a time. The
         ticks that changed nothing are left out unless you pass quiet.
-        `name@server` reads one on a server linked with trust."""
+        `name@server` reads one on a linked server."""
         if (
             far := await far_call("schedule.runs", p, caller, speaks=False)
         ) is not None:
             return far["result"]
         return sch.runs(p.name, p.offset, p.limit, p.quiet)
 
-    @r.op("schedule.pools", NoParams, read=True)
+    @r.op("schedule.pools", NoParams, read=True, access="read")
     async def schedule_pools(_, caller):
         """The pools a schedule's quota lines may name, with their windows, and
         the lines a schedule gets when it names none: for the view's editor."""
@@ -286,7 +278,7 @@ def register_schedule_ops(app: App) -> None:
             "default": DEFAULT_QUOTA,
         }
 
-    @r.op("schedule.create", ScheduleDef, agent=True)
+    @r.op("schedule.create", ScheduleDef, agent=True, work=True)
     async def schedule_create(p: ScheduleDef, caller):
         """Fire a prompt on a clock: every 5m, a cron line, or once at a time,
         into a new session from an agent or into an existing session's inbox.
@@ -294,8 +286,8 @@ def register_schedule_ops(app: App) -> None:
         stdout different from the last fire's, and that stdout is appended to
         the prompt. You own what you create; schedule_delete removes it. A
         schedule you create or change waits, paused, until a person approves it
-        from the card under your call. `name@server` makes it on a server linked
-        with trust: it lives and ticks there, its runs start there, and a
+        from the card under your call. `name@server` makes it on a linked server:
+        it lives and ticks there, its runs start there, and a
         directory or a session in it is that server's."""
         if (far := await far_edit("schedule.create", "created", p, caller)) is not None:
             return far["result"]
@@ -307,8 +299,8 @@ def register_schedule_ops(app: App) -> None:
     @r.op("schedule.update", ScheduleDef, agent=True)
     async def schedule_update(p: ScheduleDef, caller):
         """Replace a schedule you own with a new definition. It applies from the
-        next tick; a live run is not touched. `name@server` is one on a server
-        linked with trust."""
+        next tick; a live run is not touched. `name@server` is one on a linked
+        server."""
         if (far := await far_edit("schedule.update", "updated", p, caller)) is not None:
             return far["result"]
         by = far_agent(p, caller)
@@ -322,7 +314,7 @@ def register_schedule_ops(app: App) -> None:
     @r.op("schedule.delete", ScheduleName, agent=True)
     async def schedule_delete(p: ScheduleName, caller):
         """Delete a schedule you own. A live run keeps going. `name@server` is
-        one on a server linked with trust."""
+        one on a linked server."""
         if (far := await far_call("schedule.delete", p, caller)) is not None:
             return far["result"]
         mine(p.name, caller, far_agent(p, caller))
@@ -332,18 +324,18 @@ def register_schedule_ops(app: App) -> None:
     @r.op("schedule.pause", ScheduleName, agent=True)
     async def schedule_pause(p: ScheduleName, caller):
         """Stop a schedule you own from ticking until it is resumed.
-        `name@server` is one on a server linked with trust."""
+        `name@server` is one on a linked server."""
         if (far := await far_call("schedule.pause", p, caller)) is not None:
             return far["result"]
         mine(p.name, caller, far_agent(p, caller))
         sch.pause(p.name)
         return sch.wire(p.name)
 
-    @r.op("schedule.resume", ScheduleResume, agent=True)
+    @r.op("schedule.resume", ScheduleResume, agent=True, work=True)
     async def schedule_resume(p: ScheduleResume, caller):
         """Start a paused schedule again from now, its error count cleared. The
         ticks that fell during the pause do not fire. `name@server` is one on a
-        server linked with trust; one waiting for a person stays a person's to
+        linked server; one waiting for a person stays a person's to
         unpause there too."""
         if (far := await far_call("schedule.resume", p, caller)) is not None:
             return far["result"]
@@ -360,13 +352,13 @@ def register_schedule_ops(app: App) -> None:
         sch.resume(p.name, p.workflow)
         return sch.wire(p.name)
 
-    @r.op("schedule.fire", ScheduleName, agent=True)
+    @r.op("schedule.fire", ScheduleName, agent=True, work=True)
     async def schedule_fire(p: ScheduleName, caller):
         """Fire a schedule you own now, skipping its clock and its check. The
         overlap rule still holds: with a live run, wait holds it and skip drops it.
         A schedule that fires a workflow fires only on its clock for an agent:
         the person approved the clock, not runs on demand. `name@server` is one
-        on a server linked with trust, and its run starts there."""
+        on a linked server, and its run starts there."""
         if (far := await far_call("schedule.fire", p, caller)) is not None:
             return far["result"]
         by = far_agent(p, caller)
@@ -380,11 +372,11 @@ def register_schedule_ops(app: App) -> None:
             )
         return {"outcome": await sch.fire_now(p.name), **sch.wire(p.name)}
 
-    @r.op("schedule.test", ScheduleTest, agent=True)
+    @r.op("schedule.test", ScheduleTest, agent=True, names=(("session", "session"),))
     async def schedule_test(p: ScheduleTest, caller):
         """Try a clock and a check without saving anything: the next three
         ticks, and whether the check would fire now and why. With `name@server`
-        both are tried on a server linked with trust."""
+        both are tried on a linked server."""
         if (
             far := await far_call("schedule.test", p, caller, speaks=False)
         ) is not None:
@@ -400,8 +392,4 @@ def register_schedule_ops(app: App) -> None:
             where = s.spec.cwd
         else:
             where = cwd(p.cwd, caller)
-        try:
-            user = app.principals.acts_for(app.who(caller).name)
-        except PermissionError as e:
-            raise OpError("no_linux_user", str(e)) from None
-        return await sch.test(clock, p.check, where, p.name, user)
+        return await sch.test(clock, p.check, where, p.name)

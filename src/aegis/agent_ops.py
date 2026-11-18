@@ -14,6 +14,7 @@ a person may be reading that tab; the same call with the token closes it.
 
 from __future__ import annotations
 
+import asyncio
 import re
 import time
 from pathlib import Path
@@ -28,7 +29,8 @@ from .confirm import TTL_S
 from .monitors import find_source, iso_now
 from .names import SPAWN_HEAD, SPAWN_TASK, valid_handle
 from .ops import Caller, OpError
-from .session import ASLEEP_WHY, Archived, asleep_from
+from .scopes import check_name
+from .session import Archived
 from .transcript.entries import CONTENT_KINDS
 
 if TYPE_CHECKING:
@@ -42,6 +44,11 @@ TOAST_WINDOW_S = 60.0
 
 # What turn_end answers a session that still has the handle or the title aegis
 # gave it (#586): agents often set the handle and keep the drawn title.
+LEFT_LINE = (
+    "Accepted: you can end done. This is still pending in the repos this "
+    "session worked in:\n{items}\nIf it is not part of your work, ignore it. "
+    "If it is, resolve it and call turn_end with done again when it is ready."
+)
 RENAME_LINE = (
     "This session still has the handle or title aegis gave it. Once the "
     "task is clear, call session_rename with both a handle and a title that say "
@@ -92,7 +99,7 @@ class MonitorSessions(_Strict):
         min_length=1,
         max_length=20,
         description="Handles of open sessions from session_list: on this "
-        "server, or handle@server on one linked with trust.",
+        "server, or handle@server on a linked one.",
     )
     interval_s: float = Field(10, ge=1, le=3600)
     # Other sessions' work runs longer than a build.
@@ -103,8 +110,85 @@ class MonitorId(_Strict):
     monitor_id: str
 
 
+FEED_NAME = r"^[a-z0-9]+(-[a-z0-9]+){0,3}$"
+
+
+class FeedFromLine(_Strict):
+    line: int = Field(ge=0, description="Start after this many lines.")
+
+
+class FeedSource(_Strict):
+    """A file that grows, or a command with a cursor: exactly one of the two."""
+
+    model_config = {"extra": "forbid", "populate_by_name": True}
+    file: str | None = Field(
+        None, description="A file of lines that grows; relative to cwd, ~ allowed."
+    )
+    format: Literal["lines", "jsonl"] = Field(
+        "lines",
+        description="lines: each non-blank line is an item. jsonl: one JSON value per line.",
+    )
+    filter: str | None = Field(
+        None,
+        description="jsonl only: a jq expression run on each line; what it prints "
+        "is the item, and a line it prints nothing for is dropped.",
+    )
+    start: Literal["end", "start"] | FeedFromLine = Field(
+        "end",
+        alias="from",
+        description='Where a file feed starts: "end" (only new lines), "start", or {"line": N}.',
+    )
+    command: str | None = Field(
+        None,
+        description="Bash run every interval_s with the cursor in $AEGIS_FEED_CURSOR "
+        "(empty the first time): it prints one item per line, writes the next "
+        "cursor to the file $AEGIS_FEED_NEXT, and exits 0 (items), 1 (nothing "
+        "new) or anything else (an error).",
+    )
+    interval_s: float | None = Field(
+        None,
+        ge=1,
+        le=3600,
+        description="How often it is read: 5 s for a file, 30 s for a command by default.",
+    )
+
+    @model_validator(mode="after")
+    def _one(self):
+        if (self.file is None) == (self.command is None):
+            raise ValueError("give exactly one of file and command")
+        if self.command is not None and (
+            self.filter or self.format != "lines" or self.start != "end"
+        ):
+            raise ValueError("format, filter and from apply to a file source only")
+        if self.filter and self.format != "jsonl":
+            raise ValueError("a filter needs format jsonl")
+        return self
+
+
+class FeedStart(_Strict):
+    name: str = Field(
+        pattern=FEED_NAME,
+        description="Lowercase words joined by hyphens, unique among your feeds.",
+    )
+    source: FeedSource
+    debounce_s: float = Field(
+        15, ge=0, le=600, description="Seconds with no new item before a batch goes."
+    )
+    max_items: int = Field(50, ge=1, le=500, description="Items per message at most.")
+    cwd: str | None = Field(
+        None, description="Where the source is read; relative to your session's cwd."
+    )
+
+
+class FeedName(_Strict):
+    name: str
+    # A person's call names the session (its log id or handle); an agent
+    # acts on its own.
+    log_id: SkipJsonSchema[str | None] = None
+
+
 class FarAgent(_Strict):
-    """An agent on a server linked with trust, as that server's link names it."""
+    """An agent on a linked server, as that server's link names it."""
 
     handle: str
     server: str
@@ -118,7 +202,7 @@ class Enqueue(_Strict):
     callback: bool = Field(
         True, description="Deliver the worker's result to your inbox."
     )
-    # Set only by a trusted link, for the agent there that enqueued: the
+    # Set only by a link, for the agent there that enqueued: the
     # result goes back to it over the link (queue.deliver).
     from_agent: SkipJsonSchema[FarAgent | None] = Field(None, exclude=True)
 
@@ -204,6 +288,24 @@ class Quiet(_Strict):
     handle: str | None = Field(None, description="The session's handle.")
     # A person's client names a tab by its log id; an agent names it by handle.
     log_id: SkipJsonSchema[str | None] = None
+
+
+class GroupTool(_Strict):
+    handles: list[str] | None = Field(
+        None,
+        description="The sessions to move, by handle. Omit them to rename a "
+        "group with group and name.",
+    )
+    name: str | None = Field(
+        None,
+        description="A group's name: join the group of that name, make one "
+        "with it, or the new name when renaming. With handles and no name, "
+        "they leave their group.",
+    )
+    group: str | None = Field(
+        None,
+        description="The group to rename, by its name, with name and no handles.",
+    )
 
 
 class FileSend(_Strict):
@@ -347,6 +449,25 @@ BRIEF_IF = (
     "files, the decisions, what not to retry)."
 )
 
+# /autohandoff (#1019): past the session's threshold every turn_end asks for
+# the brief, and the turn_end that carries one continues the session.
+AUTO_BRIEF = (
+    "This session is in autohandoff from {at} tokens: call turn_end again now, "
+    "before your final message, with the same arguments plus handoff: a brief for "
+    "the fresh session that continues this work (what is done, what is next, the "
+    "files, the decisions, what not to retry). aegis starts it when this turn ends."
+)
+AUTO_GOING = (
+    "noted. Autohandoff: this session takes no more messages, and a fresh one "
+    "continues it with your brief when this turn ends, carrying your monitors, "
+    "feeds, queue tasks, schedules and workflow. End your turn now with a short "
+    "final message. "
+)
+AUTO_WAITS = (
+    "noted. Autohandoff waits: {why} would be lost with this session's process. "
+    "Let it finish or stop it; the next turn_end with a brief hands off. "
+)
+
 
 class NoArgs(_Strict):
     pass
@@ -366,6 +487,9 @@ def _render(e: dict, tools: bool) -> str | None:
             return None
         result = e["detail"].get("result") or e["status"]
         return f"tool {e['title']} {e['summary']} -> {result}"
+    if kind == "mention":
+        names = ", ".join(m["name"] for m in e["detail"]["members"])
+        return f"user @ {names}: {e['detail']['body']}"
     if kind in ("thinking", "recap", "btw"):
         # A recap is aegis talking to the person, and a side note is the
         # person's own aside; another agent never reads either.
@@ -407,7 +531,10 @@ HANDOFF_KIDS = (
     "Tell each one with peer_handoff that you continue {handle}'s work, so they "
     "report to you from now on, and coordinate them as {handle} did."
 )
-HANDOFF_LEADS = " {handle} headed their group of tabs; you head it now."
+HANDOFF_CARRIED = (
+    "What {handle} was waiting on is yours now and wakes you as it ends: "
+    "{carried}. monitor_list, feed_list, task_status and schedule_list show them."
+)
 
 
 def handoff_opening(
@@ -415,18 +542,20 @@ def handoff_opening(
     brief: str | None,
     tail: str,
     kids: tuple[str, ...] = (),
-    leads: bool = False,
     instruction: str | None = None,
     far: bool = False,
+    carried: list[str] | None = None,
 ) -> str:
     """A handoff's first message: who it continues, the sessions it started
-    that the new one adopts (#641), the brief when the agent wrote one, the
+    that the new one adopts (#641), what it was waiting on, which wakes the new
+    one now (#1019), the brief when the agent wrote one, the
     last turns as /spawn carries them (#354), and last, so it is what the agent
     reads last, the instruction it was handed off with (#874)."""
     parts = [(HANDOFF_HEAD_FAR if far else HANDOFF_HEAD).format(handle=handle)]
     if kids:
-        line = HANDOFF_KIDS.format(handle=handle, kids=", ".join(kids))
-        parts.append(line + (HANDOFF_LEADS.format(handle=handle) if leads else ""))
+        parts.append(HANDOFF_KIDS.format(handle=handle, kids=", ".join(kids)))
+    if carried:
+        parts.append(HANDOFF_CARRIED.format(handle=handle, carried=", ".join(carried)))
     if brief:
         parts.append("Its brief for you:\n\n" + brief)
     if tail:
@@ -491,69 +620,9 @@ def spawn_opening(source, prompt: str, home: str | None) -> str:
     )
 
 
-ACROSS = (
-    "an agent on this server reaches a linked server by spawning there "
-    "(session_spawn with agent@server, gated by that server's quota policy for "
-    "the link) and by handing off to a session there (peer_handoff to "
-    "handle@server); reading, sending to and enqueueing on another server are "
-    "for people, unless the link is trusted (help: links#trusted-links)"
-)
-
-
-# What an agent here may learn of a linked server, all of it composed here from
-# values checked here: the far server may be hostile, so none of its text is
-# passed on (DESIGN.md, "A link is a client").
-# A server older than #479 says stopped or parked for asleep.
-FAR_STATES = frozenset({"idle", "working", "error", "asleep", "stopped", "parked"})
-FAR_ERRORS = {
-    "no_session": "no open session {handle}@{server}",
-    "archived": "{handle}@{server} is archived",
-    "server_offline": "{server} is not linked right now",
-    "timeout": "{server} did not answer in time",
-    "not_owner": "{handle}@{server} is not this server's link's to prompt there",
-    "quota_closed": "the quota gate on {server} for this server's link is closed: "
-    "nothing was started; a person here can see why with /spawn",
-    "not_for_members": "{server} lets this server's link do that only as an admin",
-    "not_allowed": "{server} refused the permission asked for",
-    "unknown_agent": "{server} has no such agent",
-    "trust_ended": "the trusted link with {server} no longer holds; a person "
-    "can see why under Settings, Servers",
-}
-
-
-def far_entry(e: dict, server: str) -> dict | None:
-    """One linked server's session as an agent here may see it: a valid handle
-    and a known state, or nothing. An older server's stopped and parked read as
-    asleep with their reason; a reason that is not one of ours is dropped."""
-    if not isinstance(e, dict):
-        return None
-    handle, state = e.get("handle"), e.get("state")
-    if (
-        not (isinstance(handle, str) and valid_handle(handle))
-        or state not in FAR_STATES
-    ):
-        return None
-    if state not in ("stopped", "parked", "asleep"):
-        return {"handle": handle, "server": server, "state": state}
-    why = e.get("asleep_why")
-    if state != "asleep":
-        why = asleep_from(state, None)[1]
-    elif why not in ASLEEP_WHY:
-        why = None
-    return {"handle": handle, "server": server, "state": "asleep", "asleep_why": why}
-
-
-def far_error(
-    e: OpError, server: str, handle: str = "", trusted: bool = False
-) -> OpError:
-    """A linked server's refusal as this server words it: the code if it is
-    on the allowlist, never the far server's text. Over a trusted link the
-    far server is this person's own, and its words pass through."""
-    if trusted:
-        return OpError(e.code, f"{server}: {e.message}")
-    if e.code in FAR_ERRORS:
-        return OpError(e.code, FAR_ERRORS[e.code].format(handle=handle, server=server))
-    return OpError("far_error", f"{server} refused the call")
+def far_error(e: OpError, server: str) -> OpError:
+    """A linked server's refusal, in its own words, naming the server."""
+    return OpError(e.code, f"{server}: {e.message}")
 
 
 USER = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
@@ -702,31 +771,26 @@ def split_address(target: str, own: str) -> tuple[str, str | None]:
 
 
 def across(app: App, server: str, caller: Caller):
-    """The link for an agent's call to ``server``, which only a link both
-    servers trust carries (links.py, #684); the refusal otherwise."""
+    """The link for an agent's call to ``server``; the refusal when a link
+    asks (nothing is relayed) or ``server`` is not linked now."""
     if caller.link is not None:
         raise OpError("not_relayed", "a link is not relayed to another server")
-    if not app.links.trusted(server):
-        raise OpError("not_across_links", f"{server} is another server; {ACROSS}")
-    if not app.who(caller).is_admin:
-        raise OpError(
-            "not_for_members", "acting across a link is for an admin's agents"
-        )
     link = app.links.get(server)
-    assert link is not None
+    if link is None:
+        raise OpError("unknown_server", f"this server links no server named {server}")
+    if link.state != "linked":
+        raise OpError("server_offline", f"{server} is not linked right now")
     return link
 
 
-def from_trusted(app: App, caller: Caller, sender: FarAgent) -> str:
-    """A trusted link speaking for one of its own agents: its address."""
+def from_link(app: App, caller: Caller, sender: FarAgent) -> str:
+    """A link speaking for one of its own server's agents: its address."""
     if (
         caller.link is None
         or sender.server != caller.link
-        or not app.links.trusted(caller.link)
+        or not app.links.joined(caller.link)
     ):
-        raise OpError(
-            "not_a_link", "only a trusted link, for its own server, says this"
-        )
+        raise OpError("not_a_link", "only a link, for its own server, says this")
     if not valid_handle(sender.handle):
         raise OpError("bad_sender", "a sender is a handle")
     return f"{sender.handle}@{sender.server}"
@@ -746,7 +810,9 @@ def register_agent_ops(app: App) -> None:
         handle, server = split_address(target, app.server_name)
         if server is not None:
             raise OpError(
-                "not_across_links", f"{target} is on another server; {ACROSS}"
+                "not_across_links",
+                f"{target} is on another server; this call acts on this "
+                "server's sessions only",
             )
         return handle
 
@@ -768,12 +834,6 @@ def register_agent_ops(app: App) -> None:
     def mine(t, caller: Caller):
         if caller.is_agent and t.enqueuer != caller.log_id:
             raise OpError("not_yours", "agents can change only the tasks they enqueued")
-        # A member changes only its own tasks; one from before owners is the admin's.
-        who = app.who(caller)
-        if not who.is_admin and (t.owner or app.user) != who.name:
-            raise OpError(
-                "not_owner", f"{t.id} belongs to {t.owner or app.user}; you can read it"
-            )
 
     def roster(owner: str, but: str | None = None) -> list[dict]:
         return [
@@ -782,7 +842,7 @@ def register_agent_ops(app: App) -> None:
             if m.id != but
         ]
 
-    @r.op("monitor.start", MonitorStart, agent=True)
+    @r.op("monitor.start", MonitorStart, agent=True, work=True)
     async def monitor_start(p: MonitorStart, caller):
         """Watch a long-running process without polling: bash conditions run every
         interval_s, and you are woken through your inbox when `done` or `fail` exits 0
@@ -834,7 +894,7 @@ def register_agent_ops(app: App) -> None:
                 try:
                     listed = await link.call("session.list")
                 except OpError as e:
-                    raise far_error(e, server, h, True) from None
+                    raise far_error(e, server) from None
                 if not any(
                     isinstance(e, dict) and e.get("handle") == h for e in listed or []
                 ):
@@ -862,7 +922,13 @@ def register_agent_ops(app: App) -> None:
         )
         return {"monitor_id": m.id, "other_live_monitors": roster(s.log_id, m.id)}
 
-    @r.op("monitor.cancel", MonitorId, agent=True, read=True)
+    @r.op(
+        "monitor.cancel",
+        MonitorId,
+        agent=True,
+        read=True,
+        names=(("monitor_id", "monitor"),),
+    )
     async def monitor_cancel(p: MonitorId, caller):
         """Stop one of your monitors. No wake is sent."""
         m = app.monitors.items.get(p.monitor_id)
@@ -870,22 +936,17 @@ def register_agent_ops(app: App) -> None:
             raise OpError("no_monitor", f"no live monitor {p.monitor_id!r}")
         if caller.is_agent and m.owner != caller.log_id:
             raise OpError("not_yours", "agents can cancel only their own monitors")
-        # A monitor wakes its session: a member stops only its own sessions' ones.
-        who, owner = app.who(caller), app.owner_of(m.owner)
-        if not who.is_admin and owner not in (None, who.name):
-            raise OpError(
-                "not_owner", f"{m.id} watches {owner}'s session; you can read it"
-            )
         app.monitors.cancel(m.id)
         return {"cancelled": m.id, "remaining": roster(m.owner)}
 
-    @r.op("monitor.list", NoArgs, agent=True, read=True)
+    @r.op("monitor.list", NoArgs, agent=True, read=True, access="read")
     async def monitor_list(_, caller):
         """Your live monitors."""
+        me = app.who(caller)
         items = (
             app.monitors.of(caller.log_id)
             if caller.is_agent
-            else list(app.monitors.items.values())
+            else [m for m in app.monitors.items.values() if app.sees(me, m.owner)]
         )
         return [
             {
@@ -896,13 +957,134 @@ def register_agent_ops(app: App) -> None:
             for m in items
         ]
 
-    @r.op("queue.enqueue", Enqueue, agent=True)
+    def feed_of(p: FeedName, caller: Caller):
+        """The feed ``p`` names: an agent's own, or for a person one of the
+        session it names, which the host policy has let it change (names)."""
+        if caller.is_agent:
+            s = own(caller)
+        else:
+            if not p.log_id:
+                raise OpError("bad_params", "name the session the feed belongs to")
+            s = target(p.log_id)
+        f = app.feeds.get(s.log_id, p.name)
+        if f is None:
+            raise OpError("no_feed", f"no feed {p.name!r} on {s.handle}")
+        return f
+
+    def feed_row(f) -> dict:
+        s = reg.sessions.get(f.owner)
+        return {
+            "name": f.name,
+            "source": f.where(),
+            "state": f.state(s),
+            "paused": f.paused,
+            "pending": len(f.pending),
+            "delivered": f.delivered,
+            "batches": f.batch,
+            "last_item_at": f.last_new,
+            "last_error": f.last_error or None,
+        }
+
+    @r.op("feed.start", FeedStart, agent=True, work=True)
+    async def feed_start(p: FeedStart, caller):
+        """Start a feed: a file that grows, or a command with a cursor, read
+        every interval_s. Each batch of new items wakes you as one message
+        `> from feed:<name> · batch#<n> · …`, after debounce_s with no new
+        item, or when your turn ends if you are working. aegis keeps the
+        cursor; the feed stays until feed_cancel or your session closes. Use it
+        instead of re-arming a monitor on a file that grows."""
+        s = own(caller)
+        if app.feeds.get(s.log_id, p.name) is not None:
+            raise OpError("name_taken", f"you already have a feed {p.name!r}")
+        from .feeds import MAX_PER_SESSION, SourceError, check_jq
+
+        if len(app.feeds.of(s.log_id)) >= MAX_PER_SESSION:
+            raise OpError("too_many", f"a session has at most {MAX_PER_SESSION} feeds")
+        cwd = Path(p.cwd).expanduser() if p.cwd else s.spec.cwd
+        if not cwd.is_absolute():
+            cwd = s.spec.cwd / cwd
+        if not cwd.is_dir():
+            raise OpError("bad_params", f"cwd {cwd} is not a directory")
+        src = p.source.model_dump(exclude_none=True, by_alias=True)
+        if p.source.file is not None:
+            src.pop("command", None)
+            if isinstance(p.source.start, FeedFromLine):
+                src["from"] = {"line": p.source.start.line}
+        else:
+            for k in ("format", "from", "filter"):
+                src.pop(k, None)
+        if p.source.filter and (why := await check_jq(p.source.filter)):
+            raise OpError("bad_filter", why)
+        try:
+            f = await app.feeds.start(
+                s.log_id, str(cwd), p.name, src,
+                debounce_s=p.debounce_s, max_items=p.max_items,
+            )  # fmt: skip
+        except SourceError as e:
+            raise OpError("bad_source", str(e)) from None
+        return {
+            "feed": feed_row(f),
+            "first_poll": f.last_error
+            or (f"{len(f.pending)} items already new" if f.pending else "ok"),
+            "other_feeds": [x.name for x in app.feeds.of(s.log_id) if x is not f],
+        }
+
+    @r.op("feed.list", NoArgs, agent=True, read=True, access="read")
+    async def feed_list(_, caller):
+        """Your feeds, with their state, what waits and what was delivered."""
+        me = app.who(caller)
+        items = (
+            app.feeds.of(caller.log_id)
+            if caller.is_agent
+            else [f for f in app.feeds.items.values() if app.sees(me, f.owner)]
+        )
+        return [feed_row(f) for f in items]
+
+    @r.op("feed.pause", FeedName, agent=True, read=True, names=(("log_id", "session"),))
+    async def feed_pause(p: FeedName, caller):
+        """Stop a feed waking you. It keeps reading, and what came while it was
+        paused goes as the next batch when you feed_resume it."""
+        f = feed_of(p, caller)
+        app.feeds.pause(f, "by an agent" if caller.is_agent else "by a person")
+        return feed_row(f)
+
+    @r.op(
+        "feed.resume", FeedName, agent=True, read=True, names=(("log_id", "session"),)
+    )
+    async def feed_resume(p: FeedName, caller):
+        """Start a paused feed again, its error count cleared."""
+        f = feed_of(p, caller)
+        app.feeds.resume(f)
+        return feed_row(f)
+
+    @r.op(
+        "feed.cancel", FeedName, agent=True, read=True, names=(("log_id", "session"),)
+    )
+    async def feed_cancel(p: FeedName, caller):
+        """Remove a feed. Items still waiting are not sent."""
+        f = feed_of(p, caller)
+        app.feeds.cancel(f.owner, f.name)
+        return {"cancelled": f.name, "unsent": len(f.pending)}
+
+    @r.op("feed.send", FeedName, names=(("log_id", "session"),))
+    async def feed_send(p: FeedName, caller):
+        """A person's Send now: what waits goes without the debounce, or
+        when the session's turn ends."""
+        f = feed_of(p, caller)
+        return {"did": app.feeds.send_now(f), **feed_row(f)}
+
+    @r.op("queue.enqueue", Enqueue, agent=True, work=True)
     async def queue_enqueue(p: Enqueue, caller):
         """Hand a self-contained task to a fresh worker on a queue. Returns at once
         with the task id; the worker's final message reaches your inbox when it
         finishes (with callback). Keep working meanwhile. `queue@server`
-        enqueues on a server linked with trust; the result still reaches your
-        inbox, and the task id comes back as `task-id@server`."""
+        enqueues on a linked server; the result still reaches your
+        inbox, and the task id comes back as `task-id@server`. A queue past
+        its max_pending refuses with queue_full; one whose quota guard is
+        closed refuses with queue_closed, or takes the task with a warning
+        that it waits."""
+        if caller.is_agent and caller.log_id in reg.sessions:
+            check_name(reg.sessions[caller.log_id].spec.scope, "queues", p.queue)
         name, server = split_address(p.queue, app.server_name)
         if server is not None:
             link = across(app, server, caller)
@@ -918,11 +1100,11 @@ def register_agent_ops(app: App) -> None:
                     },
                 )
             except OpError as e:
-                raise far_error(e, server, trusted=True) from None
+                raise far_error(e, server) from None
             return {**r, "task_id": f"{r['task_id']}@{server}"}
         far = None
         if p.from_agent is not None:
-            from_trusted(app, caller, p.from_agent)
+            from_link(app, caller, p.from_agent)
             far = p.from_agent.model_dump()
         if name not in app.queues.queues:
             known = ", ".join(sorted(app.queues.queues)) or "none configured"
@@ -931,6 +1113,9 @@ def register_agent_ops(app: App) -> None:
             raise OpError("bad_config", f"queue {name!r} in .aegis.yaml: {err}")
         enqueuer = own(caller) if caller.is_agent else None
         cwd = str(enqueuer.spec.cwd if enqueuer else app.roots.harness_cwd)
+        warning = app.queues.admit(
+            name, enqueuer.log_id if enqueuer else None, cwd, app.who(caller).name
+        )
         t = await app.queues.enqueue(
             name,
             p.payload,
@@ -939,16 +1124,25 @@ def register_agent_ops(app: App) -> None:
             cwd,
             owner=app.who(caller).name,
             far_enqueuer=far,
+            scope=enqueuer.spec.scope.record() if enqueuer else None,
         )
-        return {"task_id": t.id, "status": t.status, "position": app.queues.position(t)}
+        out = {"task_id": t.id, "status": t.status, "position": app.queues.position(t)}
+        return out | ({"warning": warning} if warning and t.status == "pending" else {})
 
-    @r.op("queue.deliver", QueueDeliver)
+    @r.op(
+        "queue.deliver",
+        QueueDeliver,
+        names=(
+            ("target", "session"),
+            ("task_id", "task"),
+        ),
+    )
     async def queue_deliver(p: QueueDeliver, caller):
-        """A task's result from a server linked with trust, for the agent here
+        """A task's result from a linked server, for the agent here
         that enqueued it. Only that link may call it; the header is composed
         here from values checked here."""
-        if caller.link is None or not app.links.trusted(caller.link):
-            raise OpError("not_a_link", "only a trusted link delivers a task's result")
+        if caller.link is None or not app.links.joined(caller.link):
+            raise OpError("not_a_link", "only a link delivers a task's result")
         if not (QUEUE_NAME.match(p.queue) and TASK_ID.match(p.task_id)):
             raise OpError("bad_sender", "a queue and a task id, one word each")
         to = target(p.target)
@@ -961,7 +1155,7 @@ def register_agent_ops(app: App) -> None:
         )
 
     async def far_task(op: str, p: TaskId, caller):
-        """A task on a server linked with trust, ``task-id@server``: the call
+        """A task on a linked server, ``task-id@server``: the call
         goes there, or None when the task is here."""
         task_id, server = split_address(p.task_id, app.server_name)
         if server is None:
@@ -970,25 +1164,32 @@ def register_agent_ops(app: App) -> None:
         try:
             return {"result": await link.call(op, {"task_id": task_id})}
         except OpError as e:
-            raise far_error(e, server, trusted=True) from None
+            raise far_error(e, server) from None
 
     def far_mine(t, caller: Caller) -> None:
-        """A trusted link changes only the tasks its own server enqueued."""
+        """A link changes only the tasks its own server enqueued."""
         if (
             caller.link is not None
             and (t.far_enqueuer or {}).get("server") != caller.link
         ):
             raise OpError("not_yours", f"{t.id} was not enqueued from {caller.link}")
 
-    @r.op("task.status", TaskId, agent=True, read=True)
+    @r.op(
+        "task.status",
+        TaskId,
+        agent=True,
+        read=True,
+        names=(("task_id", "task"),),
+        access="read",
+    )
     async def task_status(p: TaskId, caller):
         """A task's status, its worker, and its result once finished.
-        `task-id@server` reads one on a server linked with trust."""
+        `task-id@server` reads one on a linked server."""
         if (far := await far_task("task.status", p, caller)) is not None:
             return far["result"]
         return app.queues.status(task(p.task_id))
 
-    @r.op("task.cancel", TaskId, agent=True)
+    @r.op("task.cancel", TaskId, agent=True, names=(("task_id", "task"),))
     async def task_cancel(p: TaskId, caller):
         """Cancel a task you enqueued: drop it if pending, stop and archive its worker if running."""
         if (far := await far_task("task.cancel", p, caller)) is not None:
@@ -999,7 +1200,7 @@ def register_agent_ops(app: App) -> None:
         await app.queues.cancel(t)
         return app.queues.status(t)
 
-    @r.op("task.resume", TaskId, agent=True)
+    @r.op("task.resume", TaskId, agent=True, names=(("task_id", "task"),))
     async def task_resume(p: TaskId, caller):
         """Put a failed or cancelled task's worker back to work, with its conversation intact."""
         if (far := await far_task("task.resume", p, caller)) is not None:
@@ -1015,39 +1216,30 @@ def register_agent_ops(app: App) -> None:
             raise OpError("no_worker", str(e)) from e
         return app.queues.status(t)
 
-    @r.op("peer.handoff", Handoff, agent=True)
+    @r.op("peer.handoff", Handoff, agent=True, names=(("target", "session"),))
     async def peer_handoff(p: Handoff, caller):
         """Give another session context or an instruction; it arrives as a user turn
         headed `> from agent:<you>`. A busy target gets it when its turn ends, and
         is told meanwhile who waits; urgent reaches it inside the turn instead, at
         its next tool step, and interrupt cuts that turn first. `handle@server`
-        reaches a session on a server this one links; nothing there can reach you
-        back, unless the link is trusted."""
+        reaches a session on a server this one links."""
         if p.urgent and p.interrupt:
             raise OpError("bad_params", URGENT_AND_INTERRUPT)
         handle, server = split_address(p.target, app.server_name)
-        who = app.who(caller)
         if server is not None:
             if caller.link is not None:
                 raise OpError("not_relayed", "a link is not relayed to another server")
             # The link delivers as its own token on the far server (web.py).
-            if not who.is_admin:
-                raise OpError(
-                    "not_for_members",
-                    f"handing off to {server} through this server's link is for "
-                    "an admin here",
-                )
             return await far_handoff(handle, server, p, caller)
         to = target(p.target)
+        if caller.is_agent and caller.log_id in reg.sessions:
+            # A scope's agents: are the agents it may reach, not only start.
+            check_name(reg.sessions[caller.log_id].spec.scope, "agents", to.spec.agent)
         to.check_lock()  # before an interrupt reaches it
-        # A prompt or an interrupt changes the session: a member's reaches only
-        # its own (tokens.py).
-        owner = app.owner_of(to.log_id)
-        if not who.is_admin and owner != who.name:
-            raise OpError(
-                "not_owner",
-                f"{to.handle} belongs to {owner}; you can read it, not prompt it",
-            )
+        if caller.is_agent and (why := app.refuse_hold(to)) is not None:
+            # Its guard refuses wakes from agents (guards.py): say so now,
+            # rather than hold the handoff where the sender cannot see it.
+            raise OpError("quota_closed", f"{to.handle} takes no handoff now: {why}")
         sender = (
             f"agent:{reg.sessions[caller.log_id].handle}"
             if caller.is_agent and caller.log_id in reg.sessions
@@ -1066,11 +1258,7 @@ def register_agent_ops(app: App) -> None:
         )
 
     async def far_handoff(handle: str, server: str, p: Handoff, caller: Caller):
-        link = app.links.get(server)
-        if link is None:
-            raise OpError(
-                "unknown_server", f"this server links no server named {server}"
-            )
+        link = across(app, server, caller)
         me = reg.sessions.get(caller.log_id) if caller.log_id else None
         sender = {
             "handle": me.handle if me else "user",
@@ -1091,14 +1279,12 @@ def register_agent_ops(app: App) -> None:
                 },
             )
         except OpError as e:
-            if e.code in FAR_ERRORS or app.links.trusted(server):
-                raise far_error(e, server, handle, app.links.trusted(server)) from None
-            raise OpError("far_error", f"{server} refused the handoff") from None
+            raise far_error(e, server) from None
         r = r if isinstance(r, dict) else {}
         did = "steered" if r.get("steered") else "held" if r.get("held") else "sent"
         return handoff_reply(did, f"{handle}@{server}", r.get("cannot_steer") is True)
 
-    @r.op("peer.deliver", Deliver)
+    @r.op("peer.deliver", Deliver, names=(("target", "session"),))
     async def peer_deliver(p: Deliver, caller):
         """A handoff from an agent on a server that links this one. Only a link
         socket may call it, and only in the name of the server it linked as."""
@@ -1114,14 +1300,6 @@ def register_agent_ops(app: App) -> None:
                 "bad_sender", "a sender is a handle and a user name, one line each"
             )
         to = target(p.target)
-        # The link is the token it presented: a member link prompts only the
-        # sessions it owns here, like any member (tokens.py).
-        principal, owner = app.who(caller), app.owner_of(to.log_id)
-        if not principal.is_admin and owner != principal.name:
-            raise OpError(
-                "not_owner",
-                f"{to.handle} belongs to {owner}; a handoff cannot reach it",
-            )
         if p.urgent and p.interrupt:
             raise OpError("bad_params", URGENT_AND_INTERRUPT)
         if p.interrupt and to.status == "working":
@@ -1140,52 +1318,60 @@ def register_agent_ops(app: App) -> None:
         }
 
     def readable(handle: str, caller) -> list[dict]:
-        """A transcript peer_read may read: an open session's, or the archived
-        one the caller continues after a handoff (#354), and no other archived
-        one."""
+        """A transcript peer_read may read: an open session's, else the newest
+        archived one by that handle or id, packed by ``aegis gc`` or not
+        (#1009). An archived session the caller's policy hides answers as
+        one that does not exist."""
         h = here(handle)
         if reg.by_handle(h) is None and h not in reg.sessions:
-            me = reg.sessions.get(caller.log_id or "")
-            old = me.spec.continues if me else None
-            if old in reg.archived and h in (old, reg.archived[old].get("handle")):
-                return reg.archived_entries(old)
+            found = [
+                m
+                for i, m in reg.archived.items()
+                if h in (i, m.get("handle")) and app.sees(app.who(caller), i, "read")
+            ]
+            if found:
+                newest = max(found, key=lambda m: m.get("last_activity") or 0)
+                return reg.archived_entries(newest["log_id"])
+            raise OpError("no_session", f"no session {h!r}")
         return target(handle).entries()
 
-    @r.op("peer.read", Read, agent=True, read=True)
+    @r.op(
+        "peer.read",
+        Read,
+        agent=True,
+        read=True,
+        names=(("target", "session"),),
+        access="read",
+    )
     async def peer_read(p: Read, caller):
         """The last entries of another session's transcript, one line each.
-        `handle@server` reads a session on a server this one links with
-        trust."""
+        `handle@server` reads a session on a server this one links."""
         handle, server = split_address(p.target, app.server_name)
-        if server is not None and caller.link is None and app.links.trusted(server):
-            link = app.links.get(server)
-            assert link is not None  # trusted() found it
+        if server is not None:
+            link = across(app, server, caller)
             try:
                 return await link.call(
                     "peer.read", {"target": handle, "last": p.last, "tools": p.tools}
                 )
             except OpError as e:
-                raise far_error(e, server, handle, True) from None
+                raise far_error(e, server) from None
         entries = readable(p.target, caller)
         lines = [x for e in entries[-p.last * 3 :] if (x := _render(e, p.tools))]
         return "\n".join(lines[-p.last :]) or "(nothing yet)"
 
-    @r.op("session.list", NoArgs, agent=True, read=True)
+    @r.op("session.list", NoArgs, agent=True, read=True, access="read")
     async def session_list(_, caller):
         """The open sessions on this server, each with its state, what it needs
         (attention and its line, what it waits on), its plan and what it is
         doing now, its model (`model` as configured, `model_id` as the harness
         resolved it, null until it has), spend, and `load`: the CPU in cores
         over the last minute and the RAM in GB of it and everything it started,
-        null while it has no process; then each linked server's by
-        handle and state alone, as `handle@server`: reach one with
-        peer_handoff. A server linked with trust lists its sessions in full,
-        with `server`."""
+        null while it has no process; then each linked server's sessions in
+        full, with `server`: reach one as `handle@server`."""
         out = []
-        who = app.who(caller)
-        member = app.multi_user is not None and not who.is_admin
+        me = app.who(caller)
         for s in reg.open_sessions():
-            if not app.sees(who, app.owner_of(s.log_id)):
+            if not app.sees(me, s.log_id):
                 continue
             w = s.wire()
             out.append(
@@ -1207,31 +1393,24 @@ def register_agent_ops(app: App) -> None:
                     ),
                 }
             )
-        # A link asking is not relayed further; links are the admin's.
-        if caller.link is None and not member:
+        # A link asking is not relayed further.
+        if caller.link is None:
             out += await far_sessions()
         return out
 
     async def far_sessions() -> list[dict]:
-        """Every linked server's open sessions, cut to handle and state: a title
-        is text an agent over there wrote, and nothing written there reaches an
-        agent here (links.py). A server linked with trust is this person's
-        own, and its entries come whole."""
+        """Every linked server's open sessions, whole, each with its server."""
         out = []
         for link in app.links.up():
             try:
                 listed = await link.call("session.list")
             except OpError:
                 continue
-            trusted = app.links.trusted(link.name)
             for e in listed if isinstance(listed, list) else []:
                 if not isinstance(e, dict) or "server" in e:
                     continue
-                if trusted:
-                    e = {k: v for k, v in e.items() if k != "you"}
-                    out.append({**e, "server": link.name})
-                elif (entry := far_entry(e, link.name)) is not None:
-                    out.append(entry)
+                e = {k: v for k, v in e.items() if k != "you"}
+                out.append({**e, "server": link.name})
         return out
 
     def origin(s, me) -> tuple[str, str | None]:
@@ -1263,7 +1442,15 @@ def register_agent_ops(app: App) -> None:
         t = app.queues.tasks.get(s.worker["task_id"]) if s.worker else None
         return t is not None and t.enqueuer == me.log_id
 
-    @r.op("session.close", Close, agent=True, owned="log_id")
+    @r.op(
+        "session.close",
+        Close,
+        agent=True,
+        names=(
+            ("handle", "session"),
+            ("log_id", "session"),
+        ),
+    )
     async def session_close(p: Close, caller):
         """Close a session: its tab goes away and it stays in the archive. A
         session you spawned, or whose queue task you enqueued, closes at once
@@ -1293,7 +1480,7 @@ def register_agent_ops(app: App) -> None:
                     },
                 )
             except OpError as e:
-                raise far_error(e, server, h, True) from None
+                raise far_error(e, server) from None
         s = target(p.handle)
         s.check_lock()
         card = s.wire()
@@ -1340,12 +1527,12 @@ def register_agent_ops(app: App) -> None:
         who = name(s.spec.spawned_by)
         return f"{who} started it" if who else "a person opened it"
 
-    @r.op("peer.close", PeerClose)
+    @r.op("peer.close", PeerClose, names=(("target", "session"),))
     async def peer_close(p: PeerClose, caller):
-        """session_close from an agent on a server linked with trust, under
+        """session_close from an agent on a linked server, under
         the same rule as here: a session it started closes at once when done,
         any other on a second call with the token it was given."""
-        key = from_trusted(app, caller, p.sender)
+        key = from_link(app, caller, p.sender)
         s = target(p.target)
         s.check_lock()
         card = s.wire()
@@ -1381,13 +1568,21 @@ def register_agent_ops(app: App) -> None:
             "the archive"
         )
 
-    @r.op("session.quiet", Quiet, agent=True, owned="log_id")
+    @r.op(
+        "session.quiet",
+        Quiet,
+        agent=True,
+        names=(
+            ("handle", "session"),
+            ("log_id", "session"),
+        ),
+    )
     async def session_quiet(p: Quiet, caller):
-        """Hide a session's tab while it works: it stays in the Fleet, dimmed,
-        and its tab comes back by itself when its turn ends done, review,
-        needs_you or error. Only a working or waiting session can be quiet.
-        Use it for a session doing background work the person need not
-        watch, your own included."""
+        """Put a session in the background, in any state: its tab hides and it
+        stays in the Fleet, dimmed. Its tab comes back by itself when a turn
+        ends done, review, needs_you or error, and hides again when the next
+        turn starts, until the person unquiets it. Use it for a session doing
+        background work the person need not watch, your own included."""
         if not caller.is_agent:
             if p.log_id is None:
                 raise OpError("bad_params", "log_id is required")
@@ -1397,7 +1592,41 @@ def register_agent_ops(app: App) -> None:
             raise OpError("bad_params", "handle is required")
         s = target(p.handle)
         reg.set_quiet(s.log_id, True)
-        return f"{s.handle} is quiet: its tab is hidden until its turn ends"
+        return (
+            f"{s.handle} is quiet: its tab shows when a turn ends with something "
+            "for the person, and hides again when the next turn starts"
+        )
+
+    @r.op("session.group", GroupTool, agent=True)
+    async def session_group(p: GroupTool, caller):
+        """Put sessions in one group of the tab bar, or give a group a new name.
+        A group holds any number of your sessions and has no head: what a
+        member spawns joins it by itself. With handles and a new name they get
+        a group called that; with the name of one you have, they join it; with
+        no name they leave theirs. With group and name and no handles, rename
+        that group. Groups are flat, and a session is in at most one."""
+        own(caller)
+        owner = app.who(caller).name
+        if p.handles:
+            picked = [target(h) for h in p.handles]
+            ids = [s.log_id for s in picked]
+            who = ", ".join(s.handle for s in picked)
+            if p.name is None:
+                reg.set_group(ids, None, owner)
+                return f"{who} left their group"
+            g = reg.groups.by_name(owner, p.name)
+            made = g is None
+            if g is None:
+                g = reg.groups.create(owner, p.name)
+            reg.set_group(ids, g.key, owner)
+            return f"{'made' if made else 'joined'} the group {g.name} ({g.key}): {who}"
+        if p.group is None or p.name is None:
+            raise OpError("bad_params", "handles, or group and name, are required")
+        g = reg.groups.by_name(owner, p.group)
+        if g is None:
+            raise OpError("no_group", f"no group named {p.group!r}")
+        renamed = reg.rename_group(g.key, p.name, owner)
+        return f"the group {g.name} is now {renamed['name']} ({g.key})"
 
     @r.op("file.send", FileSend, agent=True, read=True)
     async def file_send(p: FileSend, caller):
@@ -1414,7 +1643,7 @@ def register_agent_ops(app: App) -> None:
         paths = [s.spec.cwd / x if not x.is_absolute() else x for x in paths]
         # A file's key is its resolved path (layout.file_key): one path twice
         # in one send would be two versions on one card, so it is refused.
-        run = app.place_of_session(s.log_id).run
+        run = asyncio.to_thread
         sources = await run(lambda: [x.resolve() for x in paths])
         twice = sorted({str(x) for x in sources if sources.count(x) > 1})
         if twice:
@@ -1439,7 +1668,9 @@ def register_agent_ops(app: App) -> None:
             except canvas.LayoutError as e:
                 raise OpError("bad_params", str(e)) from e
         try:
-            recs = await files.store_as(app.roots.state_root, paths, run)
+            recs = await asyncio.to_thread(
+                files.store_all, app.roots.state_root, paths, s.log_id
+            )
         except files.FileError as e:
             # Agents write files after a cd in the shell, which does not carry
             # over, then send the bare name (seen in the first smoke test).
@@ -1450,6 +1681,7 @@ def register_agent_ops(app: App) -> None:
                 else ""
             )
             raise OpError(e.code, e.message + hint) from e
+        app.event("file", s.log_id, {"file_ids": [r["file_id"] for r in recs]})
         # The source stays in the store: the fold keys by it and never copies
         # it into an entry.
         sent = [
@@ -1555,6 +1787,13 @@ def register_agent_ops(app: App) -> None:
         if p.close:
             rec["close"] = True
         s.report(rec)
+        # Done is accepted either way; what the session left in its repos rides
+        # on the reply, for the agent to finish or ignore (#977).
+        left = ""
+        if p.attention == "done":
+            items = await asyncio.to_thread(app.repos.pending, s.log_id)
+            if items:
+                left = "\n" + LEFT_LINE.format(items="\n".join(f"- {i}" for i in items))
         if p.close:
             n = len(reg.descendants(s.log_id))
             tree = (
@@ -1564,6 +1803,7 @@ def register_agent_ops(app: App) -> None:
                 f"noted. aegis archives this session{tree} when this turn ends; "
                 "your final message is the last thing in its tab. "
                 + seen_line(s.fold().shown())
+                + left
             )
         at = app.config.current().context["handoff_at"]
         n = s.context_tokens or 0
@@ -1571,12 +1811,34 @@ def register_agent_ops(app: App) -> None:
         if s.worker:
             # A worker's final message is its task's result, read by the
             # enqueuer, not a reply to the person.
-            return "noted"
+            return "noted" + left
+        auto = s.autohandoff
+        if auto and n >= auto:
+            if not p.handoff:
+                line = (
+                    CONTEXT_LINE.format(k=f"{round(n / 1000)}k")
+                    + AUTO_BRIEF.format(at=f"{round(auto / 1000)}k")
+                    + left
+                )
+                return f"{line}\n{RENAME_LINE}" if unnamed else line
+            # What a handoff here cannot carry: the harness's own background
+            # tasks, held messages, a workflow's lock, a handoff under way.
+            waits = reg.wakers(s, run=False, carried=False)
+            if s.held:
+                waits.append(f"{len(s.held)} held messages")
+            if waits:
+                return AUTO_WAITS.format(why=", ".join(waits)) + seen_line(
+                    s.fold().shown()
+                )
+            if reg.successor(s) is None and reg.workflow_lock(s) is None:
+                s.mark_handoff_pending({})
+                s.report({"kind": "autohandoff", "tokens": n, "at": auto})
+                return AUTO_GOING + seen_line(s.fold().shown()) + left
         if p.handoff or not at or n < at:
-            said = f"noted. {seen_line(s.fold().shown())}"
+            said = f"noted. {seen_line(s.fold().shown())}{left}"
             return f"{said}\n{RENAME_LINE}" if unnamed else said
         then = BRIEF_IF if p.attention == "needs_you" else BRIEF_NOW
-        line = CONTEXT_LINE.format(k=f"{round(n / 1000)}k") + then
+        line = CONTEXT_LINE.format(k=f"{round(n / 1000)}k") + then + left
         return f"{line}\n{RENAME_LINE}" if unnamed else line
 
     toasted: dict[str, list[float]] = {}
@@ -1600,18 +1862,25 @@ def register_agent_ops(app: App) -> None:
         toasted[s.log_id] = [*recent, now]
         return {"shown": app.toast(p.text, p.kind, s)}
 
-    @r.op("meta", NoArgs, agent=True, read=True)
+    @r.op("meta", NoArgs, agent=True, read=True, access="read")
     async def meta(_, caller):
         """How aegis works for you, and its tools."""
         s = reg.sessions.get(caller.log_id or "")
         from .browsers import available
         from .mcp import primer
 
-        tools = ", ".join(op.tool_name for op in r.agent_ops())
-        browsers = not reg.multi_user and available()
-        head = (
-            primer(s, reg.server_name, reg.roots.config_root, browsers=browsers)
-            if s
-            else "aegis"
+        given = r.tools_of(s.log_id) if s else None
+        tools = ", ".join(
+            op.tool_name
+            for op in r.agent_ops()
+            if given is None or op.tool_name in given
         )
+        if s is None:
+            head = "aegis"
+        elif not s.spec.primer:
+            head = s.spec.priming or "aegis"
+        else:
+            head = primer(
+                s, reg.server_name, reg.roots.config_root, browsers=available()
+            )
         return f"{head}\n\nTools: {tools}. help_search finds how to use any of these."

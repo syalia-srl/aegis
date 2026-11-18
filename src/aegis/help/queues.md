@@ -5,6 +5,7 @@ when: handing a batch of self-contained tasks to worker sessions that run in par
 hints:
   - Hand a batch of tasks to workers and keep working; results come back as messages. #enqueue-a-task
   - Each queue task runs in a fresh worker session, a few at a time. #what-a-worker-is
+  - One worker limit for every queue, shared by priority; priority 0 pauses a queue. #priorities-and-the-worker-limit
 ---
 
 A queue runs tasks in fresh worker sessions, a few at a time. You enqueue a
@@ -26,20 +27,52 @@ while it waits for a slot, its position in the queue. With a slot free, the
 worker has already started, and the status says running.
 An unknown queue is refused with the names of the queues there are, and a
 queue whose entry in `.aegis.yaml` is broken is refused with what is wrong.
-Over a [trusted link](links#trusted-links), `queue@server` enqueues on the
-other server: the task id comes back as `task-id@server`, which
+A session whose agent's scope lists its queues is refused any other with
+out_of_scope and the queues it may use (config, [Scope an
+agent](config#scope-an-agent)).
+A queue with `max_pending:` refuses a task past that many pending with
+queue_full. While a queue's quota guard is closed for you, its
+`on_closed: reject` refuses with queue_closed, why and when it opens; `warn` takes the
+task and the reply carries a `warning` saying it waits; `hold` takes it
+silently (config, [Guard an agent or a
+queue](config#guard-an-agent-or-a-queue)).
+Past a spent per-session budget up your line, every queue refuses with
+queue_closed and the why, whatever its `on_closed:`, and a task of yours
+still pending fails: a session cap never frees (config, [Budget an
+agent](config#budget-an-agent)).
+Across a [link](links#what-agents-can-do-across-a-link), `queue@server`
+enqueues on the other server: the task id comes back as `task-id@server`, which
 `task_status`, `task_cancel` and `task_resume` take, and the result reaches
 your inbox headed `> from queue:<queue>@<server> · task#<id>@<server>`.
 
-Tasks wait first in, first out, for a free slot. A queue runs at most
-`max_parallel:` workers at once. A pending task also waits, without failing,
-while its owner's quota policy keeps the harness it needs closed.
+## Priorities and the worker limit
+
+One dispatcher starts workers for every queue, up to `max_workers:` at once on
+the server (4 when `.aegis.yaml` leaves it out). Each free slot goes to the
+queue with the fewest running workers for its `priority:`, so with `dev` at
+priority 2 and `research` at 1, and six workers, `dev` runs four and
+`research` two. A queue with nothing waiting leaves its share to the others,
+so no slot stays empty while a task waits. Within a queue, tasks start first
+in, first out.
+
+Priority 0 pauses a queue. Enqueueing on it still works; its tasks stay
+pending, and `task_status` says `paused: true`, until the priority goes above
+0. Neither a lower priority nor a lower limit stops a worker that is already
+running: the new numbers apply to the next start. Both are read from the file
+as it changes, with no restart, and the Settings page edits them.
+
+A pending task also waits, without failing, while a quota guard is closed
+on it: its queue's, its worker's agent's, or that of an agent up the chain
+that enqueued it. Such a queue leaves its share of the workers to the
+others, by their priorities, until the guard opens.
 
 ## What a worker is
 
 A worker is an ordinary session, marked as a worker of its queue on its card,
-started in the enqueuer's working directory. It starts quiet: no tab, only a
-card in the Fleet's last group, unless its queue sets `quiet: false`. Its task is its first
+started in the enqueuer's working directory and in its group of tabs. It
+starts quiet: no tab, only a card inside its group's stack in the Fleet
+(dimmed, at the end of "Needs you first" when it has no group), unless its
+queue sets `quiet: false`. Its task is its first
 prompt and its final message is the result, so it should end on the answer
 the enqueuer needs.
 

@@ -1,5 +1,5 @@
 /* Riso: a two-ink risograph print; blue ink on paper, fluoro pink printed a little off register, grain over it all. */
-[data-theme=riso] #a2{
+.aegis[data-theme=riso]{
   --bg:#efeee8;--chrome:#e5e3dc;--side:#e9e7e0;--surface:#f7f6f1;--raised:#e3e4ee;--rule:#c3c8e0;
   --ink:#2440a8;--strong:#16298a;--muted:#5468b8;--faint:#8b96c8;
   --accent:#ff3d9a;--accent-soft:rgba(255,61,154,.16);--on-accent:#16298a;
@@ -10,16 +10,16 @@
   --font-chrome:'Space Mono',monospace;--font-head:'Bricolage Grotesque',sans-serif;
   --prose-size:15.5px;--r:2px;--r-lg:4px;--time:none;--thread:none;--row-cols:22px 1fr;--fill:var(--accent);
 }
-[data-theme=riso] #a2{position:relative}
-[data-theme=riso] #a2:after{content:"";position:absolute;inset:0;pointer-events:none;z-index:100;opacity:.32;mix-blend-mode:multiply;
+.aegis[data-theme=riso]{position:relative}
+.aegis[data-theme=riso]:after{content:"";position:absolute;inset:0;pointer-events:none;z-index:100;opacity:.32;mix-blend-mode:multiply;
   background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .14 0 0 0 0 .25 0 0 0 0 .66 0 0 0 .9 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
-[data-theme=riso] #a2 .row.user .body{background:var(--surface);border:1.5px solid var(--strong);box-shadow:4px 3px 0 var(--accent);border-radius:2px}
-[data-theme=riso] #a2 .md h1,[data-theme=riso] #a2 .md h2,[data-theme=riso] #a2 .md h3,[data-theme=riso] #a2 .side .title{font-weight:800;text-shadow:2px 1px 0 rgba(255,61,154,.75)}
-[data-theme=riso] #a2 .md h1,[data-theme=riso] #a2 .md h2,[data-theme=riso] #a2 .md h3{font-size:1.35em;letter-spacing:-.01em}
-[data-theme=riso] #a2 .side .title{font-size:19px}
-[data-theme=riso] #a2 .tab.on{background:var(--accent);color:var(--strong);box-shadow:none}
-[data-theme=riso] #a2 .tn{font-weight:700}
-[data-theme=riso] #a2 .composer .box{border:1.5px solid var(--strong)}
-[data-theme=riso] #a2 .send,[data-theme=riso] #a2 .act.primary{border:1.5px solid var(--strong)}
-[data-theme=riso] #a2 .md pre,[data-theme=riso] #a2 .diff{background:#e8e9f2}
-[data-theme=riso] #a2 .row.user{padding:0 5px 5px 0}
+.aegis[data-theme=riso] .row.user .body{background:var(--surface);border:1.5px solid var(--strong);box-shadow:4px 3px 0 var(--accent);border-radius:2px}
+.aegis[data-theme=riso] .md h1,.aegis[data-theme=riso] .md h2,.aegis[data-theme=riso] .md h3,.aegis[data-theme=riso] .side .title{font-weight:800;text-shadow:2px 1px 0 rgba(255,61,154,.75)}
+.aegis[data-theme=riso] .md h1,.aegis[data-theme=riso] .md h2,.aegis[data-theme=riso] .md h3{font-size:1.35em;letter-spacing:-.01em}
+.aegis[data-theme=riso] .side .title{font-size:19px}
+.aegis[data-theme=riso] .tab.on{background:var(--accent);color:var(--strong);box-shadow:none}
+.aegis[data-theme=riso] .tn{font-weight:700}
+.aegis[data-theme=riso] .composer .box{border:1.5px solid var(--strong)}
+.aegis[data-theme=riso] .send,.aegis[data-theme=riso] .act.primary{border:1.5px solid var(--strong)}
+.aegis[data-theme=riso] .md pre,.aegis[data-theme=riso] .diff{background:#e8e9f2}
+.aegis[data-theme=riso] .row.user{padding:0 5px 5px 0}

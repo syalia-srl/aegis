@@ -16,6 +16,8 @@ class OpenCode:
     label = LABEL
     steers_mid_turn = False  # untested mid-turn; held until a live check
     steers_notices = False
+    mcp_transports = frozenset({"http", "stdio"})
+    contains = frozenset({"harness_tools", "isolated"})
     tool_prefix = "aegis_"
 
     def __init__(self, bin: str) -> None:

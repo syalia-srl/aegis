@@ -1,7 +1,6 @@
 """``notice.announce``: a notice a person or an admin's agent writes.
 
-An announcement reaches every owner's sessions, so the op is for an admin
-only: a member, and an agent in a member's session, is refused. Its author is
+An announcement reaches every session. Its author is
 the agent's handle or the person's name, and the body says it was written,
 not measured. The agent that writes one is marked as told, so its own tool
 result does not carry it back. The person's ``/announce`` (App._command)
@@ -67,7 +66,7 @@ def until_ts(text: str, now: float) -> float:
 def register_notice_ops(app: App) -> None:
     r = app.registry
 
-    @r.op("notice.announce", Announce, agent=True, admin=True)
+    @r.op("notice.announce", Announce, agent=True)
     async def notice_announce(p: Announce, caller):
         """Tell every agent on this server something once, on its next
         message or aegis tool result, such as a restart or a freeze. With

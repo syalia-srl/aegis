@@ -83,3 +83,11 @@ def test_the_embeddings_field_has_its_own_section(full_server, page):
     field = page.locator('#set-embeddings [data-key="knowledge.embeddings"]')
     assert field.input_value() == "minishlab/potion-multilingual-128M"
     assert page.errors == []
+
+
+def test_settings_has_no_tokens_section_or_member_ui(full_server, page):
+    open_settings(page, full_server.url)
+    page.wait_for_selector("#set-network")
+    assert page.locator("#set-tokens").count() == 0
+    assert page.locator("#set-member").count() == 0
+    assert page.errors == []

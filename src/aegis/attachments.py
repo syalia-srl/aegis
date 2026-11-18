@@ -15,6 +15,11 @@ the person's row draws it with the card, the URLs and the sandbox a sent file
 has, and a linked server's card loads it through /via. A copy, not a link:
 the agent may edit its inbox file, and the person's row must keep showing
 what the person sent.
+
+An upload begun as a recording (the composer's held microphone, #932) keeps
+the browser's measure of the take in a ``.recording`` file beside ``.size``;
+the send rewrites it as mono 16 kHz Opus (recordings.py) before it moves, and
+the agent reads it as a recording with its duration.
 """
 
 from __future__ import annotations
@@ -25,10 +30,9 @@ import secrets
 import shutil
 import time
 import unicodedata
-from collections.abc import Callable
 from pathlib import Path
 
-from . import files
+from . import files, recordings
 from .files import FileError
 
 CHUNK_BYTES = 256 * 1024
@@ -36,39 +40,21 @@ MAX_FILES = 20
 NAME_BYTES = 120
 STAGED = ".staged"
 SIZE = ".size"
+RECORDING = ".recording"
 _UPLOAD_ID = re.compile(r"[A-Za-z0-9_-]{16,64}")
 
 
-def inbox(state_root: Path, log_id: str, home: Path | None = None) -> Path:
-    """Where a session's files land: under the state root, or in multi-user
-    mode under ``~/.aegis/inbox`` in the home of the user the session runs
-    as, whose agent cannot read the state root (#555). Uploads are staged
-    under the state root either way."""
-    base = home / ".aegis" if home is not None else state_root
-    return base / "inbox" / log_id
+def inbox(state_root: Path, log_id: str) -> Path:
+    """Where a session's files land: under the state root."""
+    return state_root / "inbox" / log_id
 
 
-def ensure_inbox(state_root: Path, log_id: str, home: Path | None = None) -> Path:
-    """The session's inbox, created private if it is not there yet. For a
-    home, run it as that home's user (as_user.py)."""
-    folder = inbox(state_root, log_id, home)
-    if home is not None:
-        (home / ".aegis").mkdir(mode=0o700, exist_ok=True)
+def ensure_inbox(state_root: Path, log_id: str) -> Path:
+    """The session's inbox, created private if it is not there yet."""
+    folder = inbox(state_root, log_id)
     folder.parent.mkdir(parents=True, exist_ok=True)
     folder.mkdir(mode=0o700, exist_ok=True)
     return folder
-
-
-def write_into(box: Path, name: str, fd: int) -> Path:
-    """A new file ``name`` in ``box`` (``_free``'s suffix when taken) with
-    what ``fd`` reads: how a staged upload reaches an inbox the server may
-    not write, on the runner of the inbox's user."""
-    box.mkdir(mode=0o700, parents=True, exist_ok=True)
-    dest = _free(box, name)
-    with dest.open("xb") as out:
-        while chunk := os.read(fd, 1 << 20):
-            out.write(chunk)
-    return dest
 
 
 def _move(path: Path, box: Path, name: str) -> Path:
@@ -113,12 +99,19 @@ def _staged(state_root: Path, log_id: str, upload_id: str) -> Path:
 def _file(folder: Path) -> tuple[Path, int]:
     """The staged file and the size the browser declared for it."""
     declared = int((folder / SIZE).read_text())
-    (path,) = [p for p in folder.iterdir() if p.name != SIZE]
+    (path,) = [p for p in folder.iterdir() if p.name not in (SIZE, RECORDING)]
     return path, declared
 
 
-def begin(state_root: Path, log_id: str, name: str, size: int) -> str:
-    """Stage an empty file for an upload of ``size`` bytes; its upload id."""
+def begin(
+    state_root: Path,
+    log_id: str,
+    name: str,
+    size: int,
+    recorded_ms: int | None = None,
+) -> str:
+    """Stage an empty file for an upload of ``size`` bytes; its upload id.
+    ``recorded_ms`` marks it as a recording that long, by the browser's clock."""
     if size > files.MAX_BYTES:
         raise FileError(
             "too_large", f"{name} is {size} bytes; the limit is {files.MAX_BYTES}"
@@ -130,6 +123,8 @@ def begin(state_root: Path, log_id: str, name: str, size: int) -> str:
     folder = staging / upload_id
     folder.mkdir()
     (folder / SIZE).write_text(str(size))
+    if recorded_ms is not None:
+        (folder / RECORDING).write_text(str(recorded_ms))
     (folder / clean).touch()
     return upload_id
 
@@ -173,13 +168,10 @@ def commit(
     log_id: str,
     upload_ids: list[str],
     now: float | None = None,
-    deliver: Callable[[Path, str], Path] | None = None,
 ) -> list[dict]:
     """Move every upload into the inbox and the files store, or none: each is
     checked complete before the first moves. One record per file, as
-    files.store makes it without ``kind``, plus its inbox ``path``.
-    ``deliver(staged, name)`` puts one file into an inbox the server may not
-    write, and says where; by default it is moved into the state root's."""
+    files.store makes it without ``kind``, plus its inbox ``path``."""
     if len(upload_ids) > MAX_FILES:
         raise FileError(
             "too_many", f"{len(upload_ids)} files; a message carries {MAX_FILES}"
@@ -199,26 +191,42 @@ def commit(
     box = inbox(state_root, log_id)
     sent = []
     for path in staged:
-        rec = files.store(state_root, path, name=path.name)
+        took = None
+        if (mark := path.parent / RECORDING).exists():
+            path, took = recordings.normalize(path)
+            if took is None:
+                took = round(int(mark.read_text()) / 1000, 1)
+        rec = files.store(state_root, path, name=path.name, log_id=log_id)
         name = f"{stamp}-{path.name}"
-        dest = deliver(path, name) if deliver else _move(path, box, name)
+        dest = _move(path, box, name)
         shutil.rmtree(path.parent)
         sent.append(
             {**{k: v for k, v in rec.items() if k != "kind"}, "path": str(dest)}
+            | ({"recording_s": took} if took is not None else {})
         )
     return sent
 
 
 def message(typed: str, sent: list[dict]) -> str:
-    """What the harness reads: the typed text, then one line per file. The
-    block never starts with ``> from ``, which marks an inbox message."""
+    """What the harness reads: the typed text, then one line per file, a
+    recording saying so with its duration. The block never starts with
+    ``> from ``, which marks an inbox message."""
     if not sent:
         return typed
-    lines = ["Attached files:"] + [
-        f"- {f['path']} ({f['mime']}, {files.human_size(int(f['size']))})" for f in sent
-    ]
+    lines = ["Attached files:"] + [_line(f) for f in sent]
     block = "\n".join(lines)
     return f"{typed}\n\n{block}" if typed.strip() else block
+
+
+def _line(f: dict) -> str:
+    size = files.human_size(int(f["size"]))
+    if "recording_s" not in f:
+        return f"- {f['path']} ({f['mime']}, {size})"
+    took = recordings.clock(f["recording_s"])
+    return (
+        f"- {f['path']} (an audio recording the person made in the composer, "
+        f"{took} long, {f['mime']}, {size}; not transcribed)"
+    )
 
 
 def clear_staged(state_root: Path) -> int:

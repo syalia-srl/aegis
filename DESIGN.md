@@ -52,7 +52,9 @@ harness ended on its own; mid-turn or with a non-zero code it is an error,
 between turns with code 0 it is not) or `server` (the server restarted under it). A meta
 written before that state says `stopped` or `parked`, and loads through
 `session.asleep_from`, so nothing on disk is migrated. Quiet is the other axis:
-it hides the tab and never touches the process. A prompt to an asleep session starts the harness again on the same
+it hides the tab and never touches the process. `quiet` says the tab is hidden
+now; `stay_quiet` makes it a mode, so a turn's end shows the tab and the next
+turn's start hides it again (#1025), while a quiet spawn has `quiet` alone. A prompt to an asleep session starts the harness again on the same
 conversation (`claude --resume`, `opencode serve` and the same session id,
 `thread/resume` on the same Codex thread, or `session/load` on the same Cursor
 session id),
@@ -117,6 +119,55 @@ emulator; the server keeps the bytes and parses none of them, because a Python
 parser measured at under 0.4 MB/s cannot keep up with the reader
 (`docs/superpowers/specs/2026-10-14-terminals-design.html`).
 
+**A sign-in drives the harness's own login, in a terminal that stores nothing.**
+When a turn fails to sign in, `SignIns` (`signin/core.py`, #946) runs the
+harness's login command (`data/sign-in.toml`: for Claude, `claude
+setup-token`) in a terminal from `Terminals.spawn_ephemeral`: its store keeps
+only the in-memory ring, it writes no `meta.json`, and it is never archived.
+The terminal's tap sees each chunk first: raw into a `pyte` screen
+(`signin/screen.py`), where the recipe's rules name the step and capture the
+URL or the token, and through `signin/mask.py` before the ring and browsers,
+so a token never reaches the pane, a transcript or the disk. aegis runs no
+OAuth itself. The card is a `sign_in` record upserted by its id; the code the
+person types goes to the PTY only, through ops no agent is given.
+
+**The person's own Chrome pairs with the server, and its token opens one socket.**
+The extension (`src/aegis/extension/`, served zipped at
+`/chrome/extension.zip` with the client's mark, glyphs and fonts added under
+`aegis/`) trades a one-time code from `chrome.code` at `POST /chrome/pair` for
+a device token (`chrome.py`). The token is not a principal: it opens
+`/chrome/socket`, from a `chrome-extension://` origin, and nothing else; the
+server keeps its SHA-256 in `<state>/chrome.json`. The `chrome` channel
+carries the paired browsers and whether each socket is open. The page sends
+its theme's variables with `chrome.theme`, and the server forwards them to
+the extension. A grant is one tab and one session, and the extension is
+its authority: it names to the server only tabs with a grant, and resends
+them in every hello, so the server's `tabs` is a mirror for `browser_list`
+and the panels. A request (`browser_request`, `browser_open(where="person")`)
+is answered in the popup or on its transcript card, whichever is first;
+`Chrome.resolve` answers it once, records the card's outcome and wakes the
+agent. Either side revokes and tells the other, which never echoes it.
+The `browser_*` tools on a `chrome:<name>` id go to `Chrome.drive`: the
+server checks the grant (`Chrome.tab_for`, which tells revoked from
+not_granted), sends a `call` to the tab's browser and waits for its `result`.
+The extension checks the grant again, holds `chrome.debugger` on every tab
+with a grant, and runs the same CDP calls Playwright would, so its input is
+trusted. It finds targets with `extension/target.js` in an isolated world;
+`tests/test_chrome_target.py` holds that file to Playwright's own engine on
+one fixture, which is how a target means the same in both kinds of browser.
+The page's events come back as `event` messages into the tab's log, kept
+with the agents' actions as a server browser's are. The ribbon
+(`extension/ribbon.js`) is injected into shared tabs only, in a closed shadow
+root. A tab's holder (the agents, or the person after Pause or a handover)
+lives with its grants in the extension and is mirrored by `Chrome.hold`,
+which refuses agents' actions while the person holds the tab and wakes the
+one that handed it over, and any whose action was refused, when it comes
+back. Actions on one tab take `Chrome.lock`, so they run in order of arrival;
+reads do not. `browser_eval` runs only on a tab whose Scripts switch is on;
+the extension keeps the switch with the grants and checks it on each call,
+and `Chrome.scripts` turns it from aegis. Linked servers and the exit per site, slices 5 and 6 of the spec
+`2026-11-11-chrome-extension-design.html`, were dropped.
+
 **A browser is a Chromium the server holds, shared by an agent and a person.**
 A browser (`browsers.py`, #564) is a headless Chromium driven through
 Playwright's persistent context, so its profile under
@@ -159,9 +210,13 @@ request in `handoff_pending`, both in the meta: the lock starts at the call, and
 `Registry.turn_ended` starts the new session, so its tail holds the turn's last
 message. Boot starts a pending handoff whose turn already ended. A handoff across
 a link goes through `_spawn_far` and archives the old session once the far side
-takes the first message, since a plain link says nothing of the far turn; its
+takes the first message, since the near server does not follow the far turn; its
 `continued_by` holds `handle@server`. Children and a run cannot follow across a
-link, so they refuse it.
+link, so they refuse it. A handoff here carries what would wake the old
+session (#1019): `Registry.carry` moves its monitors, feeds and queue tasks to
+the new log id and retargets the schedules that fire into it, each engine
+persisting the move, and `_call_off_handoff` carries them back. The harness's
+own background tasks cannot move, so they refuse a handoff.
 
 **A restart gives back what it cut.** aegis writes `<state>/server.json` at both ends
 of a clean shutdown, so boot tells a restart from a crash. A turn the server's own
@@ -173,7 +228,18 @@ dead server left running is ended first, recognised by its pid and its start tim
 in `/proc`, so two processes never resume one session. Under systemd's default
 `KillMode=control-group` the harnesses die a moment before aegis does; an exit by
 SIGTERM that cut a turn within 30 s of a clean stop counts as that stop's, and a
-worker's task waits out those 30 s before such an exit fails it (restarts.py).
+worker's task waits out those 30 s before such an exit fails it (restarts.py). The
+port listens before boot (`server.listening`), so a harness a continue
+starts reaches `/mcp` once boot ends instead of a refused connection, after which
+Claude Code never asks again (#1024).
+
+**An update restarts in place.** `server.update` (admin only) upgrades aegis with the
+installer that owns the running install, read from `sys.prefix` and the dist-info's
+`INSTALLER`, then runs the new entry point's `--version` and goes on only for a new
+number. It stops uvicorn through its exit flag rather than a SIGTERM, which uvicorn would
+raise again after the lifespan shutdown, and `cli.serve` then `execv`s the same entry point
+and arguments (`launch.replace`): same pid, cgroup and unit, and the clean stop's
+`server.json` makes the next boot continue what it cut (self_update.py).
 
 **Its own state, never mixed with the legacy tree's.** aegis keeps its state in
 `.aegis/state/` under the config root, where the legacy tree kept its own in
@@ -186,7 +252,7 @@ so the fold reads it like any other and nothing reads the legacy directory again
 (`legacy_import.py`). Of `.aegis.yaml`, aegis reads
 the `agents:` and `queues:` maps and `default_agent`, and nothing in them is a
 default: an agent names its harness, model, effort and permission, a queue its
-agent and `max_parallel`, and one that does not is reported by name rather than
+agent, and one that does not is reported by name rather than
 filled in or dropped. A setting the loader filled in would be one nobody chose,
 with nothing to show it.
 
@@ -202,7 +268,12 @@ edits every key the readers take: the blocks that are values over defaults are
 drawn from `fields()`, a schema the wire carries, and the rest have controls of
 their own. `tests/test_config_coverage.py` takes the keys from the readers'
 declarations, so a key added to a reader fails until the form's document and
-the page carry it. Its `context:`
+the page carry it. The file is often shared through git by several servers, so
+what differs per server is committed under `hosts:`, a block per server name
+(`config.overlay`): the runtime fields read the merged mapping and the form's
+document the shared one, so a save never copies one server's values into all.
+An uncommitted edit was the alternative, and a git reset of a fraction of a
+second dropped it (#950). Its `context:`
 block is the one section with defaults: a wrong one keeps them all in force
 and `aegis doctor` names the mistake, because a typo there must never stop a
 `turn_end`.
@@ -250,7 +321,11 @@ context and cost change on nearly every line of a turn and are coalesced for
 250 ms. Publishing them per line doubled the server's cost per line. The
 cache counters (`tool_calls`, `cache_recent`, `compactions`) are coalesced the
 same way. They count only the main thread's events, like `context_tokens`,
-and one usage repeated across the lines of one call counts once (`cache.py`).
+and one usage repeated across the lines of one call counts once (`cache.py`). `turn_tokens`,
+the working row's new input and output for the turn, is coalesced with
+them and starts from zero each time the session turns working. A tool entry
+carries its activity from `usage/kinds.py`, the classifier the usage report
+uses, so the working row's verb for a call and the report agree on it.
 
 **A session's attention is decided in Python, from facts and the agent's own
 reports.** Working, error and waiting are facts the server holds: the turn, the
@@ -266,9 +341,12 @@ the click, so the main agent's card falls through to waiting on the run, and
 the click wakes it once to tell the person where the run next stops (#474); its plan comes from `plan_update`. `turn_end` refuses done
 while the plan has an item not done, because a done card offers to archive the
 session and the person should not have to read it to learn the task goes on.
-For the same reason it refuses done while a monitor, a callback queue task, a
+For the same reason it refuses done while a monitor, a live feed, a callback queue task, a
 background task or an approved run will still wake the session
 (`Registry.wakers`, #608); its children do not count, since they do not wake it.
+A done it accepts names, in its answer, what the session left in its repos
+(`Repos.pending`, #977): a nudge, not a gate, since a worktree or a draft
+branch may be left on purpose.
 Both are aegis records in the
 store, so the fold derives a session's `standing` and a refold gives the same
 card; the meta keeps it, so boot still reads no store. `attention.py` holds the
@@ -285,12 +363,20 @@ tool call is prose too and only the agent can tell it from its answer (#679).
 A queue worker hears `noted`, since its final message is its task's result. The brief rides in the report, and
 `session.handoff`, through the chip, the menu, `/handoff` with an instruction or
 an agent's `session_handoff`, starts the fresh session from it, and refuses
-while `Registry.wakers` lists anything but a run, which follows its owner. The fold also
+while `Registry.wakers` lists what a handoff cannot carry (a background task).
+A session in `/autohandoff` (its meta's `autohandoff`, a token count) is asked
+for the brief at every `turn_end` past that count, and the `turn_end` that
+carries one marks the handoff pending, as `session_handoff` does. The fold also
 times the plan from the records' `ts`: work is time inside a turn and after a
 turn that did not hand back to the person, idle is the rest, and each item gets
 the work done while it was `doing`. It accrues only at a plan record and at turn
 boundaries (`transcript/plan_clock.py`); the browser adds the time running since,
 so a turn's lines do not rewrite the meta.
+
+Every age the browser draws against a stamp from the server (idle time, the
+cold-cache notice, a monitor's start, the plan's running time) is measured on
+the server's clock: the welcome carries its time and `client/js/clock.js` keeps
+the offset, so a device whose clock is off by an hour draws no age wrong (#924).
 
 **What a person has read is the server's, shared by every browser.** A session
 keeps the ids of the agent messages no person has read, and when someone last
@@ -321,19 +407,41 @@ recap is sent to the agent. `/btw` is the same one-shot path's second caller
 the fold (`btw.py`), while a turn runs too, and the question and answer are two
 records, `btw` and `btw_answer`, that fold into one entry and never reach the
 agent.
+The third caller names groups (`group_names.py`, #1047): the registry calls
+`group_changed` with a group's key whenever its open members change, and the
+agent `group_names:` names writes its name and title after a 15 s quiet, once
+per membership. A name a person or an agent chose is pinned in `groups.json`
+and keeps; the call then sets only the title.
+
+**An @ line leaves its tab.** A person's line that starts with `@name`
+(`commands.split_mentions`) never reaches the agent of the tab it was typed
+in (`mentions.py`, #1083). A session's handle gets a note through
+`peer.handoff`, held while it is busy; an agent's name runs the line on the
+built-in `mention` queue, each task naming its agent; two or more names make a
+committee that the asking tab's agent merges in one turn, after the last
+answer or 30 minutes. The asking transcript is the only store: `mention`,
+`mention_answer`, `mention_merge` and `mention_carried` fold into one entry,
+and a restart rearms a waiting committee from it. A single answer reaches the
+tab's agent only on the person's next message, as a notice block after it, so
+it never starts a turn of its own.
 
 **One registry, every caller.** Every action is one registered operation with a
 pydantic params model. A websocket `call` is one projection of the registry, MCP
 tools are another, and plugins add operations to it. Nothing reaches the client as
 an action that is not an operation, so a subsystem cannot exist for agents and be
 missing from the UI. The retired September client died of the opposite: a protocol
-in which every subsystem needed its own fields.
+in which every subsystem needed its own fields. Under a host policy every call
+asks `can` before it runs: an operation that names a session asks `list`, `read`
+or `write` on it, and one that names none asks `spawn` when it starts work or
+`read`/`write` otherwise, with `session=None` (#993).
 
 **Agents call the same operations, as MCP tools named after them.** An operation
 marked for agents is served at `/mcp` under its name with the dot as an underscore,
 so `monitor.start` is `mcp__aegis__monitor_start`. The caller is the session whose
 token the request carries; the token is minted for each harness process and rides
-in the `X-Aegis-Session` header of its MCP config. No tool takes the caller's handle as an argument,
+in the `X-Aegis-Session` header of its MCP config. That endpoint is on the
+Server's own loopback listener only; the app a host mounts at its prefix leaves
+it out (#993). No tool takes the caller's handle as an argument,
 because an argument can be wrong and the token cannot.
 
 **The same operations run from the agent's shell.** aegis exports the endpoint
@@ -347,6 +455,18 @@ description in four of four. The cost is that every
 child of the agent inherits the token and can act as the agent. That is accepted:
 those children already run as the same user with the agent's files, and the
 token still dies with the harness process.
+
+**A session's other MCP servers are composed at each start (#960).**
+`App.mcp_for` reads the config in force, so an edit applies at the next start:
+the agent's `mcp:` names, from the file's map or `Server(mcp=...)`, then the
+policy's `mcp`, with `${VAR}` expanded from aegis's environment. Anything it
+cannot give (an unset variable, an unknown or doubled name, a transport the
+harness lacks) refuses the start into the transcript, as a refused policy
+spawn does. `Launch.mcp` stays aegis's own endpoint, which every driver treats
+apart (its token, `aegis call`'s variables, Claude's replaced tools), and the
+rest travel in `Launch.extra_mcp`. A driver that writes them into an argv or a
+file swaps each header and env value for a variable of the child's environment
+(`mcp_servers.by_ref`), as the session token already is.
 
 **A harness is a module behind one interface.** `Session` asks a `Process`
 (`harness.py`) to start, send, interrupt, set and end, and the fold reads each
@@ -482,6 +602,17 @@ as `steered`, and holds it otherwise. While messages are held, the `held` notice
 source gives the busy agent one warning per message, its sender and first line, on
 its next aegis tool result; the warnings end silently when the batch is sent.
 
+**A feed is a source that keeps waking its session** (`feeds.py`, #998): a file
+of lines or a command with a cursor, polled, with what it read and has not
+delivered kept as pending in `feeds.json`. A batch goes to `deliver` after a
+debounce when the session is idle, never mid-turn: at a turn's end
+`Registry.turn_ended` has each feed add one block to the held flush, before the
+flush task takes it, so bursts during a long turn arrive as one block per feed.
+The position is saved after the hand-off and a `sending` mark before it, so a
+crash in between sends that batch again marked `again` rather than losing it.
+A live feed counts in `Registry.wakers`, so `turn_end` refuses done; a local
+handoff moves the feeds to the successor instead of refusing.
+
 **aegis nudges an agent that drifts, once.** A live, idle session that is
 not a queue worker, whose card says done or review, gets an inbox message
 headed `> from aegis:nudge · plan|idle · …` when its plan has gone
@@ -528,7 +659,7 @@ turn starts with predicts the doc read no better than chance.
 principal's skills and memories are Markdown files under
 `<state>/knowledge/<principal>/`, a git repository in which every change
 through aegis is one commit (`knowledge/`). The state directory is out of
-every member's reach, so ops read and write it for the caller's own principal
+reach of agents' own tools, so ops read and write it for the caller's own principal
 (`App.who`), and a name another principal holds answers like one that does
 not exist. `Session._send` asks `Host.knowledge_hint` for a block before the
 notice blocks; the registry ranks the session owner's items (or the admin's,
@@ -540,9 +671,9 @@ notice it never goes into the system prompt or onto a `/` command. Loading a
 skill (`skill_read` of its SKILL.md) is a fact about the session:
 `Session.skills` lists the loaded names in order, in the meta so a restart
 keeps them, and the card shows them. A skill's scripts (`skill_run`) and its
-MCP server (`skill_mcp.py`) run as the session's Linux user in a fresh copy of
+MCP server (`skill_mcp.py`) run in a fresh copy of
 its folder, which the server pipes to the launched shell as a tar, since the
-store is out of a member's reach. A skill's MCP tools stay behind the one
+store stays out of an agent's direct reach. A skill's MCP tools stay behind the one
 `skill_tool`: the endpoint is stateless and Codex does not re-read a tool list
 mid-session by default, so no tool is added to it per session. What an agent
 saves unasked is `status: proposed` in the file itself, so the index, the hint
@@ -560,8 +691,7 @@ The card ops act on the session owner's store and are refused
 computed on a save (in the background, so a hung read never holds or fails
 a committed save) and in a daily pass the App runs from boot, each bounded
 at 30 s per principal, through the
-principal's `as_user` runner, so the paths a memory quotes are looked for as
-the member and never on the event loop; they live in memory in `Knowledge`
+thread, so the paths a memory quotes are looked for off the event loop; they live in memory in `Knowledge`
 and in the usage db's `flags` table, so a restart logs no flag twice.
 The Knowledge view's ops (`knowledge.list`, `.get`, `.put`, `.history`,
 `.restore`, `.remove`) are a person's, never an agent's, and act on the
@@ -570,8 +700,7 @@ guarded by a stamp: the SHA-256 of the item's file when the view read it,
 checked under the store's lock, so an edit never overwrites a change it did
 not see.
 `/setup`'s import (`knowledge.import`, `knowledge/importer.py`) reads each
-ticked source on the session user's `as_user` runner, so a member's files are
-read as the member and never on the event loop, and saves it with `fresh`,
+ticked source in a thread, never on the event loop, and saves it with `fresh`,
 which refuses a name any item holds. The ticks are the approval only in a
 turn the person began (`Session.person_turn`, which `/setup`'s line and an
 artifact's submit set): then one transcript card lists the items, each with
@@ -726,7 +855,7 @@ the version again, so a hand edit is caught too
 (`docs/superpowers/specs/2026-10-15-dynamic-workflows-design.html`).
 
 **Agents change only what they created.** An agent reads and messages any session
-it can see (and, through `peer_read`, the archived session it continues), and changes only its own monitors, its own session's names and the
+it can see (and, through `peer_read`, any archived session it can see), and changes only its own monitors, its own session's names and the
 tasks it enqueued. A session an agent spawns runs with at most the agent's own
 permission, so spawning is never a way to gain power. A session whose
 permission is read calls only the operations marked `read`: its own card and
@@ -736,49 +865,22 @@ and follows a live `/permission`, and Claude Code is told to let every aegis
 tool through, because its plan mode refuses MCP calls an allow rule names
 (`ops.py`, `claude/process.py`).
 
-**A token is a principal, and a member changes only what it owns.** A server
-holds one token per person, linked server or job, each a name and a role
-(`tokens.py`): the token in `.aegis/state/token` is the admin's, the others are
-digests in `tokens.json`. Every session and queue task records its owner: the
-principal that started it, or the owner of the agent that did, so a member's
-agent cannot hand work to anyone else. An admin changes anything. A member reads
-everything and changes only what it owns; server settings, links, tokens and
-spawning on a linked server are for admins. Each operation declares `admin` or
-the param that names the session it changes, and `ops.Registry.call` checks both
-in one place. An agent acts as its session's owner with the owner's current role,
-and a link acts as the token it presented. A token revoked while its socket is
-open is refused at its next message, and reads nothing more. Outside the
-multi-user mode every harness runs as the server's Linux user, so a member's agent
-with shell access can read the admin token: roles stop accidents between
-colleagues, not a hostile member.
+**One token, one person.** A server has one token, in `.aegis/state/token`
+(`tokens.py`), and whoever holds it may do anything. Every session and queue
+task still records its owner, the server's person, because the host policy of
+the embeddable aegis (#957) keys its stores and its checks by that string. aegis
+3.0 removed the multi-user mode (#958): a state directory that still holds its
+`tokens.json`, or an `.aegis.yaml` with a `multi_user` block, refuses to start
+and says what to delete. Every process runs as the server's Linux user, through
+one launcher (`launch.py`).
 
-**In the multi-user mode a principal is a Linux user.** With `multi_user:` in
-`.aegis.yaml`, each token names a Linux user (`users.py`), and the server, an
-unprivileged user holding `CAP_SETUID`, `CAP_SETGID` and `CAP_SETPCAP` from its
-unit, starts every process through one launcher (`launch.py`): behind `setpriv`,
-switched to the owner's user with every capability dropped, with the owner's
-environment and the pool file's variables. Files the server opens for a person,
-it opens on a thread switched to that person (`as_user.py`), so the kernel checks
-every access. The state directory is mode 0700, out of every member's reach. A
-signal follows the same ownership rule: the launcher tries the signal directly,
-then, when Linux denies it, retries through `kill` as the process's recorded
-user (or as the server for server-owned processes). Harnesses, terminals,
-timeout cleanup, workflow commands and crash recovery all use this path.
-member sees only what it owns: one rule, `App.sees`, hides another's sessions,
-runs, tasks, schedules, journal rows and toasts at the three places data leaves
-the server (an op's params in `Registry.call`, each channel subscriber's view in
-`member_view.py`, and the lists ops return), and something hidden answers like
-something missing. The host work the mode needs is the help page `multi-user`,
-which `/multiuser` hands to the admin's agent as one turn (`multiuser.py`)
-(`docs/superpowers/specs/2026-10-21-linux-users-design.html`).
 **An agent suggests the configuration; a person writes it.** `config_suggest`
 records a card with the whole new `.aegis.yaml`, its diff and the file's stamp
-in the transcript, so it survives a restart; an admin's Apply writes that text
+in the transcript, so it survives a restart; a person's Apply writes that text
 through the stamp check (`config.write_text`) and wakes the agent
 (`config_suggest.py`). `/setup` hands the help page `setup` to the session's
 agent as one turn with the caller's last run, and `setup_record` keeps one
-record per principal under the state directory, which a member's agent cannot
-write itself (`setup.py`, `docs/superpowers/specs/2026-10-22-setup-onboarding-design.html`).
+record per principal under the state directory (`setup.py`, `docs/superpowers/specs/2026-10-22-setup-onboarding-design.html`).
 Closing is the one exception, and it asks for a second thought: `session_close`
 closes at once only a session the agent spawned, or a worker whose task it
 enqueued, whose attention is done. Anything else, the caller's own session
@@ -801,32 +903,21 @@ sessions it watches.
 A person's `/spawn` makes nobody's child, but its first message carries the
 last turns of the tab it was typed in and that tab's handle, so the new agent
 can find the referent of a three-word task (`agent_ops.spawn_opening`).
-Across a plain link an agent never enqueues on or reads another server, and
-across a trusted one it does all of it (`agent_ops.across`): it hands off,
-to `handle@server`, and an admin's agent spawns, as the link's token there, so
-the far server's quota policy for that token decides (`app._spawn_far`). Its
+Across a link an agent does all of it (`agent_ops.across`): it hands off to
+`handle@server`, and it spawns, as the link's token there, so the far server's
+quota gate decides (`app._spawn_far`). Its
 permission is capped at the agent's, and the far session records where it came
 from as `spawned_from`, provenance the far side cannot check and never trusts.
 
-**A member spends the pool only below its lines.** A policy (`quota_gate.py`)
-gives each pool, `claude`, `opencode-go` or `codex`, a mode: closed, open, or
-lines, where each listed window of the pool's gauge has a launch line and a stop
-line. A member token takes its own policy or `default_policy` from
-`tokens.json`, a pool its policy does not name is closed, and so is a token with
-neither; an admin has none and is never gated. Below every launch line the owner
-may start harnesses; between the lines its running turns go on and nothing new
-starts; at a stop line aegis interrupts them. One question decides every start,
-`Registry.quota_hold`, asked by `session.spawn`, a queue's dispatch (a waiting
-task is skipped, never failed, so the next owner's runs), `Session.deliver`, a
-turn's end with held messages, a person's send, and the boot's continue: a
-message that may not start a turn is held with `held_for: "quota"`. After every
-reading and every minute `App.on_quota` pauses each working session whose gate
-says stopped (`quota_paused` in the meta, a `quota_paused` record) and continues
-each paused or holding one whose gate is open, with one `> from aegis:quota`
-message ahead of what it held. It is level-triggered, so a restart or a missed
-reading needs no memory, and only an open gate continues, so a gauge between the
-lines leaves a paused session paused and nothing flaps. A reading older than 15
-minutes closes the gate and stops nothing: a failed poll must not interrupt work.
+**The person's pause holds every start.** One question decides whether a
+session may start a turn, `Registry.quota_hold`, asked by `session.spawn`, a
+queue's dispatch (a waiting task is skipped, never failed), `Session.deliver`, a
+turn's end with held messages, a person's send, and the boot's continue: while
+every session is paused (`pause.py`) a message that may not start a turn is
+held. Quota lines per token left with the multi-user mode; a session a line
+paused before then is continued by `App.on_quota` at the next reading, with one
+`> from aegis:quota` message ahead of what it held. A schedule's own launch
+lines (`schedules.py`, `quota_gate.decide`) still hold its ticks.
 
 **A cascade picks a model at every start and falls only inside a turn.** An
 agent's `models:` is recorded on the spawn spec as `cascade` (unless the spawn
@@ -848,50 +939,28 @@ top. The cooling table is in memory per server; one timer at its earliest
 end calls `App._release_held`, the same release `on_quota` ends with, so held
 queue tasks, schedule ticks and workflow nodes start when a model is free again.
 
-**A link is a client, and nothing travels from a linked server into an agent.**
-Alex's laptop must never run what someone else's token wrote, so a link only
-asks: it sends calls and subscriptions, and reads back `welcome`, `reply`,
-`snapshot`, `patch` and `error`, dropping anything else with a log line. It runs
-no request handler, so the linked server has no operation to call here and no
-route to this server's agents. The linked server is treated as hostile: an agent
-here sees only strings this server composed from far values it checked, a
-handle that passes `valid_handle`, a state from a fixed set, whether a handoff
-was held, and errors this server words from an allowlist of codes. Never a
-title, a transcript, a reply or an error message the far side wrote.
-`tests/test_links.py::test_a_hostile_far_server_puts_no_text_into_an_agent_here`
-holds it against a far server that puts a marker in everything. The same goes
-for the browser: a linked server's sent file reaches this origin only through
-`/via`, under headers this server decides from the file's name
-(`files.via_headers`), and the client rebuilds every far file link from a path
-of that one shape, since a page or a `javascript:` URL running on this origin
-holds the cookie that drives every agent here. A far server's workflow run
-reaches the client over its link the same way as its sessions, and the client
-routes a card's calls by the server its row came from, so a far run id can
-never take a row of this server's or another server's run and steer a call
-there. A socket with no `Origin` is a
-program, never a browser, and only such a socket may say it is a link; a link
-socket keys subscriptions by `sid` and is not relayed on. "A link" means any
-holder of the token that says so: per-link credentials come with per-user
-tokens. Before a second person gets a token on a linked server, that server must run
-each person's sessions apart and let only a session's owner write to it, or one
-person could steer another's session into handing off (the links spec).
+**A link federates two servers** (#985). One socket, opened by the near server,
+carries both directions: the near server sends calls and subscriptions and reads
+`welcome`, `reply`, `snapshot`, `patch` and `error`, and it also answers the far
+server's `rcall` with `rreply`, running the call as a person acting through a
+link (`App.answer_link`), the same caller a link socket is on the far side, so
+every op keeps one rule for linked calls. The far server keeps a
+`links.Backlink` for the socket, which agents and the router find by name like
+any link, so a laptop behind NAT is reached without accepting a connection.
+Any other frame is dropped with a log line. Open-source aegis has no protection
+between linked servers, as it has none between people on one: linking servers
+is federating them, and a host that needs a wall between servers refuses links
+in its policy (`HostPolicy.identify` refuses a link credential by default). Both
+servers need 3.0: the hello says `both_ways` and the welcome says it back, and a
+server that lacks it fails the link as `too_old`, in either direction. One link
+joins a pair: a server refuses the hello of a server it links itself
+(`App.link_refusal`), checks that again before every call back, and ends the way
+back with an `unlink` frame when it fails or the link's token is revoked; the
+near server closes the socket, and its next hello names why.
 
-**A trusted link is a client both ways, between servers one person alone
-uses** (#684). A link added with `--trusted` asks for it in its `hello`, and the
-far server grants it in `welcome` only to its admin's own token while no other
-token exists there and it links no server of that name (`App.trust_refusal`).
-Granted, the near server's link also answers `rcall` with `rreply`, running the
-call as its admin acting through a link (`App.answer_link`), the same caller a
-link socket is on the far side, so every op keeps one rule for linked calls;
-and the far server keeps a `links.Backlink` for the socket, which agents and the
-router find by name like any link. The far server checks the rule again before
-every call back and ends the trust with a `trust` frame when it fails. A way
-back carries calls only: subscriptions are refused (`not_both_ways`), nothing is
-relayed to a third server, and the archive merges outbound links alone. On a
-plain link an `rcall` is dropped like any unknown frame. Text does travel over
-a trusted link: `session_list` passes the other server's entries whole,
-`peer_read` reads across it, and `agent_ops.far_error` passes its errors
-through, since the far server is this person's own. Acting goes the same way:
+Across the link, agents act as at home (`agent_ops.across`): `session_list`
+passes the other server's entries whole, `peer_read` reads across it, and
+`agent_ops.far_error` passes the far server's errors through after its name.
 `queue@server` enqueues there with the agent as the task's `far_enqueuer`, and
 the result comes back through the link-only `queue.deliver`; `session_close`
 goes through the link-only `peer.close`, which applies the local two-step rule
@@ -901,22 +970,95 @@ is down. A schedule tool's `name@server` runs the operation on the far server,
 which keeps every rule because the near server names the calling agent in
 `from_agent`: a link call with one is an agent, born paused and refused an
 unpause or a fire while it waits, and a link call without one is a person, which
-is how a card's Unpause in a browser arrives. A server without the field refuses
-it, so a newer server's agent never passes as a person on an older one. Ownership
-goes by the far session's log id, which survives a rename. The approval card
-stays in the near session's transcript and names the server; the client honours
-that name only for a session on its own server (`cardServer` in `app.js`), since
-a far transcript could otherwise aim a person's Unpause at another server.
+is how a card's Unpause in a browser arrives. Ownership goes by the far
+session's log id, which survives a rename. The approval card stays in the near
+session's transcript and names the server; the client honours that name only
+for a session on its own server (`cardServer` in `app.js`), since a far
+transcript could otherwise aim a person's Unpause at another server.
 
-**A trusted link can be an exit** (#862, `exit.py`). A child named to exit gets the
+The way back also carries live views (#969): the far server lists it on `links`
+marked `back`, and a browser there subscribes down it as `rsub`, `runsub` and
+`rwatch`; the near server serves them as the `answer_link` caller
+(`App.serve_link`) and sends each frame back as `rframe`. Nothing is relayed to
+a third server, and the archive and files merge outbound links alone.
+
+The browser keeps its own wall, because it is about this origin, not about
+servers: a linked server's sent file reaches this origin only through `/via`,
+under headers this server decides from the file's name (`files.via_headers`),
+and the client rebuilds every far file link from a path of that one shape, since
+a page or a `javascript:` URL running on this origin holds the cookie that
+drives every agent here. A far server's workflow run reaches the client over its
+link the same way as its sessions, and the client routes a card's calls by the
+server its row came from, so a far run id can never take a row of this server's
+or another server's run and steer a call there. A socket with no `Origin` is a
+program, never a browser, and only such a socket may say it is a link; a link
+socket keys subscriptions by `sid` and is not relayed on.
+
+**Any link can be an exit** (#862, `exit.py`). A child named to exit gets the
 proxy variables for a listener on loopback, which opens one websocket per stream
-to the far server's `/tunnel`; the relay there connects to the target. It is
-limited to trusted links, because plain HTTP through a relay is text from a linked
-server reaching an agent, and a trusted link's token already runs a shell there.
-The relay asks `App.trust_refusal` for every stream and connects only to public
-addresses, checked after resolving the name. A dead exit answers 502 and nothing
+to the far server's `/tunnel`; the relay there connects to the target. A link's
+token already runs a shell there, so the relay adds no power. It asks
+`App.link_refusal` for every stream and connects only to public addresses, checked after resolving the name. A dead exit answers 502 and nothing
 falls back to the near server's own address. It covers what honours the proxy
 variables and nothing else.
+
+**A client is a set of mounts.** The page is not one client but as many mounts
+as it asks for: `mount()` (`js/mount.js`) builds one `.aegis` root inside the
+element the host named, and composes into it the parts its layout asks for.
+There are three layouts: `chat` is one session's transcript and, unless it is
+switched off, its composer; `tabs` is the same two under a strip of the sessions
+the policy lists for that caller, with a button that starts a new one; `full` is
+the standalone client's whole page. A host passes `theme`, `lang`, `labels`,
+`controls` and `composer` to any of them; `renderers` gives a host's own tool a
+card of its own, called when the call has finished and again on each update, and
+`transcribe` hands a dictation take's 16 kHz mono pieces to the host's speech
+service in place of the browser's. `sidebar: false` keeps a `full` mount's
+session panel out, for a host that wants only the transcript, and `page` — true
+only on `index.html` — lets the mount own the document's title, favicon, theme,
+URL hash, service worker and push, while false keeps all of those the host's.
+The standalone page is one mount too, adopting its empty `#a2` element
+(`adopt`). `layout: "full"` makes `js/layouts/full.js` build the netbanner, the
+boot view and the session view into that root, and loads `app.js` with a dynamic
+import that only a full mount pays for; `composeFull` composes the parts when it
+resolves, and the calls a host made while it loaded run then. `index.html` keeps
+only its head, the empty element and the module script. That mount owns the
+state its views share: every server's sessions, the links, each link's quota and
+host, the browser's tab order, the session shown and the transcripts kept for
+it. Its views are parts as well: the Fleet, the new-session form, Settings,
+Journal, Usage, Knowledge, Files, Schedules, Help, the terminal and the browser
+each build the `<main class="view">` they draw in and hand their module that
+node, so the router only chooses which one the root's `data-view` shows. The
+router and the key table stay in `app.js` until #1003 takes them out; nothing a
+chat or tabs mount needs is in it.
+A product chat may also switch off the composer's model, effort and permission
+chips (`controls: false`, #994).
+A part owns the markup it draws, looks every node up under its own element and
+never asks the page for an id, and every stylesheet a mount loads is scoped to
+`.aegis`, so a host page keeps its own `#tabs`, its own `#composer` and its own
+rules, and two mounts never see each other's nodes. One socket is shared by
+every mount on the page (`js/connection.js`, keyed by URL and token), a host's
+token rides in the hello (`protocol.js`), and the mount derives every address
+from its own module URL, so a host that serves the app under its prefix
+(`web.py`, `Server(prefix=...)`) configures nothing; `theme: "host"` loads no
+theme and leaves the variables to the host's own CSS. The handle is the whole
+contract a host sees: `on` for `connection`, `sessionChanged`, `turnStart`,
+`turnEnd`, `entry`, `fileSent` and `error`; `open`, `spawn`, `focus`, `send`,
+`destroy` and `el`.
+
+**A part's strings are keys in a table.** `js/labels/en.js` and
+`js/labels/es.js` hold the same keys, and a mount picks one with `lang` while
+`labels` replaces single entries. A key one table lacks falls back to English
+and is logged by name once, so a translation lag makes noise instead of an
+empty button. A part's markup stays in English and names its key beside it
+(`data-t`, and `data-t-title`, `data-t-aria` and `data-t-placeholder` for the
+attributes `applyLabels` fills); code that builds a string calls `t("part.thing",
+{ name })`. Counts, plurals and dates stay in code and only their nouns come
+from the table, so a translator moves the word, not the arithmetic. The
+standalone page is a mount like any other and takes `?lang=es` (or the
+`aegis.lang` it remembers), which is what makes the full layout's own chrome,
+Settings and the help pages read in Spanish too. A turn's cost is the mount's — the cumulative figure the
+patch that entered working carried, subtracted from the one it left with, null
+when the mount joined mid-turn — so no host re-derives it.
 
 **The client knows no subsystem by name.** Server state reaches the browser as
 named channels: a snapshot on subscribe, then numbered patches. A gap in the
@@ -1124,18 +1266,24 @@ second Ctrl+F, inside the bar, is the browser's again.
 
 **A theme is one CSS file over one markup.** The markup carries everything any
 theme might show, and the base stylesheet reads only CSS variables. A theme sets
-the variables and a few overrides that decide what shows. Every font a theme
-names is vendored in `fonts.css`, or the theme looks different on every
-machine. Anything a theme draws over the whole window, such as Phosphor's
-scanlines, is positioned against `#a2` and never the viewport, because the
-landing page applies the same rules to a window that sits inside a page.
+the variables on the mount's root, `.aegis[data-theme=x]`, and a few overrides
+that decide what shows. Every font a theme names is vendored in `fonts.css`, or
+the theme looks different on every machine. Anything a theme draws over the
+whole window, such as Phosphor's scanlines, is positioned against the root and
+never the viewport, because the landing page applies the same rules to a window
+that sits inside a page.
 
-**A quota projection reads history once per window.** `quota.core.window_pace`
-keeps what is spent and runs the time left at the posterior mean of a rate with
-a Gamma prior, centred on what finished windows of that kind spent.
-`Quota._usual_spend` reads that from `usage_quota` through
-`Journal.usual_spend` when a window's reset time changes, and keeps it, because
-a snapshot is taken every minute. No finished window yet means a usual of 100%.
+**A quota projection runs at the current rate.** `quota.projection.Projector`
+keeps, per billing and window kind, an exponentially weighted rate of the
+percent's rise, with a half-life per window length (`config.quota_from`). It
+moves only when a reading changes the percent or the reset, the same rows the
+journal keeps in `usage_quota`, so a projector seeds itself by replaying seven
+half-lives of them through `Journal.quota_rows` and lands on the rate a live one
+holds. The rate carries across resets; inside a window the percent is a running
+maximum. With less than one half-life of history, `quota.core.window_pace`
+answers instead: the time left at the posterior mean of a Gamma prior centred on
+what finished windows spent, which `Quota._usual_spend` reads through
+`Journal.usual_spend` once per window.
 
 **The session panel is rows that open cards.** Each section of the panel is a
 compact row (`.prow`) that holds its own card (`.pcard`) in the markup, so the
@@ -1285,9 +1433,7 @@ longer have it, nothing is written and the answer is changed_on_disk with the
 disk's text, because agents write the files a person edits and
 last-write-wins would drop an agent's edit silently. A write goes through a
 temporary file in the same folder and `os.replace`, keeping the mode, and is
-logged with its author in `<state>/fs-log.jsonl`. Admins and members alike may
-write: every harness already runs as the server's user, so a member's agent
-could anyway. The picker's list is `fs_index.py`'s git-aware walk, run on
+logged with its author in `<state>/fs-log.jsonl`. The picker's list is `fs_index.py`'s git-aware walk, run on
 demand and never watched (#458). The tree lists one folder per `fs.list`, with
 one `git check-ignore` for the folder's innermost repository; a folder holding
 a repository shows although its parent ignores it, or `repos/` would hide every
@@ -1346,6 +1492,9 @@ root (`files.store_all`).
 A Read, Write or Edit row carries the path its tool used, and the person can
 ask for that file (`file.peek`): it is copied the same way, as it is at that
 moment, and its card opens inside the row. The agent never sees it.
+On a linked server's row the browser sends `file.peek` through the link:
+the far server copies its own file and the card fetches it under
+`/via/<server>`, so no server reads another's disk.
 Open natively runs the desktop's opener on the server, so it is a person's
 operation only, and only for a socket on loopback to a server with a desktop: a
 proxy's public name is a browser elsewhere, and an SSH tunnel to a headless box
@@ -1464,7 +1613,10 @@ in the tab that draws its window while every other place holds a line, as the
 viewer's hold does. Panes are placed by numbers inside one container and never
 moved in the DOM, because moving an iframe reloads its page. A file sent again
 from the same path is a new version of one file (`layout.file_key`), and its
-pane follows the newest.
+pane follows the newest. A layout names its panes by the ids the session's own
+server knows, so on a linked server's tab the client resolves them against
+that server: a docked file is drawn through `/via` like its card, and a docked
+browser is found and streamed on that server (#970).
 
 **Audio never leaves the browser.** Dictation transcribes in the page, with
 Cactus Whistle's WebAssembly build in two workers (`js/dictation.js`). The client
@@ -1486,6 +1638,14 @@ bar that says it is on is the host's, out of the page's reach. A send from a box
 (`dictated`), and the server adds `dictation.NOTE` after the text for the
 agent; the fold strips that exact line off the person's row and marks it
 `detail.dictated`, so the transcript and the harness keep the same text.
+
+The one exception is a take the person chooses to send: holding a composer's
+mic records audio with `MediaRecorder` instead of dictating (`js/record.js`,
+#932), and the take goes up as an ordinary attachment whose
+`attachment.begin` carries `recorded_ms`. The send rewrites it with `ffmpeg`
+as mono 16 kHz Opus (`recordings.py`), because browsers do not honor a
+requested sample rate, and the agent's line names it a recording with its
+duration. Without `ffmpeg` the browser's file and clock stand.
 
 Reading replies aloud follows the same rule the other way: the reply is already
 in the page, and it is spoken there (`js/speak.js`). The browser's own

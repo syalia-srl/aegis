@@ -1,0 +1,1 @@
+- **OpenCode calls to an agent's own MCP servers show by name.** Extra servers ran in Code Mode, so the transcript showed one script call instead of the tool.

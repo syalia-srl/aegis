@@ -41,10 +41,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-import pwd
 from typing import Any, Literal
 
-from .as_user import Runners
 from . import attachments, cache, harness_versions, launch as launching, restarts
 from . import layout as canvas
 from .artifacts import ArtifactError, Board
@@ -61,11 +59,13 @@ from .claude.stream import (
     Title,
     ToolCall,
 )
-from .harness import Launch, Process, harness_for
+from .harness import CONTAINS, Launch, Process, harness_for, isolated_dirs
 from .meta import MetaStore
 from .names import default_title
 from .ops import OpError
+from .policy import McpServer
 from .park import TIMER_TOOLS
+from .scopes import ANY as ANY_SCOPE, Scope
 from .transcript.entries import EMPTY_STANDING, Fold, fold_records
 from .transcript.store import Store, read_store
 from .transcript.wire import wire, wire_ops
@@ -90,7 +90,9 @@ _NOW = (
     "continued_by",
     "handoff_pending",
     "quiet",
+    "stay_quiet",
     "autoclose",
+    "autohandoff",
     "workflow",
     "skills",
     "skill_runs",
@@ -106,6 +108,7 @@ _SOON = (
     "tool_calls",
     "cache_recent",
     "compactions",
+    "turn_tokens",
 )
 PUBLISH_EVERY_S = 0.25
 
@@ -128,9 +131,6 @@ class Host:
     it; the default does nothing, which is what a bare session in a test or
     the bench needs."""
 
-    # Threads that open files as a session's user (as_user.py).
-    runners = Runners()
-
     def spawn_args(
         self, session: "Session"
     ) -> tuple[tuple[str, str] | None, str | None]:
@@ -142,10 +142,15 @@ class Host:
         """The cgroup a new process starts in (cgroups.py), or None."""
         return None
 
-    def user_for(self, spec: "SpawnSpec") -> str | None:
-        """The Linux user a new process runs as (launch.py); None for the
-        server's own."""
-        return spec.linux_user
+    def mcp_servers(self, session: "Session") -> tuple[McpServer, ...]:
+        """The MCP servers a new process gets beside aegis's (#960); raises
+        OpError when one cannot be given, which refuses the start."""
+        return ()
+
+    async def admit_resume(self, session: "Session") -> None:
+        """Ask the host policy before a stopped session's process starts again
+        (#959); raises policy.Refused to keep it stopped."""
+        return None
 
     def released(self, session: "Session") -> None:
         """The session's process ended: empty and remove its cgroup."""
@@ -181,6 +186,11 @@ class Host:
     def quota_hold(self, session: "Session") -> str | None:
         """Why the session's owner may not start a turn now (quota_gate.py),
         or None when it may."""
+        return None
+
+    def refuse_hold(self, session: "Session") -> str | None:
+        """Why the session's quota guard refuses a turn a person did not
+        start (guards.py, on_closed: refuse), or None when it does not."""
         return None
 
     def workflow_lock(self, session: "Session") -> str | None:
@@ -245,6 +255,10 @@ class Archived(Exception):
     """A message was sent to an archived session."""
 
 
+# The product-agent switches and their defaults (SpawnSpec, #983).
+SWITCHES = {"harness_tools": True, "isolated": False, "primer": True, "notices": True}
+
+
 @dataclass(frozen=True)
 class SpawnSpec:
     """What a session's process runs with, fixed at spawn and recorded in the
@@ -265,14 +279,11 @@ class SpawnSpec:
     overridden: tuple[str, ...] = ()
     # The log id of the agent session that spawned this one.
     spawned_by: str | None = None
-    # The group this session belongs to (#586): the log id of the session that
-    # started the chain it was spawned or enqueued in, fixed at spawn, so it
-    # outlives that session. ``key@server`` when the chain began on a linked
-    # server. None for a session nobody started: its own log id is its group.
+    # The group this session belongs to (#1039): a ``grp-`` key of the
+    # server's group store, ``grp-…@server`` for a group that began on a linked
+    # one, or None for a session in no group. It is written when the session
+    # starts its first child, and a person or an agent may move it later.
     group: str | None = None
-    # A handoff of the session that headed its group heads it in its place
-    # (#641): the tab bar and the Fleet draw it first, though it is newer.
-    leads: bool = False
     # The principal whose session this is (tokens.py); None from before owners,
     # which reads as the admin's.
     owner: str | None = None
@@ -288,16 +299,27 @@ class SpawnSpec:
     # model; () otherwise. Fixed at spawn: the position in use is the index
     # of ``model`` in it.
     cascade: tuple[str, ...] = ()
-    # The Linux user its processes run as, in multi-user mode (users.py):
-    # fixed at creation, so a later change of the token's user reaches new
-    # sessions only. None runs as the server's own user.
-    linux_user: str | None = None
     # The owner's knowledge setting when it was spawned (setup.Records):
     # native starts every process of it without the harness's own skills and
     # memory, and lets a store skill take a harness command's name. Fixed at
     # spawn, so the menu and the process never disagree; the switch reaches
     # new sessions.
     knowledge_native: bool = False
+    # A host's strings for this session (policy.SpawnRequest.tags), copied to
+    # every session it starts; shown to no one (#959).
+    tags: dict[str, str] = dataclasses.field(default_factory=dict)
+    # A product agent's switches (policy.SpawnRequest, #983), fixed at spawn.
+    harness_tools: bool = True
+    isolated: bool = False
+    primer: bool = True
+    notices: bool = True
+    # What the session may use (scopes.py, #1066): its agent's scope met with
+    # its starter's, fixed at spawn so editing the agent never widens it.
+    scope: Scope = ANY_SCOPE
+    # The log id of the session that started this one without being its
+    # parent: a queue worker's enqueuer. spawned_by would make the worker a
+    # child in the tree.
+    started_by: str | None = None
 
     def record(self) -> dict:
         """The fields a spawn record and a meta carry."""
@@ -317,8 +339,6 @@ class SpawnSpec:
             d["spawned_by"] = self.spawned_by
         if self.group:
             d["group"] = self.group
-        if self.leads:
-            d["leads"] = True
         if self.owner:
             d["owner"] = self.owner
         if self.spawned_from:
@@ -329,10 +349,17 @@ class SpawnSpec:
             d["keep_harness_tools"] = list(self.keep_harness_tools)
         if self.cascade:
             d["cascade"] = list(self.cascade)
-        if self.linux_user:
-            d["linux_user"] = self.linux_user
         if self.knowledge_native:
             d["knowledge_native"] = True
+        if self.tags:
+            d["tags"] = dict(self.tags)
+        for k, default in SWITCHES.items():
+            if getattr(self, k) != default:
+                d[k] = getattr(self, k)
+        if not self.scope.any:
+            d["scope"] = self.scope.record()
+        if self.started_by:
+            d["started_by"] = self.started_by
         return d
 
     @classmethod
@@ -350,14 +377,16 @@ class SpawnSpec:
             overridden=tuple(d.get("overridden") or ()),
             spawned_by=d.get("spawned_by"),
             group=d.get("group"),
-            leads=bool(d.get("leads")),
             owner=d.get("owner"),
             spawned_from=d.get("spawned_from"),
             continues=d.get("continues"),
             keep_harness_tools=tuple(d.get("keep_harness_tools") or ()),
             cascade=_cascade_of(d.get("cascade")),
-            linux_user=d.get("linux_user") or None,
             knowledge_native=bool(d.get("knowledge_native")),
+            tags=dict(d.get("tags") or {}),
+            **{k: bool(d.get(k, default)) for k, default in SWITCHES.items()},
+            scope=Scope.from_record(d.get("scope")),
+            started_by=d.get("started_by"),
         )
 
 
@@ -417,7 +446,9 @@ class Session:
         continued_by: str | None = None,
         handoff_pending: dict | None = None,
         quiet: bool = False,
+        stay_quiet: bool = False,
         autoclose: bool = False,
+        autohandoff: int | None = None,
         checked_version: str | None = None,
         cascade_exhausted: bool = False,
     ) -> None:
@@ -481,9 +512,15 @@ class Session:
         self.worker = worker
         # No tab until its turn ends (#386); a card in the Fleet meanwhile.
         self.quiet = quiet
+        # Quiet as a mode, not for one turn (#1025): the tab comes back when a
+        # turn ends, and goes again when the next one starts.
+        self.stay_quiet = stay_quiet
         # The person's word, ahead of time, to close once the agent ends done
         # (#691): turn_end refuses done without close while it is on.
         self.autoclose = autoclose
+        # /autohandoff (#1019): the context size, in tokens, from which a
+        # turn_end with a brief continues this session in a fresh one.
+        self.autohandoff = autohandoff
         # A schedule's run: {"name", "run", "spawn"}, inherited by its children
         # (schedules.py); None for any other session.
         self.schedule = schedule
@@ -535,6 +572,13 @@ class Session:
         self.compactions = compactions
         # The last usage counted: one call written as several lines repeats it.
         self._last_usage = None
+        # New input and output tokens since the turn started, for the working
+        # row's counter (#938). Input leaves out cache reads: each call rereads
+        # the whole context, so counting them would count it again per call.
+        self.turn_tokens = [0, 0]
+        # The output counted for the message streaming now: Claude's assistant
+        # lines carry its count at message_start, its message_delta the final.
+        self._last_out = 0
         # The session a handoff started from this one (#354): "starting" while
         # it spawns, its log id after, None when the archive was called off.
         self.continued_by = continued_by
@@ -556,6 +600,12 @@ class Session:
         self.last_verdict: harness_versions.Verdict | None = None
         # The link the last launch exits through (exit.py); None for direct.
         self.exit_via: str | None = None
+        # The environment a host's spawn added (policy.SpawnRequest.env): kept
+        # in memory only, never in the meta, and asked for again on a resume.
+        self.host_env: dict[str, str] = {}
+        # Set by Registry.spawn, which asked the host policy for this first
+        # start; every later start asks it again (admit_resume).
+        self.admitted = False
         # The last launch's version when it was outside the tested range, for
         # the panel's warning colour (#456); None in range or before a launch.
         self.untested_version: dict | None = None
@@ -620,7 +670,9 @@ class Session:
             "continued_by": self.continued_by,
             "handoff_pending": self.handoff_pending,
             "quiet": self.quiet,
+            "stay_quiet": self.stay_quiet,
             "autoclose": self.autoclose,
+            "autohandoff": self.autohandoff,
             "checked_version": self.checked_version,
             "cascade": self._cascade_meta(),
         }
@@ -638,9 +690,10 @@ class Session:
             out["exhausted"] = True
         return out
 
-    def group_key(self) -> str:
-        """The group a session this one starts belongs to (#586)."""
-        return self.spec.group or self.log_id
+    def group_key(self) -> str | None:
+        """The group a session this one starts belongs to (#1039): its own
+        ``spec.group``, never its log id. A session in no group has none."""
+        return self.spec.group
 
     def wire(self) -> dict:
         """What the ``sessions`` channel carries."""
@@ -648,6 +701,7 @@ class Session:
         m.pop("held")
         m.pop("standing")
         m.pop("priming", None)  # the agent's text stays on the server
+        m.pop("tags", None)  # a host's strings are shown to no one (#959)
         m["unread"] = len(self.unread)
         m["held_count"] = len(self.held)
         m["state"] = self.status
@@ -661,6 +715,7 @@ class Session:
         m["untested_version"] = self.untested_version
         m["cache_hit"] = cache.hit_rate(self.cache_recent)
         m["cache_alarm"] = cache.alarm(self.cache_recent, self.spec.harness)
+        m["turn_tokens"] = self.turn_tokens
         m.update(self._host.card(self))
         return m
 
@@ -811,16 +866,53 @@ class Session:
 
         await self._check_version()
         resume = self.resume_id
+        if self.admitted:
+            self.admitted = False  # the next start asks again
+        else:
+            try:
+                await self._host.admit_resume(self)
+            except OpError as e:
+                self._record(
+                    {
+                        "kind": "harness_error",
+                        "text": f"This session cannot start: {e.message}",
+                    }
+                )
+                raise
+        try:
+            extra_mcp = self._host.mcp_servers(self)
+        except OpError as e:
+            self._record(
+                {
+                    "kind": "harness_error",
+                    "text": f"This session cannot start: {e.message}",
+                }
+            )
+            raise
+        if missing := [
+            k
+            for k in CONTAINS
+            if k not in self.harness.contains and getattr(self.spec, k) != SWITCHES[k]
+        ]:
+            text = f"{self.harness.label} cannot run with {', '.join(missing)} yet"
+            self._record(
+                {"kind": "harness_error", "text": f"This session cannot start: {text}"}
+            )
+            raise OpError("unsupported", text)
+        cwd, home = self.spec.cwd, None
+        if self.spec.isolated:
+            cwd, home = await asyncio.to_thread(
+                isolated_dirs, self.state_root, self.harness.name, self.log_id
+            )
         mcp, system_prompt = self._host.spawn_args(self)
-        user = self._host.user_for(self.spec)
-        inbox = await self._host.runners.get(user)(
-            attachments.ensure_inbox, self.state_root, self.log_id, self._home()
+        inbox = await asyncio.to_thread(
+            attachments.ensure_inbox, self.state_root, self.log_id
         )
         self.exit_via = launching.resolve_via(self.spec.agent)
         proc = self.harness.process(
             Launch(
                 via=self.exit_via,
-                cwd=self.spec.cwd,
+                cwd=cwd,
                 model=self.spec.model,
                 effort=self.spec.effort,
                 permission=self.spec.permission,
@@ -834,9 +926,12 @@ class Session:
                 read_dirs=(inbox,),
                 cgroup=self._host.cgroup(self),
                 log_id=self.log_id,
-                user=user,
                 keep_harness_tools=self.spec.keep_harness_tools,
                 knowledge_native=self.spec.knowledge_native,
+                env=self.host_env,
+                extra_mcp=extra_mcp,
+                harness_tools=self.spec.harness_tools,
+                home=home,
             )
         )
         # Before the start: a harness can speak while it starts (OpenCode's
@@ -1009,6 +1104,8 @@ class Session:
         msg = {"header": header, "body": body, "ts": time.time()}
         if by_person:
             msg["by_person"] = True
+        if not (msg := self._quiet(msg)):
+            return "sent"  # aegis's own news, which a product agent never gets
         if urgent and self.status == "working" and self.harness.steers_mid_turn:
             # Steered in as a person's mid-turn message is: a user message at
             # the next tool boundary (Claude Code) or a turn/steer (Codex).
@@ -1017,7 +1114,9 @@ class Session:
         if self.status == "working" or self._flushing:
             self._hold(msg)
             return "held"
-        if self._host.quota_hold(self) is not None:
+        if self._host.quota_hold(self) is not None or (
+            not by_person and self._host.refuse_hold(self) is not None
+        ):
             self._hold(msg | {"held_for": "quota"})
             return "held"
         await self._send(_inbox_text([msg]), by_person=by_person)
@@ -1029,9 +1128,22 @@ class Session:
         self._publish_now()
         self._host.status_changed(self)
 
-    async def _flush_held(self) -> None:
+    def _quiet(self, msg: dict) -> dict | None:
+        """``msg`` as a session with notices off gets it (#983): aegis's own
+        messages dropped, except a cut turn's continuation, under a header
+        that does not name aegis. Unchanged when notices are on."""
+        if self.spec.notices or not msg["header"].startswith(AEGIS_HEADER):
+            return msg
+        if msg["header"].startswith(CONTINUED):
+            return msg | {"header": "> continue"}
+        return None
+
+    async def _flush_held(self, keep: list[dict] | None = None) -> None:
+        """Send what is held in one turn; ``keep``, the messages that stay
+        held (a refusing guard's wakes, when a person's message goes)."""
         self._flushing = True
-        batch, self.held = self.held, []
+        batch = [m for m in map(self._quiet, self.held) if m]
+        self.held = list(keep or [])
         try:
             if batch:
                 # Before the send gathers notices: the "held" warning ends here.
@@ -1050,24 +1162,12 @@ class Session:
     @property
     def inbox(self) -> Path:
         """Where the files a person attaches land (attachments.py)."""
-        return attachments.inbox(self.state_root, self.log_id, self._home())
+        return attachments.inbox(self.state_root, self.log_id)
 
     @property
     def drafts(self) -> Path:
         """Where this session's artifact drafts go (artifacts.draft_dir)."""
-        home = self._home()
-        return home / ".aegis" if home is not None else self.state_root
-
-    def _home(self) -> Path | None:
-        """The home of the Linux user this session runs as (Host.user_for),
-        or None for the server's own; PermissionError when that user is gone."""
-        user = self._host.user_for(self.spec)
-        if user is None:
-            return None
-        try:
-            return Path(pwd.getpwnam(user).pw_dir)
-        except KeyError:
-            raise PermissionError(f"Linux user {user} does not exist") from None
+        return self.state_root
 
     async def send(
         self,
@@ -1103,7 +1203,7 @@ class Session:
             self._set(title=default_title(typed or text))
         if self.cascade_exhausted:
             self.cascade_exhausted = False  # a new turn starts
-        if not text.startswith("/"):
+        if not text.startswith("/") and self.spec.notices:
             await self._host.know_how_ready(self)
             # The hint first, then the notices. The record and the harness get
             # the same text, so the fold pairs them; the fold splits the
@@ -1330,6 +1430,7 @@ class Session:
             "layout",
             "btw",
             "btw_answer",
+            "mention_carried",
             "park",
         ):
             # aegis talking to the person, not the session doing anything; nor
@@ -1364,6 +1465,9 @@ class Session:
         changes = {k: v for k, v in changes.items() if getattr(self, k) != v}
         if not changes:
             return
+        if changes.get("status") == "working" and "turn_tokens" not in changes:
+            changes["turn_tokens"] = [0, 0]
+            self._last_usage = None
         for k, v in changes.items():
             setattr(self, k, v)
         if "status" in changes:
@@ -1409,9 +1513,16 @@ class Session:
         if events and all(isinstance(ev, Delta) for ev in events):
             # Never stored: the part's closing update carries the whole text.
             self._publish(self.channel, self._out(fold.live(events)))
+            out = max(ev.output for ev in events if isinstance(ev, Delta))
+            more: dict[str, object] = {}
+            if out > self._last_out:
+                inp, done = self.turn_tokens
+                more["turn_tokens"] = [inp, done + out - self._last_out]
+                self._last_out = out
             self._set(
                 activity=fold.activity(),
                 **({"status": "working"} if self.status == "idle" else {}),
+                **more,
             )
             return
         self._record({"src": self.harness.src, "line": line}, events)
@@ -1422,6 +1533,7 @@ class Session:
             self.tool_calls,
             self.compactions,
         )
+        turn: list[int] = self.turn_tokens
         falling = False
         for ev in events:
             if isinstance(ev, TURN_BEARING) and self.status == "idle":
@@ -1429,10 +1541,19 @@ class Session:
             usage = getattr(ev, "usage", None)
             if usage is not None and getattr(ev, "parent", None) is None:
                 changes["context_tokens"] = usage.context
-                if usage != self._last_usage:
+                starting = changes.get("status") == "working"
+                if usage != self._last_usage or starting:
                     self._last_usage = usage
                     recent = cache.push(recent, usage, time.time())
                     changes["cache_recent"] = recent
+                    if starting:
+                        turn = [0, 0]
+                    turn = [
+                        turn[0] + usage.input + usage.cache_creation,
+                        turn[1] + usage.output,
+                    ]
+                    changes["turn_tokens"] = turn
+                    self._last_out = usage.output
             if isinstance(ev, ToolCall) and ev.parent is None:
                 tools += 1
                 changes["tool_calls"] = tools
@@ -1511,8 +1632,19 @@ class Session:
             log.warning("%s: a notice did not reach the agent", self.handle)
 
     def _turn_over(self) -> None:
-        """A turn ended: send what it held, unless the gate says no new turn."""
-        if self.held and self._host.quota_hold(self) is not None:
+        """A turn ended: send what it held, unless the gate says no new turn.
+        A guard that refuses wakes lets a person's messages go alone: the
+        rest wait, in their order, for it to open."""
+        refused = bool(self.held) and self._host.refuse_hold(self) is not None
+        person = [m for m in self.held if m.get("by_person")]
+        if self.held and self._host.quota_hold(self) is None and refused and person:
+            rest = [
+                m | {"held_for": "quota"} for m in self.held if not m.get("by_person")
+            ]
+            self.held = person
+            self._flushing = True
+            asyncio.get_running_loop().create_task(self._flush_held(keep=rest))
+        elif self.held and (self._host.quota_hold(self) is not None or refused):
             # The gate says no new turn: they wait for it to open.
             self.held = [m | {"held_for": "quota"} for m in self.held]
             self._metas.write_soon(self.log_id, self.meta)
@@ -1627,6 +1759,12 @@ def _cascade_of(raw: Any) -> tuple[str, ...]:
     if isinstance(raw, dict):
         raw = raw.get("models")
     return tuple(str(m) for m in raw) if isinstance(raw, list) else ()
+
+
+# aegis's own inbox headers, and the restart and crash ones among them
+# (restarts.header) that continue a cut turn.
+AEGIS_HEADER = "> from aegis:"
+CONTINUED = ("> from aegis:restart", "> from aegis:crash")
 
 
 def _inbox_text(batch: list[dict]) -> str:

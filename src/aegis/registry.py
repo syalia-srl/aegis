@@ -20,15 +20,15 @@ import logging
 import re
 import secrets
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
-from .as_user import Runners
 
 from .archive import Position, count_workers, page as archive_page
-from . import attention, cache, restarts, secret_store, users
+from . import attention, cache, guards, restarts, secret_store
 from .cgroups import SessionCgroups
 from .config import CONTEXT_DEFAULTS
+from .group_store import GroupStore
 from .harness import harness_for
 from .meta import MetaStore, rebuild
 from .names import TITLE_MAX, free_handle, mint_handle, valid_handle
@@ -38,9 +38,10 @@ from .notice_sources import Item
 from .notices import TEXT_MAX
 from .ops import OpError
 from .roots import Roots
+from .policy import EventKind, McpServer, Refused
 from .session import Host, Session, SpawnSpec
 from .transcript.entries import Fold, fold_records, tool_output
-from .transcript.store import Store, read_store
+from .transcript.store import Store, read_store, stored
 from .transcript.wire import withheld_text
 
 log = logging.getLogger("aegis.registry")
@@ -89,7 +90,7 @@ def _public(meta: dict) -> dict:
     """A stored meta as a browser may see it: the agent's priming and its raw
     standing stay on the server, like ``Session.wire`` keeps them. It carries
     the harness's label as the wire does, for the side panel's model line."""
-    out = {k: v for k, v in meta.items() if k not in ("priming", "standing")}
+    out = {k: v for k, v in meta.items() if k not in ("priming", "standing", "tags")}
     harness = harness_for(
         meta.get("harness") or "claude-code",
         "claude",
@@ -99,6 +100,10 @@ def _public(meta: dict) -> dict:
     )
     out["harness_label"] = harness.label
     return out
+
+
+async def _admit_all(spec: SpawnSpec) -> tuple[SpawnSpec, dict]:
+    return spec, {}
 
 
 class Registry(Host):
@@ -120,6 +125,8 @@ class Registry(Host):
         self._cursor_bin = cursor_bin
         self._interrupt_timeout = interrupt_timeout
         self.metas = MetaStore(roots.state_root / "sessions")
+        # The records of named groups (#1039), beside the metas store.
+        self.groups = GroupStore(roots.state_root / "groups.json")
         self.sessions: dict[str, Session] = {}
         self.archived: dict[str, dict] = {}
         # Set by the app when it wires the MCP endpoint, monitors and queues.
@@ -127,6 +134,7 @@ class Registry(Host):
         self.tokens = None
         self.server_name = "aegis"
         self.monitors = None
+        self.feeds = None  # feeds.Feeds, set by the app
         self.side_notes = None
         self.secrets = None  # secret_store.SecretStore, set by the app
         self.queues = None
@@ -135,7 +143,21 @@ class Registry(Host):
         self.browsers = None  # browsers.py, set by the app: docked browser panes
         self.quota = None
         self.notices = None  # notices.Notices, set by App
-        self.sign_in = None  # claude.login.SignIn, set by App
+        self.sign_in = None  # signin.core.SignIns, set by App
+        # The host policy's say on a start (App.admit, App.admit_resume, #959):
+        # the spec to run and the environment it adds; set by the app.
+        self.admit: Callable[[SpawnSpec], Awaitable[tuple[SpawnSpec, dict]]] = (
+            _admit_all
+        )
+        self.resume_hook: Callable[[Session], Awaitable[None]] | None = None
+        # The host policy's tools for a starting process, and what happened
+        # to a session for its on_event (App.tools_for, App.event); set by App.
+        self.tools_for: Callable[[Session], None] = lambda s: None
+        # The MCP servers a starting session gets beside aegis's (App.mcp_for).
+        self.mcp_for: Callable[[Session], tuple[McpServer, ...]] = lambda s: ()
+        self.event: Callable[[EventKind, str, dict], None] = lambda kind, log_id, data: (
+            None
+        )
         self.load = None  # load.LoadSampler, set by App
         # knowledge.Knowledge, and whose knowledge a session's sends are
         # hinted from (its owner, else the admin); both set by App.
@@ -155,10 +177,15 @@ class Registry(Host):
         # check (harness_versions.py), as a registry with no app does. The
         # app points it at Config.current().
         self.version_policy: Callable[[], dict | None] = lambda: None
-        # The app's quota gate: (owner, harness, model) -> quota_gate.Gate.
-        self.gate = None
         # The person's pause of every session (pause.py): session -> why.
         self.pause_hold = None
+        # The app's refuse_hold, guard and guard_items (guards.py, #1067).
+        self.refuse = None
+        self.guard = None
+        self.guard_items: Callable[[Session], None] | None = None
+        # The app's GroupNames.changed (#1047): a group key whose open members
+        # changed. None names nothing, as a registry with no app does.
+        self.group_changed: Callable[[str], None] | None = None
         # The app's start_spec: a spec -> the spec to start (its cascade's
         # first model free now) and the gate it passes.
         self.start_spec = None
@@ -172,15 +199,6 @@ class Registry(Host):
         # One cgroup per session, when the unit is delegated (cgroups.py); the
         # app sets it at boot.
         self.cgroups: SessionCgroups | None = None
-        # The multi-user mode (users.py), and who a principal is; the app sets
-        # them at boot from its tokens.
-        self.multi_user = False
-        # tokens.TokenStore.acts_for: the user a principal's processes run
-        # as, raising PermissionError when nothing may run for it.
-        self.acts_for: Callable[[str | None], str | None] = lambda name: None
-        self.role_of: Callable[[str | None], str | None] = lambda name: None
-        # Threads that open files as a session's user (as_user.py).
-        self.runners = Runners()
         # What boot decided about the turns the last run's end cut (restarts.py):
         # each continued session, and whether that end was a crash; the ones a
         # person must continue.
@@ -190,9 +208,14 @@ class Registry(Host):
 
     # -- the Host a session asks ----------------------------------------------
     def spawn_args(self, session: Session) -> tuple[tuple[str, str] | None, str | None]:
+        self.tools_for(session)
         priming = session.spec.priming
         if self.mcp_url is None or self.tokens is None:
             return None, priming
+        endpoint = (self.mcp_url, self.tokens.mint(session.log_id))
+        if not session.spec.primer:
+            # A product agent (#983): the host's prompt alone.
+            return endpoint, priming
         from .browsers import available
         from .mcp import primer
 
@@ -200,34 +223,25 @@ class Registry(Host):
             session,
             self.server_name,
             self.roots.config_root,
-            browsers=not self.multi_user and available(),
+            browsers=available(),
         )
         if priming:
             prompt += "\n\n" + priming
-        return (self.mcp_url, self.tokens.mint(session.log_id)), prompt
+        return endpoint, prompt
 
-    def user_for(self, spec: SpawnSpec) -> str | None:
-        """The Linux user a session's process runs as. In multi-user mode a
-        member's session made before the mode has none, and its transcript
-        lives in the server's home: it may not start as the server instead."""
-        if not self.multi_user:
-            return None
-        if spec.linux_user is not None:
-            return spec.linux_user
-        # An owner that would run as a user now, or none at all (revoked):
-        # its session from before the mode may not start as the server.
-        if self.acts_for(spec.owner) is not None:
-            raise PermissionError(
-                "this session was created before multi-user mode; start a new one"
-            )
-        return None
+    def mcp_servers(self, session: Session) -> tuple[McpServer, ...]:
+        return self.mcp_for(session)
 
     def cgroup(self, session: Session) -> Path | None:
         return self.cgroups.create(session.log_id) if self.cgroups else None
 
+    async def admit_resume(self, session: Session) -> None:
+        if self.resume_hook is not None:
+            await self.resume_hook(session)
+
     def released(self, session: Session) -> None:
         if self.cgroups is not None:
-            self.cgroups.release(session.log_id, user=session.spec.linux_user)
+            self.cgroups.release(session.log_id)
 
     def load_changed(self, log_id: str) -> None:
         """A session's shown load changed: republish its card."""
@@ -239,6 +253,9 @@ class Registry(Host):
         return self.cgroups.path(session.log_id) if self.cgroups is not None else None
 
     def turn_ended(self, session: Session) -> None:
+        self.event("turn_end", session.log_id, {})
+        if self.feeds is not None:
+            self.feeds.turn_ended(session)
         if self.queues is not None:
             self.queues.turn_ended(session)
         if self.quota is not None:
@@ -310,6 +327,7 @@ class Registry(Host):
         """A handoff an agent asked for will not start."""
         s.mark_continued(None)
         s.report({"kind": "handoff_off", "handle": "the new session", "why": why})
+        self._maybe_unquiet(s)
 
     def _call_off_handoff(self, old: Session, new: Session, why: str) -> None:
         """The new session will not take over: the old one opens again and its
@@ -317,7 +335,9 @@ class Registry(Host):
         clears the name the guard reads."""
         if old.continued_by == new.log_id:
             old.mark_continued(None)
+            self.carry(new.log_id, old.log_id)
             old.report({"kind": "handoff_off", "handle": new.handle, "why": why})
+            self._maybe_unquiet(old)
 
     async def _archive(self, s: Session) -> None:
         try:
@@ -335,24 +355,54 @@ class Registry(Host):
             frontier = {s.log_id for s in kids}
         return out[::-1]
 
-    def wakers(self, s: Session, *, run: bool = True) -> list[str]:
+    def wakers(
+        self, s: Session, *, run: bool = True, carried: bool = True
+    ) -> list[str]:
         """What will still wake ``s`` with a new turn, one phrase each: its
-        approved run, monitors, background tasks and callback queue tasks.
+        approved run, monitors, live feeds, background tasks and callback
+        queue tasks. ``carried=False`` leaves out what a handoff here carries
+        to the successor (#1019): monitors, feeds and queue tasks. Background
+        tasks stay: they belong to the harness's process, which ends.
         turn_end refuses done while any is live (#608): the task is not over.
         Its children are not here; they do not wake it, and one spawned for the
         person may outlive the task that started it. ``run=False`` leaves the
         run out, for a handoff: a run follows its owner's successor."""
         n_mon = len(self.monitors.of(s.log_id)) if self.monitors is not None else 0
         n_tasks = sum(1 for w in self._waiting_for(s) if w["kind"] == "task")
+        n_feeds = len(self.feeds.live(s.log_id)) if self.feeds else 0
         counts = (
-            (n_mon, "monitor"),
+            (n_mon if carried else 0, "monitor"),
+            (n_feeds if carried else 0, "feed"),
             (len(s.open_tasks), "background task"),
-            (n_tasks, "queue task"),
+            (n_tasks if carried else 0, "queue task"),
         )
         live = self._running(s) if run else None
         out = [f"workflow {live.run}"] if live is not None else []
         out += [f"{n} {noun}{'' if n == 1 else 's'}" for n, noun in counts if n]
         return out
+
+    def carry(self, old: str, new: str) -> list[str]:
+        """A handoff here (#1019): what would wake ``old`` wakes ``new`` from
+        now on, its monitors, feeds, queue tasks and the schedules that fire
+        into it. Called back with the two swapped when the new session does
+        not take over. Returns what moved, one phrase each, for its first
+        message."""
+        s = self.sessions.get(old)
+        moved = self.wakers(s, run=False) if s is not None else []
+        # A schedule does not wake a session by itself, but it fires into it.
+        if self.schedules is not None:
+            n = sum(
+                1
+                for x in self.schedules.items.values()
+                if x.d.fire.target == "existing" and x.d.fire.session == old
+            )
+            if n:
+                moved.append(f"{n} schedule{'' if n == 1 else 's'}")
+            self.schedules.move(old, new)
+        for engine in (self.monitors, self.feeds, self.queues):
+            if engine is not None:
+                engine.move(old, new)
+        return [m for m in moved if "background task" not in m]
 
     def close_blockers(self, s: Session) -> list[str]:
         """What keeps ``s`` and the sessions it started from closing once its
@@ -401,6 +451,11 @@ class Registry(Host):
                 log.exception("aegis: could not archive %s on its close", s.handle)
 
     def recorded(self, session: Session, record: dict, events: list | None) -> None:
+        self.event(
+            "entry",
+            session.log_id,
+            {"kind": record.get("kind"), "seq": record.get("seq")},
+        )
         if record.get("kind") == "plan" and self.nudges is not None:
             # Before the plan_update's result reads its notices, so it never
             # answers with the stale-plan warning it just ended.
@@ -415,6 +470,7 @@ class Registry(Host):
             )
 
     def exited(self, session: Session, code: int, stderr_tail: list[str]) -> None:
+        self.event("stop", session.log_id, {"code": code})
         if self.tokens is not None:
             self.tokens.drop(session.log_id)
         if self.queues is not None:
@@ -431,7 +487,7 @@ class Registry(Host):
         # person should see it (#386). A SIGTERM is most likely the server's
         # own stop under systemd, and the next boot continues the session.
         if session.quiet and code not in restarts.SIGTERM_CODES:
-            self.set_quiet(session.log_id, False)
+            self._show(session)
         if self.workflows is not None:
             self.workflows.exited(session, code)
 
@@ -467,6 +523,12 @@ class Registry(Host):
         return None if self.cascade is None else self.cascade(session, text)
 
     def notice_blocks(self, session: Session, at: str) -> str:
+        if not session.spec.notices:
+            return ""
+        if at == "send" and self.guard_items is not None:
+            # A turn starts: its guard's notice is as of now, not as of the
+            # last reading's on_quota (a session spawned since has none).
+            self.guard_items(session)
         blocks = "" if self.notices is None else self.notices.pending(session, at)
         menus = "" if self.know_how is None else self.know_how.pending(session)
         return "\n\n".join(b for b in (blocks, menus) if b)
@@ -509,34 +571,132 @@ class Registry(Host):
 
     def sign_in_failed(self, session: Session) -> None:
         if self.sign_in is not None:
-            self.sign_in.failed(session)
+            self.sign_in.failed(session, session.spec.harness)
 
     def rate_limit(self, session: Session, windows: dict) -> None:
-        # A member's stream reports the member's account, not the server's.
-        if self.quota is not None and session.spec.linux_user is None:
+        if self.quota is not None:
             self.quota.observe(windows)
 
     def quota_hold(self, session: Session) -> str | None:
-        """A paused session waits for its gate to open; any other may start a
-        turn unless its owner is stopped, or closed and the harness would
-        have to start (quota_gate.py), or every session is paused (pause.py)."""
+        """Why a session may not start a turn now: every session is paused
+        (pause.py), or a quota line paused it before aegis 3.0 removed the
+        lines, until on_quota continues it. A turn a guard's stop line cut
+        is not held here: a person's message to it runs, and refuse_hold
+        holds every other wake (guards.py)."""
         if self.pause_hold is not None and (why := self.pause_hold(session)):
             return why
-        if session.quota_paused:
-            return session.quota_paused
-        if self.gate is None:
+        if guards.is_cut(session.quota_paused):
             return None
-        s = session.spec
-        g = self.gate(s.owner, s.harness, s.model)
-        if g.state == "stopped" or (g.state == "closed" and not session.running):
-            return g.why or "the quota gate is closed"
-        return None
+        return session.quota_paused or None
+
+    def refuse_hold(self, session: Session) -> str | None:
+        return self.refuse(session) if self.refuse is not None else None
+
+    def ensure_group(self, parent: Session) -> str:
+        """The group a child of ``parent`` joins (#1039): the parent's own, or a
+        new record with a generated name that the parent joins first, rewriting
+        its spec and meta and republishing its card. A key of a linked server
+        stays as it is: that server holds the record."""
+        key = parent.spec.group
+        if key is not None and ("@" in key or self.groups.get(key) is not None):
+            return key
+        g = self.groups.create(self.principal_of(parent))
+        parent.spec = dataclasses.replace(parent.spec, group=g.key)
+        self.metas.write(parent.meta())
+        self._publish("sessions", [{"upsert": parent.wire()}])
+        return g.key
+
+    def set_group(
+        self, log_ids: list[str], key: str | None, owner: str | None
+    ) -> str | None:
+        """Move sessions into the group ``key``, into a fresh one with a
+        generated name when ``key`` is "new", or out of their group with None.
+        A group left with no open member is deleted. Returns the key, None when
+        they left. A hand edit reaches this server's sessions only, and only
+        the owner's."""
+        members: list[Session] = []
+        for log_id in log_ids:
+            if "@" in log_id:
+                raise OpError(
+                    "far_session",
+                    f"{log_id} is on another server; groups are changed here only",
+                )
+            s = self.sessions.get(log_id)
+            if s is None:
+                raise OpError("no_session", f"no open session {log_id!r}")
+            if (s.spec.owner or owner) != owner:
+                raise OpError("not_yours", f"{s.handle} is not yours to group")
+            members.append(s)
+        if key == "new":
+            key = self.groups.create(owner).key
+        elif key is not None:
+            g = self.groups.get(key)
+            if g is None:
+                raise OpError("no_group", f"no group {key!r}")
+            if (g.owner or owner) != owner:
+                raise OpError("not_yours", f"the group {g.name} is not yours")
+        changed, emptied = [], set()
+        for s in members:
+            old = s.spec.group
+            if old == key:
+                continue
+            if old is not None:
+                emptied.add(old)
+            s.spec = dataclasses.replace(s.spec, group=key)
+            self.metas.write(s.meta())
+            changed.append(s)
+        for old in emptied - {key}:
+            if not any(x.spec.group == old for x in self.sessions.values()):
+                self.groups.delete(old)
+            else:
+                self._group_changed(old)
+        if changed:
+            self._group_changed(key)
+            self._publish("sessions", [{"upsert": s.wire()} for s in changed])
+        return key
+
+    def rename_group(self, key: str, name: str, owner: str | None) -> dict:
+        """Rename a group and re-publish every member's card, so each browser
+        draws the new name (#1039). ``bad_name`` for an empty, multi-line or
+        too long name; a name the owner uses takes a suffix. Only the owner's."""
+        g = self.groups.get(key)
+        if g is None:
+            raise OpError("no_group", f"no group {key!r}")
+        if (g.owner or owner) != owner:
+            raise OpError("not_yours", f"the group {g.name} is not yours")
+        g = self.groups.rename(key, name)
+        members = [s for s in self.sessions.values() if s.spec.group == key]
+        if members:
+            self._publish("sessions", [{"upsert": s.wire()} for s in members])
+        return {"key": g.key, "name": g.name}
+
+    def retitle_group(self, key: str, name: str | None, title: str) -> bool:
+        """The generator's name and title for ``key`` (group_names.py, #1047):
+        the name only when nobody pinned one and it is valid, the title always.
+        Republishes every member's card. False when the group is gone."""
+        g = self.groups.get(key)
+        if g is None:
+            return False
+        name = name if name is not None and not g.pinned else g.name
+        self.groups.rename(key, name, title=title, pinned=False)
+        members = [s for s in self.sessions.values() if s.spec.group == key]
+        if members:
+            self._publish("sessions", [{"upsert": s.wire()} for s in members])
+        return True
+
+    def _group_changed(self, key: str | None) -> None:
+        """Tell the generator a group's members changed; a linked server's
+        key is named there."""
+        if self.group_changed is not None and key and "@" not in key:
+            if self.groups.get(key) is not None:
+                self.group_changed(key)
 
     def card(self, session: Session) -> dict:
-        return {
+        out = {
             "monitors": self.monitors.card(session.log_id)
             if self.monitors is not None
             else [],
+            "feeds": self.feeds.card(session.log_id) if self.feeds is not None else [],
             **self._attention(session),
             "waiting_for": self._waiting_for(session),
             **self._worker(session),
@@ -549,6 +709,13 @@ class Registry(Host):
             if session.archived or self.successor(session) is not None
             else None,
         }
+        # The bar and the Fleet name a group from any member's card (#1039).
+        g = self.groups.get(session.spec.group) if session.spec.group else None
+        if g is not None:
+            out["group_name"] = g.name
+            if g.title:
+                out["group_title"] = g.title
+        return out
 
     def _worker(self, s: Session) -> dict:
         """A worker's wire field with its task's status, so the Fleet can set a
@@ -564,7 +731,8 @@ class Registry(Host):
     BACK = frozenset({"done", "review", "needs_you", "error"})
 
     def _maybe_unquiet(self, s: Session) -> None:
-        if not s.quiet:
+        # A handoff under way carries the quiet to the new session (#1022).
+        if not s.quiet or s.continued_by == "pending":
             return
         kind = self._attention(s)["attention"]
         # A worker done with its task is archived at once: its error goes to
@@ -576,7 +744,13 @@ class Registry(Host):
             self.workflows is not None and self.workflows.live(s.workflow["run"])
         )
         if kind == "error" or (not s.worker and not held and kind in self.BACK):
-            self.set_quiet(s.log_id, False)
+            self._show(s)
+
+    def _show(self, s: Session) -> None:
+        """Give a quiet session its tab back for now; a quiet mode stays
+        (#1025), so the next turn hides it again."""
+        s._set(quiet=False)
+        self.metas.write(s.meta())
 
     def _running(self, s: Session):
         """The approved run ``s`` is the main agent of, until it ends."""
@@ -634,8 +808,9 @@ class Registry(Host):
         approved run it is the main agent of, by name, and the sessions it
         waits on by handle, the first two and then a count."""
         n_mon = len(self.monitors.of(s.log_id)) if self.monitors is not None else 0
-        quota = s.quota_paused or (
-            any(m.get("held_for") == "quota" for m in s.held) and self.quota_hold(s)
+        quota = (guards.uncut(s.quota_paused) if s.quota_paused else None) or (
+            any(m.get("held_for") == "quota" for m in s.held)
+            and (self.quota_hold(s) or self.refuse_hold(s))
         )
         whom = self._waiting_for(s)
         names = [w["handle"] for w in whom if w["handle"]]
@@ -656,6 +831,11 @@ class Registry(Host):
         return flow + names + waits + ([f"quota ({quota})"] if quota else [])
 
     def status_changed(self, session: Session) -> None:
+        # A turn starts: a session quiet as a mode loses its tab again (#1025),
+        # whether the person answered or a monitor, task or schedule woke it.
+        if session.stay_quiet and session.status == "working" and not session.quiet:
+            session._set(quiet=True)
+            self.metas.write(session.meta())
         parent = session.spec.spawned_by
         if parent and parent in self.sessions:
             self.refresh_card(parent)
@@ -669,6 +849,8 @@ class Registry(Host):
             self.workflows.changed()
         if self.notices is not None:
             self.notices.set(session.log_id, HELD_SOURCE, held_items(session.held))
+        if self.feeds is not None:
+            self.feeds.session_changed(session.log_id)
 
     def finished(self, s: Session) -> bool:
         """Done working, which a turn ending is not: not busy (held messages
@@ -778,7 +960,9 @@ class Registry(Host):
             else meta.get("continued_by"),
             handoff_pending=meta.get("handoff_pending"),
             quiet=bool(meta.get("quiet")),
+            stay_quiet=bool(meta.get("stay_quiet")),
             autoclose=bool(meta.get("autoclose")),
+            autohandoff=meta.get("autohandoff"),
             checked_version=meta.get("checked_version"),
             # The meta's {"models", "at", "exhausted"}; a spawn record's list
             # has no exhausted.
@@ -810,8 +994,41 @@ class Registry(Host):
             m["handle"] = mint_handle(self._handles())
             self.metas.write(m)
             self._admit(m)
+        self._migrate_groups()
+
+    def _migrate_groups(self) -> None:
+        """Groups from before #1039 were keyed by the log id of the session that
+        headed the chain. Give each local key with an open member a record, and
+        rewrite its members' specs; the session the old key names joins it too
+        when it is open. A key naming a linked server waits for that server to
+        migrate, and an archived member keeps its old key until it is reopened."""
+        remap: dict[str, str] = {}
+        for s in self.sessions.values():
+            old = s.spec.group
+            if old is None or old.startswith("grp-") or "@" in old:
+                continue
+            if old not in remap:
+                remap[old] = self.groups.create(self.principal_of(s)).key
+            s.spec = dataclasses.replace(s.spec, group=remap[old])
+            self.metas.write(s.meta())
+        for old, key in remap.items():
+            head = self.sessions.get(old)
+            if head is not None and head.spec.group is None:
+                head.spec = dataclasses.replace(head.spec, group=key)
+                self.metas.write(head.meta())
 
     def _admit(self, meta: dict) -> None:
+        if meta.get("linux_user") and not meta.get("archived"):
+            # A former member's session (#958): its harness ran as another
+            # Linux user, in that user's home, and cannot resume as the server.
+            meta["archived"] = True
+            self.metas.write(meta)
+            log.warning(
+                "aegis: archived %s, which ran as Linux user %s under the "
+                "multi-user mode aegis 3.0 removed",
+                meta.get("handle") or meta["log_id"],
+                meta["linux_user"],
+            )
         if not meta.get("handle") or (
             not meta.get("archived") and meta["handle"] in self._open_handles()
         ):
@@ -820,7 +1037,7 @@ class Registry(Host):
             self.archived[meta["log_id"]] = meta
             return
         if not self._prev.clean and restarts.end_leftover(
-            meta.get("pid"), meta.get("pid_started"), user=meta.get("linux_user")
+            meta.get("pid"), meta.get("pid_started")
         ):
             log.warning(
                 "aegis: ended the harness a crash left behind for %s", meta["handle"]
@@ -869,19 +1086,23 @@ class Registry(Host):
                 # when it ends, like any held message, never into it.
                 self.metas.write(s.meta())
                 continue
-            if self.quota_hold(s) is not None:
+            if self.quota_hold(s) is not None or self.refuse_hold(s) is not None:
                 # Through the gate: they wait for the owner's quota to open
-                # (app.on_quota), and a paused session stays paused.
+                # (app.on_quota), and a paused session stays paused, as does
+                # one a guard's stop line cut.
                 s.held = [m | {"held_for": "quota"} for m in msgs]
                 self.metas.write(s.meta())
                 continue
             try:
                 await s._flush_held()
-            except Exception:
+            except Exception as e:
                 # _flush_held empties held before it sends: put the batch back.
-                log.exception(
-                    "aegis: could not continue %s after the restart", s.handle
-                )
+                if isinstance(e, Refused):
+                    log.warning("aegis: %s stays stopped: %s", s.handle, e.message)
+                else:
+                    log.exception(
+                        "aegis: could not continue %s after the restart", s.handle
+                    )
                 s.held = msgs
                 self.metas.write(s.meta())
                 # Not continued after all: a worker's queue tries, and fails
@@ -939,7 +1160,7 @@ class Registry(Host):
         if log_id not in self.sessions and log_id not in self.archived:
             raise OpError("no_session", f"no session {log_id!r}")
         path = self.store_path(log_id)
-        return tool_output(read_store(path)[0], entry_id) if path.exists() else None
+        return tool_output(read_store(path)[0], entry_id) if stored(path) else None
 
     def archived_entries(self, log_id: str) -> list[dict]:
         """An archived session's transcript entries, read from its store."""
@@ -947,7 +1168,7 @@ class Registry(Host):
 
     def _archived_fold(self, log_id: str) -> Fold:
         path = self.store_path(log_id)
-        return fold_records(read_store(path)[0]) if path.exists() else Fold()
+        return fold_records(read_store(path)[0]) if stored(path) else Fold()
 
     async def spawn(
         self,
@@ -959,17 +1180,8 @@ class Registry(Host):
         workflow: dict | None = None,
         launch_by: str = "agent",
     ) -> Session:
+        spec, env = await self.admit(spec)
         log_id = mint_log_id()
-        if self.multi_user:
-            try:
-                spec = users.place(
-                    spec,
-                    root=self.roots.harness_cwd,
-                    role=self.role_of(spec.owner),
-                    linux_user=self.acts_for(spec.owner),
-                )
-            except PermissionError as e:
-                raise OpError("no_linux_user", str(e)) from None
         if self.knowledge_native(spec.owner):
             spec = dataclasses.replace(spec, knowledge_native=True)
         s = self._session(
@@ -989,11 +1201,15 @@ class Registry(Host):
             }
         )
         self.sessions[log_id] = s
+        s.host_env, s.admitted = env, True
+        self._group_changed(s.spec.group)
         self._publish("sessions", [{"upsert": s.wire()}])
         s.launch_by = launch_by
+        self.event("start", log_id, {})
         try:
             await s.start()
         except (OSError, TimeoutError):
+            self.event("close", log_id, {})
             del self.sessions[log_id]
             s.store.close()
             self.store_path(log_id).unlink(missing_ok=True)
@@ -1006,8 +1222,14 @@ class Registry(Host):
 
     async def close(self, log_id: str) -> None:
         s = self.open(log_id)
+        # A successor closed before it took over gives back what it carried
+        # (#1019), before its own monitors and feeds are dropped.
+        if (old := self.sessions.get(s.spec.continues or "")) is not None:
+            self._call_off_handoff(old, s, "it was closed")
         if self.monitors is not None:
             self.monitors.drop_owner(log_id)
+        if self.feeds is not None:
+            self.feeds.drop_owner(log_id)
         if self.side_notes is not None:
             self.side_notes.drop(log_id)
         if self.knowledge is not None:
@@ -1020,15 +1242,21 @@ class Registry(Host):
             except Exception:
                 log.exception("aegis: %s's skill servers did not stop", log_id)
         await s.stop()
-        if (old := self.sessions.get(s.spec.continues or "")) is not None:
-            self._call_off_handoff(old, s, "it was closed")
         if self.secrets is not None:
             # Pads and open requests die with the session, and so do the
             # files people provided to it, unless the agent moved them.
             self.secrets.drop(log_id)
             secret_store.remove_all_provided(s.entries())
         s.report({"kind": "close"})
+        self.event("close", log_id, {})
         del self.sessions[log_id]
+        # The record outlives its members only while one is open (#1039).
+        if s.spec.group is not None and not any(
+            x.spec.group == s.spec.group for x in self.sessions.values()
+        ):
+            self.groups.delete(s.spec.group)
+        else:
+            self._group_changed(s.spec.group)
         s.archived = True
         s.artifacts.flush_all()  # a page's last coalesced write, before the store shuts
         s.store.close()
@@ -1063,7 +1291,13 @@ class Registry(Host):
             "last_status": "asleep",
             "asleep_why": "slept",
             "quiet": False,  # a person reopening it wants to see it (#386)
+            "stay_quiet": False,
         }
+        # Its group's record went with its last open member: it stands alone
+        # (#1039). A linked server's key stays: that server holds the record.
+        if isinstance(key := meta.get("group"), str) and "@" not in key:
+            if self.groups.get(key) is None:
+                meta["group"] = None
         # An open session may have taken its handle meanwhile (#673).
         handle = free_handle(str(meta["handle"]), self._open_handles())
         renamed = handle != meta["handle"]
@@ -1121,16 +1355,19 @@ class Registry(Host):
         return _public(meta)
 
     def set_quiet(self, log_id: str, quiet: bool) -> dict:
-        """Hide a session's tab until its turn ends, or show it again (#386)."""
+        """Quiet a session, in any state, or end its quiet (#386, #1025). Quiet
+        is a mode: the tab hides now and each time a turn starts, and comes
+        back each time a turn ends with something for the person."""
         s = self.open(log_id)
-        attention = s.wire()["attention"]
-        if quiet and attention not in ("working", "waiting"):
-            raise OpError(
-                "not_running",
-                f"{s.handle} is {attention}; only a working or waiting session "
-                "can be quiet, since only its turn's end brings it back",
-            )
-        s._set(quiet=quiet)
+        s._set(quiet=quiet, stay_quiet=quiet)
+        self.metas.write(s.meta())
+        return s.wire()
+
+    def set_autohandoff(self, log_id: str, at: int | None) -> dict:
+        """Set the context size from which a session continues itself in a
+        fresh one at a turn_end with a brief (#1019); None turns it off."""
+        s = self.open(log_id)
+        s._set(autohandoff=at)
         self.metas.write(s.meta())
         return s.wire()
 

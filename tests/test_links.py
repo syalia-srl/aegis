@@ -21,7 +21,7 @@ from websockets.asyncio.server import serve as ws_serve
 
 from aegis import attachments, links
 from aegis.app import App
-from aegis.ops import Caller, OpError, Principal
+from aegis.ops import OpError
 from aegis.roots import make_roots
 from aegis.web import PROTO, build_web
 
@@ -32,7 +32,7 @@ default_agent: opus
 agents:
   opus: {harness: claude-code, model: opus, effort: high, permission: full}
 queues:
-  general: {agent: opus, max_parallel: 1}
+  general: {agent: opus}
 """
 
 
@@ -161,6 +161,113 @@ async def test_a_link_comes_up_and_names_the_far_server(pair):
     assert "token" not in w
 
 
+async def raw_hello(node: Node, link: dict) -> dict:
+    """The first frame a link hello gets back, from a socket with no Origin."""
+    async with connect(
+        links.ws_url(node.base),
+        additional_headers={"Authorization": f"Bearer {node.token}"},
+    ) as ws:
+        hello = {"t": "hello", "token": node.token, "proto": PROTO, "link": link}
+        await ws.send(json.dumps(hello))
+        return json.loads(await asyncio.wait_for(ws.recv(), 5))
+
+
+async def test_every_link_opens_the_way_back(pair):
+    alpha, beta = pair
+    await until(lambda: beta.app.links.joined("alpha"), timeout=10, what="the way back")
+    assert alpha.app.links.joined("beta")
+
+
+async def test_an_old_trusted_field_is_ignored(tmp_path, fake_claude):
+    beta = await Node(tmp_path / "beta", "beta", fake_claude).start()
+    alpha = await Node(tmp_path / "alpha", "alpha", fake_claude).start()
+    try:
+        links.LinkStore(alpha.app.roots.state_root / "links.json").save(
+            [{"name": "beta", "url": beta.base, "token": beta.token, "trusted": False}]
+        )
+        await until(
+            lambda: beta.app.links.joined("alpha"), timeout=10, what="the way back"
+        )
+        assert "trusted" not in alpha.app.links.wire()[0]
+    finally:
+        await alpha.stop()
+        await beta.stop()
+
+
+async def test_a_second_link_between_one_pair_is_refused_by_name(pair):
+    alpha, beta = pair
+    await until(lambda: beta.app.links.joined("alpha"), timeout=10, what="the way back")
+    beta.app.links.add("alpha", alpha.base, alpha.token)
+    await until(
+        lambda: beta.app.links.outbound("alpha").state == "refused",
+        timeout=10,
+        what="the refusal",
+    )
+    assert "links a server named beta itself" in beta.app.links.outbound("alpha").error
+    assert alpha.app.links.get("beta").state == "linked"
+
+
+async def test_a_hello_without_both_ways_is_named_too_old(pair):
+    _, beta = pair
+    # A near server from 2.x: its hello carries link but not both_ways.
+    frame = await raw_hello(beta, {"server": "old", "user": "u"})
+    assert frame["t"] == "error" and frame.get("code") == "too_old"
+    assert "3.0.0 or newer" in frame["message"]
+
+
+async def test_the_first_link_keeps_working_after_a_second_is_refused(pair):
+    alpha, beta = pair
+    await until(lambda: beta.app.links.joined("alpha"), timeout=10, what="the way back")
+    beta.app.links.add("alpha", alpha.base, alpha.token)
+    await until(
+        lambda: beta.app.links.outbound("alpha").state == "refused",
+        timeout=10,
+        what="the refusal",
+    )
+    # Calls go both ways over the link alpha opened, and keep going.
+    assert isinstance(await beta.app.links.get("alpha").call("session.list"), list)
+    assert isinstance(await alpha.app.links.get("beta").call("session.list"), list)
+    await asyncio.sleep(1.5)
+    assert alpha.app.links.joined("beta") and beta.app.links.joined("alpha")
+
+
+async def test_two_servers_linking_each_other_at_start_keep_one_link(
+    tmp_path, fake_claude
+):
+    beta = Node(tmp_path / "beta", "beta", fake_claude)
+    alpha = Node(tmp_path / "alpha", "alpha", fake_claude)
+    for near, far in ((alpha, beta), (beta, alpha)):
+        state = near.root / ".aegis" / "state"
+        state.mkdir(parents=True)
+        links.LinkStore(state / "links.json").save(
+            [{"name": far.name, "url": far.base, "token": far.token}]
+        )
+    await beta.start()
+    await alpha.start()
+    try:
+
+        def states() -> list[str]:
+            pairs = ((alpha, "beta"), (beta, "alpha"))
+            return sorted(n.app.links.outbound(f).state for n, f in pairs)
+
+        # One side may try before the other listens, and retries.
+        await until(
+            lambda: states() == ["linked", "refused"],
+            timeout=20,
+            what="one link both ways",
+        )
+        assert alpha.app.links.joined("beta") and beta.app.links.joined("alpha")
+        assert isinstance(await beta.app.links.get("alpha").call("session.list"), list)
+    finally:
+        await alpha.stop()
+        await beta.stop()
+
+
+def test_a_welcome_without_both_ways_is_named_too_old():
+    why = links.too_old({"server": "old", "build": {"version": "2.17.0"}})
+    assert "old runs aegis 2.17.0" in why and "3.0.0 or newer" in why
+
+
 async def test_a_browser_on_alpha_calls_and_subscribes_on_beta(pair):
     alpha, beta = pair
     async with Browser(alpha) as b:
@@ -287,7 +394,11 @@ async def test_beta_cannot_call_or_subscribe_down_the_link(
 
     async def hostile(ws):
         await ws.recv()  # the hello
-        await ws.send(json.dumps({"t": "welcome", "proto": PROTO, "server": "evil"}))
+        await ws.send(
+            json.dumps(
+                {"t": "welcome", "proto": PROTO, "server": "evil", "both_ways": True}
+            )
+        )
         for frame in (
             {"t": "call", "id": 1, "op": "session.spawn", "params": {"agent": "opus"}},
             {"t": "sub", "channel": "sessions"},
@@ -437,6 +548,29 @@ async def test_a_sent_file_is_streamed_through_via(pair, tmp_path):
         miss = await c.get(f"{alpha.base}/via/gamma{path}")
         assert miss.status_code == 404
     del s
+
+
+async def test_a_browser_on_alpha_peeks_a_file_a_beta_row_used(pair, tmp_path):
+    # The Show button of a linked server's Read row (#1044): beta copies its
+    # own file, and alpha's browser fetches it under /via/beta.
+    alpha, beta = pair
+    s = await beta.spawn()
+    notes = tmp_path / "far-notes.md"
+    notes.write_text("# Far notes\n")
+    await turn(s, f"/read {notes}")
+    (read,) = [e for e in s.entries() if e["kind"] == "tool"]
+    notes.write_text("# Far notes, edited\n")
+    async with Browser(alpha) as b:
+        r = await b.call(
+            "file.peek", server="beta", log_id=s.log_id, entry_id=read["id"]
+        )
+    (f,) = r["result"]
+    assert f["name"] == "far-notes.md"
+    (kept,) = s.fold().entry(read["id"])["detail"]["peek"]["files"]
+    assert kept["url"] == f["url"], "the peek is recorded on beta's row"
+    async with httpx.AsyncClient() as c:
+        got = await c.get(f"{alpha.base}/via/beta{f['url']}?download=1")
+    assert got.content == b"# Far notes, edited\n"
 
 
 async def test_aegis_link_add_reads_the_token_from_stdin_and_checks_the_name(
@@ -734,49 +868,48 @@ async def test_a_handoff_with_interrupt_cuts_the_far_turn_first(pair):
     assert far.status != "working" or inbox(far)
 
 
-async def test_session_list_shows_far_handles_and_states_only(pair):
+async def test_an_agent_reads_and_enqueues_across_any_link(pair):
     alpha, beta = pair
     here, far = await alpha.spawn(), await beta.spawn()
-    beta.app.sessions.rename(far.log_id, None, "a far title")
-    out = await turn(here, mcp("session_list"))
-    listed = json.loads(out.removeprefix("mcp ok: "))
-    (entry,) = [e for e in listed if e.get("server") == "beta"]
-    assert entry == {"handle": far.handle, "server": "beta", "state": far.status}
+    await turn(far, "say hello from beta")
+    out = await turn(here, mcp("peer_read", target=f"{far.handle}@beta"))
+    assert out.startswith("mcp ok:") and "hello from beta" in out, out
+    out = await turn(here, mcp("queue_enqueue", queue="general@beta", payload="do it"))
+    assert out.startswith("mcp ok:"), out
+    await until(
+        lambda: len(beta.app.sessions.sessions) == 2, timeout=10, what="the worker"
+    )
 
 
-async def test_reading_and_enqueueing_across_a_link_are_refused(pair):
+async def test_a_call_to_a_far_server_that_is_down_is_worded_here(pair):
     alpha, beta = pair
-    here, far = await alpha.spawn(), await beta.spawn()
+    here = await alpha.spawn()
+    await beta.stop()
+    await until(lambda: not alpha.app.links.joined("beta"), timeout=10, what="the drop")
     for call in (
-        mcp("peer_read", target=f"{far.handle}@beta"),
+        mcp("peer_read", target="x@beta"),
         mcp("queue_enqueue", queue="general@beta", payload="do it"),
     ):
         out = await turn(here, call)
-        assert out.startswith("mcp error:") and "not_across_links" in out, out
-    assert list(beta.app.sessions.sessions) == [far.log_id]
+        assert "server_offline" in out and "beta is not linked right now" in out, out
 
 
-async def member_link(alpha, beta, policy):
-    """Relink alpha to beta with a member token of beta's, gated by ``policy``."""
-    token = beta.app.principals.add("alpha", "member")
-    beta.app.principals.set_policy("alpha", policy)
+async def admin_link(alpha, beta):
+    """Relink alpha to beta with beta's token, plain (not trusted)."""
     alpha.app.links.remove("beta")
-    alpha.app.links.add("beta", beta.base, token)
+    alpha.app.links.add("beta", beta.base, beta.token)
     await until(
         lambda: (
             (link := alpha.app.links.get("beta")) is not None and link.state == "linked"
         ),
         timeout=10,
-        what="the member link",
+        what="the link",
     )
-
-
-OPEN = {"claude": {"mode": "open"}}
 
 
 async def test_an_agent_spawns_on_a_linked_server_as_the_links_token(pair):
     alpha, beta = pair
-    await member_link(alpha, beta, OPEN)
+    await admin_link(alpha, beta)
     here = await alpha.spawn(permission="write")
     out = await turn(here, mcp("session_spawn", agent="opus@beta", prompt="hi"))
     assert out.startswith("mcp ok:"), out
@@ -784,35 +917,14 @@ async def test_an_agent_spawns_on_a_linked_server_as_the_links_token(pair):
     (far,) = beta.app.sessions.sessions.values()
     assert r == {"log_id": far.log_id, "handle": f"{far.handle}@beta", "server": "beta"}
     m = far.meta()
-    assert m["owner"] == "alpha" and m["spawned_from"] == f"{here.handle}@alpha"
+    assert (
+        m["owner"] == beta.app.principals.owner
+        and m["spawned_from"] == f"{here.handle}@alpha"
+    )
     # Opus is full on beta; the spawning agent has write, so the far one too.
     assert m["permission"] == "write" and m.get("spawned_by") is None
     out = await turn(here, mcp("session_spawn", agent="opus@beta", permission="full"))
     assert "not_allowed" in out
-
-
-async def test_a_closed_gate_on_the_far_side_refuses_an_agents_spawn(pair):
-    alpha, beta = pair
-    await member_link(alpha, beta, {})  # every pool closed for the link
-    here = await alpha.spawn()
-    out = await turn(here, mcp("session_spawn", agent="opus@beta"))
-    assert out.startswith("mcp error:") and "quota_closed" in out, out
-    assert "quota gate" in out and not beta.app.sessions.sessions
-
-
-async def test_a_members_agent_cannot_spawn_across_a_link(pair):
-    alpha, beta = pair
-    await member_link(alpha, beta, OPEN)
-    alpha.app.principals.add("ben", "member")
-    alpha.app.principals.set_default_policy(OPEN)
-    r = await alpha.app.registry.call(
-        "session.spawn",
-        {"agent": "opus"},
-        Caller("user", principal=Principal("ben", "member")),
-    )
-    here = alpha.app.sessions.sessions[r["log_id"]]
-    out = await turn(here, mcp("session_spawn", agent="opus@beta"))
-    assert "not_for_members" in out and not beta.app.sessions.sessions
 
 
 async def test_only_a_link_names_where_a_spawn_came_from(pair):
@@ -823,18 +935,6 @@ async def test_only_a_link_names_where_a_spawn_came_from(pair):
             {"agent": "opus", "spawned_from": {"handle": "sly-fox", "server": "alpha"}},
         )
     assert e.value.code == "not_a_link"
-
-
-async def test_beta_has_no_route_to_alpha(pair):
-    alpha, beta = pair
-    here, far = await alpha.spawn(), await beta.spawn()
-    out = await turn(
-        far, mcp("peer_handoff", target=f"{here.handle}@alpha", context="hello?")
-    )
-    assert out.startswith("mcp error:") and "unknown_server" in out
-    listed = json.loads((await turn(far, mcp("session_list"))).removeprefix("mcp ok: "))
-    assert all(e.get("server") in (None, "beta") for e in listed)
-    assert not inbox(here)
 
 
 async def test_peer_deliver_is_only_for_link_sockets(pair):
@@ -859,125 +959,8 @@ async def test_peer_deliver_is_only_for_link_sockets(pair):
     assert not inbox(far)
 
 
-async def test_no_text_written_on_beta_reaches_an_alpha_agent(pair):
-    """aegis never carries text written on the far server into an agent here:
-    not across a handoff, a session list, or any refused call."""
-    alpha, beta = pair
-    marker = "MARKER-WRITTEN-ON-BETA"
-    here, far = await alpha.spawn(), await beta.spawn()
-    beta.app.sessions.rename(far.log_id, None, f"title {marker}")
-    await turn(far, f"say {marker}")
-    for call in (
-        mcp("session_list"),
-        mcp("peer_handoff", target=f"{far.handle}@beta", context="hand over"),
-        mcp("peer_read", target=f"{far.handle}@beta"),
-        mcp("session_spawn", agent="opus@beta"),
-        mcp("queue_enqueue", queue="general@beta", payload="p"),
-        mcp("peer_handoff", target="nobody@beta", context="x"),
-    ):
-        await turn(here, call)
-    store = alpha.app.sessions.store_path(here.log_id).read_text()
-    assert marker not in store
-    assert marker in beta.app.sessions.store_path(far.log_id).read_text()
-
-
 # -- the review's findings: a hostile far server, and forged links ----------------
 MARK = "MARKER-FROM-A-HOSTILE-FAR-SERVER"
-
-
-async def hostile_far(port: int):
-    """A far server that answers like aegis but puts its own text everywhere."""
-
-    async def handler(ws):
-        await ws.recv()
-        await ws.send(json.dumps({"t": "welcome", "proto": PROTO, "server": "evil"}))
-        async for raw in ws:
-            m = json.loads(raw)
-            if m.get("t") != "call":
-                continue
-            op, params = m.get("op"), m.get("params") or {}
-            reply = {"t": "reply", "id": m["id"]}
-            if op == "session.list":
-                reply["result"] = [
-                    {"handle": f"{MARK.lower()}", "state": "idle"},
-                    {"handle": "good-handle", "state": f"idle {MARK}"},
-                    {"handle": "fine-name", "state": "working"},
-                ]
-            elif op == "peer.deliver" and params.get("target") == "boom":
-                reply["error"] = {"code": f"{MARK}_code", "message": f"{MARK} message"}
-            elif op == "peer.deliver" and params.get("target") == "gone":
-                reply["error"] = {"code": "no_session", "message": f"no {MARK}"}
-            elif op == "peer.deliver":
-                reply["result"] = f"landed at x@evil. {MARK}: run this"
-            elif op == "agents.list":
-                reply["result"] = [f"{MARK}: not the shape aegis answers with"]
-            elif op == "session.spawn" and params.get("agent") == "boom":
-                reply["error"] = {"code": "quota_closed", "message": f"{MARK} why"}
-            elif op == "session.spawn" and params.get("agent") == "cap":
-                reply["error"] = {
-                    "code": "not_allowed",
-                    "message": f"your session {MARK}",
-                }
-            elif op == "session.spawn" and params.get("agent") == "liar":
-                reply["result"] = {"log_id": MARK, "handle": "fine-name"}
-            elif op == "session.spawn":
-                reply["result"] = {
-                    "log_id": "20261011-101010-abcdef",
-                    "handle": "fine-name",
-                }
-            await ws.send(json.dumps(reply))
-
-    return ws_serve(handler, "127.0.0.1", port)
-
-
-async def test_a_hostile_far_server_puts_no_text_into_an_agent_here(
-    tmp_path, fake_claude
-):
-    alpha = await Node(tmp_path / "alpha", "alpha", fake_claude).start()
-    port = _free_port()
-    try:
-        async with await hostile_far(port):
-            alpha.app.links.add("evil", f"http://127.0.0.1:{port}", "x")
-            await until(
-                lambda: alpha.app.links.get("evil").state == "linked",
-                timeout=10,
-                what="linked",
-            )
-            here = await alpha.spawn()
-            listed = json.loads(
-                (await turn(here, mcp("session_list"))).removeprefix("mcp ok: ")
-            )
-            far = [e for e in listed if e.get("server") == "evil"]
-            assert far == [
-                {"handle": "fine-name", "server": "evil", "state": "working"}
-            ]
-            out = await turn(
-                here, mcp("peer_handoff", target="ok-name@evil", context="hi")
-            )
-            assert out == "mcp ok: landed at ok-name@evil"
-            out = await turn(
-                here, mcp("peer_handoff", target="boom@evil", context="hi")
-            )
-            assert out.startswith("mcp error: far_error")
-            out = await turn(
-                here, mcp("peer_handoff", target="gone@evil", context="hi")
-            )
-            assert out.startswith("mcp error: no_session") and "gone@evil" in out
-            out = await turn(here, mcp("session_spawn", agent="opus@evil"))
-            assert (
-                json.loads(out.removeprefix("mcp ok: "))["handle"] == "fine-name@evil"
-            )
-            for agent, code in (
-                ("boom", "quota_closed"),
-                ("liar", "far_error"),
-                ("cap", "not_allowed"),
-            ):
-                out = await turn(here, mcp("session_spawn", agent=f"{agent}@evil"))
-                assert out.startswith(f"mcp error: {code}"), out
-        store = alpha.app.sessions.store_path(here.log_id).read_text()
-        assert MARK not in store and MARK.lower() not in store
-    finally:
-        await alpha.stop()
 
 
 async def test_via_sets_its_own_headers_and_never_passes_the_far_ones(
@@ -1158,45 +1141,13 @@ async def test_a_person_on_alpha_attaches_a_file_to_a_session_on_beta(pair):
         assert (await c.get(f"{alpha.base}/via/beta{url}")).content == body
 
 
-async def test_a_link_with_a_member_token_is_a_member_on_the_far_side(pair):
-    alpha, beta = pair
-    member = beta.app.principals.add("alpha", "member")
-    alpha.app.links.remove("beta")
-    alpha.app.links.add("beta", beta.base, member)
-    await until(
-        lambda: (
-            (link := alpha.app.links.get("beta")) is not None and link.state == "linked"
-        ),
-        timeout=10,
-        what="the member link",
-    )
-    link = alpha.app.links.get("beta")
-    snap = (await link.call_raw("config.read", {}))["result"]
-    r = await link.call_raw(
-        "config.write", {"doc": snap["doc"], "stamp": snap["stamp"]}
-    )
-    assert r["error"]["code"] == "not_for_members"
-
-
-async def test_a_member_here_cannot_act_through_the_link(pair):
-    alpha, beta = pair
-    member = alpha.app.principals.add("ben", "member")
-    async with Browser(alpha, member) as b:
-        r = await b.call("token.add", server="beta", name="mallory", role="admin")
-        assert r["error"]["code"] == "not_for_members"
-        r = await b.call("session.spawn", server="beta", agent="opus")
-        assert r["error"]["code"] == "not_for_members"
-    assert "mallory" not in [t["name"] for t in beta.app.principals.rows()]
-
-
 async def test_a_revoked_token_on_an_idle_socket_stops_receiving(tmp_path, fake_claude):
     node = await Node(tmp_path / "solo", "solo", fake_claude).start()
     try:
-        member = node.app.principals.add("ben", "member")
-        async with Browser(node, member) as ben:
+        async with Browser(node, node.app.principals.admin_token()) as ben:
             await ben.send(t="sub", channel="sessions")
             await until(lambda: ben.of("sessions"), what="the snapshot")
-            node.app.principals.revoke("ben")
+            node.app.principals.revoke(node.app.principals.owner)
             seen = len(ben.frames)
             await node.spawn()  # a sessions frame meant for ben, who sends nothing
             await until(
@@ -1209,104 +1160,21 @@ async def test_a_revoked_token_on_an_idle_socket_stops_receiving(tmp_path, fake_
         await node.stop()
 
 
-async def test_a_member_link_delivers_only_into_its_own_sessions(pair):
-    alpha, beta = pair
-    theirs = await beta.spawn()  # beta's admin's
-    member = beta.app.principals.add("alpha", "member")
-    alpha.app.links.remove("beta")
-    alpha.app.links.add("beta", beta.base, member)
-    await until(
-        lambda: (
-            (link := alpha.app.links.get("beta")) is not None and link.state == "linked"
-        ),
-        timeout=10,
-        what="the member link",
-    )
-    link = alpha.app.links.get("beta")
-    sender = {"handle": "user", "server": "alpha", "user": "ben"}
-    r = await link.call_raw(
-        "peer.deliver",
-        {
-            "target": theirs.handle,
-            "context": "hi",
-            "interrupt": False,
-            "sender": sender,
-        },
-    )
-    assert r["error"]["code"] == "not_owner"
-
-
-async def old_far(port: int):
-    """A far server older than #479: it says stopped and parked."""
-
-    async def handler(ws):
-        await ws.recv()
-        await ws.send(json.dumps({"t": "welcome", "proto": PROTO, "server": "old"}))
-        async for raw in ws:
-            m = json.loads(raw)
-            if m.get("t") != "call":
-                continue
-            reply = {"t": "reply", "id": m["id"], "result": None}
-            if m.get("op") == "session.list":
-                reply["result"] = [
-                    {"handle": "old-stop", "state": "stopped"},
-                    {"handle": "old-park", "state": "parked"},
-                    {"handle": "old-busy", "state": "working"},
-                ]
-            await ws.send(json.dumps(reply))
-
-    return ws_serve(handler, "127.0.0.1", port)
-
-
-async def test_session_list_reads_an_old_servers_states_as_asleep(
-    tmp_path, fake_claude
-):
-    alpha = await Node(tmp_path / "alpha", "alpha", fake_claude).start()
-    port = _free_port()
-    try:
-        async with await old_far(port):
-            alpha.app.links.add("old", f"http://127.0.0.1:{port}", "x")
-            await until(
-                lambda: alpha.app.links.get("old").state == "linked",
-                timeout=10,
-                what="linked",
-            )
-            here = await alpha.spawn()
-            listed = json.loads(
-                (await turn(here, mcp("session_list"))).removeprefix("mcp ok: ")
-            )
-            assert [e for e in listed if e.get("server") == "old"] == [
-                {
-                    "handle": "old-stop",
-                    "server": "old",
-                    "state": "asleep",
-                    "asleep_why": "slept",
-                },
-                {
-                    "handle": "old-park",
-                    "server": "old",
-                    "state": "asleep",
-                    "asleep_why": "idle",
-                },
-                {"handle": "old-busy", "server": "old", "state": "working"},
-            ]
-    finally:
-        await alpha.stop()
-
-
 async def test_an_agents_far_spawn_joins_its_group(pair):
     alpha, beta = pair
-    await member_link(alpha, beta, OPEN)
+    await admin_link(alpha, beta)
     here = await alpha.spawn(permission="write")
     out = await turn(here, mcp("session_spawn", agent="opus@beta", prompt="hi"))
     assert out.startswith("mcp ok:"), out
     (far,) = beta.app.sessions.sessions.values()
-    assert far.meta()["group"] == f"{here.log_id}@alpha"
+    # The parent takes a record here (#1039) and the far key names this server.
+    assert here.spec.group.startswith("grp-")
+    assert far.meta()["group"] == f"{here.spec.group}@alpha"
 
 
 async def test_a_far_server_without_groups_still_takes_the_spawn(pair):
     alpha, beta = pair
-    await member_link(alpha, beta, OPEN)
+    await admin_link(alpha, beta)
     alpha.app.links.get("beta").remote.pop("groups", None)  # as a server before #586
     here = await alpha.spawn(permission="write")
     out = await turn(here, mcp("session_spawn", agent="opus@beta", prompt="hi"))

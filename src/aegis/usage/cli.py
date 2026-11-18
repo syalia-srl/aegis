@@ -161,11 +161,12 @@ def _handles(con) -> dict[str, str]:
 def _progress(con, state: Path) -> str | None:
     """How far the usage backfill has come, when it has not finished."""
     from . import tables
+    from .store import stores
 
     if tables.is_complete(con):
         return None
     done = con.execute("SELECT COUNT(DISTINCT log_id) FROM usage_turns").fetchone()[0]
-    total = sum(1 for _ in (state / "transcripts").glob("*.jsonl"))
+    total = len(stores(state / "transcripts"))
     return (
         f"usage backfill: {done} of about {total} sessions derived so far;"
         " this answer is partial"
@@ -388,8 +389,7 @@ def import_history(
     root: Path | None = ROOT,
 ) -> None:
     """Count older work once: the legacy tree's logs and Claude Code's own
-    session files. Safe to run again: what was imported is skipped. On a
-    shared server, an admin's usage_import also reads each member's files."""
+    session files. Safe to run again: what was imported is skipped."""
     import getpass
     import sys
 

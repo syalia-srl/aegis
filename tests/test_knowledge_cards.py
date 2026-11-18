@@ -14,10 +14,10 @@ import pytest
 from aegis.ops import OpError
 
 from .conftest import until
-from .test_acts_for import BEN, recorded  # noqa: F401
+from .one_person import BEN, recorded  # noqa: F401
 from .test_agents import inbox, mcp, turn, world  # noqa: F401  (fixture)
-from .test_member_view import homes, spawn  # noqa: F401
-from .test_member_view import world as members  # noqa: F401
+from .one_person import homes, spawn  # noqa: F401
+from .one_person import world as members  # noqa: F401
 
 
 def ok(said: str) -> dict:
@@ -285,20 +285,6 @@ async def test_a_proposed_skill_is_not_a_command_but_skill_read_loads_it(world):
     assert "1. go" in read["text"] and s.skills == ["release"]
     assert await press(world, s, got["card"], "approve") == "ok"
     assert "release" in [n for n, _ in await app._offered_skills(app.user)]
-
-
-async def test_only_the_session_owner_answers_its_card(members):
-    app = members.app
-    ben = app.sessions.sessions[await spawn(members, BEN)]
-    id = (await save(ben, name="ben-fact"))["card"]
-    ref = {"log_id": ben.log_id, "id": id}
-    # The admin may read ben's transcript, but the card is ben's to answer.
-    with pytest.raises(OpError) as err:
-        await app.registry.call("knowledge.card.approve", ref)
-    assert err.value.code == "not_owner" and card(ben, id)["status"] == "pending"
-    assert await app.registry.call("knowledge.card.approve", ref, BEN) == "ok"
-    assert app.knowledge.store.get("ben", "ben-fact").status == "approved"
-    assert app.knowledge.store.get(app.user, "ben-fact") is None
 
 
 def records(s, kind: str) -> list[dict]:

@@ -102,8 +102,7 @@ paths, then in the working directory of the session that saved it (kept
 as `cwd` in the memory), then under your Files root and your home. One
 that is found nowhere flags the memory stale, naming the path. A stale memory
 stays in the block, since a moved file does not make the fact false, but
-it is worth a look. On a server with several people the files are looked
-for as your Linux user, so a check sees only what you can see. The check
+it is worth a look. The check
 after a save runs in the background, so a slow disk never holds the save;
 a check that takes longer than 30 seconds is dropped until the next one,
 and only the first 200 paths of a memory are looked for. The flags
@@ -177,9 +176,7 @@ A skill that lists files under `aegis.scripts` lets an agent run them with
 `skill_run`, once the skill is loaded in its session; any other file of the
 folder never runs. Each run copies the skill's folder into a fresh
 temporary directory, runs `python3` on the script there with the
-arguments the agent gives, and removes the directory after. On a server
-with several people, it runs as your Linux user, so a script reaches what
-you can reach and nothing more. A run stops after two minutes unless the
+arguments the agent gives, and removes the directory after. A run stops after two minutes unless the
 agent asks for longer, up to ten. A script runs on the server without
 asking, so only a session with full permission may run one.
 
@@ -188,7 +185,7 @@ asking, so only a session with full permission may run one.
 A skill whose `aegis:` block names `mcp.command` brings an MCP server that
 speaks over standard input and output. When a session loads the skill,
 aegis starts the server for that session alone, in a fresh copy of the
-skill's folder and, on a server with several people, as your Linux user.
+skill's folder.
 `skill_read` returns the server's tools with their arguments, and the
 agent calls one with `skill_tool`, naming the skill, the tool and the
 arguments. No other session reaches the server, and it stops when the
@@ -316,8 +313,7 @@ outside aegis is deleted unless you ticked its row.
 
 Moving items in does not stop a harness from loading what is left. That is
 a separate switch, off by default: Settings, under Skills and memory, "Only
-aegis's skills and memory in my sessions". It is yours alone; in multi-user
-mode another member's sessions are not touched. `/setup` offers it as the
+aegis's skills and memory in my sessions". `/setup` offers it as the
 `knowledge:native` row. With it on, your sessions start:
 
 - in Claude Code, without its `Skill` tool (aegis's `skill_read` and

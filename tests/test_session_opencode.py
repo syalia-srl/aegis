@@ -334,3 +334,11 @@ async def test_a_side_note_window_reads_an_opencode_fold(oc):
     await oc.turn("hello")
     text = btw.window(oc.session.entries()).text
     assert "user: hello" in text and "assistant: " in text
+
+
+async def test_a_refused_credential_asks_for_a_sign_in(oc, monkeypatch):
+    failed: list = []
+    monkeypatch.setattr(oc.session._host, "sign_in_failed", lambda s: failed.append(s))
+    await oc.session.send("AUTHFAIL")
+    await until(lambda: failed == [oc.session], what="sign_in_failed")
+    assert oc.session.spec.harness == "opencode"

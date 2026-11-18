@@ -176,8 +176,7 @@ without anyone seeing it.
 
 ## Who may open what
 
-Every person with a token here, admin or member, may read and write files
-here. Each save is logged with the name of whoever made it, in
+Whoever holds the server's token may read and write files here. Each save is logged with the name of whoever made it, in
 fs-log.jsonl in the server's state folder.
 
 Three things are always refused. A session cannot call Files at all: it has

@@ -106,7 +106,7 @@ def register_layout_ops(app: App) -> None:
         return reg.sessions[caller.log_id]
 
     # -- the person ------------------------------------------------------------
-    @r.op("layout.dock", LayoutDock, owned="log_id")
+    @r.op("layout.dock", LayoutDock, names=(("log_id", "session"),))
     async def dock(p: LayoutDock, caller):
         s = reg.open(p.log_id)
         # place() lets the pane it places through, so an agent's dock= can
@@ -123,7 +123,7 @@ def register_layout_ops(app: App) -> None:
             raise _bad(e) from e
         return s.set_layout(new, "person")
 
-    @r.op("layout.undock", LayoutUndock, owned="log_id")
+    @r.op("layout.undock", LayoutUndock, names=(("log_id", "session"),))
     async def undock(p: LayoutUndock, caller):
         s = reg.open(p.log_id)
         if p.pane == canvas.TRANSCRIPT:
@@ -132,7 +132,7 @@ def register_layout_ops(app: App) -> None:
             return s.layout
         return s.set_layout(canvas.trim(s.layout, p.pane), "person")
 
-    @r.op("layout.resize", LayoutResize, owned="log_id")
+    @r.op("layout.resize", LayoutResize, names=(("log_id", "session"),))
     async def resize(p: LayoutResize, caller):
         s = reg.open(p.log_id)
         try:
@@ -142,7 +142,7 @@ def register_layout_ops(app: App) -> None:
         return s.set_layout(new, "person")
 
     # -- the agent -------------------------------------------------------------
-    @r.op("layout.read", agent=True, read=True)
+    @r.op("layout.read", agent=True, read=True, access="read")
     async def read(p, caller):
         """Your canvas as it stands: the windows the person sees, each a list of
         columns with their width shares, each column a stack of panes with

@@ -242,6 +242,21 @@ def test_a_failed_turn_says_why():
     assert r.is_error and r.subtype == "provider.no-route: Model unavailable: go/x"
 
 
+def test_a_refused_credential_is_a_failed_sign_in():
+    # What opencode 2.1.2 reports for a wrong OpenCode Go key (#946).
+    p = Parser()
+    p.feed(ev("session.created", sessionID="ses_1"))
+    err = {"type": "provider.auth", "message": "Invalid credential", "status": 401,
+           "response": {"body": '{"error":{"type":"authentication_error","message":"Invalid credential"}}'}}  # fmt: skip
+    (r,) = p.feed(ev("session.execution.failed", sessionID="ses_1", error=err))
+    assert r.is_error and r.auth_failed
+    assert r.subtype == "provider.auth: Invalid credential"
+    other = {"type": "provider.no-route", "message": "Model unavailable: go/x"}
+    p.feed(ev("session.created", sessionID="ses_1"))
+    (r,) = p.feed(ev("session.execution.failed", sessionID="ses_1", error=other))
+    assert not r.auth_failed
+
+
 def test_a_model_switch_is_a_new_init():
     p = Parser()
     p.feed(

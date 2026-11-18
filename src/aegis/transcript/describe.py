@@ -57,6 +57,7 @@ KNOWLEDGE_GLYPH = "book"
 COMMAND_GLYPH = "slash"
 RECAP_GLYPH = "sparkle"
 BTW_GLYPH = "btw"
+MENTION_GLYPH = "swap"
 
 # How much of a result the one-line verdict may carry.
 DIGEST_MAX = 200
@@ -462,3 +463,8 @@ def task_notices(text: str) -> list[dict]:
             }
         )
     return out
+
+
+def tokens_k(n: int) -> str:
+    """A token count as the person reads it: 213k, or 500 below a thousand."""
+    return f"{round(n / 1000)}k" if n >= 1000 else str(n)

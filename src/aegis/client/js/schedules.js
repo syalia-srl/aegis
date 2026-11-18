@@ -90,10 +90,21 @@ function quotaText(q, pools) {
   const lines = Object.entries(q || {}).flatMap(([pool, ws]) =>
     Object.entries(ws).map(([kind, v]) => {
       const w = pools?.find((p) => p.name === pool)?.windows.find((x) => x.kind === kind);
-      return `${pool} ${w?.label || kind} ${v === "pace" ? "on pace" : `below ${v}%`}`;
+      return `${pool} ${w?.label || kind} ${lineText(v)}`;
     }),
   );
   return lines.length ? lines.join(" · ") : "no limit: fires whatever the quota";
+}
+
+// One line: "on pace", "below 80%", or a map's parts, "below 80% used,
+// 90% projected, stop 97%".
+function lineText(v) {
+  if (v === "pace") return "on pace";
+  if (typeof v !== "object" || v === null) return `below ${v}%`;
+  const parts = [];
+  if (v.used != null) parts.push(`${v.used}% used`);
+  if (v.projected != null) parts.push(`${v.projected}% projected`);
+  return `below ${parts.join(", ")}${v.stop != null ? `, stop ${v.stop}%` : ""}`;
 }
 
 // A server time as the view shows it: the time alone today, else the date too.
@@ -110,7 +121,7 @@ function duration(s) {
 function why(r) {
   if (r.kind === "quiet") return r.rc === 1 ? "exit 1: not yet" : "the same stdout as the last fire";
   if (r.kind === "held") return r.why === "quota" ? `held: ${r.line || "the quota gate is closed"}` : "held: a run is live";
-  if (r.kind === "skipped") return "dropped: a run was live";
+  if (r.kind === "skipped") return r.why === "quota" ? `skipped: ${r.line}` : "dropped: a run was live";
   if (r.kind === "error") return [r.rc != null ? `exit ${r.rc}` : "", r.err || ""].filter(Boolean).join(" · ");
   if (r.kind === "missed") return `${r.n} ticks missed while aegis was down or the machine slept; they fire once`;
   if (r.kind === "paused") return r.by === "errors" ? "paused after errors" : "paused";
@@ -159,7 +170,8 @@ function definition(E) {
 function launchLines(q) {
   const out = {};
   for (const [pool, ws] of Object.entries(q)) {
-    const lines = Object.fromEntries(Object.entries(ws).map(([k, v]) => [k, v === "pace" ? v : Number(v)]));
+    const keep = (v) => (v === "pace" || typeof v === "object" ? v : Number(v));
+    const lines = Object.fromEntries(Object.entries(ws).map(([k, v]) => [k, keep(v)]));
     if (Object.keys(lines).length) out[pool] = lines;
   }
   return out;
@@ -237,7 +249,13 @@ export class Schedules {
   setServer(server) {
     if (server === this.server) return;
     Object.assign(this, { server, cur: null, form: null, runs: null, err: "" });
-    if (this.visible) this.open();
+    if (!this.visible) return;
+    // Draw what this page already holds for that server before the roster and
+    // pools: those are the far server's round trips, each with the link's own
+    // timeout, and the list must not wait on them (a far server can be slow to
+    // answer while its schedules channel has already delivered).
+    this.draw();
+    this.open();
   }
 
   changed(names, server) {
@@ -686,7 +704,10 @@ export class Schedules {
     };
     lab.append(cb, document.createTextNode(` ${w.label}`));
     row.append(lab);
-    if (w.kind in ws) {
+    if (w.kind in ws && typeof ws[w.kind] === "object") {
+      // A map line, written in the file or by an agent: shown, kept as it is.
+      row.append(el("span", "cnote", lineText(ws[w.kind])));
+    } else if (w.kind in ws) {
       const v = ws[w.kind];
       row.append(seg(["pace", "percent"], v === "pace" ? "pace" : "percent", (o) => {
         ws[w.kind] = o === "pace" ? "pace" : "50";
@@ -733,18 +754,18 @@ export class Schedules {
     const nameOk = NAME.test(E.name);
     const clockOk = !!E.preview && !E.preview.error;
     const fireOk = E.target === "new" || !!E.session;
-    const hint = document.getElementById("sch-name-hint");
+    const hint = this.root.querySelector("#sch-name-hint");
     if (hint) {
       hint.textContent = E.name && !nameOk ? "two or three lowercase words joined by hyphens" : "";
       hint.classList.toggle("bad", !!E.name && !nameOk);
     }
-    const ch = document.getElementById("sch-clock-hint");
+    const ch = this.root.querySelector("#sch-clock-hint");
     if (ch) {
       ch.textContent = !E.preview ? "…" : E.preview.error || `next ticks: ${E.preview.next.map(short).join(", ")}`;
       ch.classList.toggle("bad", !!E.preview?.error);
     }
-    const save = document.getElementById("sch-save");
-    const quotaOk = E.noLimit || Object.values(E.quota).every((ws) => Object.values(ws).every((v) => v === "pace" || PERCENT.test(String(v))));
+    const save = this.root.querySelector("#sch-save");
+    const quotaOk = E.noLimit || Object.values(E.quota).every((ws) => Object.values(ws).every((v) => v === "pace" || typeof v === "object" || PERCENT.test(String(v))));
     if (save) save.disabled = !(nameOk && clockOk && fireOk && quotaOk && E.prompt.trim());
   }
 

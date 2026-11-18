@@ -1,13 +1,11 @@
 """usage.read over hand-built rows, on a stand-in for the app."""
 
-import functools
 import time
 from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
 
-from aegis.app import App
 from aegis.journal import db
 from aegis.mcp import _schema
 from aegis.ops import Caller, OpError, Principal, Registry
@@ -16,9 +14,7 @@ from aegis.usage.ops import register_usage_ops
 from aegis.usage.turns import Derived, PartRow, TurnRow
 
 NOW = time.time()
-ANA = Caller("user", principal=Principal("ana", "member"))
-BEN = Caller("user", principal=Principal("ben", "member"))
-ADMIN = Caller("user", principal=Principal("ana", "admin"))
+ADMIN = Caller("user", principal=Principal("ana"))
 
 
 def turn(rec, person, cost, mode="person", billing="api"):
@@ -54,9 +50,8 @@ def stand_in(tmp_path, multi_user=None, name="here", billing="api", readings=())
         server_name=name,
         multi_user=multi_user,
         user="ana",
-        who=lambda c: c.principal or Principal("", "admin"),
+        who=lambda c: c.principal or Principal(""),
     )
-    app.sees = functools.partial(App.sees, app)
     register_usage_ops(app)
     return app
 
@@ -90,16 +85,6 @@ async def test_a_where_narrows_and_a_server_split_names_this_server(app):
         "usage.read", {"split": ["server", "repo"], "where": {"mode": "queue"}}
     )
     assert [(r["server"], r["repo"]) for r in a["rows"]] == [("here", "/w/notes")]
-
-
-async def test_a_member_sees_only_its_own_sessions_and_an_admin_all(tmp_path):
-    app = stand_in(tmp_path, multi_user=object())
-    a = await app.registry.call("usage.read", {}, BEN)
-    assert a["totals"]["cost"] == 1.0
-    a = await app.registry.call("usage.read", {}, ANA)
-    assert a["totals"]["cost"] == 0.6
-    a = await app.registry.call("usage.read", {}, ADMIN)
-    assert a["totals"]["cost"] == 1.6
 
 
 async def test_a_call_over_a_link_answers_for_this_server_only(app):
@@ -244,13 +229,6 @@ async def test_an_older_aegis_without_usage_read_is_missing(tmp_path):
     assert a["servers"]["beta"]["state"] == "missing"
     assert {r["server"] for r in a["rows"]} == {"here"}
     assert a["totals"]["cost"] == 1.6
-
-
-async def test_a_members_call_asks_no_link(tmp_path):
-    app, [beta] = linked(tmp_path, "beta", multi_user=object())
-    a = await app.registry.call("usage.read", {}, BEN)
-    assert not beta.asked and set(a["servers"]) == {"here"}
-    assert a["totals"]["cost"] == 1.0
 
 
 async def test_a_subscription_two_servers_share_counts_once(tmp_path):

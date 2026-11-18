@@ -77,7 +77,7 @@ export const ACTIONS = [
     keys: [on("global", "Alt+M", alt("KeyM"))],
   },
   // As the Quiet button, and only when it is enabled: a working or waiting session.
-  { id: "quiet", title: "Quiet: hide this tab until the turn ends", when: ["session"], keys: [on("global", "Alt+Q", alt("KeyQ"))] },
+  { id: "quiet", title: "Quiet: hide this session's tab while it works, or show it again", when: ["session"], keys: [on("global", "Alt+Q", alt("KeyQ"))] },
   // As the Archive button, so a working session still asks first.
   { id: "archive", title: "Archive this tab; Reopen brings it back", when: ["session"], keys: [on("global", "Alt+A", alt("KeyA"))] },
   { id: "side", title: "Show or hide the session panel", keys: [on("global", "Alt+B", alt("KeyB"))] },
@@ -97,7 +97,7 @@ export const ACTIONS = [
       on("browse", "0…9", (ev) => bare(ev) && /^[0-9]$/.test(ev.key)),
     ],
   },
-  { id: "escape", title: "Interrupt the agent; close a dialog or a list", keys: [on("global", "Esc", key("Escape"))] },
+  { id: "escape", title: "Interrupt the agent, twice in a row; once closes a dialog or a list", keys: [on("global", "Esc Esc", key("Escape"))] },
   { id: "help", title: "Every key, in one list", keys: [on("browse", "?", key("?"))] },
   { id: "next", title: "Next row", keys: [on("session", "j  ↓", key("j", "ArrowDown"))] },
   { id: "prev", title: "Previous row", keys: [on("session", "k  ↑", key("k", "ArrowUp"))] },
@@ -204,13 +204,16 @@ const PRESSABLE = new Set(["A", "BUTTON", "SUMMARY"]);
 
 // runs: what each action does, by id; each becomes its action's `run`. An
 // action without one, or one for no action, is a mistake caught at boot.
+// Returns the function that removes the listener: a full layout destroyed
+// with its root must not leave a keypress running actions on nodes it took
+// down (m6).
 export function installKeys(runs, view) {
   const ids = new Set(ACTIONS.map((a) => a.id));
   const missing = [...ids].filter((id) => !runs[id]);
   const extra = Object.keys(runs).filter((id) => !ids.has(id));
   if (missing.length || extra.length) throw new Error(`keys.js: no run for ${missing}; no action for ${extra}`);
   for (const a of ACTIONS) a.run = runs[a.id];
-  document.addEventListener("keydown", (ev) => {
+  const onKey = (ev) => {
     if (ev.defaultPrevented || ev.isComposing) return;
     const v = view();
     // In the Files view Ctrl+S saves from any field, the picker's included:
@@ -222,5 +225,7 @@ export function installKeys(runs, view) {
     if (b.native && PRESSABLE.has(ev.target.tagName)) return;
     ev.preventDefault();
     b.action.run(ev);
-  });
+  };
+  document.addEventListener("keydown", onKey);
+  return () => document.removeEventListener("keydown", onKey);
 }

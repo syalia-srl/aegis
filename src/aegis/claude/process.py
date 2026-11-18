@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import signal
 import time
 from collections import deque
@@ -76,6 +77,8 @@ REPLACED_TOOLS = {
 # autoMemoryEnabled); the canary pins both (tests/canary).
 NATIVE_TOOLS = {"Skill": "skill_read, skill_search"}
 NO_AUTO_MEMORY = {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}
+
+
 # aegis decides which of its own tools a session may call (ops.Registry.call),
 # so Claude Code lets each one through in every mode. Measured on 2.1.291:
 # plan mode refuses an MCP call even when --allowedTools or a settings rule
@@ -83,32 +86,40 @@ NO_AUTO_MEMORY = {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}
 # PreToolUse hook's allow passes all three, while plan mode still refuses
 # writes (#305). From 2.1.301 plan mode refuses the hook's allow too, unless
 # the tool is annotated readOnlyHint, which every aegis tool is (mcp.py, #442).
-ALLOW_AEGIS = json.dumps(
-    {
-        "hooks": {
-            "PreToolUse": [
-                {
-                    "matcher": "mcp__aegis__.*",
-                    "hooks": [
-                        {
-                            "type": "command",
-                            "command": "echo '"
-                            + json.dumps(
-                                {
-                                    "hookSpecificOutput": {
-                                        "hookEventName": "PreToolUse",
-                                        "permissionDecision": "allow",
+# The servers a session gets beside aegis's (#960) are let through the same way.
+def allow_mcp(names: tuple[str, ...] = ()) -> str:
+    servers = "|".join(re.escape(n) for n in ("aegis", *names))
+    return json.dumps(
+        {
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": f"mcp__({servers})__.*"
+                        if names
+                        else "mcp__aegis__.*",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": "echo '"
+                                + json.dumps(
+                                    {
+                                        "hookSpecificOutput": {
+                                            "hookEventName": "PreToolUse",
+                                            "permissionDecision": "allow",
+                                        }
                                     }
-                                }
-                            )
-                            + "'",
-                        }
-                    ],
-                }
-            ]
+                                )
+                                + "'",
+                            }
+                        ],
+                    }
+                ]
+            }
         }
-    }
-)
+    )
+
+
+ALLOW_AEGIS = allow_mcp()
 
 
 def build_argv(
@@ -121,6 +132,8 @@ def build_argv(
     system_prompt: str | None = None,
     add_dirs: tuple[Path, ...] = (),
     disallowed: tuple[str, ...] = (),
+    mcp_names: tuple[str, ...] = (),
+    own_tools: bool = True,
 ) -> list[str]:
     argv = [
         claude_bin,
@@ -139,12 +152,16 @@ def build_argv(
         "--mcp-config",
         mcp_config,
         "--settings",
-        ALLOW_AEGIS,
+        allow_mcp(mcp_names),
     ]
     for folder in add_dirs:
         # Read access outside the cwd under every permission mode: the inbox.
         argv += ["--add-dir", str(folder)]
-    if disallowed:
+    if not own_tools:
+        # None of Claude Code's own tools; MCP tools stay (#983, measured on
+        # 2.1.296: the init line lists only the MCP servers' tools).
+        argv += ["--tools", ""]
+    elif disallowed:
         # One comma-joined value: the flag is variadic and would eat a
         # following positional.
         argv += ["--disallowedTools", ",".join(disallowed)]
@@ -169,11 +186,9 @@ class ClaudeProcess:
         on_exit: Callable[[int, list[str]], None],
         env: dict[str, str] | None = None,
         cgroup: Path | None = None,
-        user: str | None = None,
         via: str | None = None,
     ) -> None:
         self.argv = argv
-        self.user = user
         self.via = via
         self.cwd = cwd
         self.cgroup = cgroup
@@ -207,7 +222,6 @@ class ClaudeProcess:
             limit=LINE_LIMIT,
             cgroup=self.cgroup,
             oom=True,
-            user=self.user,
             via=self.via,
         )
         err = asyncio.create_task(self._pump_stderr())
@@ -306,13 +320,11 @@ class ClaudeProcess:
         if proc is None:
             return
         if proc.returncode is None:
-            await launch.signal_process_async(proc.pid, signal.SIGTERM, user=self.user)
+            await launch.signal_process_async(proc.pid, signal.SIGTERM)
             try:
                 await asyncio.wait_for(proc.wait(), TERM_GRACE_S)
             except TimeoutError:
-                await launch.signal_process_async(
-                    proc.pid, signal.SIGKILL, user=self.user
-                )
+                await launch.signal_process_async(proc.pid, signal.SIGKILL)
                 await proc.wait()
         for t in self._tasks:
             if not t.done():

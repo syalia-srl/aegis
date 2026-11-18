@@ -53,6 +53,13 @@ from __future__ import annotations
 
 import sys
 
+if sys.argv[1:3] == ["auth", "login"]:
+    # The sign-in card's login (#946): the recorded screens, from fake_login.py.
+    import os
+
+    login = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fake_login.py")
+    os.execv(sys.executable, [sys.executable, login, "opencode"])
+
 if sys.argv[1:2] == ["--version"]:
     # First, before the imports below: aegis reads this before every launch
     # on a new binary (harness_versions.py), and the whole module costs
@@ -412,6 +419,16 @@ def run(s: Sess, text: str) -> None:
     st.end("stop")
 
 
+AUTH = {
+    "type": "provider.auth",
+    "message": "Invalid credential",
+    "status": 401,
+    "response": {
+        "body": '{"error":{"type":"authentication_error","message":"Invalid credential"}}'
+    },
+}
+
+
 def worker(s: Sess) -> None:
     while True:
         iid, text = s.inbox.get()
@@ -419,6 +436,11 @@ def worker(s: Sess) -> None:
         emit("session.execution.started", sessionID=s.id)
         emit("session.inbox.delivered", sessionID=s.id, inboxID=iid)
         model = f"{s.model['providerID']}/{s.model['id']}"
+        if text == "AUTHFAIL":
+            # What opencode 2.1.2 reports for a wrong key (#946).
+            drain(s)
+            emit("session.execution.failed", sessionID=s.id, error=AUTH)
+            continue
         if model in EXHAUSTED or text == "OVERFLOW":
             drain(s)
             error = OVERFLOW if text == "OVERFLOW" else LIMIT

@@ -16,7 +16,7 @@ Closing the browser leaves every session running.
 
 ## Start a session
 
-Open a new tab with the + at the end of the tab bar, or Alt+N. Type what the
+Open a new tab with the New session button at the end of the tab bar, or Alt+N. Type what the
 agent should do and press Enter; Shift+Enter adds a line. The session starts
 and its tab opens. On a touch screen Enter adds a line and the send button
 starts the session, so a mistap does not start one with half a message. The
@@ -97,7 +97,7 @@ Type in the session's box and press Enter. A message you send while the
 agent works reaches it during the turn: Claude Code reads it at its next tool
 call. Messages from other sessions and from aegis are held until the turn
 ends, unless an agent sent a handoff as urgent: that one reaches the turn the
-same way yours does, and its row shows `steered in`. Esc interrupts the turn.
+same way yours does, and its row shows `steered in`. Esc Esc interrupts the turn: press Esc twice within a second. One Esc closes a dialog or a menu and leaves the turn running.
 `/model`, `/effort` and `/permission` switch those for this session; clicking
 the chips under the box does the same.
 
@@ -115,6 +115,26 @@ errors, so it reads by context and asks about what it cannot make sense of.
 Your row in the transcript shows "🎙 dictated" in place of that line. Emptying
 the box forgets the mark. A message to a session on a linked server, or one
 queued while offline, goes without the line.
+
+## Record an audio message
+
+Press and hold the mic button, in a session's box or the new-tab box, to
+record audio instead of dictating; a short tap still dictates. A bar with a
+timer covers the box while it records, and releasing sends the take with
+whatever you typed. For a long take, slide up while holding: the recording
+locks, you can lift your finger, and the bar's stop button (or a tap on the
+mic) ends it and sends it. The bar's bin, or Esc, throws the take away. With
+a mouse it works the same: hold the button down, drag up to lock.
+
+The recording is an attachment, nothing is transcribed. aegis saves it in
+the session's inbox as Ogg Opus, mono, 16 kHz, about 200 KB a minute, and the
+agent reads its path and its duration after your text. The conversion needs
+`ffmpeg` on the server; without it the file keeps the format the browser
+recorded (WebM or MP4) and the duration is the browser's own measure. A take
+under a second is not sent.
+
+An agent that needs your voice itself, a narration to cut a video to for
+example, asks you to hold the mic rather than record in another app.
 
 ## Rename it
 
@@ -174,7 +194,12 @@ Two calls keep the person informed without reading the transcript:
   Archive button, so aegis refuses done while the plan has items not done,
   or while a monitor, queue task, background task or workflow will still
   wake the agent: it finishes or trims the plan, cancels what it no longer
-  waits on, or passes review.
+  waits on, or passes review. A done it accepts also lists what the session
+  left in the repos it worked in, as the Repos row counts it but probed again
+  that moment: a worktree still there, uncommitted files it wrote, unpushed
+  commits, a branch with its commits and no pull request, an open pull
+  request. The agent resolves what is its work and calls done again, and
+  ignores the rest; done is never refused for it.
 
 The mark on the tab and the card comes from `turn_end`, except working,
 waiting and error, which aegis sees for itself; a turn with no `turn_end`
@@ -214,7 +239,7 @@ aegis tells every live session when the host runs short: the disk is full,
 memory is short, the CPU is saturated or the quota runs ahead of pace. A
 notice never starts a turn, and never goes into the system prompt. It rides
 on the session's next message. During a turn, Claude Code reads it right after
-the agent's next tool call of any kind. Codex, OpenCode and Cursor read it on
+the agent's next tool call of any kind. Codex, OpenCode, Cursor and pi read it on
 the result of their next aegis tool call, and a call made with `aegis call`
 carries none, so its output still parses. An agent reads a block headed like
 an inbox message:
@@ -297,17 +322,54 @@ a toast. An agent calls `notice_announce` with `text=`, `level=` and
 `until=`; `clear=` with an id ends one early, and a call with neither lists
 those in force. Each agent gets the text and one line more, "This was
 written by ops-agent, not measured by aegis.", naming the agent's handle or
-your name as the author; the agent that wrote it is not told its own. Announcing is for an admin and an admin's agents; a member gets
-not_for_members.
+your name as the author; the agent that wrote it is not told its own.
 
 ## Order the tabs
 
-The tab bar's order is this browser's own, and a reload keeps it. A session
-started from another one sits in that one's group, a block headed by the
-session that started it. Drag a tab to move it: a group's head moves the whole
-group, and any other member moves only inside its group. Alt+Shift+[ and
-Alt+Shift+] move the tab in front one place left or right by the same rules,
-from the message box too.
+The tab bar's order is this browser's own, and a reload keeps it. Sessions can
+also sit in a group: one block in the bar, drawn under the group's name, with
+no session at its head. Click the count chip to fold the block to one tab and
+`+N`, and again to unfold it. Click the group's name to open its page: the
+Fleet over just its members, in the same order, quiet sessions and workers
+included, where a card opens that session.
+
+A group fills by itself. What a session spawns or enqueues joins that
+session's group, and a session in no group that starts its first child makes a
+group holding both, with a generated name such as `brisk-backus` (`-2` when
+the name is taken). With `group_names:` set (config#group-names), an agent
+renames it from what its members work on each time one joins or leaves, and
+gives it a one-line title, shown when you hover its name and on its Fleet
+card; a name you or an agent chose stays. A person's `/spawn` joins the group of the tab it was
+typed in, making one if that tab has none. A group with one open member is
+drawn as that member's plain tab; its record stays, so a later spawn rejoins
+the same name.
+
+To edit a group by hand:
+
+- Drag a tab onto another lone tab to put both in a new group, or onto a block
+  to join it. Drag a member to the gap between blocks to leave its group; what
+  it spawned stays behind.
+- The tab menu (right-click, or a long press) has Move to group, with New
+  group and this server's groups by name, and Leave group.
+- Double click the group's name, or choose Rename group in its menu, and type
+  the new name in place: Enter saves, Escape cancels.
+- Ungroup, in the group's own menu, leaves every member where it is. Archive
+  group… in the same menu closes them all, after one question.
+- A group on this server holds this server's sessions only: a tab from a
+  linked server cannot be dropped into one, and the menu says why.
+- An agent groups sessions with `session_group`: handles and a name put them
+  in that group, handles alone make them leave, and a group and name with no
+  handles rename it.
+
+While a block is folded, its members stay inside it, whatever their mark: the
+group's tab shows the most urgent mark among them, and its `+N` chip turns
+alert while one needs you. Unfold the block to see which. The member you are
+looking at is the one exception: it stays drawn beside the block, in the
+group's colour, and the block stays folded.
+
+Alt+Shift+[ and Alt+Shift+] move the tab in front one place left or right, by
+the same rules, from the message box too: a member within its group, a lone
+tab around its neighbours. Dragging the group's name carries its whole block.
 
 ## Switch between sessions
 
@@ -332,19 +394,29 @@ plan item, or what it is doing.
 
 ## Quiet sessions
 
-A quiet session has no tab. Its card stays in the Fleet, dimmed and marked
-quiet with a crossed-out eye, in the last group of "Needs you first". It comes back to the tab bar by
-itself when its turn ends done, review, needs_you or error, and stays there
-until it is quieted again; a queue worker comes back only on an error.
+A quiet session runs in the background, with no tab. Its card stays in the
+Fleet, dimmed and marked quiet with a crossed-out eye, inside its group's
+stack; a quiet session in no group sits in the last group of "Needs you
+first". Its tab comes back by itself when a turn ends done, review,
+needs_you or error, so you see what it has for you. A quiet member counts in
+its group's `+N` and appears on the group's page. Quiet is a mode, not one
+turn: when the next turn starts, because you answered or because a monitor, a
+task or a schedule woke it, the tab goes away again. It stays quiet until you
+unquiet it. A queue worker comes back only on an error.
 
-- The Quiet button in the session panel, beside Sleep, quiets a session that
-  is working or waiting. Alt+Q does the same for the session in front, from
-  the message box too.
-- `/quiet` in a session's box quiets that session, as Alt+Q does.
+- The Quiet button in the session panel, beside Sleep, quiets a session in
+  any state, and pressed again unquiets it. Alt+Q does the same for the
+  session in front, from the message box too.
+- `/quiet` in a session's box quiets that session or unquiets it, as Alt+Q
+  does.
 - An agent calls `session_quiet` with a handle, its own included.
-- Clicking a quiet card in the Fleet brings the session back at once.
+- The tab menu offers Quiet, or Unquiet on a quiet session.
+- Clicking a quiet card in the Fleet unquiets the session and opens it.
 - Opening it from the Alt+P list does the same (see
   [Switch between sessions](#switch-between-sessions)).
+
+A session spawned with `--quiet`, or `quiet` on `session_spawn`, is quiet for
+its first turn only.
 
 Quiet is about the tab, not the process: a quiet session keeps working, and
 sleeping one keeps it quiet. Wake, Continue and Restart leave it quiet too;
@@ -383,8 +455,7 @@ Quiet or Unquiet; then Interrupt while it works, Wake while it is asleep,
 Continue while it is not working, Sleep while it is not asleep, Restart, and
 Hand off; then Rename…, which
 opens the session with its handle ready to edit; then Archive. Each acts on
-that session, not on the one shown. Another member's session offers Open and
-Open in new tab only, and a step of a running workflow shows the rest
+that session, not on the one shown. A step of a running workflow shows the rest
 disabled, with the reason as the item's tooltip. A terminal's card has Open,
 Open in new tab and Archive.
 
@@ -396,7 +467,7 @@ and Go to session) and the archive's rows (Read and Reopen).
 
 | verb | where | what it does |
 |---|---|---|
-| Interrupt | the menu, Esc, the button beside Send | ends the turn the agent is working on |
+| Interrupt | the menu, Esc Esc, the button beside Send | ends the turn the agent is working on. One Esc closes a dialog or a menu; Esc again within a second interrupts |
 | Sleep | the menu, the panel, `/sleep` (`/stop` is an alias) | ends the process and keeps the conversation; the session is asleep until a message wakes it. When ending it would also end a background task, a harness timer or a process it left running (a `nohup` command, a dev server), the menu and the panel ask first and name them; when aegis cannot check, they ask anyway |
 | Wake | the menu, on an asleep session | starts the process and sends nothing. Like a message, it is refused while the quota gate is closed, and it asks before starting a harness version outside the tested range |
 | Continue | the menu and the panel, on a session that is not working | sends "Continue" to the agent, which wakes an asleep one |
