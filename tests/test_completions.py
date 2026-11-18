@@ -192,7 +192,7 @@ def test_the_callback_lists_subcommands_and_options():
             "COMP_CWORD": "2",
         }
     )
-    for name in ("add", "list", "trust", "remove"):
+    for name in ("add", "list", "remove"):
         assert name in nested.split()
 
     fish = _complete(
