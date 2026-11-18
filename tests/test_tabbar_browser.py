@@ -270,12 +270,13 @@ def test_the_more_button_opens_the_switcher_and_a_row_scrolls_its_tab_into_view(
     assert sorted(rows) == sorted(keys)
     pg.click(f"#switcher .sw-row[data-id='{keys[-1]}']")
     pg.wait_for_function(f"location.hash === '#s={keys[-1]}'")
-    inside = pg.evaluate(
+    # The list scrolls the tab in after the hash changes: wait for it.
+    pg.wait_for_function(
         f"""() => {{ const t = document.querySelector("#tablist .tab[data-id='{keys[-1]}']").getBoundingClientRect();
               const l = document.getElementById('tablist').getBoundingClientRect();
-              return t.left >= l.left - 1 && t.right <= l.right + 1; }}"""
+              return t.left >= l.left - 1 && t.right <= l.right + 1; }}""",
+        timeout=5000,
     )
-    assert inside
     pg.close()
 
 

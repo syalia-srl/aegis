@@ -22,7 +22,7 @@ import { installKeys, renderKeys } from "./keys.js";
 import { Palette } from "./palette.js";
 import { HeaderPart } from "./parts/header.js";
 import { SidebarPart } from "./parts/sidebar.js";
-import { CommandsPart } from "./parts/commands.js";
+import { CommandsPart, mentionable } from "./parts/commands.js";
 import { DictationPart } from "./parts/dictation.js";
 import { SpawnPart } from "./parts/spawn.js";
 import { FleetPart } from "./parts/fleet.js";
@@ -378,6 +378,7 @@ const canvas = new Canvas($("canvas"), {
   onChange: () => syncDock(),
   refuse: (message) => toast(message, { kind: "error" }),
   openWindow: (n, tab) => openWindow(app.state.shown, n, tab),
+  compose: (text) => toComposer(app.state.shown, text),
   // A browser the session drives, docked: its own view of the stream.
   browserCard,
   mountBrowser: (host, id) => {
@@ -1910,7 +1911,7 @@ function drawComposerHint(s) {
       ? "Asleep; your next message wakes it."
       : touch.matches
         ? ""
-        : "Message the agent. Enter sends, Shift+Enter adds a line, / for commands, Esc interrupts.";
+        : "Message the agent. Enter sends, Shift+Enter adds a line, / for commands, Esc Esc interrupts.";
   if (input.placeholder !== placeholder) {
     input.placeholder = placeholder;
     autosize();
@@ -1936,8 +1937,21 @@ function tokenCount(n) {
   return n < 1000 ? String(Math.round(n)) : `${(n / 1000).toFixed(1)}k`;
 }
 const callTitle = new CallTitle();
+// One Esc closes a dialog. The interrupt is the next Esc within this long,
+// so a press while typing does not stop the turn (#912).
+const ESC_AGAIN_MS = 1000;
+let escArmedAt = 0;
+function drawEscHint() {
+  const key = Date.now() - escArmedAt < ESC_AGAIN_MS ? "transcript.working.escapeAgain" : "transcript.working.escape";
+  const node = document.querySelector("#working .wesc [data-t]");
+  if (node && node.dataset.t !== key) {
+    node.dataset.t = key;
+    node.textContent = app.t(key);
+  }
+}
 function tickWorking() {
   if (workingSince == null) return;
+  drawEscHint();
   $("working-s").textContent = Math.round((Date.now() - workingSince) / 1000);
   ["working-in", "working-out"].forEach((id, k) => {
     const gap = workingTokens[k] - workingShown[k];
@@ -2006,6 +2020,11 @@ async function askRecap(force) {
   if (force && why && app.state.shown === id) toast(why, { kind });
 }
 $("entries").addEventListener("click", (ev) => {
+  const skip = ev.target.closest("[data-mention-skip]");
+  if (skip && app.state.shown) {
+    app.callFor(app.state.shown, "mention.skip", { id: skip.dataset.mentionSkip }).catch((e) => toast(e.message, { kind: "error" }));
+    return;
+  }
   const cancel = ev.target.closest("[data-btw-cancel]");
   if (cancel && app.state.shown) {
     app.callFor(app.state.shown, "btw.cancel", { id: cancel.dataset.btwCancel }).catch((e) => toast(e.message, { kind: "error" }));
@@ -2195,6 +2214,17 @@ function nextNeed() {
 
 // What each key in keys.js does. `input` is declared below;
 // a key is pressed only after this module has run.
+// Left and Right page the open viewer when it holds a set, and otherwise the
+// selected row's card. An open viewer with one file, or a page, stays put:
+// the card under it is covered.
+function pageShownFile(d) {
+  if (viewer.isOpen) {
+    viewer.step(d);
+    return;
+  }
+  transcript.pageFile(d);
+}
+
 // A transcript key does nothing while the canvas's tabs hide the transcript.
 const onTranscript = (run) => (ev) => canvas.transcriptShown() && run(ev);
 const offKeys = installKeys(
@@ -2241,6 +2271,8 @@ const offKeys = installKeys(
       find.open();
     },
     press: onTranscript(() => transcript.press()),
+    filePrev: onTranscript(() => pageShownFile(-1)),
+    fileNext: onTranscript(() => pageShownFile(1)),
     copy: onTranscript(() => transcript.selected && copyRow(transcript.selected, transcript.nodes.get(transcript.selected), copyDeps)),
     foldLevel: () => foldLevel((transcript.foldLevel + 1) % 3),
     walk() {},
@@ -2285,12 +2317,19 @@ const offKeys = installKeys(
       } else menu.openOverlay();
     },
     escape() {
+      const armed = escArmedAt;
+      escArmedAt = 0;
       if (dictation.discard() || cancelAsk() || closeInstallDialog() || closePushPanel()) return;
       if (header.close()) return;
       if (root.dataset.side === "open") return closeSide();
       if (!keymap.hidden) help(false);
       else if (cmenu.close() || cmenu.unbar() || viewer.close() || find.close() || closeMonitorCard() || closeFeedCard() || sidebar?.closeCard()) return;
-      else if (route().view === "session" && !sidebar?.isEditing()) interrupt();
+      else if (route().view === "session" && !sidebar?.isEditing() && focused()?.state === "working") {
+        // One Esc arms the interrupt, the second within ESC_AGAIN_MS sends it.
+        if (armed && Date.now() - armed < ESC_AGAIN_MS) interrupt();
+        else escArmedAt = Date.now();
+        drawEscHint();
+      }
     },
     help: () => help(),
     side: () => toggleSide(),
@@ -2914,13 +2953,16 @@ const menu = new CommandsPart(app, $("composer"), {
   fetch: loadCommands,
   run: (line) => sendLine(line, false),
   getLine: () => input.value,
-  setLine: (v) => {
+  setLine: (v, caret) => {
     input.value = v;
     autosize();
     if (app.state.shown) localStorage.setItem(`aegis.draft.${app.state.shown}`, v);
     input.focus();
+    if (caret !== undefined) input.setSelectionRange(caret, caret);
   },
   meta: () => focused(),
+  getCaret: () => input.selectionStart ?? input.value.length,
+  sessions: () => mentionable(app.state.sessions, app.state.shown),
 });
 
 for (const [id, cmd] of [
@@ -3062,12 +3104,13 @@ input.addEventListener("input", async () => {
   if (app.state.shown) localStorage.setItem(`aegis.draft.${app.state.shown}`, input.value);
   if (!input.value.trim()) spoken.delete(`aegis.draft.${app.state.shown}`); // a box emptied by hand starts over
   const v = input.value;
-  if (v.startsWith("/") && !v.startsWith("//")) {
+  if ((v.startsWith("/") && !v.startsWith("//")) || menu.mentioning()) {
     if (menu.isOpen) menu.refresh();
     else await menu.openInline(); // the outline below needs the catalog it loads
   } else if (menu.isOpen) menu.close();
   const now = input.value;
-  $("composer").classList.toggle("bad", now.startsWith("/") && !now.startsWith("//") && !menu.known(now));
+  const checked = (now.startsWith("/") && !now.startsWith("//")) || (now.startsWith("@") && !now.startsWith("@@"));
+  $("composer").classList.toggle("bad", checked && !menu.known(now));
 });
 input.addEventListener("keydown", (ev) => {
   if (menu.onKey(ev)) return;

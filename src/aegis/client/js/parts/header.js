@@ -180,7 +180,10 @@ export class HeaderPart {
     );
     this.headerObserver.observe(this.el);
     // The strip's overflow button counts every open session, quiet ones too.
-    this.listObserver = new ResizeObserver(() => this.size());
+    this.listObserver = new ResizeObserver(() => {
+      this.size();
+      this.focus(); // a narrower strip can leave the shown tab out of reach
+    });
     this.listObserver.observe(this.list);
     this.mutationObserver = new MutationObserver(() => this.size());
     this.mutationObserver.observe(this.list, { childList: true });
@@ -250,15 +253,19 @@ export class HeaderPart {
   // header buttons' on marks.
   render(metas, focusId = null, view = undefined) {
     renderTabs(this.list, metas, focusId, this.tabActions);
-    this.focus();
     if (view !== undefined) this.mark(view);
+    // The count button may show and narrow the strip: size it, then focus.
     this.size();
+    this.focus();
   }
 
   // One session's tab redrawn where it stands. False when the tab is inside a
   // group, whose head and count depend on its members: then the bar redraws.
   patch(meta, focusId = null) {
-    return patchTab(this.list, meta, focusId, this.tabActions);
+    const done = patchTab(this.list, meta, focusId, this.tabActions);
+    // A patch can move .on to a tab out of reach, with no render to scroll it.
+    if (done && focusId) this.focus();
+    return done;
   }
 
   // -- renaming a group in place (#1039) -------------------------------------

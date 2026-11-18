@@ -413,6 +413,18 @@ agent `group_names:` names writes its name and title after a 15 s quiet, once
 per membership. A name a person or an agent chose is pinned in `groups.json`
 and keeps; the call then sets only the title.
 
+**An @ line leaves its tab.** A person's line that starts with `@name`
+(`commands.split_mentions`) never reaches the agent of the tab it was typed
+in (`mentions.py`, #1083). A session's handle gets a note through
+`peer.handoff`, held while it is busy; an agent's name runs the line on the
+built-in `mention` queue, each task naming its agent; two or more names make a
+committee that the asking tab's agent merges in one turn, after the last
+answer or 30 minutes. The asking transcript is the only store: `mention`,
+`mention_answer`, `mention_merge` and `mention_carried` fold into one entry,
+and a restart rearms a waiting committee from it. A single answer reaches the
+tab's agent only on the person's next message, as a notice block after it, so
+it never starts a turn of its own.
+
 **One registry, every caller.** Every action is one registered operation with a
 pydantic params model. A websocket `call` is one projection of the registry, MCP
 tools are another, and plugins add operations to it. Nothing reaches the client as

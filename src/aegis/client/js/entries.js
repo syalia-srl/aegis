@@ -15,6 +15,7 @@ import { hostIcon, repoUrl, shortLabel, sureRepo } from "./refs.js";
 import { serverNow } from "./clock.js";
 import { SETTLE } from "./toolverb.js";
 import { labelsFor } from "./labels.js";
+import { pdfViewerSrc } from "./pdfview.js";
 
 // The table a row reads when its caller passes none: the standalone page, until
 // b1/b9 give it a mount of its own. A mount passes its own through render().
@@ -148,8 +149,9 @@ export function entryFiles(e) {
 }
 
 // A set of sent files as one card: a bar with the name and the actions, the
-// preview below. A set pages in place (‹ ›, or a swipe on a touch screen),
-// round from the last file to the first, and a preview is built only when
+// preview below. A set pages in place (‹ ›, a swipe on a touch screen, or
+// Left and Right when the row is selected — keys.js), round from the last
+// file to the first, and a preview is built only when
 // its file is shown. The preview kind was decided at send (files.py); Open
 // hands the set to the viewer, at the file shown.
 function viaFile(f, base = fileBase) {
@@ -1715,9 +1717,10 @@ export function preview(f, remote, zoom, t = en) {
     view = el("iframe");
     // A linked server's frame is sandboxed unless it is a PDF, which /via
     // serves as application/pdf whatever the far server says.
-    if (pv === "html" || (remote && !/\.pdf$/i.test(f.url))) view.setAttribute("sandbox", "allow-scripts");
+    // The PDF viewer is our own page. Sandboxing it would hide its text from us.
+    if (pv === "html" || (remote && pv !== "pdf")) view.setAttribute("sandbox", "allow-scripts");
     view.loading = "lazy";
-    view.src = f.url;
+    view.src = pv === "pdf" ? pdfViewerSrc(f.url) : f.url;
     view.title = f.name;
   } else if (pv === "markdown") {
     view = markdown(f.excerpt, { t });
@@ -2302,6 +2305,40 @@ const RENDERERS = {
     const r = row(e, folded ? "btw folded" : "btw", body);
     r.dataset.btw = det.id; // unique across sessions, unlike the entry id
     r.querySelector(".g").replaceChildren(icon("btw"));
+    return r;
+  },
+
+  // An @ mention (mentions.py): the line, a chip per member, each answer as
+  // it lands and, for a committee, its merge and the button that skips it.
+  mention(e, opts = {}) {
+    const t = opts.t || en;
+    const det = e.detail || {};
+    const body = el("div", "body");
+    const hd = el("div", "hd");
+    hd.append(el("span", null, t(det.committee ? "entries.mention.committee" : "entries.mention.label")), el("span", "q", det.body));
+    const chips = el("div", "chips");
+    for (const m of det.members || []) chips.append(el("span", `chip ${m.state}`, `${m.name} · ${t(`entries.mention.state.${m.state}`)}`));
+    body.append(hd, chips);
+    for (const m of det.members || []) {
+      if (m.state === "answered") {
+        const a = el("div", "ans");
+        const md = markdown(m.answer, { t });
+        a.append(el("div", "who", m.name), md);
+        body.append(a);
+      } else if (m.state === "failed") body.append(el("div", "why", t("entries.mention.failed", { name: m.name, why: m.why })));
+    }
+    if (det.committee) {
+      const ft = el("div", "ft");
+      ft.append(el("span", null, t(det.merge === "sent" ? "entries.mention.merged" : det.merge === "skipped" ? "entries.mention.skipped" : "entries.mention.waiting")));
+      if (!det.merge) {
+        const skip = el("button", "btn link", t("entries.mention.skip"));
+        skip.dataset.mentionSkip = det.id;
+        ft.append(skip);
+      }
+      body.append(ft);
+    }
+    const r = row(e, "mention", body);
+    r.querySelector(".g").replaceChildren(icon("swap"));
     return r;
   },
 

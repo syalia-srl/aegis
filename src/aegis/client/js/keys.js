@@ -97,7 +97,7 @@ export const ACTIONS = [
       on("browse", "0…9", (ev) => bare(ev) && /^[0-9]$/.test(ev.key)),
     ],
   },
-  { id: "escape", title: "Interrupt the agent; close a dialog or a list", keys: [on("global", "Esc", key("Escape"))] },
+  { id: "escape", title: "Interrupt the agent, twice in a row; once closes a dialog or a list", keys: [on("global", "Esc Esc", key("Escape"))] },
   { id: "help", title: "Every key, in one list", keys: [on("browse", "?", key("?"))] },
   { id: "next", title: "Next row", keys: [on("session", "j  ↓", key("j", "ArrowDown"))] },
   { id: "prev", title: "Previous row", keys: [on("session", "k  ↑", key("k", "ArrowUp"))] },
@@ -114,6 +114,17 @@ export const ACTIONS = [
     keys: [on("session", "Enter  Space", key("Enter", " "), { native: true })],
   },
   { id: "press", title: "Press the row's first button", keys: [on("session", "o", key("o"))] },
+  // A card with one file has no pager, and the key does nothing there.
+  {
+    id: "filePrev",
+    title: "Previous file on the selected card, or in the viewer",
+    keys: [on("session", "←", key("ArrowLeft"))],
+  },
+  {
+    id: "fileNext",
+    title: "Next file on the selected card, or in the viewer",
+    keys: [on("session", "→", key("ArrowRight"))],
+  },
   { id: "copy", title: "Copy the row's message or output", keys: [on("session", "c", key("c"))] },
   // Outside a text field: inside the find bar's box, a second press is the browser's own find.
   {

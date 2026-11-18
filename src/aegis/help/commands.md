@@ -1,10 +1,11 @@
 ---
 title: Commands
 kind: concept
-when: looking up an aegis slash command or an aegis command-line subcommand
+when: looking up an aegis slash command or command-line subcommand, or installing shell tab completion
 hints:
   - Type / in the composer to see every command this session takes. #slash-commands
   - Every aegis tool is also a shell command: aegis call <tool> key=value. #tools-from-an-agent-s-shell
+  - Install shell tab completion with aegis completions install. #shell-completions
 ---
 
 aegis has two sets of commands: slash commands typed in a session's message
@@ -18,6 +19,9 @@ survives a restart, where the harness's would end with its process.
 
 Type / in a session's box to open the menu of every command, aegis's first;
 Tab or Enter picks one. Alt+/ opens the same menu over a draft.
+
+A line that starts with `@` instead goes to another session or agent: see
+[mentions](handoffs#mention-from-the-composer).
 
 After the command, the menu completes every argument that comes from a list:
 the model, effort and permission, the tutorial page, the saved workflow, and
@@ -102,11 +106,37 @@ and no aegis command is refused before it costs a turn.
 | `aegis tools [tool]` | from an agent's shell, list its aegis tools, or print one tool's description and JSON schema |
 | `aegis gc [--days N] [--apply]` | reclaim the disk that sessions archived more than N days ago (7 by default) still hold. Their transcripts are packed: images emptied, the rest gzipped, still read by `peer_read`, the archive and the journal. Their uploads, sent files, stderr logs, browser folders and the harness's own transcript (`~/.claude/projects`) are deleted, so they can no longer resume, and so is every browser profile no browser used in that time. Without `--apply` it only lists what would go and how much |
 | `aegis import-legacy <dir>` | copy the sessions of aegis before 2.0 into the archive, to read |
+| `aegis completions install [shell]` | install tab completion for bash, fish, zsh or nushell; the shell defaults to this one |
+| `aegis completions show [shell]` | print that shell's completion script |
+| `aegis pdfjs install` | download Mozilla's PDF viewer, which annotations on a PDF need, and check it against its pinned hash; a reload of the page picks it up ([files](files#annotating-images-and-pdfs)) |
 
-Every subcommand but `aegis map` takes `--root` to name the root instead of finding it from
-the current directory (for `aegis init`, the directory to write into), and
-`--help` for its full list of options.
+Every subcommand but `aegis map`, `aegis completions` and `aegis pdfjs` takes `--root` to name the root instead of finding it from
+the current directory (for `aegis init`, the directory to write into).
+Every subcommand takes `--help` for its full list of options.
 `aegis --version` prints the version.
+
+## Shell completions
+
+Tab completes `aegis`, its subcommands and their options after
+`aegis completions install`. With no shell named, that installs for the
+shell you are in, one of bash, fish, zsh and nushell. Name one to install
+another: `aegis completions install fish`.
+
+The script asks `aegis` again for each word, so commands added in a later
+version complete without installing again. Open a new shell once afterwards.
+
+`aegis completions show` prints the script and writes nothing, for a startup
+file you keep yourself.
+
+| shell | where install writes it |
+|---|---|
+| bash | `~/.local/share/bash-completion/completions/aegis`, and a line in `~/.bashrc` that sources it |
+| fish | `~/.config/fish/completions/aegis.fish`, which fish loads on its own |
+| zsh | `~/.zfunc/_aegis`, and `fpath` in `~/.zshrc`, plus `compinit` when that file does not run it yet |
+| nushell | `~/.config/nushell/autoload/aegis.nu`, which nushell loads on its own |
+
+Bash follows XDG_DATA_HOME when it is set, and fish and nushell follow
+XDG_CONFIG_HOME. Zsh follows ZDOTDIR. `nu` is accepted as a name for nushell.
 
 ## Tools from an agent's shell
 

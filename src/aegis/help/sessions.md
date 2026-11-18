@@ -97,7 +97,7 @@ Type in the session's box and press Enter. A message you send while the
 agent works reaches it during the turn: Claude Code reads it at its next tool
 call. Messages from other sessions and from aegis are held until the turn
 ends, unless an agent sent a handoff as urgent: that one reaches the turn the
-same way yours does, and its row shows `steered in`. Esc interrupts the turn.
+same way yours does, and its row shows `steered in`. Esc Esc interrupts the turn: press Esc twice within a second. One Esc closes a dialog or a menu and leaves the turn running.
 `/model`, `/effort` and `/permission` switch those for this session; clicking
 the chips under the box does the same.
 
@@ -361,11 +361,11 @@ To edit a group by hand:
   in that group, handles alone make them leave, and a group and name with no
   handles rename it.
 
-While a block is folded, a member whose turn ends needs_you, review, done or
-error shows its own tab beside the block, in the group's colour, so you see
-it without unfolding. Its next turn starts and the tab goes back inside. The
-member you are looking at also stays drawn beside the block, whatever its
-mark, and the block stays folded.
+While a block is folded, its members stay inside it, whatever their mark: the
+group's tab shows the most urgent mark among them, and its `+N` chip turns
+alert while one needs you. Unfold the block to see which. The member you are
+looking at is the one exception: it stays drawn beside the block, in the
+group's colour, and the block stays folded.
 
 Alt+Shift+[ and Alt+Shift+] move the tab in front one place left or right, by
 the same rules, from the message box too: a member within its group, a lone
@@ -467,7 +467,7 @@ and Go to session) and the archive's rows (Read and Reopen).
 
 | verb | where | what it does |
 |---|---|---|
-| Interrupt | the menu, Esc, the button beside Send | ends the turn the agent is working on |
+| Interrupt | the menu, Esc Esc, the button beside Send | ends the turn the agent is working on. One Esc closes a dialog or a menu; Esc again within a second interrupts |
 | Sleep | the menu, the panel, `/sleep` (`/stop` is an alias) | ends the process and keeps the conversation; the session is asleep until a message wakes it. When ending it would also end a background task, a harness timer or a process it left running (a `nohup` command, a dev server), the menu and the panel ask first and name them; when aegis cannot check, they ask anyway |
 | Wake | the menu, on an asleep session | starts the process and sends nothing. Like a message, it is refused while the quota gate is closed, and it asks before starting a harness version outside the tested range |
 | Continue | the menu and the panel, on a session that is not working | sends "Continue" to the agent, which wakes an asleep one |

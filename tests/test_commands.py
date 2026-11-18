@@ -3,7 +3,7 @@ import asyncio
 import pytest
 
 from aegis.app import App
-from aegis.commands import escape, split
+from aegis.commands import escape, split, split_mentions
 from aegis.ops import OpError
 from aegis.roots import make_roots
 from aegis.transcript.store import read_store
@@ -413,3 +413,34 @@ def test_parse_handoff_refuses_quiet():
     with pytest.raises(OpError) as e:
         parse_handoff("--quiet go")
     assert "--quiet" in str(e.value)
+
+
+# -- @ mentions (mentions.py) ------------------------------------------------------
+@pytest.mark.parametrize(
+    ("line", "names", "body"),
+    [
+        ("@ben-ci the flaky test", ["ben-ci"], "the flaky test"),
+        (
+            "@deepseek @fable @ben-ci review this",
+            ["deepseek", "fable", "ben-ci"],
+            "review this",
+        ),
+        ("@fable @fable twice", ["fable"], "twice"),
+        ("@ana@lab hi there", ["ana@lab"], "hi there"),
+        ("@ben-ci", ["ben-ci"], ""),
+        ("@ben-ci then @cara mid-line", ["ben-ci"], "then @cara mid-line"),
+    ],
+)
+def test_split_mentions_reads_the_leading_run(line, names, body):
+    mentions, rest = split_mentions(line)
+    assert [m.address for m in mentions] == names
+    assert rest == body
+
+
+def test_split_mentions_flags_and_what_is_text():
+    (m,), _ = split_mentions("@!s:opus stop that")
+    assert (m.name, m.urgent, m.session) == ("opus", True, True)
+    assert split_mentions("ask @cara about it") is None
+    assert split_mentions("@@ben is a literal") is None
+    assert split_mentions("@ alone") is None
+    assert escape("@@ben is a literal") == "@ben is a literal"

@@ -16,6 +16,7 @@
 // one, its card holds a line instead of a frame (entries.hold), and the
 // agent's state reaches the viewer's frame instead.
 
+import { annotatable, annotate } from "./annotations.js";
 import { Tray } from "./comments.js";
 import { artifactStage, dockButton, fileActions, fileUrl, fillWorkflow, hold, markdown, phoneButton, popButton, preview, swipe } from "./entries.js";
 import { entryIcon, icon } from "./glyphs.js";
@@ -205,6 +206,7 @@ export class Viewer {
     this.key = null; // the session shown
     this.drawn = 0; // bumped by every draw, so a fetch for an older one is dropped
     this.tray = null; // the shown file's comments
+    this.annotation = null; // the shown image or PDF's drawing layer
     menu.bar(root, (range, content) => this.pointItems(range, content), { unit: contentUnit });
     menu.attach(root, (t, ev) => this.pressed(t, ev));
   }
@@ -280,6 +282,8 @@ export class Viewer {
   }
 
   render(e) {
+    this.annotation?.destroy();
+    this.annotation = null;
     const item = this.isOpen ? this.items.get(this.key) : null;
     const draw = ++this.drawn;
     // A redraw of the same item keeps its tray (newTray), and the note being
@@ -338,6 +342,17 @@ export class Viewer {
     return b;
   }
 
+  // The open set, one file over, round from the last to the first. The pager
+  // buttons and a swipe call this, and so do Left and Right (keys.js). False
+  // when this view has fewer than two files.
+  step(d) {
+    const item = this.isOpen ? this.items.get(this.key) : null;
+    if (!item?.files || item.files.length < 2) return false;
+    item.at = (item.at + d + item.files.length) % item.files.length;
+    this.render();
+    return true;
+  }
+
   drawFile(item, bar, body, draw) {
     const acts = el("span", "acts");
     const f = item.files[item.at];
@@ -351,8 +366,8 @@ export class Viewer {
       files.title = `Open ${rootPath} in the Files view, where it can be edited`;
       acts.append(files);
     }
-    // Comments on a text, Markdown or HTML file, kept per version (its URL).
-    const tray = ["markdown", "text", "html"].includes(f.preview) ? this.newTray(f.url, this.pathOf()) : null;
+    // Comments and visual annotations, kept per version (the file's URL).
+    const tray = ["markdown", "text", "html"].includes(f.preview) || annotatable(f.preview) ? this.newTray(f.url, this.pathOf()) : null;
     drawFile(f, {
       remote: item.remote,
       glyph: item.glyph,
@@ -363,24 +378,27 @@ export class Viewer {
       isCurrent: () => draw === this.drawn,
       drawn: (content) => tray?.layer(content),
     });
+    if (annotatable(f.preview)) {
+      this.annotation = annotate(body.querySelector(".stage"), tray, {
+        path: this.pathOf(),
+        kind: f.preview,
+      });
+    }
     if (item.files.length > 1) {
-      // Round from the last file to the first, as on the card.
-      const go = (d) => {
-        item.at = (item.at + d + item.files.length) % item.files.length;
-        this.render();
-      };
+      // Round from the last file to the first, as on the card. Left and Right
+      // call step() too (keys.js).
       const pager = el("span", "pager");
-      const step = (d, name, title) => {
+      const stepBtn = (d, name, title) => {
         const b = el("button", "btn icon");
         b.append(icon(name));
         b.title = title;
         b.setAttribute("aria-label", title);
-        b.addEventListener("click", () => go(d));
+        b.addEventListener("click", () => this.step(d));
         return b;
       };
-      pager.append(step(-1, "left", "Previous file"), el("span", "count", `${item.at + 1} / ${item.files.length}`), step(1, "right", "Next file"));
+      pager.append(stepBtn(-1, "left", "Previous file"), el("span", "count", `${item.at + 1} / ${item.files.length}`), stepBtn(1, "right", "Next file"));
       bar.append(pager);
-      swipe(body, go);
+      swipe(body, (d) => this.step(d));
     }
     acts.append(this.closeButton());
     bar.append(acts);

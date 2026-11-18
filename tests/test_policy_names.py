@@ -45,6 +45,10 @@ NOT_AN_ID: dict[tuple[str, str], str] = {
     ("chrome.unpair", "id"): "a paired browser (chrome.py), a server op, not a session",
     ("journal.rows", "session"): "a filter on rows; lists are task 5's",
     ("journal.search", "session"): "a filter on rows; lists are task 5's",
+    (
+        "mention.reply",
+        "id",
+    ): "an @ mention's id; mentions.py checks the caller was asked",
     **{
         (op, "from_agent"): "provenance from a linked server, never authorization"
         for op in (

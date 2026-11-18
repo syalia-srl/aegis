@@ -143,6 +143,7 @@ from .quota_gate import (
     refusal,
 )
 from .btws import SideNotes
+from .mentions import Mentions
 from .group_names import GroupNames
 from .recaps import Recaps
 from . import host_tokens
@@ -308,6 +309,16 @@ class ReadParams(_Strict):
 class RecapParams(_Strict):
     log_id: str
     force: bool = False
+
+
+class MentionReply(_Strict):
+    id: str = Field(description="The mention's id, as its note names it.")
+    text: str = Field(min_length=1, description="Your answer, in Markdown.")
+
+
+class MentionSkip(_Strict):
+    log_id: str
+    id: str
 
 
 class BtwCancelParams(_Strict):
@@ -634,6 +645,7 @@ class App:
         self.sessions.group_changed = self.group_names.changed
         self.side_notes = SideNotes(self)
         self.sessions.side_notes = self.side_notes
+        self.mentions = Mentions(self)
         self.nudges = Nudges(self.sessions, self.config)
         self.sessions.nudges = self.nudges
         self.notices = Notices(self)
@@ -673,6 +685,7 @@ class App:
         # Bytes each linked server took through this one as its exit (exit.py).
         self.exit_bytes: dict[str, int] = {}
         self.queues.far_callback = self._far_callback
+        self.queues.on_mention = self.mentions.task_done
         self.monitors.far_list = self._far_list
         # Sessions a pause or a continue is under way for, so a reading that
         # lands before it finishes does not start a second one.
@@ -1908,6 +1921,7 @@ class App:
         # the continue; before the queues resume, so a worker the registry
         # continued needs no second message from its queue.
         await self.sessions.continue_after_boot()
+        self.mentions.boot()
         # A turn that ended before the stop and whose handoff had not started:
         # nothing else will end it. A cut turn continues above, and starts it
         # when it ends.
@@ -2015,6 +2029,7 @@ class App:
         await self.terminals.shutdown()
         await self.browsers.shutdown()
         await self.side_notes.shutdown()
+        self.mentions.shutdown()
         await self.sessions.shutdown()
         try:
             await self.skill_servers.shutdown()
@@ -3156,6 +3171,13 @@ class App:
                     "the session moved on since this was written; "
                     "send it again to send it anyway",
                 )
+            if (men := commands.split_mentions(p.text)) is not None:
+                if p.attachments:
+                    raise OpError(
+                        "attachments_with_mention",
+                        "an @ line takes no files; send them with a message",
+                    )
+                return await self.mentions.send(s, men[0], men[1], caller)
             cmd = commands.split(p.text)
             if cmd is not None:
                 if p.attachments:
@@ -3212,12 +3234,16 @@ class App:
                         )
                     except files.FileError as e:
                         raise OpError(e.code, e.message) from e
+                # The single @ answers the person read since their last
+                # message ride this one, quoted after it (mentions.py).
+                quote, carried = self.mentions.carry(s) if cmd is None else ("", [])
                 await s.send(
-                    att.message(text, sent),
+                    att.message(text, sent) + quote,
                     typed=text,
                     attached=sent,
                     by_person=not caller.is_agent,
                 )
+                self.mentions.carried(s, carried)
                 if not_saved:
                     return {"not_saved": not_saved}
             except FileNotFoundError as e:
@@ -3378,6 +3404,22 @@ class App:
         async def recap_request(p: RecapParams, caller):
             """A recap of where the session stands, for a person landing on its tab."""
             return await self.recaps.request(reg.open(p.log_id), p.force)
+
+        @r.op("mention.reply", MentionReply, agent=True)
+        async def mention_reply(p: MentionReply, caller):
+            """Answer an @ mention that asked you: a note whose last line names
+            `mention_reply id=...`. The person reads your text in the session
+            they typed the note in, and a committee waits for it there; it
+            starts no turn anywhere."""
+            me = reg.sessions.get(caller.log_id or "")
+            if me is None:
+                raise OpError("not_a_session", "only a session can answer a mention")
+            return self.mentions.reply(me.handle, p.id, p.text)
+
+        @r.op("mention.skip", MentionSkip, names=(("log_id", "session"),))
+        async def mention_skip(p: MentionSkip, caller):
+            """Skip a committee's merge before it goes out; its answers stay."""
+            return self.mentions.skip(reg.open(p.log_id), p.id)
 
         @r.op("btw.cancel", BtwCancelParams, names=(("log_id", "session"),))
         async def btw_cancel(p: BtwCancelParams, caller):
