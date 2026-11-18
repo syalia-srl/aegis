@@ -29,7 +29,7 @@ TOOLS: list[tuple[str, str]] = [
         "other agents",
     ),
     (r"(.*__)?(monitor_\w+|browser_\w+)", "testing"),
-    (r"(.*__)?(artifact_\w+|file_send|secret_\w+|toast)", "showing"),
+    (r"(.*__)?(artifact_\w+|table_send|file_send|secret_\w+|toast)", "showing"),
     (r"WebSearch|WebFetch|(?i:.*(fetch|firecrawl|web_?search|scrape).*)", "web"),
 ]
 

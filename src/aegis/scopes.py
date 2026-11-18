@@ -37,8 +37,8 @@ TOOLS = frozenset(
     schedule_runs schedule_test schedule_update secret_request secret_send
     session_close session_group session_handoff session_list session_quiet
     session_rename session_spawn setup_record signin_open skill_delete
-    skill_read skill_run skill_save skill_search skill_tool task_cancel
-    task_resume task_status toast turn_end usage_import usage_read
+    skill_read skill_run skill_save skill_search skill_tool table_send
+    task_cancel task_resume task_status toast turn_end usage_import usage_read
     workflow_answer workflow_arm workflow_ask workflow_delete workflow_edit
     workflow_lint workflow_list workflow_note workflow_output workflow_result
     workflow_save workflow_status workflow_stop
