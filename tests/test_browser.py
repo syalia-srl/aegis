@@ -980,6 +980,10 @@ def test_a_session_from_spawn_to_close(server, page):
     page.press("#input", "Enter")
     busy = page.locator(".row.tool.running").get_attribute("data-id")
     page.keyboard.press("Escape")
+    # One Esc only arms the interrupt (#912): the turn runs on and says so.
+    page.wait_for_selector("#working .wesc >> text=Esc again to interrupt")
+    assert page.is_visible(".row.tool.running"), "one Esc interrupted"
+    page.keyboard.press("Escape")
     turns_done(page, 3)
     # textContent, not inner_text: a row below the fold is skipped by
     # content-visibility:auto, and Chromium's innerText reads it as '' (#693).
