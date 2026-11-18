@@ -154,7 +154,7 @@ def test_no_composer_literal_was_left_in_the_modules():
         ),
         "composer.attach": ("Attach files", ["parts/composer.js"]),
         "composer.sendTitle": ("Send (Enter)", ["parts/composer.js"]),
-        "composer.interruptTitle": ("Interrupt (Esc)", ["parts/composer.js"]),
+        "composer.interruptTitle": ("Interrupt (Esc Esc)", ["parts/composer.js"]),
         "composer.sending": (
             "sending when the attachments finish",
             ["parts/composer.js"],
