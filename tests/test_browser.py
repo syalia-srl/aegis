@@ -84,12 +84,20 @@ class Server:
             text=True,
             env=self.environ(),
         )
-        deadline = time.monotonic() + 15
+        deadline = time.monotonic() + 45
         self.url = ""
         while not self.url and time.monotonic() < deadline:
             line = self.proc.stdout.readline()
+            if line == "" and self.proc.poll() is not None:
+                break
             if m := re.search(r"open (http://\S+)", line):
                 self.url = m.group(1)
+        if not self.url and self.proc and self.proc.poll() is None:
+            self.proc.terminate()
+            try:
+                self.proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.proc.kill()
         assert self.url, "aegis serve printed no URL"
         # Read the rest of the log from here on: a pipe nobody reads fills at
         # 64 KB, and the server's next log line (a long prompt is logged

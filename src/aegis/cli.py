@@ -347,6 +347,9 @@ def serve(
     typer.echo(f"open {url}")
     for o in origin:
         typer.echo(f"open {o}/?token={token}")
+    # A piped stdout (browser tests) is block-buffered; flush so the waiter
+    # sees the URL before uvicorn takes the event loop.
+    sys.stdout.flush()
     if window:
         _open_when_listening(local, port, url, browser)
     from . import launch, self_update
