@@ -66,7 +66,7 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from . import exit as exit_
 from . import chrome as chrome_
-from . import files, fs_paths
+from . import files, fs_paths, pdfjs
 from .app import App
 from .channels import Sub
 from .links import BOTH_WAYS_SINCE, PROTO, Backlink
@@ -80,9 +80,6 @@ log = logging.getLogger("aegis.web")
 
 HELLO_TIMEOUT_S = 5.0
 CLIENT_DIR = Path(__file__).parent / "client"
-# Mozilla's viewer (pdf.js). Kept out of CLIENT_DIR so the service worker does
-# not cache it with the app shell; the preview iframe loads it from /pdfjs.
-PDFJS_DIR = Path(__file__).parent / "vendor" / "pdfjs"
 # The service worker lives outside CLIENT_DIR, so /static never serves it: it is
 # served only from the root, where its scope is the whole client.
 SERVICE_WORKER = Path(__file__).parent / "sw.js"
@@ -285,6 +282,19 @@ def sign_in_cookie(
         secure=secure,
     )
     return response
+
+
+class PdfjsFiles(StaticFiles):
+    """Mozilla's viewer, or a 404 that says how to get it. Plain StaticFiles
+    answers 500 while its directory does not exist (check_config)."""
+
+    async def __call__(self, scope, receive, send) -> None:
+        if not pdfjs.installed():
+            response = PlainTextResponse(
+                "pdf.js is not installed: run `aegis pdfjs install`", 404
+            )
+            return await response(scope, receive, send)
+        return await super().__call__(scope, receive, send)
 
 
 class ClientFiles(StaticFiles):
@@ -844,6 +854,8 @@ def build_web(
                 # sends it only to a server that says this.
                 "groups": True,
                 "native": desktop,
+                # Whether PDFs open in Mozilla's viewer, with annotations (pdfjs.py).
+                "pdfjs": pdfjs.installed(),
                 "me": {
                     "name": principal.name,
                 },
@@ -1115,7 +1127,10 @@ def build_web(
         Route("/sw.js", service_worker),
         Route("/client-files.json", files_list),
         Mount("/static", ClientFiles(directory=CLIENT_DIR)),
-        Mount("/pdfjs", StaticFiles(directory=PDFJS_DIR)),
+        # Mozilla's viewer, once `aegis pdfjs install` put it there (pdfjs.py).
+        # Outside /static, so the service worker does not cache it with the app
+        # shell. Checked per request: an install needs no restart.
+        Mount("/pdfjs", PdfjsFiles(directory=pdfjs.root(), check_dir=False)),
         Route("/files/{file_id}/{name}", sent_file),
         Route("/fs/{ticket}/{name}", fs_file),
         Route("/via/{server}/files/{file_id}/{name}", via_file),

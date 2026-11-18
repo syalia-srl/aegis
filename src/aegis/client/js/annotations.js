@@ -10,6 +10,7 @@
 // and an arrow store normalized points; a highlight is a translucent region.
 
 import { icon } from "./glyphs.js";
+import { pdfjsReady } from "./pdfview.js";
 
 function el(tag, cls, text) {
   const n = document.createElement(tag);
@@ -167,8 +168,14 @@ function selectionFrom(sel) {
 // Mozilla's viewer, which is on our origin, so the page and the selected
 // words are readable. Highlight is a text selection. The page box remains
 // only when that viewer does not come up.
+// An image always; a PDF only in Mozilla's viewer, whose page and text layer
+// the tools read. Without `aegis pdfjs install` it opens in the browser's own.
+export function annotatable(kind) {
+  return kind === "image" || (kind === "pdf" && pdfjsReady());
+}
+
 export function annotate(stage, tray, { path, kind }) {
-  if (!tray || !["image", "pdf"].includes(kind)) return null;
+  if (!tray || !annotatable(kind)) return null;
   const target = stage.querySelector("img, iframe");
   if (!target) return null;
   stage.classList.add("visual-annotations");

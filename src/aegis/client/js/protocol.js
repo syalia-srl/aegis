@@ -18,6 +18,7 @@
 // unsubscribed only when the last one goes.
 
 import { setServerTime } from "./clock.js";
+import { setPdfjs } from "./pdfview.js";
 
 export const PROTO = 3;
 
@@ -82,6 +83,7 @@ export class Connection {
         this.server = msg.server;
         this.build = msg.build || ""; // the client the server serves now (#499)
         this.native = msg.native === true;
+        setPdfjs(msg.pdfjs); // PDFs in Mozilla's viewer, with annotations (pdfview.js)
         // Who this browser is here, and whose a session with no owner is (tokens.py).
         this.me = msg.me || null;
         this.owner = msg.owner || "";

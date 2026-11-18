@@ -22,7 +22,6 @@ __pycache__/
 # Distribution / packaging
 .Python
 build/
-!src/aegis/vendor/pdfjs/build/
 develop-eggs/
 dist/
 downloads/

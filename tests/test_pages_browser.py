@@ -278,7 +278,7 @@ def test_the_annotation_list_sits_beside_the_picture(server, page):  # noqa: F81
     assert page.errors == []
 
 
-def test_a_wheel_reaches_the_pdf_while_a_tool_is_on(server, page):  # noqa: F811
+def test_a_wheel_reaches_the_pdf_while_a_tool_is_on(pdfjs, server, page):  # noqa: F811
     report = Path(__file__).with_name("report-annotation.pdf")
     (server.root / "report.pdf").write_bytes(report.read_bytes())
     page.goto(server.url)
@@ -346,7 +346,7 @@ def test_an_image_region_becomes_a_structured_annotation(server, page):  # noqa:
     assert page.errors == []
 
 
-def test_a_pdf_highlight_names_the_selected_words(server, page):  # noqa: F811
+def test_a_pdf_highlight_names_the_selected_words(pdfjs, server, page):  # noqa: F811
     report = Path(__file__).with_name("report-annotation.pdf")
     (server.root / "report.pdf").write_bytes(report.read_bytes())
     page.goto(server.url)
@@ -371,7 +371,7 @@ def test_a_pdf_highlight_names_the_selected_words(server, page):  # noqa: F811
     assert page.errors == []
 
 
-def test_a_pdf_region_names_its_page_in_files(server, page):  # noqa: F811
+def test_a_pdf_region_names_its_page_in_files(pdfjs, server, page):  # noqa: F811
     report = Path(__file__).with_name("report-annotation.pdf")
     (server.root / "report.pdf").write_bytes(report.read_bytes())
     page.goto(server.url)
@@ -973,3 +973,20 @@ def test_a_note_being_typed_keeps_the_focus_through_a_resend(server, page):  # n
     assert note.count() == 1 and note.input_value() == "ripe"
     other.close()
     assert page.errors == []
+
+
+def test_without_pdfjs_a_pdf_opens_in_the_browser_viewer_without_tools(server, page):  # noqa: F811
+    """pdf.js is installed on demand (`aegis pdfjs install`). Without it the
+    PDF is the file itself in a frame, and has no annotation tools, which
+    read pdf.js's page and text layer. An image keeps its tools."""
+    report = Path(__file__).with_name("report-annotation.pdf")
+    (server.root / "report.pdf").write_bytes(report.read_bytes())
+    page.goto(server.url)
+    spawn(page)
+    page.goto(f"{server.url.split('#')[0]}#files=report.pdf")
+    frame = page.locator(".v-files .fstage.pdf iframe")
+    frame.wait_for(state="attached")
+    assert "/pdfjs/" not in frame.get_attribute("src")
+    page.wait_for_timeout(500)
+    assert page.locator(".v-files .vatools").count() == 0
+    assert page.evaluate("fetch('/pdfjs/web/viewer.html').then((r) => r.status)") == 404

@@ -1,6 +1,6 @@
 """``aegis serve``, ``aegis init``, ``aegis doctor``, ``aegis link``, ``aegis service``, ``aegis usage``,
-``aegis journal``, ``aegis map``, ``aegis call``, ``aegis tools``, ``aegis completions``, and ``aegis``
-alone, which is ``serve --window``.
+``aegis journal``, ``aegis map``, ``aegis call``, ``aegis tools``, ``aegis completions``, ``aegis pdfjs``, and
+``aegis`` alone, which is ``serve --window``.
 
 This is the only module that reads the process's working directory.
 
@@ -892,6 +892,31 @@ def completions_show(
     from .completions import show
 
     typer.echo(show(shell))
+
+
+pdfjs_app = typer.Typer(
+    add_completion=False,
+    no_args_is_help=True,
+    help="Mozilla's PDF viewer, which PDF annotations need.",
+)
+app.add_typer(pdfjs_app, name="pdfjs")
+
+
+@pdfjs_app.command("install")
+def pdfjs_install() -> None:
+    """Download Mozilla's PDF viewer (about 6 MB) and check it against its pinned hash."""
+    from . import pdfjs
+
+    if pdfjs.installed():
+        typer.echo(f"pdf.js {pdfjs.VERSION} is already in {pdfjs.root()}")
+        return
+    try:
+        where = pdfjs.install()
+    except Exception as exc:  # noqa: BLE001 — a network or checksum failure, said plainly
+        typer.echo(f"could not install pdf.js: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(f"installed pdf.js {pdfjs.VERSION} in {where}")
+    typer.echo("reload aegis in the browser: PDFs open in it, with annotation tools")
 
 
 def main() -> None:
