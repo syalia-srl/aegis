@@ -108,8 +108,9 @@ and no aegis command is refused before it costs a turn.
 | `aegis import-legacy <dir>` | copy the sessions of aegis before 2.0 into the archive, to read |
 | `aegis completions install [shell]` | install tab completion for bash, fish, zsh or nushell; the shell defaults to this one |
 | `aegis completions show [shell]` | print that shell's completion script |
+| `aegis pdfjs install` | download Mozilla's PDF viewer, which annotations on a PDF need, and check it against its pinned hash; a reload of the page picks it up ([files](files#annotating-images-and-pdfs)) |
 
-Every subcommand but `aegis map` and `aegis completions` takes `--root` to name the root instead of finding it from
+Every subcommand but `aegis map`, `aegis completions` and `aegis pdfjs` takes `--root` to name the root instead of finding it from
 the current directory (for `aegis init`, the directory to write into).
 Every subcommand takes `--help` for its full list of options.
 `aegis --version` prints the version.

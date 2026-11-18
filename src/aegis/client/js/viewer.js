@@ -16,7 +16,7 @@
 // one, its card holds a line instead of a frame (entries.hold), and the
 // agent's state reaches the viewer's frame instead.
 
-import { annotate } from "./annotations.js";
+import { annotatable, annotate } from "./annotations.js";
 import { Tray } from "./comments.js";
 import { artifactStage, dockButton, fileActions, fileUrl, fillWorkflow, hold, markdown, phoneButton, popButton, preview, swipe } from "./entries.js";
 import { entryIcon, icon } from "./glyphs.js";
@@ -367,7 +367,7 @@ export class Viewer {
       acts.append(files);
     }
     // Comments and visual annotations, kept per version (the file's URL).
-    const tray = ["markdown", "text", "html", "image", "pdf"].includes(f.preview) ? this.newTray(f.url, this.pathOf()) : null;
+    const tray = ["markdown", "text", "html"].includes(f.preview) || annotatable(f.preview) ? this.newTray(f.url, this.pathOf()) : null;
     drawFile(f, {
       remote: item.remote,
       glyph: item.glyph,
@@ -378,7 +378,7 @@ export class Viewer {
       isCurrent: () => draw === this.drawn,
       drawn: (content) => tray?.layer(content),
     });
-    if (["image", "pdf"].includes(f.preview)) {
+    if (annotatable(f.preview)) {
       this.annotation = annotate(body.querySelector(".stage"), tray, {
         path: this.pathOf(),
         kind: f.preview,

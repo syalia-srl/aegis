@@ -106,8 +106,9 @@ A file opens the way its kind is drawn when a session sends it:
 - HTML opens in a sandboxed frame: its scripts run, but the page has no origin
   of its own, so it cannot reach aegis or your sign-in. Files it links to
   beside it (stylesheets, images) do not load.
-- Images open fitted to the pane. A PDF opens in Mozilla's viewer;
-  audio and video in their players.
+- Images open fitted to the pane. A PDF opens in Mozilla's viewer once
+  `aegis pdfjs install` has put it on the server, and in the browser's own
+  viewer before that; audio and video in their players.
 - Anything else shows its type and size, Download, and, when the browser runs
   on the server's desktop, a button that opens it in the desktop's app for it.
 
@@ -167,6 +168,11 @@ release. A PDF opens in Mozilla's viewer, so the page on screen is known, and
 Area and Point name the words under them when the page has text. The wheel
 still scrolls the document while a tool is on. Annotate off leaves the
 viewer's zoom, find, and page controls in reach.
+
+The tools on a PDF need Mozilla's viewer, which aegis does not ship: run
+`aegis pdfjs install` once on the server (about 6 MB, checked against a pinned
+hash), then reload the page. Until then a PDF opens in the browser's own
+viewer, without the tools. Images have them either way.
 
 Each mark adds a number and a note to the same comment tray used for text.
 On a wide window the list sits beside the picture, so the preview keeps its

@@ -22,7 +22,7 @@
 // anything else offers its size, a download and the desktop's app for it.
 
 import { fuzzy } from "./commands.js";
-import { annotate } from "./annotations.js";
+import { annotatable, annotate } from "./annotations.js";
 import { pdfViewerSrc } from "./pdfview.js";
 import { Tray } from "./comments.js";
 import { ask, choose } from "./dialog.js";
@@ -914,7 +914,7 @@ export class Files {
     if (r.text === undefined) {
       const stage = this.preview(r);
       pane.append(stage);
-      if (this.point && ["image", "pdf"].includes(r.kind)) {
+      if (this.point && annotatable(r.kind)) {
         this.tray = new Tray(pane, `files:${path}:${r.hash}`, (text) => this.point.send(text), path);
         this.annotation = annotate(stage, this.tray, { path, kind: r.kind });
       }

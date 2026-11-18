@@ -44,7 +44,7 @@
 // browser lets a click open a tab only for a few seconds (Chrome) or not at
 // all after an await (Safari).
 
-import { annotate } from "./annotations.js";
+import { annotatable, annotate } from "./annotations.js";
 import { Tray } from "./comments.js";
 import { drawArtifact, drawFile } from "./viewer.js";
 import { DOCKED, entryFiles, fileUrl, fillWorkflow, hold, inWindow, paneFile, popButton, workflowTitle } from "./entries.js";
@@ -550,7 +550,7 @@ export class Canvas {
   // into the session's composer. The tray key is the file's URL, so a mark
   // made here is still there if the file is opened in the viewer before Send.
   mountMarks(node, f) {
-    if (!f || !this.compose || !["image", "pdf"].includes(f.preview)) return;
+    if (!f || !this.compose || !annotatable(f.preview)) return;
     const stage = node.querySelector(".pbody .stage");
     if (!stage) return;
     const path = f.root_path || f.name;

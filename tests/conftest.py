@@ -136,6 +136,9 @@ def _no_real_quota(tmp_path_factory, monkeypatch):
     # Nor the Claude token the machine's sessions sign in with (claude/login.py).
     monkeypatch.setenv("AEGIS_CLAUDE_TOKEN_FILE", str(off / "claude-oauth-token"))
     monkeypatch.setenv("AEGIS_DICTATION_DIR", str(off / "dictation"))
+    # Nor the machine's pdf.js: PDFs open in the browser's viewer unless a
+    # test asks for the `pdfjs` fixture (pdfjs.py).
+    monkeypatch.setenv("AEGIS_PDFJS_DIR", str(off / "pdfjs"))
     # The network probes need no credentials, so only a switch keeps a test's
     # `aegis serve` off the network (net/service.py).
     monkeypatch.setenv("AEGIS_NET_PROBES", "offline")
@@ -368,3 +371,34 @@ else:
         return _launch(self, *args, **kwargs)
 
     BrowserType.launch = _launch_in_a_slot
+
+
+@pytest.fixture(scope="session")
+def _pdfjs_cache() -> Path:
+    """Mozilla's viewer, downloaded once per machine into the test cache and
+    checked against its pinned hash. A test that needs it skips offline."""
+    from aegis import pdfjs
+
+    base = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+    where = base / "aegis-tests" / "pdfjs" / pdfjs.VERSION
+    if not (where / "web" / "viewer.html").is_file():
+        saved = os.environ.get("AEGIS_PDFJS_DIR")
+        os.environ["AEGIS_PDFJS_DIR"] = str(where)
+        try:
+            pdfjs.install()
+        except Exception as exc:  # noqa: BLE001 — no network: skip, do not fail
+            pytest.skip(f"pdf.js is not installed and could not be downloaded: {exc}")
+        finally:
+            if saved is None:
+                os.environ.pop("AEGIS_PDFJS_DIR", None)
+            else:
+                os.environ["AEGIS_PDFJS_DIR"] = saved
+    return where
+
+
+@pytest.fixture
+def pdfjs(_pdfjs_cache, monkeypatch) -> Path:
+    """The server a test starts after this serves pdf.js. Name it before
+    `server` in the test's arguments, so the server inherits it."""
+    monkeypatch.setenv("AEGIS_PDFJS_DIR", str(_pdfjs_cache))
+    return _pdfjs_cache
