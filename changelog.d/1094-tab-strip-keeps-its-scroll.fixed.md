@@ -1,0 +1,1 @@
+- **The tab strip stays where you scrolled it.** With more tabs than fit, any other session's tab redrawing (a state dot, a mark) scrolled the strip back to the open tab, so the tabs out of view could not be reached by scrolling. The strip now scrolls to the open tab only when the open tab changes or the strip's width does (#1094).

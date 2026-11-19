@@ -180,9 +180,13 @@ export class HeaderPart {
     );
     this.headerObserver.observe(this.el);
     // The strip's overflow button counts every open session, quiet ones too.
-    this.listObserver = new ResizeObserver(() => {
+    // It also fires when a tab redraws: only a new width forces the focus.
+    this.listObserver = new ResizeObserver(([e]) => {
       this.size();
-      this.focus(); // a narrower strip can leave the shown tab out of reach
+      const width = e.contentRect.width;
+      // a narrower strip can leave the shown tab out of reach
+      this.focus(width !== this.width);
+      this.width = width;
     });
     this.listObserver.observe(this.list);
     this.mutationObserver = new MutationObserver(() => this.size());
@@ -289,9 +293,14 @@ export class HeaderPart {
   }
 
   // The tab in view, scrolled into the strip when it is out of reach. Only the
-  // strip scrolls: scrollIntoView would also scroll a host's page (m7).
-  focus() {
+  // strip scrolls: scrollIntoView would also scroll a host's page (m7). Only
+  // when the tab in view changed, or `force` on a resize: a redraw of any
+  // other tab must not undo the person's scroll (#1094).
+  focus(force = false) {
     const tab = this.list.querySelector(".tab.on");
+    const id = tab?.dataset.id ?? null;
+    if (!force && id === this.focused) return;
+    this.focused = id;
     if (!tab) return;
     const strip = this.list.getBoundingClientRect();
     const r = tab.getBoundingClientRect();
