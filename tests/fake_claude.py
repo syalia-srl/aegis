@@ -930,6 +930,31 @@ def run(text: str) -> None:
         # A turn that costs ``arg`` dollars, by Claude's running total.
         assistant({"type": "text", "text": f"cost {arg}"})
         result(cost=float(arg))
+    elif word == "/apierror":
+        # As Claude Code does when it gives up on the API (#1099): a synthetic
+        # assistant line, then an error result carrying the same words.
+        text = "API Error: Couldn't connect through your proxy (ERR_PROXY_TUNNEL)"
+        emit(
+            {
+                "type": "assistant",
+                "message": {
+                    "model": "<synthetic>",
+                    "content": [{"type": "text", "text": text}],
+                },
+            }
+        )
+        emit(
+            {
+                "type": "result",
+                "subtype": "success",
+                "is_error": True,
+                "terminal_reason": "api_error",
+                "result": text,
+                "duration_ms": 50,
+                "total_cost_usd": round(state["cost"], 4),
+                "num_turns": 1,
+            }
+        )
     elif word == "/exit":
         sys.stderr.write("fatal: something broke\nsecond line\n")
         sys.stderr.flush()
