@@ -11,6 +11,7 @@ from .test_browser import (  # noqa: F401
     linked,
     server,
     spawn,
+    turns_done,
 )
 
 pytestmark = [pytest.mark.browser, pytest.mark.slow]
@@ -370,3 +371,38 @@ def test_a_header_mounts_into_a_given_element_and_finds_its_own_nodes(server, pa
         "tabs": 1,
     }
     assert page.errors == []
+
+
+def test_another_tab_redrawn_leaves_the_scrolled_strip_where_it_is(
+    server,  # noqa: F811
+    browser,  # noqa: F811
+):
+    # #1094: a patch of any tab scrolled the strip back to the open one, so a
+    # busy session elsewhere made the tabs out of view unreachable.
+    pg = browser.new_page(viewport={"width": 900, "height": 700})
+    pg.goto(server.url)
+    pg.wait_for_selector("#a2[data-view=fleet]")
+    keys = [spawn(pg) for _ in range(6)]
+    strip = "document.getElementById('tablist')"
+    pg.wait_for_function(f"{strip}.scrollLeft > 0")
+    pg.evaluate(f"{strip}.scrollLeft = 0")
+    # Count redraws in the strip, whose open tab is out of view at 0.
+    pg.evaluate(
+        f"""() => {{ window.patched = 0;
+          new MutationObserver(() => window.patched++).observe({strip},
+            {{subtree: true, childList: true, attributes: true, characterData: true}}); }}"""
+    )
+    other = browser.new_page(viewport={"width": 900, "height": 700})
+    other.goto(server.url.split("#")[0] + f"#s={keys[0]}")
+    other.wait_for_selector("#a2[data-view=session]")
+    other.fill("#input", "hello")
+    other.press("#input", "Enter")
+    turns_done(other, 1)
+    other.close()
+    pg.wait_for_function("window.patched > 0")
+    pg.wait_for_timeout(300)
+    assert pg.evaluate(f"{strip}.scrollLeft") == 0
+    # Switching tabs still brings the new one in.
+    pg.goto(server.url.split("#")[0] + f"#s={keys[-1]}")
+    pg.wait_for_function(f"{strip}.scrollLeft > 0")
+    pg.close()
