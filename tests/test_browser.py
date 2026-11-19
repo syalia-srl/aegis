@@ -4557,7 +4557,8 @@ def test_the_navigator_counts_the_unread_and_jumps_to_the_first(server, page):
 
 def test_alt_j_walks_the_sessions_that_need_you_longest_waiting_first(server, page):
     """#199: Alt+J goes to the session that has waited longest for you, lands on
-    its first unread message, and cycles; the Fleet's needs-you group agrees."""
+    the start of its last message (#1095), and cycles; the Fleet's needs-you
+    group agrees."""
     page.goto(server.url)
     page.wait_for_selector("#a2[data-view=fleet]")
     page.evaluate("document.hasFocus = () => false")  # nothing gets read
@@ -4578,10 +4579,11 @@ def test_alt_j_walks_the_sessions_that_need_you_longest_waiting_first(server, pa
     hash_ = "location.hash.slice(3)"
     page.keyboard.press("Alt+KeyJ")
     page.wait_for_function(f"{hash_} === '{b}'")
+    # Two unread replies: the last one, not the first unread, is selected.
+    last = "[...document.querySelectorAll('.row.prose')].at(-1)?.dataset.id"
     first = "document.querySelector('.row.prose:has(.rm .ic.i-unread)')?.dataset.id"
-    page.wait_for_function(
-        f"document.querySelector('.row.sel')?.dataset.id === {first}"
-    )
+    page.wait_for_function(f"document.querySelector('.row.sel')?.dataset.id === {last}")
+    assert page.evaluate(f"{last} !== {first}")
     page.keyboard.press("Alt+KeyJ")
     page.wait_for_function(f"{hash_} === '{a}'")
     page.keyboard.press("Alt+KeyJ")

@@ -289,7 +289,7 @@ const browserTab = new BrowserTab(browserPart.host, browserSources);
 // reload of the Files view keeps it.
 let lastShown = sessionStorage.getItem("aegis.lastShown");
 let warmed = null; // the parked (asleep, idle) session whose first keystroke asked for session.warm
-let landUnread = null; // the tab Alt+J opened, whose transcript lands on its first unread
+let landLast = null; // the tab Alt+J opened, whose transcript lands on its last message (#1095)
 let unsubTranscript = null;
 let workingSince = null;
 // The turn's new input and output tokens (session.turn_tokens), which the
@@ -1786,8 +1786,8 @@ function follow(id) {
         if (!placed) {
           transcript.setSince(sinceText(app.state.sessions.get(id)));
           askRecap(false); // the server decides whether it is worth one
-          if (landUnread === id) transcript.firstUnread();
-          landUnread = null;
+          if (landLast === id) transcript.lastMessage();
+          landLast = null;
           if (landEntry && landEntry.key === id) transcript.reveal(landEntry.id);
           landEntry = null;
         }
@@ -2207,8 +2207,8 @@ function nextNeed() {
   const r = route();
   const i = r.view === "session" ? list.findIndex((m) => m.key === r.id) : -1;
   const id = list[(i + 1) % list.length].key;
-  if (list[i]?.key === id) return transcript.firstUnread(); // the only one, and open
-  landUnread = id;
+  if (list[i]?.key === id) return transcript.lastMessage(); // the only one, and open
+  landLast = id;
   go(`#s=${id}`);
 }
 
