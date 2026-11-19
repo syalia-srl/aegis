@@ -165,6 +165,7 @@ SCRIPTS = (
     "busy",
     "deafsleep",
     "fail",
+    "apierror",
     "notice",
     "big",
     "exit",
