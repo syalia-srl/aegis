@@ -364,6 +364,8 @@ class _feed:
         """Start a feed: a file that grows, or a command with a cursor, read every interval_s. Each batch of new items wakes you as one message `> from feed:<name> · batch#<n> · …`, after debounce_s with no new item, or when your turn ends if you are working. aegis keeps the cursor; the feed stays until feed_cancel or your session closes. Use it instead of re-arming a monitor on a file that grows."""
 
 class _file:
+    async def fetch(self, *, file_id: str, name: str, offset: int = ...) -> Any:
+        """Up to FETCH_CHUNK bytes of a sent file from ``offset``, base64, and its whole size: how a server this one linked reads a file here through its ``/via``, having no route to this server (#1103). Only over a link; a browser here has ``/files``."""
     async def open(self, *, file_id: str, name: str) -> Any:
         """Open a sent file in the desktop's app for it. Only for a person whose browser runs on the server's desktop; never an agent tool, or an agent could launch apps on that desktop."""
     async def peek(
