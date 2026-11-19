@@ -613,7 +613,8 @@ class Backlink:
     ``rsub`` and ``rframe`` (#969). ``check`` says why the link no longer
     holds, or None, and is asked before every call."""
 
-    url = None  # nothing to fetch files from: the far server has no route here
+    # No route to the far server: /via reads its files with file.fetch (web.py).
+    url = None
 
     def __init__(
         self,
