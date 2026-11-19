@@ -392,6 +392,10 @@ plan item, or what it is doing.
   a phone the list fills the screen, and the close button beside its field
   takes you back.
 
+Alt+J opens the next session that needs you, in that same order, and lands
+with the start of its last message at the top of the transcript, where its
+reading starts. Alt+U goes from there to its first unread message.
+
 ## Quiet sessions
 
 A quiet session runs in the background, with no tab. Its card stays in the
