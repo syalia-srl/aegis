@@ -188,6 +188,9 @@ KNOWLEDGE_CHECK_TIMEOUT_S = 30.0
 LOG_ID = re.compile(r"^\d{8}-\d{6}-[0-9a-f]{6}$")
 # How many nonced sends the server remembers, across every session.
 SEND_NONCES = 512
+# The bytes of a sent file one file.fetch returns: base64 in one frame, well
+# under the 16 MiB a link socket's far end accepts.
+FETCH_CHUNK = 4 * 1024 * 1024
 
 Effort = Literal["low", "medium", "high", "xhigh", "max"]
 Permission = Literal["read", "write", "full", "auto"]
@@ -422,6 +425,12 @@ class GroupRenameParams(_Strict):
 class FileRef(_Strict):
     file_id: str
     name: str
+
+
+class FileChunk(_Strict):
+    file_id: str
+    name: str
+    offset: int = Field(0, ge=0)
 
 
 class StatParams(_Strict):
@@ -3705,6 +3714,26 @@ class App:
                 files.open_natively(path)
             except (files.FileError, OSError) as e:
                 raise OpError("open_failed", str(e)) from e
+
+        @r.op("file.fetch", FileChunk)
+        async def file_fetch(p: FileChunk, caller):
+            """Up to FETCH_CHUNK bytes of a sent file from ``offset``, base64,
+            and its whole size: how a server this one linked reads a file
+            here through its ``/via``, having no route to this server
+            (#1103). Only over a link; a browser here has ``/files``."""
+            if caller.link is None:
+                raise OpError("not_linked", "only a linked server reads files this way")
+            path = files.find(self.roots.state_root, p.file_id, p.name)
+            if path is None:
+                raise OpError("no_file", f"no sent file {p.name!r}")
+
+            def read() -> tuple[int, bytes]:
+                with path.open("rb") as f:
+                    f.seek(p.offset)
+                    return path.stat().st_size, f.read(FETCH_CHUNK)
+
+            size, data = await asyncio.to_thread(read)
+            return {"size": size, "data": base64.b64encode(data).decode("ascii")}
 
         async def root_path(path: Path, caller) -> dict:
             """``{"root_path": ...}``, the file relative to the viewer's Files
