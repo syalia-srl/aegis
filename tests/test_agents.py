@@ -864,6 +864,21 @@ async def test_a_dead_worker_fails_its_task_and_keeps_its_tab(world):
     assert t.status == "failed" and t.worker in world.app.sessions.sessions
 
 
+async def test_a_worker_stopped_by_an_api_error_fails_and_resumes(world):
+    a = await world.spawn()
+    said = await turn(a, mcp("queue_enqueue", queue="general", payload="/apierror"))
+    t = world.app.queues.tasks[json.loads(said.removeprefix("mcp ok: "))["task_id"]]
+    await until(lambda: inbox(a), timeout=10, what="the error callback")
+    (cb,) = inbox(a)
+    assert " · error · " in cb["title"] and "ERR_PROXY_TUNNEL" in cb["md"]
+    assert t.status == "failed" and "ERR_PROXY_TUNNEL" in (t.error or "")
+    assert t.worker in world.app.sessions.sessions  # not archived
+    said = await turn(a, mcp("task_resume", task_id=t.id))
+    assert json.loads(said.removeprefix("mcp ok: "))["status"] == "running"
+    await until(lambda: t.status == "completed", timeout=10, what="the resumed task")
+    assert t.result and "ERR_PROXY_TUNNEL" not in t.result
+
+
 async def test_the_worker_limit_holds_tasks_back(world):
     (world.root / ".aegis.yaml").write_text(ONE_WORKER)
     a = await world.spawn()
