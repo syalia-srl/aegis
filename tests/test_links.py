@@ -550,6 +550,31 @@ async def test_a_sent_file_is_streamed_through_via(pair, tmp_path):
     del s
 
 
+async def test_a_sent_file_comes_through_via_on_the_way_back(
+    pair, tmp_path, monkeypatch
+):
+    # Beta has no route to alpha, which linked it (#1103): the bytes come
+    # down alpha's socket, in chunks, and still get beta's own headers.
+    alpha, beta = pair
+    from aegis import app as app_mod, files
+
+    monkeypatch.setattr(app_mod, "FETCH_CHUNK", 4)
+    f = tmp_path / "page.html"
+    f.write_text("<h1>back</h1>")
+    sent = files.store(alpha.app.roots.state_root, f)
+    path = files.url(sent["file_id"], sent["name"])
+    async with httpx.AsyncClient() as c:
+        r = await c.get(f"{beta.base}/via/alpha{path}")
+        tag = '<script src="/static/js/pagepoint.js"></script>'
+        assert r.status_code == 200 and r.text == f"<h1>back</h1>{tag}"
+        assert "sandbox" in r.headers["content-security-policy"]
+        dl = await c.get(f"{beta.base}/via/alpha{path}?download=1")
+        assert dl.content == b"<h1>back</h1>"
+        assert dl.headers["content-disposition"].startswith("attachment")
+        miss = await c.get(f"{beta.base}/via/alpha/files/{sent['file_id']}/nope.html")
+        assert miss.status_code == 404
+
+
 async def test_a_browser_on_alpha_peeks_a_file_a_beta_row_used(pair, tmp_path):
     # The Show button of a linked server's Read row (#1044): beta copies its
     # own file, and alpha's browser fetches it under /via/beta.

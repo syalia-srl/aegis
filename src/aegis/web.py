@@ -37,6 +37,7 @@ host serves the page under its prefix.
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import hashlib
 import json
@@ -607,24 +608,12 @@ def build_web(
             path, headers={"Cache-Control": "public, max-age=31536000, immutable"}
         )
 
-    async def via_file(request):
-        """A sent file on a linked server, streamed from it. The id stays the
-        secret; the headers are this server's own, from the file's name
-        (files.via_headers), because the far server is not trusted to say how
-        its bytes may run on this origin."""
-        p = request.path_params
-        host = request.headers.get("host", "")
-        link = app.links.get(p["server"])
-        if (
-            link is None
-            or link.url is None
-            or not (host in allowed_hosts or host in public)
-        ):
-            return PlainTextResponse("Not Found", status_code=404)
-        download = request.query_params.get("download") == "1"
+    async def far_file(base: str, file_id: str, name: str, download: bool):
+        """A linked server's file over HTTP from its URL: the body's chunks, or
+        the response to give instead."""
         # A download asks the far server for one too: its preview of a page
         # carries the pointing script, and a download is the file's own bytes.
-        url = f"{link.url}{files.url(p['file_id'], p['name'])}"
+        url = f"{base}{files.url(file_id, name)}"
         if download:
             url += "?download=1"
         client = httpx.AsyncClient(timeout=httpx.Timeout(30, read=None))
@@ -652,6 +641,50 @@ def build_web(
             finally:
                 await upstream.aclose()
                 await client.aclose()
+
+        return body
+
+    async def back_file(link, file_id: str, name: str):
+        """A file of a server that linked this one, which has no route to it,
+        read down that server's socket with file.fetch (#1103): the body's
+        chunks, or None when the server has no such file."""
+        params = {"file_id": file_id, "name": name}
+        try:
+            first = await link.call("file.fetch", params)
+        except OpError:
+            return None
+
+        async def body():
+            got, reply = 0, first
+            while True:
+                data = base64.b64decode(reply["data"])
+                got += len(data)
+                yield data
+                if not data or got >= reply["size"]:
+                    return
+                reply = await link.call("file.fetch", {**params, "offset": got})
+
+        return body
+
+    async def via_file(request):
+        """A sent file on a linked server, streamed from it. The id stays the
+        secret; the headers are this server's own, from the file's name
+        (files.via_headers), because the far server is not trusted to say how
+        its bytes may run on this origin."""
+        p = request.path_params
+        host = request.headers.get("host", "")
+        link = app.links.get(p["server"])
+        if link is None or not (host in allowed_hosts or host in public):
+            return PlainTextResponse("Not Found", status_code=404)
+        download = request.query_params.get("download") == "1"
+        if link.url is None:
+            body = await back_file(link, p["file_id"], p["name"])
+            if body is None:
+                return PlainTextResponse("Not Found", status_code=404)
+        else:
+            body = await far_file(link.url, p["file_id"], p["name"], download)
+            if isinstance(body, Response):
+                return body
 
         headers = files.via_headers(p["name"], download)
         if not download and files.classify_name(p["name"])[1] == "html":
