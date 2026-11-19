@@ -234,7 +234,6 @@ TAIL = {
     "asker": "If that is not enough, ask the person what to do, in the message that ends your current turn, naming the largest candidates and their sizes. Do not start a task of your own for it.",
     "person": "Another session is asking the person about the rest; do not ask.",
     "spawned": "If that is not enough, say so in your result to the agent that started you; do not ask the person.",
-    "worker": "Do not ask anyone; your result goes back to whoever started you.",
 }
 ONCE = "aegis tells you once, and again when it clears."
 CLEAR = {
@@ -820,9 +819,15 @@ class Notices:
         # (App.guard_items): the pool's own advice would contradict it, so
         # the quota kinds are neither told nor cleared until it opens.
         guarded = any(k.startswith(f"{GUARD}:") for k in self._items.get(s.log_id, {}))
+        # A worker has a task and nobody to ask: a host notice's orders read
+        # as its task, and it ran them instead (#1098). It gets announcements
+        # only; the sessions that coordinate it are told.
+        worker = self._opener(s) == "worker"
         blocks = []
         for key, (level, reading) in active.items():
             if guarded and key.startswith("quota:"):
+                continue
+            if worker and not key.startswith("announce:"):
                 continue
             # A level kept from before a restart has no reading to print yet.
             if s.notices_sent.get(key) == level or not reading:
