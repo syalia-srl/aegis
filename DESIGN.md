@@ -644,7 +644,9 @@ cache.
 What each session was told is `notices_sent` in its meta, so a restart
 neither repeats a notice nor forgets its clear; the episodes and the one
 asker per kind and owner live in memory. A 30 s loop turns the episodes so a
-notice at critical toasts while nobody is talking to anyone.
+notice at critical toasts while nobody is talking to anyone. A queue worker,
+a workflow node and a schedule's run get announcements only: the host kinds
+give orders, and a session with a task ran them as its task (#1098).
 
 **A repository's know-how stays in its tree and is told once per session.**
 `knowledge/know_how.py` lists `know-how/*.md` at the git root a session first
