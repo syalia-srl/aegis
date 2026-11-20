@@ -168,3 +168,21 @@ async def test_only_an_asked_session_may_reply(world):
     assert "answered" in said
     (m,) = mention(a)["detail"]["members"]
     assert m["state"] == "answered" and m["answer"] == "I think so"
+
+
+def test_a_long_answer_rides_whole():
+    from aegis.mentions import carry_text
+
+    answer = "\n".join(f"{i}. point {i} " + "x" * 400 for i in range(1, 8))
+    entry = {
+        "kind": "mention",
+        "detail": {
+            "id": "m-1",
+            "body": "critica esto",
+            "members": [{"name": "opus", "state": "answered", "answer": answer}],
+        },
+    }
+    text, ids = carry_text([entry])
+    assert ids == ["m-1"]
+    assert "7. point 7 " + "x" * 400 in text
+    assert "(cut;" not in text

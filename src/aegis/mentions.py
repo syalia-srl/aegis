@@ -37,8 +37,6 @@ log = logging.getLogger("aegis.mentions")
 # How long a committee waits for its slowest member before the merge goes out
 # with the answers it has.
 MERGE_AFTER_S = 30 * 60
-# A single answer rides the next person message cut to this many characters.
-CARRY_CHARS = 2000
 
 NOTE_ASK = (
     "(Act on it as you see fit. If it asks for an answer, give it with "
@@ -102,13 +100,7 @@ def carry_text(entries: list[dict]) -> tuple[str, list[str]]:
         for m in det.get("members", []):
             if m["state"] != "answered":
                 continue
-            text = m["answer"]
-            if len(text) > CARRY_CHARS:
-                text = (
-                    text[:CARRY_CHARS]
-                    + "… (cut; the whole answer is in this tab's mention block)"
-                )
-            q = "\n".join(f"> {line}" for line in text.splitlines())
+            q = "\n".join(f"> {line}" for line in m["answer"].splitlines())
             quotes.append(
                 f'{m["name"]} answered the person\'s @ mention ("{det["body"]}"), '
                 f"which they read in this tab:\n{q}"
