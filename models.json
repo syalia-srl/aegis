@@ -1,7 +1,7 @@
 {
   "source": "Artificial Analysis",
   "url": "https://artificialanalysis.ai",
-  "refreshed": "2026-11-19",
+  "refreshed": "2026-11-20",
   "models": {
     "fable": {
       "aa": "claude-fable-5-2",
@@ -252,8 +252,8 @@
       "aa": "hy3",
       "coding": null,
       "intelligence": null,
-      "price_in": 0.136,
-      "price_out": 0.555
+      "price_in": 0.14,
+      "price_out": 0.58
     },
     "opencode-go/longcat-2.0": {
       "aa": "longcat-2-0",
