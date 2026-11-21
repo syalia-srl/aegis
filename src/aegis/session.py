@@ -64,6 +64,7 @@ from .meta import MetaStore
 from .names import default_title
 from .ops import OpError
 from .policy import McpServer
+from .quota_gate import pool_of
 from .park import TIMER_TOOLS
 from .scopes import ANY as ANY_SCOPE, Scope
 from .transcript.entries import EMPTY_STANDING, Fold, fold_records
@@ -724,6 +725,10 @@ class Session:
         m["cache_hit"] = cache.hit_rate(self.cache_recent)
         m["cache_alarm"] = cache.alarm(self.cache_recent, self.spec.harness)
         m["turn_tokens"] = self.turn_tokens
+        # The pool it draws on, resolved: every card names one (or null for an
+        # account with no gauge), so the sidebar matches on it alone
+        # (gauges.js providerFor) instead of deriving it from harness and model.
+        m["pool"] = pool_of(self.spec)
         m.update(self._host.card(self))
         return m
 

@@ -305,3 +305,45 @@ async def test_a_window_with_enough_history_projects_at_its_rate(tmp_path):
     assert 12 < w["rate"] < 20
     left_h = (w["resets_at"] - c.wall) / 3600
     assert w["projected"] == pytest.approx(24 + w["rate"] * left_h, abs=1)
+
+
+def _card(tmp_path, **spec):
+    """The ``sessions`` card of a bare session built from ``spec``."""
+    from aegis.meta import MetaStore
+    from aegis.session import Session, SpawnSpec
+    from aegis.transcript.store import Store
+
+    s = Session(
+        log_id="log-pool",
+        spec=SpawnSpec(
+            cwd=tmp_path, **{"effort": "high", "permission": "full", **spec}
+        ),
+        handle="quiet-owl",
+        store=Store(tmp_path / "log-pool.jsonl"),
+        stderr_path=tmp_path / "log-pool.log",
+        claude_bin="claude",
+        publish=lambda ch, ops: None,
+        metas=MetaStore(tmp_path / "sessions"),
+    )
+    return s.wire()
+
+
+@pytest.mark.parametrize(
+    "spec, pool",
+    [
+        # No recorded pool: what pool_for answers for its harness and model.
+        ({"agent": "opus", "model": "opus"}, "claude"),
+        (
+            {"agent": "go", "model": "opencode-go/kimi-k2", "harness": "opencode"},
+            "opencode-go",
+        ),
+        ({"agent": "oc", "model": "anthropic/x", "harness": "opencode"}, None),
+        ({"agent": "cx", "model": "gpt-5", "harness": "codex"}, "codex"),
+        # A recorded pool wins over the harness, and "none" is no gauge.
+        ({"agent": "go", "model": "glm-5", "pool": "opencode-go"}, "opencode-go"),
+        ({"agent": "gw", "model": "glm-5", "pool": "none"}, None),
+    ],
+)
+def test_the_card_carries_the_resolved_pool(tmp_path, spec, pool):
+    card = _card(tmp_path, **spec)
+    assert "pool" in card and card["pool"] == pool
