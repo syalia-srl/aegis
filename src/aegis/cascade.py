@@ -28,7 +28,9 @@ names (quota_gate.pool_of), so a Go limit on a claude-code session cools Go
 and not Opus. A pool fall is keyed by the pool alone: two clients of one
 account share it. With no pool named, an endpoint's fall is its own (two
 unmetered gateways never share one), and a harness derives the pool as
-pool_for does, else the model's provider prefix (``opencode``).
+pool_for does, else keys the model's provider prefix under itself, so it
+never cools another harness's pool. A harness's recorded ``pool: none`` has
+no pool: its pool fall cools the model alone (_pool_key).
 
 A model fall is keyed by its owner (``cooling_owner``): a connection's
 endpoint, else the harness. ``cool`` writes and ``until`` and ``pick`` read
@@ -48,7 +50,7 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Literal
 
-from .quota_gate import Gate, pool_for
+from .quota_gate import NONE, Gate, pool_for
 
 # How long a model cools when its error names no retry-after.
 DEFAULT_COOL_S = 600.0
@@ -132,15 +134,23 @@ def _is_endpoint(owner: str) -> bool:
     return "://" in owner
 
 
-def _pool(owner: str, model: str, pool: str | None) -> str:
-    """The pool a pool fall of ``model`` keys: the one the caller names; for
-    an endpoint with none (``pool: none``), the endpoint itself; for a
-    harness, what pool_for derives, else the model's provider prefix."""
-    if pool:
-        return pool
+def _pool_key(owner: str, model: str, pool: str | None) -> tuple[str, str, str] | None:
+    """The key a pool fall of ``model`` is written and read under. A named
+    pool keys alone, so two clients of one account share it; an endpoint
+    with none (``pool: none``) keys itself. A harness's ``none`` has no
+    pool, so its pool fall cools the model alone (None). A harness that
+    names nothing keys the pool pool_for derives, which is the pool pool_of
+    would name, else the model's provider prefix under the harness, so a
+    ``claude/x`` on opencode never cools Claude Code's ``claude``."""
+    if pool and pool != NONE:
+        return (pool, "pool", pool)
     if _is_endpoint(owner):
-        return owner
-    return pool_for(owner, model) or model.split("/", 1)[0]
+        return (owner, "pool", owner)
+    if pool == NONE:
+        return None
+    if derived := pool_for(owner, model):
+        return (derived, "pool", derived)
+    return (owner, "pool", model.split("/", 1)[0])
 
 
 class Cooling:
@@ -161,35 +171,38 @@ class Cooling:
             end = now + DEFAULT_COOL_S
         key = (owner, "model", model)
         if fall.scope == "pool":
-            name = _pool(owner, model, pool)
-            key = (name, "pool", name)
+            key = _pool_key(owner, model, pool) or key
         self._until[key] = max(end, self._until.get(key, 0.0))
         return end
 
     def until(
         self, owner: str, model: str, now: float, pool: str | None = None
     ) -> float | None:
-        name = _pool(owner, model, pool)
-        ends = [
-            self._until.get((owner, "model", model), 0.0),
-            self._until.get((name, "pool", name), 0.0),
-        ]
+        ends = [self._until.get((owner, "model", model), 0.0)]
+        if (key := _pool_key(owner, model, pool)) is not None:
+            ends.append(self._until.get(key, 0.0))
         end = max(ends)
         return end if end > now else None
 
     def latest(
         self,
         harness: str,
-        model: str,
+        models: str | Iterable[str],
         now: float,
         users: Iterable[tuple[str, str | None]] = (),
     ) -> float | None:
         """When a catalogue row's model is free again: the latest end among
         the harness's own key and the keys of the agents that name it, each
-        given as (cooling_owner, pool). A row is a catalogue, not a session,
-        so it has no endpoint of its own; its agents supply theirs."""
-        ends = [self.until(harness, model, now)]
-        ends += [self.until(owner, model, now, pool) for owner, pool in users]
+        given as (cooling_owner, pool), under every spelling of the model (its
+        id and the id it resolves to: a fall is written under the one the
+        session ran). A row is a catalogue, not a session, so it has no
+        endpoint of its own; its agents supply theirs."""
+        names = [models] if isinstance(models, str) else list(dict.fromkeys(models))
+        users = list(users)
+        ends = []
+        for model in names:
+            ends.append(self.until(harness, model, now))
+            ends += [self.until(owner, model, now, pool) for owner, pool in users]
         return max((e for e in ends if e is not None), default=None)
 
     def earliest(self, now: float) -> float | None:

@@ -157,7 +157,7 @@ def register_config_ops(app: App) -> None:
                         "used_by": list({u["agent"]: u for u in used}.values()),
                         "cooling_until": app.cooling.latest(
                             f.harness,
-                            m.value,
+                            [v for v in (m.value, m.resolved) if v],
                             now,
                             [_draws_on(a, m.value) for a in agents if a.name in names],
                         ),

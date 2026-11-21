@@ -487,6 +487,20 @@ def test_an_opencode_session_bills_go_only_on_a_go_model(model, want):
     assert d.turns[0].billing == want
 
 
+@pytest.mark.parametrize("harness", ["opencode", "cursor", "pi"])
+@pytest.mark.parametrize(
+    "pool, want",
+    [("opencode-go", "opencode-go:c3d4"), ("none", "api"), ("claude", "claude:a1b2")],
+)
+def test_a_harness_session_bills_the_pool_its_record_names(harness, pool, want):
+    """A recorded pool is the account on any harness, and ``none`` is api,
+    whatever pool the harness and model would imply."""
+    d = _feed(harness, harness,
+              [(None, _call("a", "Read", {"file_path": "/w/a.py"})), (None, _result())],
+              info=_info(harness, pool), model="opencode-go/deepseek-v4-pro")  # fmt: skip
+    assert d.turns[0].billing == want
+
+
 def test_codex_bills_its_plan_without_a_quota_provider():
     from tests.usage.stores import codex_usage
 

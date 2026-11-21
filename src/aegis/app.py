@@ -486,6 +486,13 @@ def _cooling_owner(spec: SpawnSpec) -> str:
     return cooling_owner(spec.harness, None)
 
 
+def _cooling_pool(spec: SpawnSpec, model: str | None = None) -> str | None:
+    """The pool a session's falls are written and read under: the one its
+    spawn recorded, ``none`` kept (pool_of reads it as None, which would let
+    a harness derive a pool the session does not draw on), else pool_of's."""
+    return spec.pool or pool_of(spec, model)
+
+
 def _dead(e: Exception) -> OpError:
     return OpError(
         "session_dead",
@@ -1331,7 +1338,7 @@ class App:
             gate,
             self.cooling,
             time.time(),
-            lambda m: pool_of(spec, m),
+            lambda m: _cooling_pool(spec, m),
         )
         if model is None:
             return spec, Gate("closed", why)
@@ -1345,7 +1352,7 @@ class App:
         if fall is None:
             return None
         owner = _cooling_owner(spec)
-        until = self.cool(owner, spec.model, fall, pool_of(spec))
+        until = self.cool(owner, spec.model, fall, _cooling_pool(spec))
         model, _ = pick(
             spec.cascade,
             spec.cascade.index(spec.model),
@@ -1353,7 +1360,7 @@ class App:
             lambda m: self.gate(spec.owner, pool_of(spec, m), m),
             self.cooling,
             time.time(),
-            lambda m: pool_of(spec, m),
+            lambda m: _cooling_pool(spec, m),
         )
         return model, until
 

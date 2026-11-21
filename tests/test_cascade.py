@@ -3,7 +3,7 @@ import time
 import pytest
 
 from aegis.cascade import DEFAULT_COOL_S, Cooling, Fall, classify, cooling_owner, pick
-from aegis.quota_gate import Gate
+from aegis.quota_gate import NONE, Gate
 
 # The verdict task 1 recorded in cascade.py's docstring.
 SCOPE_ZEN = "model"
@@ -233,3 +233,45 @@ def test_a_catalogue_row_shows_a_pool_fall_of_its_agents_pool():
     c.cool(GO, "glm-5", Fall("pool", 120.0), T, "opencode-go")
     assert c.latest("claude-code", "kimi-k3", T, [(GO, "opencode-go")]) == T + 120
     assert c.latest("claude-code", "kimi-k3", T, [("claude-code", "claude")]) is None
+
+
+def test_a_harness_pool_fall_on_a_prefix_stays_in_its_harness():
+    """An opencode model named ``claude/x`` derives no pool (pool_for): its
+    pool fall keys the prefix under opencode, not Claude Code's ``claude``."""
+    c = Cooling()
+    c.cool("opencode", "claude/x", Fall("pool", None), T)
+    assert c._until == {("opencode", "pool", "claude"): T + DEFAULT_COOL_S}
+    assert c.until("claude-code", "opus", T, "claude") is None
+    assert c.until("claude-code", "opus", T) is None
+    assert c.until("opencode", "claude/y", T) == T + DEFAULT_COOL_S
+    assert c.until("pi", "claude/x", T) is None
+
+
+@pytest.mark.parametrize(
+    "harness, model", [("claude-code", "opus"), ("opencode", "claude/x")]
+)
+def test_a_pool_fall_with_pool_none_cools_the_model_alone(harness, model):
+    """A recorded ``pool: none`` has no pool: its pool fall cools that model
+    and never the pool its harness would derive."""
+    c = Cooling()
+    c.cool(harness, model, Fall("pool", None), T, NONE)
+    assert c._until == {(harness, "model", model): T + DEFAULT_COOL_S}
+    assert c.until("claude-code", "sonnet", T, "claude") is None
+    assert c.until(harness, model, T, NONE) == T + DEFAULT_COOL_S
+    assert c.until(harness, "other", T, NONE) is None
+
+
+def test_an_endpoint_with_pool_none_keys_its_pool_fall_by_itself():
+    c = Cooling()
+    c.cool(GO, "m", Fall("pool", None), T, NONE)
+    assert c._until == {(GO, "pool", GO): T + DEFAULT_COOL_S}
+    assert c.until(GO, "other", T, NONE) == T + DEFAULT_COOL_S
+
+
+def test_a_catalogue_row_sees_a_fall_written_under_its_resolved_id():
+    c = Cooling()
+    c.cool("claude-code", "claude-opus-5-5", Fall("model", 60.0), T, "claude")
+    claude = [("claude-code", "claude")]
+    assert c.latest("claude-code", "opus", T, claude) is None
+    assert c.latest("claude-code", ["opus", "claude-opus-5-5"], T, claude) == T + 60
+    assert c.latest("claude-code", ["opus", "opus"], T, claude) is None
