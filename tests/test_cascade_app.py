@@ -2,12 +2,15 @@
 OpenCode and an agent of three models."""
 
 import asyncio
+import dataclasses
 import time
+from types import SimpleNamespace
 
 import pytest
 
 from aegis.cascade import Fall
 from aegis.ops import OpError
+from aegis.session import SpawnSpec
 
 from .conftest import until
 from .test_agents import World
@@ -94,3 +97,43 @@ async def test_shutdown_cancels_the_cooling_timer(tmp_path, fake_claude, fake_op
     await w.stop()
     await asyncio.sleep(0.8)
     assert released == []
+
+
+def go_spec(world) -> SpawnSpec:
+    """A claude-code cascade whose record names opencode-go: nothing sets a
+    pool before the agent's connection does (B1), so the test sets it."""
+    return SpawnSpec(
+        agent="go-claude",
+        model="glm-5",
+        effort="high",
+        permission="full",
+        cwd=world.root,
+        harness="claude-code",
+        cascade=("glm-5", "kimi-k3"),
+        pool="opencode-go",
+    )
+
+
+async def test_a_go_limit_on_claude_code_cools_go_and_not_claude(world):
+    app, spec = world.app, go_spec(world)
+    model, end = app.cascade_next(
+        SimpleNamespace(spec=spec), "Claude AI usage limit reached|9999999999"
+    )
+    now = time.time()
+    assert model is None and end == 9999999999.0
+    assert app.cooling.until("claude-code", "kimi-k3", now, "opencode-go") == end
+    assert app.cooling.until("claude-code", "opus", now, "claude") is None
+    _, g = app.start_spec(spec, guarded=False)
+    assert g.state == "closed" and "cooling" in g.why
+    claude = dataclasses.replace(spec, pool=None, model="opus", cascade=("opus", "sonnet"))
+    started, g = app.start_spec(claude, guarded=False)
+    assert g.may_start and started.model == "opus"
+
+
+async def test_a_model_fall_moves_a_pooled_cascade_to_its_next_model(world):
+    app, spec = world.app, go_spec(world)
+    model, _ = app.cascade_next(SimpleNamespace(spec=spec), "API Error: 529 Overloaded")
+    assert model == "kimi-k3"
+    started, g = app.start_spec(spec, guarded=False)
+    assert g.may_start and started.model == "kimi-k3"
+    assert app.cooling.until("claude-code", "glm-5", time.time()) is not None

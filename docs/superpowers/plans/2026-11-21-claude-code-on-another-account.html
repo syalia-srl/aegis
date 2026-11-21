@@ -177,7 +177,7 @@ details.task ol,details.task p{padding-right:4px}
 <h2 id="a2"><span class="n">A2</span>Cooling and billing</h2>
 <p>A Go limit must stop cooling Opus, and a Go turn must stop being billed to Claude. This is the slice where a mistake hides in a key, so the tests name the keys.</p>
 
-<details class="task" id="task-4" data-state="pending"><summary><span class="n">4</span><span class="t"><code>Cooling</code> by its owner and its pool, and both <code>pick</code> calls</span><span class="s">pending</span><span class="f">src/aegis/cascade.py, src/aegis/app.py, tests/test_cascade.py, tests/test_cascade_app.py</span></summary>
+<details class="task" id="task-4" data-state="done"><summary><span class="n">4</span><span class="t"><code>Cooling</code> by its owner and its pool, and both <code>pick</code> calls</span><span class="s">pending</span><span class="f">src/aegis/cascade.py, src/aegis/app.py, tests/test_cascade.py, tests/test_cascade_app.py</span></summary>
 <ol>
   <li><code>cooling_owner(harness, base_url)</code>: <code>base_url</code> or <code>harness</code>. It is <b>the</b> key a model fall is written and read under, so <code>cool</code> and <code>until</code> cannot disagree.</li>
   <li><code>Cooling.cool(owner, model, fall, now, pool=None)</code>: a model fall keys <code>(owner, "model", model)</code>; a pool fall keys <code>(pool or owner, "pool", pool or owner)</code> — for a connection with <code>pool: none</code>, <code>(base_url, "pool", base_url)</code>, so two unmetered gateways never share a fall. <code>_pool</code> goes; the provider-prefix fallback stays for an OpenCode model with no pool (its "pool" is the prefix).</li>

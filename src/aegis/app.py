@@ -85,7 +85,7 @@ from .agents import (
     model_suggestions,
     resolve,
 )
-from .cascade import Cooling, Fall, classify, pick
+from .cascade import Cooling, Fall, classify, cooling_owner, pick
 from .cgroups import SessionCgroups
 from .channels import Channels, Throttle
 from .claude.process import PERMISSION_MODE, ControlError
@@ -477,6 +477,13 @@ class ArchiveParams(_Strict):
     cursor: str | None = Field(
         None, description="The cursor the last page returned; omitted: the first."
     )
+
+
+def _cooling_owner(spec: SpawnSpec) -> str:
+    """The owner a session's model falls are written and read under. A spec
+    carries no connection yet, so it is the harness; the connection's
+    endpoint takes its place when SpawnSpec gains one."""
+    return cooling_owner(spec.harness, None)
 
 
 def _dead(e: Exception) -> OpError:
@@ -1034,8 +1041,8 @@ class App:
         self.whos[key] = who
         return host_tokens.mint(self.host_secret, key, ttl)
 
-    def gate(self, owner: str | None, harness: str, model: str | None) -> Gate:
-        """Whether a harness may start on that pool for its owner: always,
+    def gate(self, owner: str | None, pool: str | None, model: str | None) -> Gate:
+        """Whether a session may start on that pool for its owner: always,
         since quota lines per token left with multi-user mode (#958). The
         guards on agents and queues are ``guard``."""
         return Gate("open")
@@ -1318,7 +1325,13 @@ class App:
         if spec.model not in spec.cascade:
             return spec, gate(spec.model)
         model, why = pick(
-            spec.cascade, -1, spec.harness, gate, self.cooling, time.time()
+            spec.cascade,
+            -1,
+            _cooling_owner(spec),
+            gate,
+            self.cooling,
+            time.time(),
+            lambda m: pool_of(spec, m),
         )
         if model is None:
             return spec, Gate("closed", why)
@@ -1331,21 +1344,26 @@ class App:
         fall = classify(spec.harness, text)
         if fall is None:
             return None
-        until = self.cool(spec.harness, spec.model, fall)
+        owner = _cooling_owner(spec)
+        until = self.cool(owner, spec.model, fall, pool_of(spec))
         model, _ = pick(
             spec.cascade,
             spec.cascade.index(spec.model),
-            spec.harness,
-            lambda m: self.gate(spec.owner, spec.harness, m),
+            owner,
+            lambda m: self.gate(spec.owner, pool_of(spec, m), m),
             self.cooling,
             time.time(),
+            lambda m: pool_of(spec, m),
         )
         return model, until
 
-    def cool(self, harness: str, model: str, fall: Fall) -> float:
-        """Cool a model that fell, and arm the timer that releases what it
-        held when the first cooling model is free again."""
-        end = self.cooling.cool(harness, model, fall, time.time())
+    def cool(
+        self, owner: str, model: str, fall: Fall, pool: str | None = None
+    ) -> float:
+        """Cool a model that fell, under its cooling owner (cascade.cooling_owner)
+        and the session's pool, and arm the timer that releases what it held
+        when the first cooling model is free again."""
+        end = self.cooling.cool(owner, model, fall, time.time(), pool)
         self._arm_cooling()
         return end
 
