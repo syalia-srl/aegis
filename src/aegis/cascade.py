@@ -44,7 +44,7 @@ from __future__ import annotations
 
 import re
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -176,6 +176,21 @@ class Cooling:
         ]
         end = max(ends)
         return end if end > now else None
+
+    def latest(
+        self,
+        harness: str,
+        model: str,
+        now: float,
+        users: Iterable[tuple[str, str | None]] = (),
+    ) -> float | None:
+        """When a catalogue row's model is free again: the latest end among
+        the harness's own key and the keys of the agents that name it, each
+        given as (cooling_owner, pool). A row is a catalogue, not a session,
+        so it has no endpoint of its own; its agents supply theirs."""
+        ends = [self.until(harness, model, now)]
+        ends += [self.until(owner, model, now, pool) for owner, pool in users]
+        return max((e for e in ends if e is not None), default=None)
 
     def earliest(self, now: float) -> float | None:
         return min((u for u in self._until.values() if u > now), default=None)

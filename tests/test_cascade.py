@@ -210,3 +210,26 @@ def test_the_wire_names_the_pool_of_a_pool_fall():
         {"endpoint": GO, "model": "m", "until": T + 30},
         {"pool": "opencode-go", "until": T + 60},
     ]
+
+
+def test_a_catalogue_row_reads_the_keys_its_agents_draw_on():
+    """A model used only by a connection agent reports that endpoint's fall;
+    a model used by both keeps the harness fall; a free agent never hides
+    another's fall."""
+    c = Cooling()
+    c.cool(GO, "glm-5", Fall("model", 60.0), T, "opencode-go")
+    c.cool("claude-code", "opus", Fall("model", 30.0), T, "claude")
+    go = (GO, "opencode-go")
+    claude = ("claude-code", "claude")
+    assert c.latest("claude-code", "glm-5", T, [go]) == T + 60
+    assert c.latest("claude-code", "glm-5", T, []) is None
+    assert c.latest("claude-code", "opus", T, [go, claude]) == T + 30
+    assert c.latest("claude-code", "opus", T, [go]) == T + 30
+    assert c.latest("claude-code", "opus", T + 31, [go, claude]) is None
+
+
+def test_a_catalogue_row_shows_a_pool_fall_of_its_agents_pool():
+    c = Cooling()
+    c.cool(GO, "glm-5", Fall("pool", 120.0), T, "opencode-go")
+    assert c.latest("claude-code", "kimi-k3", T, [(GO, "opencode-go")]) == T + 120
+    assert c.latest("claude-code", "kimi-k3", T, [("claude-code", "claude")]) is None

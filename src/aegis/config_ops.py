@@ -15,9 +15,11 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
+from .cascade import cooling_owner
 from .config import ConfigDoc, McpDoc, mcp_raw, stamp_from, write
 from . import mcp_servers
 from .ops import OpError
+from .quota_gate import pool_for
 from . import service
 from .doctor import Found, detect, doctor, propose
 from .doctor_watch import DoctorWatch
@@ -27,6 +29,14 @@ if TYPE_CHECKING:
     from .app import App
 
 DETECT_TTL_S = 60.0
+
+
+def _draws_on(agent, model: str) -> tuple[str, str | None]:
+    """The cooling keys an agent's sessions on ``model`` draw on: its
+    cooling owner and its pool. An agent names no connection yet, so both
+    are its harness's; a connection's endpoint and pool take their place
+    when the agent gains one."""
+    return cooling_owner(agent.harness, None), pool_for(agent.harness, model)
 
 
 class McpTest(BaseModel):
@@ -139,12 +149,18 @@ def register_config_ops(app: App) -> None:
                     for v in (m.value, m.resolved)
                     if v in a.models
                 ]
+                names = {u["agent"] for u in used}
                 rows.append(
                     {
                         "harness": f.harness,
                         **m.wire(),
                         "used_by": list({u["agent"]: u for u in used}.values()),
-                        "cooling_until": app.cooling.until(f.harness, m.value, now),
+                        "cooling_until": app.cooling.latest(
+                            f.harness,
+                            m.value,
+                            now,
+                            [_draws_on(a, m.value) for a in agents if a.name in names],
+                        ),
                     }
                 )
         rows.sort(
