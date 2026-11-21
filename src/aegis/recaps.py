@@ -65,6 +65,8 @@ class Recaps:
                 recap.TIMEOUT_S,
                 oneshot.message(recap.SYSTEM, prompt, cfg["harness"]),
                 harness=cfg["harness"],
+                connection=cfg.get("connection"),
+                pool=cfg.get("pool"),
             )
         except (oneshot.OneshotError, PermissionError) as e:
             return {"status": "failed", "why": str(e)}

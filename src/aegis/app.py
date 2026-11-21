@@ -652,7 +652,8 @@ class App:
         reg.workflows = self.workflows
         reg.browsers = self.browsers
         self.catalogs = commands.Catalogs(
-            roots.state_root / "stderr" / "catalog-probe.log"
+            roots.state_root / "stderr" / "catalog-probe.log",
+            lambda: self.config.current().agents,
         )
         # The last sends that carried a nonce, oldest first: (log_id, nonce)
         # -> the delivery a retry answers with instead of delivering again.

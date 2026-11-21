@@ -22,10 +22,11 @@ from __future__ import annotations
 
 import asyncio
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from .agents import EFFORTS, Agent, model_suggestions
 from .claude import control
 from .claude.control import Catalog
 from .ops import OpError
@@ -361,6 +362,18 @@ def ranked(cat: Catalog) -> Catalog:
     return replace(cat, models=annotate(cat.models))
 
 
+def connection_models(s: Session, agents: list[Agent]) -> list[str]:
+    """What /model offers a connection session: its own model and cascade
+    first (from its record), then every model a claude-code agent on the same
+    endpoint names (``model_suggestions``)."""
+    conn = s.spec.connection
+    assert conn is not None
+    same = [a for a in agents if a.base_url == conn.base_url]
+    out = [s.spec.model, *s.spec.cascade]
+    out += model_suggestions(same).get(s.spec.harness, [])
+    return list(dict.fromkeys(m for m in out if m))
+
+
 class Catalogs:
     """Each (harness, cwd)'s catalog, from a live process or a probe.
 
@@ -371,8 +384,12 @@ class Catalogs:
     lookups for one cwd share a single probe, so a burst of keystrokes after a
     restart starts one ``claude``, not one per key."""
 
-    def __init__(self, stderr_path: Path) -> None:
+    def __init__(
+        self, stderr_path: Path, agents: Callable[[], Iterable[Agent]] = tuple
+    ) -> None:
         self._stderr = stderr_path
+        # The configured agents, read when a connection session asks.
+        self._agents = agents
         self._by_key: dict[str, Catalog] = {}
         self._failed: set[str] = set()
         self._probing: dict[str, asyncio.Task[Catalog | None]] = {}
@@ -392,6 +409,22 @@ class Catalogs:
         return self._by_key.get(self._key(harness, cwd))
 
     async def get(self, s: Session) -> Catalog | None:
+        cat = await self._get(s)
+        if s.spec.connection is None:
+            return cat
+        # Claude Code lists Anthropic's models whatever its endpoint: a
+        # connection session offers its agents' own, with Claude Code's
+        # commands.
+        models = connection_models(s, list(self._agents()))
+        return Catalog(
+            cat.commands if cat is not None else (),
+            tuple(
+                control.Model(value=m, resolved=m, label=m, doc="", efforts=EFFORTS)
+                for m in models
+            ),
+        )
+
+    async def _get(self, s: Session) -> Catalog | None:
         key = self._key(s.spec.harness, s.spec.cwd)
         t = s.catalog_task
         if t is not None:

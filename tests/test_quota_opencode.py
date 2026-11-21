@@ -253,3 +253,56 @@ def test_a_fetch_stamps_its_reading_on_the_clock_that_counts_sleep(monkeypatch):
         "sk-go", opener=lambda req, timeout=None: _Resp(json.dumps(LIVE).encode())
     )
     assert snap.fetched_at == 42.0
+
+
+# -- The Go key as a connection's inference key (task 15) --------------------
+
+
+def test_go_declares_read_key_as_its_inference_key_and_the_others_none():
+    from aegis.quota import PROVIDERS
+
+    keys = {p.name: p.inference_key for p in PROVIDERS}
+    assert keys == {"opencode-go": read_key, "claude": None, "cursor": None}
+
+
+def test_the_inference_key_is_read_from_the_database(tmp_path, monkeypatch):
+    from aegis.claude import connection
+
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    monkeypatch.delenv("OPENCODE_AUTH", raising=False)
+    _opencode_db(tmp_path, [("opencode-go", "sk-go-db", 1)])
+    assert connection.read_key(None, "opencode-go") == "sk-go-db"
+
+
+def test_the_inference_key_is_read_from_auth_json(tmp_path, monkeypatch):
+    from aegis.claude import connection
+
+    auth = tmp_path / "auth.json"
+    auth.write_text(json.dumps({"opencode-go": {"type": "api", "key": "sk-go-1x"}}))
+    monkeypatch.setenv("OPENCODE_AUTH", str(auth))
+    assert connection.read_key(None, "opencode-go") == "sk-go-1x"
+
+
+@pytest.mark.parametrize("pool", ["claude", "cursor", "none", None])
+def test_a_pool_with_no_key_of_its_own_is_an_error(pool):
+    from aegis.claude import connection
+
+    with pytest.raises(connection.KeyProblem, match="set api_key_file"):
+        connection.read_key(None, pool)
+
+
+def test_a_key_file_wins_over_the_pools_key(tmp_path, monkeypatch):
+    from aegis.claude import connection
+
+    auth = tmp_path / "auth.json"
+    auth.write_text(json.dumps({"opencode-go": {"type": "api", "key": "sk-go"}}))
+    monkeypatch.setenv("OPENCODE_AUTH", str(auth))
+    key = tmp_path / "own.key"
+    key.write_text("sk-own\n")
+    key.chmod(0o600)
+    assert connection.read_key(str(key), "opencode-go") == "sk-own"
+    key.chmod(0o644)
+    with pytest.raises(connection.KeyProblem, match="0600"):
+        connection.read_key(str(key), "opencode-go")
+    with pytest.raises(connection.KeyProblem, match="does not exist"):
+        connection.read_key(str(tmp_path / "gone.key"), "opencode-go")

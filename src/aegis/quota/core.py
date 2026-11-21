@@ -141,6 +141,11 @@ class QuotaProvider:
     # its hash goes on the wire, so two linked servers on one account can show
     # its gauges once (links.py) without either learning the other's id.
     account: Callable[[], str | None] = lambda: None
+    # The key a claude-code connection on this pool sends to the endpoint when
+    # its agent names no api_key_file (claude/connection.py), read at each
+    # process start; None or a None answer: the pool has none of its own. The
+    # quota key doubles as one only where the vendor says so (Go does).
+    inference_key: Callable[[], str | None] | None = None
 
 
 def _severity(percent: float, given) -> str:

@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from aegis.meta import MetaStore
+from aegis.ops import OpError
 from aegis.claude.process import ControlError
 from aegis.session import Connection, Host, Session, SpawnSpec
 from aegis.transcript.entries import fold_records
@@ -628,22 +629,30 @@ def test_an_old_record_loads_with_no_connection(tmp_path):
 
 GO_AGENT = (
     "agents:\n  go: {harness: claude-code, model: m, effort: high, "
-    "permission: full, base_url: '%s', pool: none}\n"
+    "permission: full, base_url: '%s', pool: none, api_key_file: '%s'}\n"
 )
+
+
+def _go(tmp_path: Path, url: str) -> str:
+    """GO_AGENT at ``url``, with a key file the start accepts."""
+    key = tmp_path / "go.key"
+    key.write_text("sk-go\n")
+    key.chmod(0o600)
+    return GO_AGENT % (url, key)
 
 
 async def test_a_restart_keeps_the_endpoint_after_its_agent_is_edited(
     tmp_path, fake_claude
 ):
     cfg = tmp_path / ".aegis.yaml"
-    cfg.write_text(GO_AGENT % "https://one.example/anthropic")
+    cfg.write_text(_go(tmp_path, "https://one.example/anthropic"))
     w = await World(tmp_path, fake_claude).start()
     try:
         r = await w.app.registry.call("session.spawn", {"agent": "go"})
         s = w.session(r["log_id"])
         assert s.spec.connection.base_url == "https://one.example/anthropic"
         assert s.spec.pool == "none"
-        cfg.write_text(GO_AGENT % "https://two.example/anthropic")
+        cfg.write_text(_go(tmp_path, "https://two.example/anthropic"))
         await w.restart()
         reborn = w.session(r["log_id"])
         assert reborn.spec.connection.base_url == "https://one.example/anthropic"
@@ -715,3 +724,213 @@ async def test_a_failed_sign_in_off_claudes_pool_raises_no_claude_card(
     await turn(claude, "hello")  # no connection: the card, as today
     await until(lambda: cards(claude), what="the card")
     assert raised == [claude.handle]
+
+
+# -- The child's environment for a connection (task 15) ----------------------
+
+KEYED_AGENT = """\
+agents:
+  go:
+    harness: claude-code
+    model: m
+    effort: high
+    permission: full
+    base_url: https://gw.example/anthropic
+    pool: none
+    api_key_file: {key}
+    env: {{ANTHROPIC_DEFAULT_HAIKU_MODEL: m-small}}
+{extra}"""
+
+
+def _keyed(tmp_path, mode: int = 0o600, extra: str = "") -> Path:
+    key = tmp_path / "gw.key"
+    key.write_text("sk-gw-key\n")
+    key.chmod(mode)
+    (tmp_path / ".aegis.yaml").write_text(KEYED_AGENT.format(key=key, extra=extra))
+    return key
+
+
+def _envs(path: Path) -> list[dict]:
+    return [json.loads(line) for line in path.read_text().splitlines()]
+
+
+async def test_a_connection_child_runs_on_its_endpoint_without_a_claude_token(
+    tmp_path, fake_claude, monkeypatch
+):
+    _keyed(tmp_path)
+    put("sk-ant-oat01-" + "A1b2_C3d4-" * 9)  # a token file, as on any server
+    log = tmp_path / "env.log"
+    monkeypatch.setenv("FAKE_CLAUDE_ENV_LOG", str(log))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-the-servers-own")
+    w = await World(tmp_path, fake_claude).start()
+    try:
+        r = await w.app.registry.call("session.spawn", {"agent": "go"})
+        await until(lambda: log.exists(), what="the child's environment")
+        env = _envs(log)[-1]
+        assert env["ANTHROPIC_BASE_URL"] == "https://gw.example/anthropic"
+        assert env["ANTHROPIC_AUTH_TOKEN"] == "sk-gw-key"
+        assert env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] == "m-small"
+        assert "CLAUDE_CODE_OAUTH_TOKEN" not in env
+        assert "ANTHROPIC_API_KEY" not in env
+        assert env["AEGIS_SESSION"] == r["log_id"]
+        # A session on Anthropic beside it still gets the token.
+        (tmp_path / ".aegis.yaml").write_text(
+            KEYED_AGENT.format(
+                key=tmp_path / "gw.key",
+                extra="  opus: {harness: claude-code, model: opus, effort: high, "
+                "permission: full}\n",
+            )
+        )
+        await w.app.registry.call("session.spawn", {"agent": "opus"})
+        await until(lambda: len(_envs(log)) == 2, what="the plain child")
+        assert _envs(log)[-1]["CLAUDE_CODE_OAUTH_TOKEN"].startswith("sk-ant-oat01-")
+    finally:
+        await w.stop()
+
+
+async def test_a_key_file_open_to_others_refuses_the_start(tmp_path, fake_claude):
+    key = _keyed(tmp_path, mode=0o644)
+    w = await World(tmp_path, fake_claude).start()
+    try:
+        with pytest.raises(OpError) as e:
+            await w.app.registry.call("session.spawn", {"agent": "go"})
+        assert "agent go" in e.value.message and "0600" in e.value.message
+        assert str(key) in e.value.message
+    finally:
+        await w.stop()
+
+
+async def test_an_isolated_connection_session_has_no_link_to_the_sign_in(
+    tmp_path, fake_claude, monkeypatch
+):
+    own = tmp_path / "claude-home"
+    own.mkdir()
+    (own / ".credentials.json").write_text("{}")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(own))
+    log = tmp_path / "env.log"
+    monkeypatch.setenv("FAKE_CLAUDE_ENV_LOG", str(log))
+    key = _keyed(tmp_path)
+    (tmp_path / ".aegis.yaml").write_text(
+        KEYED_AGENT.format(key=key, extra="").replace(
+            "    pool: none\n", "    pool: none\n    isolated: true\n"
+        )
+    )
+    w = await World(tmp_path, fake_claude).start()
+    try:
+        await w.app.registry.call("session.spawn", {"agent": "go"})
+        await until(lambda: log.exists(), what="the child's environment")
+        home = Path(_envs(log)[-1]["CLAUDE_CONFIG_DIR"])
+        assert home != own and home.is_dir()
+        assert not (home / ".credentials.json").exists()
+        assert not (home / ".credentials.json").is_symlink()
+    finally:
+        await w.stop()
+
+
+def test_what_aegis_sets_wins_over_the_agents_env(tmp_path):
+    from aegis.claude.harness import ClaudeSession
+    from aegis.harness import Launch
+
+    key = tmp_path / "k"
+    key.write_text("sk-k")
+    key.chmod(0o600)
+    sess = ClaudeSession(
+        "claude",
+        Launch(
+            cwd=tmp_path,
+            model="m",
+            effort="high",
+            permission="full",
+            resume_id=None,
+            mcp=("http://127.0.0.1:1/mcp", "tok"),
+            system_prompt=None,
+            stderr_path=tmp_path / "err",
+            on_line=lambda _: None,
+            on_exit=lambda *_: None,
+            log_id="the-session",
+            home=tmp_path / "home",
+            connection=Connection(
+                base_url="https://gw.example/anthropic",
+                api_key_file=str(key),
+                env=(("AEGIS_SESSION", "not-this"), ("MY_FLAG", "1")),
+            ),
+            pool="none",
+        ),
+    )
+    env = sess._proc.env
+    assert env["AEGIS_SESSION"] == "the-session"
+    assert env["CLAUDE_CONFIG_DIR"] == str(tmp_path / "home")
+    assert env["MY_FLAG"] == "1" and env["ANTHROPIC_AUTH_TOKEN"] == "sk-k"
+
+
+async def test_model_offers_the_agents_own_models_for_a_connection_session(
+    tmp_path, fake_claude
+):
+    _keyed(
+        tmp_path,
+        extra="  go2: {harness: claude-code, model: m-big, effort: high, "
+        "permission: full, base_url: 'https://gw.example/anthropic', pool: none, "
+        "api_key_file: '%s'}\n"
+        "  opus: {harness: claude-code, model: opus, effort: high, "
+        "permission: full}\n" % (tmp_path / "gw.key"),
+    )
+    w = await World(tmp_path, fake_claude).start()
+    try:
+        r = await w.app.registry.call("session.spawn", {"agent": "go"})
+        s = w.session(r["log_id"])
+        cat = await w.app.catalogs.get(s)
+        assert [m.value for m in cat.models] == ["m", "m-big"]
+        with pytest.raises(OpError) as e:
+            await w.app.registry.call(
+                "session.configure", {"log_id": s.log_id, "model": "opus"}
+            )
+        assert e.value.code == "unknown_model"
+        plain = await w.app.registry.call("session.spawn", {"agent": "opus"})
+        cat = await w.app.catalogs.get(w.session(plain["log_id"]))
+        assert "m-big" not in [m.value for m in cat.models]
+    finally:
+        await w.stop()
+
+
+async def test_a_handoff_resolves_the_agent_again_and_takes_its_connection(
+    tmp_path, fake_claude
+):
+    """A handoff that names its agent resolves it from .aegis.yaml as it is
+    now, connection and all; one that names none continues the old spec, as
+    a resume does, and keeps the endpoint its record holds."""
+    cfg = tmp_path / ".aegis.yaml"
+    cfg.write_text(_go(tmp_path, "https://one.example/anthropic"))
+    w = await World(tmp_path, fake_claude).start()
+
+    def successor(old):
+        return next(
+            (
+                s
+                for s in w.app.sessions.sessions.values()
+                if s.spec.continues == old.log_id
+            ),
+            None,
+        )
+
+    try:
+        named, bare = [
+            w.session(
+                (await w.app.registry.call("session.spawn", {"agent": "go"}))["log_id"]
+            )
+            for _ in range(2)
+        ]
+        cfg.write_text(_go(tmp_path, "https://two.example/anthropic"))
+        for old, params in ((named, {"agent": "go"}), (bare, {})):
+            await w.app.registry.call(
+                "session.handoff", {"log_id": old.log_id, "msg": "go on", **params}
+            )
+            await until(lambda: successor(old) is not None, what="the new session")
+        assert successor(named).spec.connection.base_url == (
+            "https://two.example/anthropic"
+        )
+        assert successor(named).spec.pool == "none"
+        assert successor(bare).spec.connection.base_url == (
+            "https://one.example/anthropic"
+        )
+    finally:
+        await w.stop()

@@ -399,6 +399,18 @@ def model_suggestions(agents: list[Agent]) -> dict[str, list[str]]:
     return out
 
 
+def connection_of(agent: Agent) -> Connection | None:
+    """The agent's connection as a spec and a one-shot carry it; None for an
+    agent on Anthropic."""
+    if not agent.base_url:
+        return None
+    return Connection(
+        base_url=agent.base_url,
+        api_key_file=agent.api_key_file or None,
+        env=tuple(agent.env.items()),
+    )
+
+
 def resolve(
     agents: list[Agent],
     default: str | None,
@@ -442,15 +454,7 @@ def resolve(
     # The connection and its pool belong to the agent's harness: another
     # harness drops both and derives its pool; another model keeps both, so
     # every model of a cascade runs on the one account.
-    connection = (
-        Connection(
-            base_url=agent.base_url,
-            api_key_file=agent.api_key_file or None,
-            env=tuple(agent.env.items()),
-        )
-        if agent.base_url and "harness" not in overridden
-        else None
-    )
+    connection = connection_of(agent) if "harness" not in overridden else None
     return SpawnSpec(
         agent=agent.name,
         model=fields["model"],

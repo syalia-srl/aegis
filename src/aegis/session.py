@@ -46,6 +46,7 @@ from typing import Any, Literal
 from . import attachments, cache, harness_versions, launch as launching, restarts
 from . import layout as canvas
 from .artifacts import ArtifactError, Board
+from .claude.connection import KeyProblem
 from .claude.control import Catalog
 from .claude.process import ControlError
 from .claude.stream import (
@@ -965,31 +966,42 @@ class Session:
             attachments.ensure_inbox, self.state_root, self.log_id
         )
         self.exit_via = launching.resolve_via(self.spec.agent)
-        proc = self.harness.process(
-            Launch(
-                via=self.exit_via,
-                cwd=cwd,
-                model=self.spec.model,
-                effort=self.spec.effort,
-                permission=self.spec.permission,
-                resume_id=resume,
-                mcp=mcp,
-                system_prompt=system_prompt,
-                stderr_path=self._stderr_path,
-                on_line=self._on_line,
-                on_exit=on_exit,
-                on_error=self._on_error,
-                read_dirs=(inbox,),
-                cgroup=self._host.cgroup(self),
-                log_id=self.log_id,
-                keep_harness_tools=self.spec.keep_harness_tools,
-                knowledge_native=self.spec.knowledge_native,
-                env=self.host_env,
-                extra_mcp=extra_mcp,
-                harness_tools=self.spec.harness_tools,
-                home=home,
+        try:
+            proc = self.harness.process(
+                Launch(
+                    via=self.exit_via,
+                    cwd=cwd,
+                    model=self.spec.model,
+                    effort=self.spec.effort,
+                    permission=self.spec.permission,
+                    resume_id=resume,
+                    mcp=mcp,
+                    system_prompt=system_prompt,
+                    stderr_path=self._stderr_path,
+                    on_line=self._on_line,
+                    on_exit=on_exit,
+                    on_error=self._on_error,
+                    read_dirs=(inbox,),
+                    cgroup=self._host.cgroup(self),
+                    log_id=self.log_id,
+                    keep_harness_tools=self.spec.keep_harness_tools,
+                    knowledge_native=self.spec.knowledge_native,
+                    env=self.host_env,
+                    extra_mcp=extra_mcp,
+                    harness_tools=self.spec.harness_tools,
+                    home=home,
+                    connection=self.spec.connection,
+                    pool=self.spec.pool,
+                )
             )
-        )
+        except KeyProblem as e:
+            # The key is read at each start: a key file gone, opened up or
+            # handed to another user refuses it, with the agent's error.
+            text = f"agent {self.spec.agent}: {e}"
+            self._record(
+                {"kind": "harness_error", "text": f"This session cannot start: {text}"}
+            )
+            raise OpError("bad_connection", text) from e
         # Before the start: a harness can speak while it starts (OpenCode's
         # session.created), and a line read while stopping is dropped.
         self._stopping = False

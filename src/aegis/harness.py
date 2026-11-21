@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Protocol
 if TYPE_CHECKING:
     from .claude.control import Catalog
     from .policy import McpServer
-    from .session import SpawnSpec
+    from .session import Connection, SpawnSpec
 
 
 def _no_error(text: str, idle: bool, line: str | None) -> None:
@@ -96,6 +96,11 @@ class Launch:
     # An isolated session's own config directory (isolated_dirs); None reads
     # the person's, as every other session does.
     home: Path | None = None
+    # The agent's connection (session.Connection) and the pool it draws on:
+    # claude-code runs against that endpoint with its key, not with the Claude
+    # sign-in (claude/connection.py). None: Anthropic, as every session before.
+    connection: Connection | None = None
+    pool: str | None = None
 
 
 # The switches a driver may guarantee (Harness.contains, #983).

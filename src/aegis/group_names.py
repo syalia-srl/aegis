@@ -154,6 +154,8 @@ class GroupNames:
                     SYSTEM, prompt([_member(s) for s in members]), cfg["harness"]
                 ),
                 harness=cfg["harness"],
+                connection=cfg.get("connection"),
+                pool=cfg.get("pool"),
             )
         except (oneshot.OneshotError, PermissionError) as e:
             log.warning("aegis: naming group %s: %s", key, e)

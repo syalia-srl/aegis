@@ -189,6 +189,7 @@ PROVIDER = QuotaProvider(
     fetch=fetch_usage,
     read_token=read_key,
     account=read_key,  # one key, one account
+    inference_key=read_key,  # the Go gateway takes the same key
     # `monthly` is a calendar month, so 30 days is an approximation: on a
     # 31-day month it overstates the elapsed fraction by 3.3% and understates
     # the projection by about the same, which can only change a colour within

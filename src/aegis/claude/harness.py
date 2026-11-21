@@ -15,7 +15,7 @@ import os
 
 from ..harness import Launch, session_env
 from ..mcp_servers import by_ref
-from . import login
+from . import connection, login
 from . import control
 from .control import Catalog
 from .process import (
@@ -36,14 +36,18 @@ _SETTERS = {
 }
 
 
-def isolated_env(home: Path) -> dict[str, str]:
+def isolated_env(home: Path, link_login: bool = True) -> dict[str, str]:
     """An isolated session's environment (#983): ``home`` as Claude Code's
     config dir, holding a link to the person's sign-in and nothing else of
     theirs (no CLAUDE.md, skills, plugins or settings). An empty dir without
-    the link starts signed out."""
+    the link starts signed out. ``link_login`` False makes no link and removes
+    one left there: a connection session signs in to its own endpoint."""
     own = os.environ.get("CLAUDE_CONFIG_DIR") or str(Path.home() / ".claude")
     link, login_file = home / ".credentials.json", Path(own) / ".credentials.json"
-    if login_file.exists() and not link.is_symlink():
+    if not link_login:
+        if link.is_symlink():
+            link.unlink()
+    elif login_file.exists() and not link.is_symlink():
         link.symlink_to(login_file)
     return {"CLAUDE_CONFIG_DIR": str(home)}
 
@@ -63,14 +67,21 @@ class ClaudeSession:
             disallowed = tuple(t for t in REPLACED_TOOLS if t not in keep)
             if launch.knowledge_native:
                 disallowed += tuple(NATIVE_TOOLS)
-        env = session_env(launch)
+        conn = launch.connection
+        # The connection's endpoint, key and env first; what aegis sets for
+        # the harness below goes on top of them.
+        base = None if conn is None else connection.base_env(conn, launch.pool)
+        env = session_env(launch, base)
         if launch.extra_mcp:
             refs = by_ref(launch.extra_mcp)[1]
             env = {**(os.environ if env is None else env), **refs}
         if launch.knowledge_native:
             env = {**(os.environ if env is None else env), **NO_AUTO_MEMORY}
         if launch.home is not None:
-            env = {**(os.environ if env is None else env), **isolated_env(launch.home)}
+            env = {
+                **(os.environ if env is None else env),
+                **isolated_env(launch.home, link_login=conn is None),
+            }
         argv = build_argv(
             bin,
             launch.model,
@@ -90,7 +101,8 @@ class ClaudeSession:
             launch.stderr_path,
             launch.on_line,
             launch.on_exit,
-            env=login.with_token(env),
+            # A connection's child has its own key and no Claude token.
+            env=login.with_token(env) if conn is None else env,
             cgroup=launch.cgroup,
             via=launch.via,
         )
