@@ -82,7 +82,7 @@ class Gate:
 
 
 def pool_for(harness: str, model: str | None) -> str | None:
-    """The pool a session draws on; the client's providerFor (gauges.js)."""
+    """The pool a session draws on by default, from its harness and model."""
     for name, h in POOLS.items():
         if h != harness:
             continue

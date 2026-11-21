@@ -217,7 +217,7 @@ details.task ol,details.task p{padding-right:4px}
 <div class="verify"><b>verify</b> <code>uv run pytest tests/test_quota_wire.py -q</code> — a session with no recorded pool carries the pool <code>pool_for</code> answers for its harness and model.</div>
 </details>
 
-<details class="task" id="task-8" data-state="pending"><summary><span class="n">8</span><span class="t"><code>providerFor</code> by name, and the sidebar's browser test</span><span class="s">pending</span><span class="f">src/aegis/client/js/gauges.js, parts/sidebar.js (unchanged), tests/test_pool_browser.py (new)</span></summary>
+<details class="task" id="task-8" data-state="done"><summary><span class="n">8</span><span class="t"><code>providerFor</code> by name, and the sidebar's browser test</span><span class="s">pending</span><span class="f">src/aegis/client/js/gauges.js, parts/sidebar.js (unchanged), tests/test_pool_browser.py (new)</span></summary>
 <ol>
   <li><code>providerFor(s, providers)</code> becomes <code>providers.find(p =&gt; p.name === s.pool) || null</code>; its only caller, <code>parts/sidebar.js:854</code>, is unchanged. A pool <code>none</code>, or none at all, still answers null.</li>
   <li>There is no sidebar gauge test on main to change: add <code>tests/test_pool_browser.py</code>, a session whose card names <code>opencode-go</code> and one whose card names <code>claude</code>, at 1280 and 390 px.</li>
