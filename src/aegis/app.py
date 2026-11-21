@@ -608,7 +608,7 @@ class App:
             self.publish,
             meta_of=self._meta_of_session,
             accounts=lambda: {
-                p["harness"]: f"{p['name']}:{p['account']}"
+                p["name"]: f"{p['name']}:{p['account']}"
                 for p in self.quota.snapshot()["providers"]
                 if p["account"]
             },

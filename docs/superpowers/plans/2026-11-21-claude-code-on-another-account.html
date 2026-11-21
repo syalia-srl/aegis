@@ -196,7 +196,7 @@ details.task ol,details.task p{padding-right:4px}
 <div class="verify"><b>verify</b> <code>uv run pytest tests/test_config_coverage.py -q</code>, and a unit assert (in <code>tests/test_cascade.py</code>) that a model used only by a connection agent reports that endpoint's fall while a model used by both keeps the harness fall.</div>
 </details>
 
-<details class="task" id="task-6" data-state="pending"><summary><span class="n">6</span><span class="t">The turn is billed to the session's account</span><span class="s">pending</span><span class="f">src/aegis/usage/turns.py, src/aegis/journal/service.py, src/aegis/app.py, src/aegis/usage/importer.py, tests/usage/test_turns.py</span></summary>
+<details class="task" id="task-6" data-state="done"><summary><span class="n">6</span><span class="t">The turn is billed to the session's account</span><span class="s">pending</span><span class="f">src/aegis/usage/turns.py, src/aegis/journal/service.py, src/aegis/app.py, src/aegis/usage/importer.py, tests/usage/test_turns.py</span></summary>
 <ol>
   <li><code>SessionInfo</code> gains <code>pool: str | None = None</code>, and its <code>account</code> callable is asked by pool instead of by harness.</li>
   <li><code>journal/service.py:370</code> passes <code>pool=meta.get("pool")</code>, and <code>app.py:603</code>'s <code>accounts</code> is keyed by <code>p["name"]</code> instead of <code>p["harness"]</code>.</li>

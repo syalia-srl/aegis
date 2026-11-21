@@ -120,8 +120,8 @@ class Journal:
         self._publish = publish
         self._derivers: dict[str, Deriver] = {}
         # A session's meta (owner, kind, harness, continues, agent, worker
-        # queue, starter) and the account each harness is logged in as, read
-        # when its usage deriver is made.
+        # queue, starter, pool) and the account each pool is logged in as,
+        # read when its usage deriver is made.
         self.meta_of = meta_of
         self.accounts = accounts
         self._usage: dict[str, UsageDeriver] = {}
@@ -367,7 +367,8 @@ class Journal:
             agent=meta.get("agent") or None,
             queue=(meta.get("worker") or {}).get("queue") or None,
             starter=next((meta[k] for k in LINKS if meta.get(k)), None),
-            account=lambda harness: self.accounts().get(harness),
+            pool=meta.get("pool") or None,
+            account=lambda pool: self.accounts().get(pool),
             replay_start=self._replay_start(con),
         )
         return UsageDeriver(info, self._repo_of(con))
