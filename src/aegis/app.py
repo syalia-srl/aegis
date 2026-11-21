@@ -139,7 +139,7 @@ from .quota_gate import (
     Gate,
     continued,
     opens_again,
-    pool_for,
+    pool_of,
     refusal,
 )
 from .btws import SideNotes
@@ -1076,7 +1076,7 @@ class App:
         cur = self.config.current()
         agents = {a.name: a.guard for a in cur.agents}
         queues = {n: q.get("guard") for n, q in cur.queues.items()}
-        pool = pool_for(spec.harness, model or spec.model)
+        pool = pool_of(spec, model)
         over = guards.levels(
             spec.record(), queue, agents, queues, self._record_of, pool
         )

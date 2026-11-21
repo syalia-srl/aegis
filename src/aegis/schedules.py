@@ -51,7 +51,7 @@ from .monitors import run_bash
 from .names import valid_handle
 from .ops import OpError
 from .scopes import Scope
-from .quota_gate import lines_gate, pool_for
+from .quota_gate import lines_gate, pool_of
 from .workflow_lang import edit_diff, parse, rows as workflow_rows
 from .workflow_store import check_named
 from .schedule_log import (
@@ -269,12 +269,12 @@ class Schedules:
         try:
             if s.d.fire.target == "existing":
                 t = self._target(s).spec
-                return self._line(s, t.harness, t.model) is None
+                return self._line(s, t) is None
             spec = self._spec(s)
         except OpError:
             return True  # the fire says what is wrong
         spec, g = self._app.start_spec(spec, guarded=False)
-        return g.may_start and self._line(s, spec.harness, spec.model) is None
+        return g.may_start and self._line(s, spec) is None
 
     def _refused(self, spec) -> str | None:
         """Why the guard of a run's new session refuses its first turn: an
@@ -295,13 +295,13 @@ class Schedules:
             return g.why
         return None
 
-    def _line(self, s: Schedule, harness: str, model: str | None) -> str | None:
-        """Why the schedule's own launch line for the pool a fire draws on
-        holds it, or None when every line is clear (quota_gate.decide). A
-        pool aegis has never read has no line: there is nothing to measure,
-        and holding every tick would stop the schedule for good. A stale
-        reading holds, as it does a token's gate."""
-        pool = pool_for(harness, model)
+    def _line(self, s: Schedule, spec: SpawnSpec) -> str | None:
+        """Why the schedule's own launch line for the pool a fire of ``spec``
+        draws on (quota_gate.pool_of) holds it, or None when every line is
+        clear (quota_gate.decide). A pool aegis has never read has no line:
+        there is nothing to measure, and holding every tick would stop the
+        schedule for good. A stale reading holds, as it does a token's gate."""
+        pool = pool_of(spec)
         # A percent or pace line keeps the form it always had: a full
         # window holds a fire (its stop at 100), and pace closes only above
         # 100% projected (quota_gate._pace). A map line reads as written.
@@ -368,7 +368,7 @@ class Schedules:
                     return self._tick(
                         name, tick, "skipped", why="quota", line=why, **extra
                     )
-                if line := self._line(s, spec.harness, spec.model):
+                if line := self._line(s, spec):
                     return self._tick(
                         name, tick, "held", why="quota", line=line, **extra
                     )
@@ -391,7 +391,7 @@ class Schedules:
                     return self._tick(
                         name, tick, "skipped", why="quota", line=why, **extra
                     )
-                if line := self._line(s, ses.spec.harness, ses.spec.model):
+                if line := self._line(s, ses.spec):
                     return self._tick(
                         name, tick, "held", why="quota", line=line, **extra
                     )
