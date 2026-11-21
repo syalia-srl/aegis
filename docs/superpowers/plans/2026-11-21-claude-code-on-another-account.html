@@ -269,7 +269,7 @@ details.task ol,details.task p{padding-right:4px}
 <div class="verify"><b>verify</b> <code>uv run pytest tests/test_config_coverage.py tests/test_config_write.py -q</code> — a save keeps the four keys and the comments around them.</div>
 </details>
 
-<details class="task" id="task-13" data-state="pending"><summary><span class="n">13</span><span class="t"><code>resolve</code> copies the connection; the spec and its record keep it</span><span class="s">pending</span><span class="f">src/aegis/agents.py, src/aegis/session.py, tests/test_agent_config.py, tests/test_session.py</span></summary>
+<details class="task" id="task-13" data-state="done"><summary><span class="n">13</span><span class="t"><code>resolve</code> copies the connection; the spec and its record keep it</span><span class="s">pending</span><span class="f">src/aegis/agents.py, src/aegis/session.py, tests/test_agent_config.py, tests/test_session.py</span></summary>
 <ol>
   <li><code>Connection</code>: <code>base_url</code>, <code>api_key_file</code> (a path or None for the pool's own key) and <code>env</code> as a tuple of pairs, so <code>SpawnSpec</code> stays hashable. <code>SpawnSpec</code> gains <code>pool</code> (set now) and <code>connection</code>.</li>
   <li><code>agents.resolve</code> copies both. A spawn that overrides <code>harness</code> drops both and derives the pool again; one that overrides <code>model</code> keeps both, so a cascade runs on one account.</li>

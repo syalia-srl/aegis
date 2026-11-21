@@ -48,7 +48,7 @@ from .quota_gate import NONE
 from . import scopes
 from .roots import CONFIG_FILE
 from .scopes import Scope
-from .session import SWITCHES, SpawnSpec
+from .session import SWITCHES, Connection, SpawnSpec
 
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 HARNESSES = ("claude-code", "opencode", "codex", "cursor", "pi")
@@ -409,7 +409,9 @@ def resolve(
 ) -> SpawnSpec:
     """The spec a spawn runs: the agent's fields, each replaced by its override
     when one is given. The priming is always the agent's. Its scope is the
-    agent's met with ``within``, the scope of the session that starts it."""
+    agent's met with ``within``, the scope of the session that starts it. Its
+    connection and pool are the agent's unless the spawn names another
+    harness."""
     name = name or default
     if not name:
         raise OpError("no_agent", "no agent given and no default_agent in .aegis.yaml")
@@ -434,6 +436,18 @@ def resolve(
     # An explicit model is the person's choice: it runs alone, with no cascade.
     own = not {"model", "harness"} & set(overridden)
     cascade = agent.models if own and len(agent.models) > 1 else ()
+    # The connection and its pool belong to the agent's harness: another
+    # harness drops both and derives its pool; another model keeps both, so
+    # every model of a cascade runs on the one account.
+    connection = (
+        Connection(
+            base_url=agent.base_url,
+            api_key_file=agent.api_key_file or None,
+            env=tuple(agent.env.items()),
+        )
+        if agent.base_url and "harness" not in overridden
+        else None
+    )
     return SpawnSpec(
         agent=agent.name,
         model=fields["model"],
@@ -445,6 +459,8 @@ def resolve(
         keep_harness_tools=agent.keep_harness_tools,
         **{k: getattr(agent, k) for k in SWITCHES},
         cascade=cascade,
+        pool=(agent.pool or None) if connection else None,
+        connection=connection,
         overridden=overridden,
         spawned_by=spawned_by,
         group=group,

@@ -5,6 +5,8 @@ import pytest
 from aegis.agents import ConfigError, load_agents, model_suggestions, resolve
 from aegis.ops import OpError
 from aegis.queues import load_queues
+from aegis.quota_gate import pool_of
+from aegis.session import Connection
 
 
 def write(tmp_path: Path, text: str) -> Path:
@@ -376,3 +378,52 @@ def test_a_connection_inside_provider_is_refused(tmp_path):
     )
     assert a.error and "base_url, pool go on the agent, not in provider:" in a.error
     assert a.base_url == ""
+
+
+def go_agents(tmp_path):
+    return load_agents(
+        write(
+            tmp_path,
+            "agents:\n  go:\n    harness: claude-code\n    effort: high\n"
+            "    permission: full\n    models: [deepseek-v4.1-flash, kimi-k2]\n"
+            "    base_url: https://opencode.ai/inference/go/anthropic\n"
+            "    pool: opencode-go\n    api_key_file: /keys/go.key\n"
+            "    env: {ANTHROPIC_DEFAULT_HAIKU_MODEL: deepseek-v4.1-flash}\n",
+        )
+    )
+
+
+def test_resolve_copies_the_connection_and_its_pool(tmp_path):
+    spec = resolve(go_agents(tmp_path), None, "go", {}, tmp_path)
+    assert spec.pool == "opencode-go"
+    assert spec.connection == Connection(
+        base_url="https://opencode.ai/inference/go/anthropic",
+        api_key_file="/keys/go.key",
+        env=(("ANTHROPIC_DEFAULT_HAIKU_MODEL", "deepseek-v4.1-flash"),),
+    )
+    assert spec.cascade == ("deepseek-v4.1-flash", "kimi-k2")
+    hash(spec.connection)  # pairs, not a dict: the connection is hashable
+
+
+def test_a_model_override_keeps_the_connection(tmp_path):
+    spec = resolve(go_agents(tmp_path), None, "go", {"model": "kimi-k2"}, tmp_path)
+    assert spec.model == "kimi-k2" and spec.cascade == ()
+    assert spec.pool == "opencode-go"
+    assert spec.connection and spec.connection.base_url.startswith("https://opencode")
+
+
+def test_a_harness_override_drops_the_connection_and_derives_the_pool(tmp_path):
+    spec = resolve(
+        go_agents(tmp_path),
+        None,
+        "go",
+        {"harness": "opencode", "model": "opencode-go/kimi-k2"},
+        tmp_path,
+    )
+    assert (spec.connection, spec.pool) == (None, None)
+    assert pool_of(spec) == "opencode-go"  # derived from harness and model
+
+
+def test_an_agent_without_a_connection_resolves_none(agents, tmp_path):
+    spec = resolve(agents, None, "opus", {}, tmp_path)
+    assert (spec.connection, spec.pool) == (None, None)

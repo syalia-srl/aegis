@@ -9,12 +9,12 @@ import pytest
 
 from aegis.meta import MetaStore
 from aegis.claude.process import ControlError
-from aegis.session import Host, Session, SpawnSpec
+from aegis.session import Connection, Host, Session, SpawnSpec
 from aegis.transcript.entries import fold_records
 from aegis.transcript.store import Store, read_store
 
 from .conftest import cmdline, until
-from .test_agents import turn, world  # noqa: F401  (fixture)
+from .test_agents import World, turn, world  # noqa: F401  (fixture)
 from .test_claude_login import BAD, cards, put
 
 
@@ -596,6 +596,60 @@ def test_a_recorded_pool_round_trips_as_written(tmp_path):
         spec = SpawnSpec("a", "opus", "high", "full", tmp_path, pool=pool)
         assert spec.record()["pool"] == pool
         assert SpawnSpec.from_record(spec.record(), tmp_path).pool == pool
+
+
+def test_a_connection_record_holds_the_key_files_path_never_the_key(tmp_path):
+    key = tmp_path / "go.key"
+    key.write_text("sk-the-key")
+    conn = Connection(
+        base_url="https://opencode.ai/inference/go/anthropic",
+        api_key_file=str(key),
+        env=(("ANTHROPIC_DEFAULT_HAIKU_MODEL", "m"),),
+    )
+    spec = SpawnSpec(
+        "go", "m", "high", "full", tmp_path, pool="opencode-go", connection=conn
+    )
+    rec = spec.record()
+    assert rec["connection"] == {
+        "base_url": "https://opencode.ai/inference/go/anthropic",
+        "api_key_file": str(key),
+        "env": {"ANTHROPIC_DEFAULT_HAIKU_MODEL": "m"},
+    }
+    assert "sk-the-key" not in json.dumps(rec)
+    back = SpawnSpec.from_record(json.loads(json.dumps(rec)), tmp_path)
+    assert back.connection == conn and back.pool == "opencode-go"
+
+
+def test_an_old_record_loads_with_no_connection(tmp_path):
+    spec = SpawnSpec.from_record({"agent": "a", "model": "opus"}, tmp_path)
+    assert spec.connection is None
+    assert "connection" not in spec.record()
+
+
+GO_AGENT = (
+    "agents:\n  go: {harness: claude-code, model: m, effort: high, "
+    "permission: full, base_url: '%s', pool: none}\n"
+)
+
+
+async def test_a_restart_keeps_the_endpoint_after_its_agent_is_edited(
+    tmp_path, fake_claude
+):
+    cfg = tmp_path / ".aegis.yaml"
+    cfg.write_text(GO_AGENT % "https://one.example/anthropic")
+    w = await World(tmp_path, fake_claude).start()
+    try:
+        r = await w.app.registry.call("session.spawn", {"agent": "go"})
+        s = w.session(r["log_id"])
+        assert s.spec.connection.base_url == "https://one.example/anthropic"
+        assert s.spec.pool == "none"
+        cfg.write_text(GO_AGENT % "https://two.example/anthropic")
+        await w.restart()
+        reborn = w.session(r["log_id"])
+        assert reborn.spec.connection.base_url == "https://one.example/anthropic"
+        assert reborn.spec.pool == "none"
+    finally:
+        await w.stop()
 
 
 # -- What only Claude's pool does (registry.rate_limit, turn_ended, sign_in_failed)

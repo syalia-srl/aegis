@@ -261,6 +261,42 @@ SWITCHES = {"harness_tools": True, "isolated": False, "primer": True, "notices":
 
 
 @dataclass(frozen=True)
+class Connection:
+    """The endpoint a claude-code session runs against instead of Anthropic
+    (agents.py): its URL, the file its key is read from at each process start
+    (None: the pool's own key), and the variables added to its process, as
+    pairs so the spec stays hashable. The record holds the path, never the
+    key."""
+
+    base_url: str
+    api_key_file: str | None = None
+    env: tuple[tuple[str, str], ...] = ()
+
+    def record(self) -> dict:
+        d: dict = {"base_url": self.base_url}
+        if self.api_key_file:
+            d["api_key_file"] = self.api_key_file
+        if self.env:
+            d["env"] = dict(self.env)
+        return d
+
+    @classmethod
+    def from_record(cls, raw: Any) -> "Connection | None":
+        """The connection a record holds; None when it holds none, as every
+        record from before connections does."""
+        if not isinstance(raw, dict) or not raw.get("base_url"):
+            return None
+        env = raw.get("env")
+        return cls(
+            base_url=str(raw["base_url"]),
+            api_key_file=str(raw["api_key_file"]) if raw.get("api_key_file") else None,
+            env=tuple((str(k), str(v)) for k, v in env.items())
+            if isinstance(env, dict)
+            else (),
+        )
+
+
+@dataclass(frozen=True)
 class SpawnSpec:
     """What a session's process runs with, fixed at spawn and recorded in the
     spawn record and the meta. A resume reads it from there, never from
@@ -305,6 +341,10 @@ class SpawnSpec:
     # for. None derives it from harness and model, as every record from
     # before it does. Read from the record, never from ``.aegis.yaml``.
     pool: str | None = None
+    # The agent's connection (Connection), copied at spawn; None: Anthropic,
+    # with the Claude sign-in. Read from the record like the pool, so editing
+    # the agent never moves an old session to another endpoint.
+    connection: Connection | None = None
     # The owner's knowledge setting when it was spawned (setup.Records):
     # native starts every process of it without the harness's own skills and
     # memory, and lets a store skill take a harness command's name. Fixed at
@@ -357,6 +397,8 @@ class SpawnSpec:
             d["cascade"] = list(self.cascade)
         if self.pool:
             d["pool"] = self.pool
+        if self.connection:
+            d["connection"] = self.connection.record()
         if self.knowledge_native:
             d["knowledge_native"] = True
         if self.tags:
@@ -391,6 +433,7 @@ class SpawnSpec:
             keep_harness_tools=tuple(d.get("keep_harness_tools") or ()),
             cascade=_cascade_of(d.get("cascade")),
             pool=d.get("pool") or None,
+            connection=Connection.from_record(d.get("connection")),
             knowledge_native=bool(d.get("knowledge_native")),
             tags=dict(d.get("tags") or {}),
             **{k: bool(d.get(k, default)) for k, default in SWITCHES.items()},
