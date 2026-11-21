@@ -18,13 +18,24 @@ Every model of a cascade runs on the agent's harness.
 Three forms name the harness: flat ``harness:``, ``provider: <harness>`` as a
 string (the Workspace's own form), and a nested ``provider:`` mapping whose
 ``name`` is the harness and whose other keys are fields.
+
+A ``claude-code`` agent may name a connection: ``base_url``, the endpoint it
+sends Claude Code to instead of Anthropic, with ``pool``, the account aegis
+meters it on, and optionally ``api_key_file`` and ``env``. Each is refused,
+with the agent's error, where it would put a credential into ``.aegis.yaml``
+(which is in git) or let the process reach the person's own Claude sign-in.
+The nested ``provider:`` map names models, not an account, so a connection
+written inside it is refused.
 """
 
 from __future__ import annotations
 
+import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from ruamel.yaml import YAML, YAMLError
 
@@ -32,6 +43,8 @@ from .claude.process import PERMISSION_MODE, REPLACED_TOOLS
 from .guards import AGENT_ACTIONS, Guard
 from . import budgets, guards
 from .ops import OpError
+from .quota import PROVIDERS
+from .quota_gate import NONE
 from . import scopes
 from .roots import CONFIG_FILE
 from .scopes import Scope
@@ -50,6 +63,19 @@ OPENCODE_MODEL = (
 )
 
 CODEX_MODEL = "a Codex model is provider/model, such as openai/gpt-5.5"
+
+# A connection's keys (``_connection``), and the pools it may name: a quota
+# provider's, or none. codex has no provider, so no gauge could read it.
+CONNECTION_KEYS = ("base_url", "pool", "api_key_file", "env")
+CONNECTION_POOLS = tuple(p.name for p in PROVIDERS) + (NONE,)
+# env names that would carry a credential into a file in git, or point the
+# process back at the person's own config directory and its sign-in.
+ENV_REFUSED = (
+    "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN",
+    "ANTHROPIC_CUSTOM_HEADERS", "ANTHROPIC_BASE_URL", "CLAUDE_CONFIG_DIR", "HOME",
+)  # fmt: skip
+ENV_REFUSED_SUFFIXES = ("_TOKEN", "_KEY", "_SECRET")
+_VAR = re.compile(r"\$\{")
 
 
 def _model_error(harness: str, model: str) -> str | None:
@@ -96,6 +122,13 @@ class Agent:
     guard: Guard | None = None
     # Its spending caps (budgets.py, #1068); (): no cap.
     budget: tuple[budgets.Cap, ...] = ()
+    # Its connection (claude-code only): the endpoint, the pool aegis meters
+    # it on, the key file (~ expanded; "": the pool's own key) and the
+    # variables added to its process. "" and {}: none, Anthropic as today.
+    base_url: str = ""
+    pool: str = ""
+    api_key_file: str = ""
+    env: dict[str, str] = field(default_factory=dict)
 
     @property
     def enabled(self) -> bool:
@@ -127,9 +160,15 @@ def _invalid(field: str, value: str) -> str | None:
 def _agent(name: str, raw: Any) -> Agent:
     d: dict[str, Any] = dict(raw) if isinstance(raw, dict) else {}
     provider = d.pop("provider", None)
+    nested_error = None
     if isinstance(provider, str):
         d["harness"] = provider
     elif isinstance(provider, dict):
+        if inside := [k for k in CONNECTION_KEYS if k in provider]:
+            nested_error = (
+                f"{', '.join(inside)} go on the agent, not in provider:, which "
+                "names models, not an account"
+            )
         d |= {k: v for k, v in provider.items() if k != "name"}
         if provider.get("name"):
             d["harness"] = provider["name"]
@@ -159,6 +198,9 @@ def _agent(name: str, raw: Any) -> Agent:
     scope, scope_error = scopes.parse(d.get("tools"))
     guard, guard_error = guards.parse(d.get("quota"), AGENT_ACTIONS)
     budget, budget_error = budgets.parse(d.get("budget"))
+    conn, conn_error = _connection(d, values["harness"])
+    if nested_error:
+        conn = _connection({}, "")[0]
     switches = {k: d.get(k, default) for k, default in SWITCHES.items()}
     switch_error = next(
         (f"{k} must be true or false" for k, v in switches.items()
@@ -178,7 +220,9 @@ def _agent(name: str, raw: Any) -> Agent:
         or switch_error
         or scope_error
         or guard_error
-        or budget_error,
+        or budget_error
+        or nested_error
+        or conn_error,
         models=models or ((values["model"],) if values["model"] else ()),
         repeated=repeated,
         harness_tools=_flag(switches, "harness_tools"),
@@ -189,7 +233,89 @@ def _agent(name: str, raw: Any) -> Agent:
         tools=scopes.form(d.get("tools")),
         guard=guard,
         budget=budget,
+        **conn,
     )
+
+
+def _connection(d: dict, harness: str) -> tuple[dict[str, Any], str | None]:
+    """An agent's connection fields, and the first error that stops it; the
+    fields are empty when there is an error, so a refused connection never
+    reaches a spec."""
+    empty: dict[str, Any] = {"base_url": "", "pool": "", "api_key_file": "", "env": {}}
+    raw = {k: d.get(k) for k in CONNECTION_KEYS}
+    given = [k for k, v in raw.items() if v not in (None, "")]
+    if not given:
+        return empty, None
+    url = raw["base_url"]
+    if url in (None, ""):
+        return empty, f"{', '.join(given)} needs a base_url"
+    if harness != "claude-code":
+        return empty, "base_url is for claude-code agents"
+    if err := _url_error(url):
+        return empty, err
+    pool = raw["pool"]
+    if pool in (None, ""):
+        return empty, (
+            "base_url needs a pool: the account aegis meters it on, "
+            f"one of {', '.join(CONNECTION_POOLS)}"
+        )
+    if pool == "claude":
+        return empty, "pool claude would read Claude's gauge for another endpoint"
+    if pool == "codex":
+        return empty, "pool codex has no gauge to read"
+    if pool not in CONNECTION_POOLS:
+        return empty, f"pool {pool!r} is not one of {', '.join(CONNECTION_POOLS)}"
+    key_file = raw["api_key_file"]
+    if key_file not in (None, "") and not isinstance(key_file, str):
+        return empty, "api_key_file must be a path"
+    if key_file and _VAR.search(key_file):
+        return empty, "api_key_file takes a path, not a ${VAR}"
+    env, env_error = _env(raw["env"])
+    if env_error:
+        return empty, env_error
+    return {
+        "base_url": url,
+        "pool": pool,
+        "api_key_file": os.path.expanduser(key_file) if key_file else "",
+        "env": env,
+    }, None
+
+
+def _url_error(url: Any) -> str | None:
+    if not isinstance(url, str):
+        return "base_url must be an http or https URL"
+    if _VAR.search(url):
+        return "base_url takes no ${VAR}: write the URL itself"
+    try:
+        parts = urlsplit(url)
+        parts.port  # noqa: B018 -- raises on a port that is not a number
+    except ValueError:
+        return f"base_url {url!r} is not a URL"
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        return f"base_url {url!r} is not an http or https URL"
+    if "@" in parts.netloc:
+        return (
+            "base_url must not hold a user or password: .aegis.yaml is in git; "
+            "put the key in api_key_file"
+        )
+    return None
+
+
+def _env(raw: Any) -> tuple[dict[str, str], str | None]:
+    """``env:`` as names to strings, or the error that stops the agent."""
+    if raw in (None, ""):
+        return {}, None
+    if not isinstance(raw, dict) or not all(
+        isinstance(k, str) and k and isinstance(v, str) for k, v in raw.items()
+    ):
+        return {}, "env must map variable names to strings"
+    refused = [k for k in raw if k in ENV_REFUSED or k.endswith(ENV_REFUSED_SUFFIXES)]
+    if refused:
+        return {}, (
+            f"env must not set {', '.join(refused)}: a credential or the config "
+            "directory does not go in .aegis.yaml; the key goes in api_key_file"
+        )
+    return dict(raw), None
 
 
 def _flag(switches: dict, key: str) -> bool:

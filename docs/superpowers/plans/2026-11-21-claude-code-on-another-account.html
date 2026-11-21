@@ -251,7 +251,7 @@ details.task ol,details.task p{padding-right:4px}
 <h2 id="b1"><span class="n">B1</span>The fields</h2>
 <p>A connection belongs to an agent. It is named in <code>.aegis.yaml</code>, refused there when it is wrong, and copied into the spawn record so a resume never moves.</p>
 
-<details class="task" id="task-11" data-state="pending"><summary><span class="n">11</span><span class="t">The four keys, parsed and refused</span><span class="s">pending</span><span class="f">src/aegis/agents.py, src/aegis/config.py (AGENT_KEYS), tests/test_agent_config.py</span></summary>
+<details class="task" id="task-11" data-state="done"><summary><span class="n">11</span><span class="t">The four keys, parsed and refused</span><span class="s">pending</span><span class="f">src/aegis/agents.py, src/aegis/config.py (AGENT_KEYS), tests/test_agent_config.py</span></summary>
 <ol>
   <li><code>Agent</code> gains <code>base_url: str = ""</code>, <code>pool: str = ""</code>, <code>api_key_file: str = ""</code> and <code>env: dict[str, str] = field(default_factory=dict)</code>; <code>AGENT_KEYS</code> (<code>config.py:78-82</code>) gains the four names.</li>
   <li>A helper reads them from the agent map and answers one error at a time, which lands in <code>Agent.error</code> like every other refusal: <code>base_url</code> only on <code>claude-code</code>, an http or https URL without userinfo and without <code>${…}</code>; <code>pool</code> required with it, from the keys of <code>PROVIDERS</code> or <code>none</code>, never <code>codex</code> and never <code>claude</code>; <code>api_key_file</code> and <code>env</code> only with it.</li>

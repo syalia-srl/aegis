@@ -266,3 +266,113 @@ def test_the_product_switches_parse_and_reach_the_spec(tmp_path):
     )
     bad = {a.name: a for a in agents}["bad"]
     assert bad.error == "isolated must be true or false" and not bad.enabled
+
+
+GO = (
+    "  go:\n"
+    "    harness: claude-code\n"
+    "    model: deepseek-v4.1-flash\n"
+    "    effort: high\n"
+    "    permission: full\n"
+)
+
+
+def test_a_connection_parses_with_its_pool_key_file_and_env(tmp_path):
+    (a,) = load_agents(
+        write(
+            tmp_path,
+            "agents:\n"
+            + GO
+            + "    base_url: https://opencode.ai/inference/go/anthropic\n"
+            "    pool: opencode-go\n"
+            "    api_key_file: ~/.config/aegis/go.key\n"
+            "    env: {ANTHROPIC_DEFAULT_HAIKU_MODEL: deepseek-v4.1-flash}\n",
+        )
+    )
+    assert a.error is None and a.enabled
+    assert a.base_url == "https://opencode.ai/inference/go/anthropic"
+    assert a.pool == "opencode-go"
+    assert a.api_key_file == str(Path("~/.config/aegis/go.key").expanduser())
+    assert a.env == {"ANTHROPIC_DEFAULT_HAIKU_MODEL": "deepseek-v4.1-flash"}
+
+
+def test_pool_none_needs_no_key_file_to_parse(tmp_path):
+    (a,) = load_agents(
+        write(tmp_path, "agents:\n" + GO + "    base_url: http://gw.local/a\n"
+              "    pool: none\n")
+    )  # fmt: skip
+    assert a.error is None and (a.pool, a.api_key_file, a.env) == ("none", "", {})
+
+
+def test_an_agent_without_a_connection_parses_as_before(tmp_path):
+    (a,) = load_agents(write(tmp_path, "agents:\n" + GO))
+    assert a.error is None
+    assert (a.base_url, a.pool, a.api_key_file, a.env) == ("", "", "", {})
+
+
+@pytest.mark.parametrize(
+    "extra, fragment",
+    [
+        ("    base_url: not a url\n    pool: none\n", "is not an http or https URL"),
+        ("    base_url: ftp://x.y/a\n    pool: none\n", "is not an http or https URL"),
+        ("    base_url: https://${HOST}/a\n    pool: none\n", "takes no ${VAR}"),
+        ("    base_url: https://me:secret@x.y/a\n    pool: none\n",
+         "must not hold a user or password"),
+        ("    base_url: https://x.y/a\n", "base_url needs a pool"),
+        ("    base_url: https://x.y/a\n    pool: codex\n", "pool codex has no gauge"),
+        ("    base_url: https://x.y/a\n    pool: claude\n", "pool claude would read"),
+        ("    base_url: https://x.y/a\n    pool: nope\n", "pool 'nope' is not one of"),
+        ("    pool: opencode-go\n", "pool needs a base_url"),
+        ("    api_key_file: ~/k\n", "api_key_file needs a base_url"),
+        ("    env: {FOO: bar}\n", "env needs a base_url"),
+        ("    base_url: https://x.y/a\n    pool: none\n"
+         "    api_key_file: ${HOME}/k\n", "api_key_file takes a path"),
+        ("    base_url: https://x.y/a\n    pool: none\n    env: [a]\n",
+         "env must map variable names to strings"),
+        ("    base_url: https://x.y/a\n    pool: none\n    env: {N: 3}\n",
+         "env must map variable names to strings"),
+    ],
+)  # fmt: skip
+def test_a_connection_is_refused_with_the_agents_error(tmp_path, extra, fragment):
+    (a,) = load_agents(write(tmp_path, "agents:\n" + GO + extra))
+    assert a.error and fragment in a.error, a.error
+    assert not a.enabled
+    assert (a.base_url, a.pool, a.env) == ("", "", {})
+
+
+def test_base_url_is_refused_on_another_harness(tmp_path):
+    (a,) = load_agents(
+        write(tmp_path, "agents:\n  oc: {harness: opencode, model: opencode-go/x, "
+              "effort: high, permission: full, base_url: 'https://x.y/a', "
+              "pool: opencode-go}\n")
+    )  # fmt: skip
+    assert a.error == "base_url is for claude-code agents"
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN",
+        "ANTHROPIC_CUSTOM_HEADERS", "ANTHROPIC_BASE_URL", "CLAUDE_CONFIG_DIR",
+        "HOME", "GITHUB_TOKEN", "OPENAI_API_KEY", "MY_SECRET",
+    ],
+)  # fmt: skip
+def test_env_refuses_a_credential_or_the_config_directory(tmp_path, name):
+    (a,) = load_agents(
+        write(tmp_path, "agents:\n" + GO + "    base_url: https://x.y/a\n"
+              f"    pool: none\n    env: {{{name}: x}}\n")
+    )  # fmt: skip
+    assert a.error and f"env must not set {name}" in a.error
+
+
+def test_a_connection_inside_provider_is_refused(tmp_path):
+    (a,) = load_agents(
+        write(
+            tmp_path,
+            "agents:\n  nested:\n"
+            "    provider: {name: claude-code, model: m, effort: high, "
+            "permission: full, base_url: 'https://x.y/a', pool: none}\n",
+        )
+    )
+    assert a.error and "base_url, pool go on the agent, not in provider:" in a.error
+    assert a.base_url == ""
