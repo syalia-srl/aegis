@@ -228,7 +228,7 @@ details.task ol,details.task p{padding-right:4px}
 <h2 id="a4"><span class="n">A4</span>What only Claude's pool does</h2>
 <p>Three paths read or repair the Claude account. Each must ask the pool first, and with no connection anywhere the file must behave exactly as now.</p>
 
-<details class="task" id="task-9" data-state="pending"><summary><span class="n">9</span><span class="t">observe, the refresh, and the sign-in card</span><span class="s">pending</span><span class="f">src/aegis/registry.py, src/aegis/quota/__init__.py, src/aegis/session.py (the Host protocol), tests/test_signin_core.py, tests/test_signin_status.py</span></summary>
+<details class="task" id="task-9" data-state="done"><summary><span class="n">9</span><span class="t">observe, the refresh, and the sign-in card</span><span class="s">pending</span><span class="f">src/aegis/registry.py, src/aegis/quota/__init__.py, src/aegis/session.py (the Host protocol), tests/test_signin_core.py, tests/test_signin_status.py</span></summary>
 <ol>
   <li><code>Quota.observe</code> takes a session's <code>rate_limit_event</code> only when <code>pool_of(s.spec) == "claude"</code>; the test belongs where the session reports it, <code>Host.rate_limit</code> (<code>registry.py:576</code>, declared at <code>session.py:241</code>).</li>
   <li><code>Quota.turn_ended</code> nudges the Claude reading only after a turn whose pool is <code>claude</code>. It stays routed by harness; OpenCode was never nudged, and a Go session refreshing nothing after its turn stays a non-goal.</li>

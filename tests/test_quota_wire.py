@@ -347,3 +347,38 @@ def _card(tmp_path, **spec):
 def test_the_card_carries_the_resolved_pool(tmp_path, spec, pool):
     card = _card(tmp_path, **spec)
     assert "pool" in card and card["pool"] == pool
+
+
+async def test_a_turn_off_claudes_pool_skips_claude_but_cursor_still_refreshes(
+    tmp_path,
+):
+    c = Clocks()
+    claude_calls, cursor_calls = [], []
+    claude = provider(c, [(50.0, 11160), (55.0, 11100)], claude_calls)
+    cursor = dataclasses.replace(
+        provider(c, [(10.0, 11160), (20.0, 11100)], cursor_calls),
+        name="cursor",
+        label="Cursor",
+        harness="cursor",
+    )
+    q = Quota(
+        lambda *a: None,
+        providers=(claude, cursor),
+        cache=tmp_path,
+        clock=lambda: c.mono,
+        wall=lambda: c.wall,
+    )
+    q.start()
+    await until(
+        lambda: (len(claude_calls), len(cursor_calls)) == (1, 1), what="the first tick"
+    )
+    c.advance(61)  # past both turn floors
+    q.turn_ended("claude-code", "opencode-go")
+    q.turn_ended("claude-code", "none")
+    q.turn_ended("cursor", "cursor")
+    await until(lambda: len(cursor_calls) == 2, what="the Cursor refresh")
+    await asyncio.sleep(0.05)
+    assert len(claude_calls) == 1
+    q.turn_ended("claude-code", "claude")
+    await until(lambda: len(claude_calls) == 2, what="the Claude refresh")
+    await q.stop()

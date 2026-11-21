@@ -294,12 +294,15 @@ class Quota:
         self.services[CLAUDE.name].observe(snap)
         self.check()
 
-    def turn_ended(self, harness: str | None = None) -> None:
+    def turn_ended(self, harness: str | None = None, pool: str | None = None) -> None:
         """A turn just spent quota: refresh that harness's provider before its
         cadence would, but no sooner than its turn floor after the last fetch.
 
         With no harness this still refreshes Claude, which is what a turn end
-        meant before Cursor had a gauge. OpenCode stays on its poll.
+        meant before Cursor had a gauge. OpenCode stays on its poll. A ``pool``
+        other than Claude's (a Claude Code session on another account) skips
+        Claude; None says nothing about the pool and keeps the routing by
+        harness alone.
         """
         if self._task is None:
             return
@@ -309,6 +312,8 @@ class Quota:
             if harness is None and p.name != CLAUDE.name:
                 continue
             if harness is not None and p.harness != harness:
+                continue
+            if p.name == CLAUDE.name and pool not in (None, CLAUDE.name):
                 continue
             t = asyncio.create_task(self._nudge(p))
             self._nudges.add(t)
