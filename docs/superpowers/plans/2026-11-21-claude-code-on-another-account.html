@@ -261,7 +261,7 @@ details.task ol,details.task p{padding-right:4px}
 <div class="verify"><b>verify</b> <code>uv run pytest tests/test_agent_config.py -q</code> — one case per refusal, and an agent with none of the four parses exactly as before.</div>
 </details>
 
-<details class="task" id="task-12" data-state="pending"><summary><span class="n">12</span><span class="t">The Settings rows and the key coverage</span><span class="s">pending</span><span class="f">src/aegis/config.py (AgentDoc, _set_agent), client/js/settings.js, tests/test_config_coverage.py, tests/test_config_write.py</span></summary>
+<details class="task" id="task-12" data-state="done"><summary><span class="n">12</span><span class="t">The Settings rows and the key coverage</span><span class="s">pending</span><span class="f">src/aegis/config.py (AgentDoc, _set_agent), client/js/settings.js, tests/test_config_coverage.py, tests/test_config_write.py</span></summary>
 <ol>
   <li><code>AgentDoc</code> (<code>config.py:769</code>) gains the four fields, <code>config.py:883</code> fills them and <code>_set_agent</code> (<code>:1423</code>) writes them back; <code>settings.js</code> shows them read-only on the agent card, as #1066 to #1068 did their keys.</li>
   <li><code>FULL</code> (<code>tests/test_config_coverage.py:29</code>) gains a second agent with <code>base_url</code>, <code>pool</code>, <code>api_key_file</code> and <code>env</code>, valid as written; <code>reader_keys</code> checks the reader and <code>settings.js</code> names them.</li>

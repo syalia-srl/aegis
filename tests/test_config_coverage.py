@@ -32,6 +32,7 @@ exit_via: far
 agents:
   opus: {exit: "off", harness: claude-code, model: opus, effort: high, permission: full, priming: Be brief., keep_harness_tools: [Agent], mcp: [notes, phone], harness_tools: false, isolated: true, primer: false, notices: false, tools: {deny: [workflows], queues: [general], agents: [quick]}, quota: {claude: {weekly_all: {used: 80, projected: 90, stop: 97}}, on_closed: refuse, advice: File it.}, budget: [{usd: 2, per: session}, {tokens: 2000000, per: 24h}]}
   quick: {harness: claude-code, models: [haiku, sonnet], effort: low, permission: read}
+  go: {harness: claude-code, model: deepseek-v4.1-flash, effort: high, permission: full, base_url: "https://opencode.ai/inference/go/anthropic", pool: opencode-go, api_key_file: ~/.config/aegis/go.key, env: {ANTHROPIC_DEFAULT_HAIKU_MODEL: deepseek-v4.1-flash}}
 queues:
   general: {agent: opus, priority: 3, quiet: false, quota: {opencode-go: {weekly: pace}, on_closed: reject}, max_pending: 50}
 max_workers: 7
@@ -146,6 +147,7 @@ def paths(node: object, prefix: str = "") -> set[str]:
             "usage.subscriptions",
             "agents.*.tools",
             "agents.*.quota",
+            "agents.*.env",
             "queues.*.quota",
         ) or (p.startswith(("terminals.*.", "mcp.*.")) and p.count(".") == 2)
         out |= {p} if leaf else paths(v, p)
