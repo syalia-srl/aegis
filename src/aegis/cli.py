@@ -398,20 +398,27 @@ def doctor(
     cursor: str = typer.Option(
         "cursor-agent", help="The cursor-agent executable to check."
     ),
+    probe: str | None = typer.Option(
+        None,
+        "--probe",
+        metavar="AGENT",
+        help="Also ask Claude Code whether this connection agent's endpoint "
+        "answers; spends one call on its account.",
+    ),
 ) -> None:
     """Check .aegis.yaml, the harnesses it names and the state directory."""
     from .doctor import doctor as run_doctor
+    from .doctor import probe as run_probe
     from .roots import make_roots
     from .service import check as service_check
 
     start = Path.cwd()
     roots = make_roots(start=start, root=root)
-    findings = asyncio.run(
-        run_doctor(
-            roots, _bins(claude, opencode, codex, cursor), start=None if root else start
-        )
-    )
+    bins = _bins(claude, opencode, codex, cursor)
+    findings = asyncio.run(run_doctor(roots, bins, start=None if root else start))
     findings += service_check()
+    if probe is not None:
+        findings.append(asyncio.run(run_probe(roots, bins, probe)))
     raise typer.Exit(1 if _report(findings) else 0)
 
 

@@ -314,7 +314,7 @@ details.task ol,details.task p{padding-right:4px}
 
 <h2 id="b4"><span class="n">B4</span>The probe</h2>
 
-<details class="task" id="task-17" data-state="pending"><summary><span class="n">17</span><span class="t"><code>aegis doctor --probe &lt;agent&gt;</code></span><span class="s">pending</span><span class="f">src/aegis/doctor.py, src/aegis/cli.py, tests/test_doctor.py, src/aegis/help/</span></summary>
+<details class="task" id="task-17" data-state="done"><summary><span class="n">17</span><span class="t"><code>aegis doctor --probe &lt;agent&gt;</code></span><span class="s">done</span><span class="f">src/aegis/doctor.py, src/aegis/cli.py, tests/test_doctor.py, src/aegis/help/</span></summary>
 <ol>
   <li>An opt-in probe in the shape of <code>login.probe</code> (<code>claude/login.py:141</code>): a scratch <code>CLAUDE_CONFIG_DIR</code>, <code>claude -p --model &lt;model&gt; --output-format json --tools "" --setting-sources ""</code>, the agent's connection environment as B2 builds it, and <code>Reply with the word ok.</code> on stdin.</li>
   <li>It reads <code>is_error</code>; a <code>400 MissingSessionID</code> is reported as the endpoint refusing the call, which is what a Claude Code release that stops sending the header would show.</li>

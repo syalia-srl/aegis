@@ -144,22 +144,35 @@ async def probe(
     """Ask Claude Code itself whether ``token`` signs in: one short request on
     the cheapest model, in a scratch config directory so the stored sign-in
     is neither read nor written. None when it answered; else why not."""
+    # A key in the server's environment outranks the token and would make
+    # any token pass.
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+    }
+    res = await ask(binary, PROBE_MODEL, env | {VAR: token}, timeout)
+    if isinstance(res, str):
+        return res
+    if res.get("is_error"):
+        return str(res.get("result") or "Claude Code could not sign in")
+    return None
+
+
+async def ask(
+    binary: str, model: str, env: Mapping[str, str], timeout: float = PROBE_TIMEOUT_S
+) -> dict | str:
+    """One short request to Claude Code with ``env``, no tools and no
+    settings, in a scratch config directory removed afterwards: its JSON
+    result, or why there is none. The caller reads ``is_error``."""
     with tempfile.TemporaryDirectory(prefix="aegis-claude-probe-") as scratch:
-        # A key in the server's environment outranks the token and would
-        # make any token pass.
-        env = {
-            k: v
-            for k, v in os.environ.items()
-            if k not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
-        }
-        env |= {VAR: token, "CLAUDE_CONFIG_DIR": scratch}
         try:
             proc = await launch.child(
                 [
                     binary,
                     "-p",
                     "--model",
-                    PROBE_MODEL,
+                    model,
                     "--output-format",
                     "json",
                     "--tools",
@@ -169,7 +182,7 @@ async def probe(
                 ],
                 via=launch.resolve_via(),
                 cwd=scratch,
-                env=env,
+                env={**env, "CLAUDE_CONFIG_DIR": scratch},
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
@@ -190,6 +203,4 @@ async def probe(
         return f"Claude Code exited with code {proc.returncode} and no answer"
     if not isinstance(res, dict):
         return "Claude Code gave no answer"
-    if res.get("is_error"):
-        return str(res.get("result") or "Claude Code could not sign in")
-    return None
+    return res

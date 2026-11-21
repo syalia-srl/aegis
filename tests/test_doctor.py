@@ -1,10 +1,14 @@
+import dataclasses
+import json
+import os
+import sys
 from pathlib import Path
 
 import pytest
 
 from aegis.claude.control import Model
 from aegis.harness_versions import ranges
-from aegis.doctor import Found, detect, doctor, propose
+from aegis.doctor import Found, detect, doctor, probe, propose
 from aegis.roots import make_roots
 
 GOOD = """\
@@ -399,6 +403,22 @@ def go_config(tmp_path: Path, extra: str = "", pool: str = "opencode-go") -> str
     )
 
 
+def go_key(monkeypatch, key: str | None) -> None:
+    """The Go pool's own key, as a session start reads it."""
+    import aegis.quota as quota
+
+    monkeypatch.setattr(
+        quota,
+        "PROVIDERS",
+        tuple(
+            dataclasses.replace(p, inference_key=lambda: key)
+            if p.name == "opencode-go"
+            else p
+            for p in quota.PROVIDERS
+        ),
+    )
+
+
 def key_file(tmp_path: Path, mode: int = 0o600) -> Path:
     k = tmp_path / "go.key"
     k.write_text("sk-test")
@@ -409,7 +429,7 @@ def key_file(tmp_path: Path, mode: int = 0o600) -> Path:
 async def test_a_connection_is_ok_without_a_catalog_row(
     tmp_path, fake_claude, fake_opencode, monkeypatch
 ):
-    monkeypatch.setattr("aegis.quota.opencode.read_key", lambda: "sk-go")
+    go_key(monkeypatch, "sk-go")
     found = await run(
         tmp_path,
         go_config(tmp_path, "    isolated: true\n"),
@@ -425,7 +445,7 @@ async def test_a_connection_is_ok_without_a_catalog_row(
 async def test_a_connection_without_the_pools_key_is_an_error(
     tmp_path, fake_claude, fake_opencode, monkeypatch
 ):
-    monkeypatch.setattr("aegis.quota.opencode.read_key", lambda: None)
+    go_key(monkeypatch, None)
     found = await run(
         tmp_path,
         go_config(tmp_path, "    isolated: true\n"),
@@ -433,7 +453,7 @@ async def test_a_connection_without_the_pools_key_is_an_error(
         fake_opencode,
     )
     (f,) = at(found, "agents.go.api_key_file")
-    assert f.level == "error" and "no Go key" in f.message
+    assert f.level == "error" and "OpenCode Go holds no key" in f.message
 
 
 @pytest.mark.parametrize(
@@ -502,3 +522,130 @@ async def test_a_tokens_budget_and_its_own_pool_guard_do_not_warn(
     )
     found = await run(tmp_path, text, fake_claude, fake_opencode)
     assert [f.level for f in found if f.row == "agents.go"] == ["ok"]
+
+
+# The probe spends a call on the agent's account, so it never meets a real
+# Claude Code here: this binary records how it was started and prints what
+# FAKE_PROBE_REPLY holds.
+FAKE_PROBE = """\
+import json, os, sys
+prompt = sys.stdin.read()
+with open(os.environ["FAKE_PROBE_LOG"], "w") as f:
+    json.dump({"argv": sys.argv[1:], "env": dict(os.environ), "stdin": prompt,
+               "cwd": os.getcwd()}, f)
+sys.stdout.write(os.environ["FAKE_PROBE_REPLY"])
+"""
+
+
+@pytest.fixture
+def fake_probe(tmp_path, monkeypatch):
+    """The fake binary's path, and a reader of what it was started with."""
+    script = tmp_path / "fake_probe.py"
+    script.write_text(FAKE_PROBE)
+    binary = tmp_path / "probe-bin" / "claude"
+    binary.parent.mkdir()
+    binary.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{script}" "$@"\n')
+    binary.chmod(0o755)
+    log = tmp_path / "probe.json"
+    monkeypatch.setenv("FAKE_PROBE_LOG", str(log))
+    # What the server's own environment would leak into the call.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-server")
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-server")
+
+    def reply(res: dict | str) -> None:
+        monkeypatch.setenv(
+            "FAKE_PROBE_REPLY", res if isinstance(res, str) else json.dumps(res)
+        )
+
+    return str(binary), reply, lambda: json.loads(log.read_text())
+
+
+async def run_probe(tmp_path: Path, binary: str, extra: str = "", name: str = "go"):
+    k = key_file(tmp_path)
+    text = go_config(
+        tmp_path,
+        f"    isolated: true\n    api_key_file: {k}\n"
+        "    env: {API_TIMEOUT_MS: '600000'}\n" + extra,
+    )
+    (tmp_path / ".aegis.yaml").write_text(text)
+    roots = make_roots(tmp_path, tmp_path)
+    return await probe(roots, bins(binary, "opencode-not-installed"), name)
+
+
+async def test_the_probe_starts_claude_code_on_the_connection(tmp_path, fake_probe):
+    binary, reply, started = fake_probe
+    reply({"type": "result", "is_error": False, "result": "ok"})
+    f = await run_probe(tmp_path, binary)
+    assert (f.level, f.where, f.row) == ("ok", "agents.go", "agents.go")
+    assert f.message == (
+        "Claude Code answered at opencode.ai (deepseek-v4.1-flash, pool opencode-go)"
+    )
+    seen = started()
+    assert seen["argv"] == [
+        "-p", "--model", "deepseek-v4.1-flash", "--output-format", "json",
+        "--tools", "", "--setting-sources", "",
+    ]  # fmt: skip
+    assert seen["stdin"] == "Reply with the word ok."
+    env = seen["env"]
+    assert env["ANTHROPIC_BASE_URL"] == "https://opencode.ai/inference/go/anthropic"
+    assert env["ANTHROPIC_AUTH_TOKEN"] == "sk-test"
+    assert env["API_TIMEOUT_MS"] == "600000"  # the agent's env
+    assert "ANTHROPIC_API_KEY" not in env and "CLAUDE_CODE_OAUTH_TOKEN" not in env
+    # A scratch config directory, gone once the probe is over.
+    assert env["CLAUDE_CONFIG_DIR"] == seen["cwd"]
+    assert not os.path.exists(seen["cwd"])
+
+
+async def test_an_error_result_is_the_endpoint_refusing(tmp_path, fake_probe):
+    binary, reply, _ = fake_probe
+    reply({"is_error": True, "result": "API Error: 401 invalid api key"})
+    f = await run_probe(tmp_path, binary)
+    assert f.level == "error"
+    assert f.message == "the endpoint refused the call: API Error: 401 invalid api key"
+
+
+async def test_a_missing_session_header_is_named(tmp_path, fake_probe):
+    """What a Claude Code release that stops sending x-claude-code-session-id
+    would show."""
+    binary, reply, _ = fake_probe
+    reply(
+        {
+            "is_error": True,
+            "result": 'API Error: 400 {"type":"error","error":'
+            '{"type":"MissingSessionID","message":"missing session id"}}',
+        }
+    )
+    f = await run_probe(tmp_path, binary)
+    assert (f.level, f.message) == (
+        "error",
+        "the endpoint refused the call: 400 MissingSessionID",
+    )
+
+
+async def test_no_answer_is_an_error(tmp_path, fake_probe):
+    binary, reply, _ = fake_probe
+    reply("not json")
+    f = await run_probe(tmp_path, binary)
+    assert f.level == "error" and "no answer" in f.message
+
+
+async def test_the_probe_starts_nothing_without_a_key(tmp_path, fake_probe):
+    binary, reply, started = fake_probe
+    reply({"is_error": False, "result": "ok"})
+    text = go_config(tmp_path, f"    api_key_file: {tmp_path / 'missing.key'}\n")
+    (tmp_path / ".aegis.yaml").write_text(text)
+    f = await probe(make_roots(tmp_path, tmp_path), bins(binary, "oc"), "go")
+    assert (f.level, f.where) == ("error", "agents.go.api_key_file")
+    assert "does not exist" in f.message
+    assert not (tmp_path / "probe.json").exists()
+
+
+async def test_the_probe_refuses_an_agent_without_a_connection(tmp_path, fake_probe):
+    binary, _, _ = fake_probe
+    (tmp_path / ".aegis.yaml").write_text(GOOD)
+    roots = make_roots(tmp_path, tmp_path)
+    f = await probe(roots, bins(binary, "oc"), "opus")
+    assert f.level == "error" and "base_url" in f.message
+    f = await probe(roots, bins(binary, "oc"), "nobody")
+    assert f.level == "error" and "no agent 'nobody'" in f.message
+    assert not (tmp_path / "probe.json").exists()
