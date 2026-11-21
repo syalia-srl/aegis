@@ -49,7 +49,7 @@ from .kinds import (
 from ..quota_gate import NONE, pool_for
 from .context import START, Replay, band
 from .prices import Prices, codex_prices_for, prices_for
-from .store import split_cache
+from .store import has_connection, split_cache
 
 MAX_WAIT = 28_800  # an idle gap counts at most 8 hours
 WAKE = re.compile(r"^> from ([\w-]+)")
@@ -82,6 +82,9 @@ class SessionInfo:
     pool: str | None = None
     # The account a pool is logged in as, "<pool>:<hash>", asked by pool name.
     account: Callable[[str], str | None] = lambda pool: None
+    # The session ran on an agent's connection (spec 08): another endpoint,
+    # whose prices are not Anthropic's. Its spawn record says so too.
+    connection: bool = False
     replay_start: int = START  # successors' median start context here
 
 
@@ -242,6 +245,7 @@ class UsageDeriver:
         self.harness = info.harness
         self.cwd = ""
         self.model: str | None = None  # the spawn's or the harness's init
+        self.connection = info.connection
         self._parsers: dict = {}
         self._turn: _Turn | None = None
         self._turns = 0
@@ -417,6 +421,7 @@ class UsageDeriver:
             self.cwd = str(rec.get("cwd") or self.cwd)
             self.harness = str(rec.get("harness") or self.harness)
             self.model = rec.get("model") or self.model
+            self.connection = self.connection or has_connection(rec)
             return Derived()
         if kind == "send":
             if rec.get("steered"):
@@ -614,6 +619,8 @@ class UsageDeriver:
         return MODES.get(m[1], "other")
 
     def _rates(self, m: _Msg) -> Prices | None:
+        if self.connection:  # the endpoint's prices, even for a Claude-like id
+            return None
         if self.harness == "claude-code":
             return prices_for(m.model or self.model)
         if self.harness == "codex":
@@ -636,7 +643,9 @@ class UsageDeriver:
     ) -> Derived:
         t, self._turn = self._turn, None
         billed: Decimal | None = None
-        if total is not None:
+        # A connection's total is Claude Code pricing another endpoint's tokens
+        # at Anthropic's rates: ignored, and the running total never moves.
+        if total is not None and not self.connection:
             c = Decimal(str(total))
             if self._prev_total is None or c < self._prev_total:
                 billed = c

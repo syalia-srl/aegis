@@ -519,3 +519,53 @@ def test_a_quiet_commit_settles_the_edit_by_its_message():
     assert Settle(rec=t1, n=0, purpose="fix") in d.settles
     commit = [p for p in d.parts if p.activity == "committing"][0]
     assert commit.purpose == "fix"
+
+
+# -- A turn on an agent's connection (spec 08) --------------------------------
+
+GW = {"base_url": "https://gw.example/anthropic"}
+
+
+def _two_turns(**spawn) -> UseRec:
+    r = UseRec()
+    r.spawn(**spawn)
+    for k, total in enumerate((0.0597, 0.10)):
+        r.own("send", text=f"turn {k}")
+        r.assistant(f"m{k}", model="claude-opus-5-5", inp=1000, out=200, cr=5000)
+        r.result(cost_total=total)
+    return r
+
+
+def test_a_connection_turn_is_unpriced_with_its_tokens():
+    """Claude Code's total prices the endpoint's tokens at Anthropic's rates,
+    even for a Claude-like model id: ignored, and the tokens are kept."""
+    d = run(_two_turns(connection=GW, pool="none"))
+    assert [(t.cost, t.cost_kind) for t in d.turns] == [(Decimal(0), "unpriced")] * 2
+    for t in d.turns:
+        assert (t.tok_in, t.tok_out, t.tok_cr) == (1000, 200, 5000)
+    assert sum(p.tokens for p in d.parts) == 2 * (1000 + 200 + 5000)
+    assert all(p.cost == 0 for p in d.parts)
+
+
+def test_a_connection_from_the_meta_alone_is_unpriced():
+    """A store whose spawn line predates the record field: the meta says so."""
+    d = run(_two_turns(), info=SessionInfo(connection=True))
+    assert {t.cost_kind for t in d.turns} == {"unpriced"}
+
+
+def test_without_a_connection_the_total_is_billed_as_before():
+    d = run(_two_turns())
+    assert [(t.cost, t.cost_kind) for t in d.turns] == [
+        (Decimal("0.0597"), "billed"),
+        (Decimal("0.0403"), "billed"),
+    ]
+
+
+def test_an_interrupted_connection_turn_is_unpriced_not_priced():
+    r = UseRec()
+    r.spawn(connection=GW)
+    r.own("send", text="go")
+    r.assistant("m1", inp=1000, out=200, tools=[("a", "Read", {"file_path": "/w/x"})])
+    r.own("stop")
+    [t] = run(r).turns
+    assert t.cost_kind == "unpriced" and t.tok_in == 1000

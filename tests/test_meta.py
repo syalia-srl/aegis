@@ -136,3 +136,16 @@ def test_notices_sent_survives_a_meta_round_trip(tmp_path: Path):
     r.boot(restarts.CLEAN)
     s = r.sessions["a"]
     assert s.notices_sent == sent and s.meta()["notices_sent"] == sent
+
+
+def test_rebuild_keeps_the_spawns_connection_and_pool(tmp_path: Path):
+    """The usage readers tell a connection's unpriced turns by the meta; a
+    meta rebuilt from its store keeps it, and an old store adds neither."""
+    gw = {"base_url": "https://gw.example/anthropic", "api_key_file": "/k"}
+    for name, extra in (("go", {"connection": gw, "pool": "none"}), ("old", {})):
+        s = Store(tmp_path / f"{name}.jsonl")
+        s.append({"src": "aegis", "kind": "spawn", "ts": 1.0, "cwd": "/w", **extra})
+        s.close()
+    go, old = rebuild(tmp_path / "go.jsonl"), rebuild(tmp_path / "old.jsonl")
+    assert (go["connection"], go["pool"], go["cost_usd"]) == (gw, "none", None)
+    assert "connection" not in old and "pool" not in old

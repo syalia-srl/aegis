@@ -302,7 +302,7 @@ details.task ol,details.task p{padding-right:4px}
 <h2 id="b3"><span class="n">B3</span>Cost</h2>
 <p>Claude Code prices every model as Opus, so a Go turn would be recorded at about 27 times its cost. A connection's turn says what it knows: tokens, no dollars.</p>
 
-<details class="task" id="task-16" data-state="pending"><summary><span class="n">16</span><span class="t">Unpriced turns, and no dollars on the card</span><span class="s">pending</span><span class="f">src/aegis/usage/turns.py, src/aegis/session.py, src/aegis/api/sessions.py, src/aegis/usage/scan.py, src/aegis/doctor.py, tests/usage/test_turns.py, tests/usage/test_cost_scan.py, tests/test_meta.py, tests/test_session.py, tests/test_doctor.py</span></summary>
+<details class="task" id="task-16" data-state="done"><summary><span class="n">16</span><span class="t">Unpriced turns, and no dollars on the card</span><span class="s">done</span><span class="f">src/aegis/usage/turns.py, src/aegis/session.py, src/aegis/api/sessions.py, src/aegis/usage/scan.py, src/aegis/doctor.py, tests/usage/test_turns.py, tests/usage/test_cost_scan.py, tests/test_meta.py, tests/test_session.py, tests/test_doctor.py</span></summary>
 <ol>
   <li><code>_close</code> (<code>usage/turns.py:624</code>): with a connection the result's total is ignored and neither <code>billed</code> nor <code>_prev_total</code> moves; <code>_rates</code> answers <code>None</code>, so the turn is <code>unpriced</code> with every token counted.</li>
   <li>The card's and the API's <code>cost_usd</code> are dropped with it (<code>session.py:1597</code>, <code>:642</code>; <code>api/sessions.py:152</code>, <code>:245-253</code>).</li>

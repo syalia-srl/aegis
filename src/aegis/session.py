@@ -692,7 +692,7 @@ class Session:
             if self._proc or self.asleep_why == "idle"
             else self.last_status,
             "asleep_why": self.asleep_why,
-            "cost_usd": self.cost_usd,
+            "cost_usd": None if self.spec.connection else self.cost_usd,
             "context_tokens": self.context_tokens,
             "context_window": self.context_window,
             "activity": self.activity,
@@ -1661,7 +1661,9 @@ class Session:
                     changes["status"] = "idle"
                 if not ev.is_error:
                     changes["restart_continues"] = 0
-                if ev.cost_usd is not None:
+                # A connection's total prices another endpoint at Anthropic's
+                # rates: its card shows tokens and no dollars (spec 08).
+                if ev.cost_usd is not None and self.spec.connection is None:
                     changes["cost_usd"] = ev.cost_usd
                 if ev.context_window:
                     changes["context_window"] = ev.context_window

@@ -934,3 +934,37 @@ async def test_a_handoff_resolves_the_agent_again_and_takes_its_connection(
         )
     finally:
         await w.stop()
+
+
+# -- The cost of a connection turn (task 16) ----------------------------------
+
+
+async def test_a_connection_session_shows_its_tokens_and_no_dollars(
+    tmp_path, fake_claude
+):
+    """Claude Code prices a connection's tokens at Anthropic's rates; the card
+    keeps the tokens and drops that figure, while a plain session keeps its."""
+    _keyed(
+        tmp_path,
+        extra="  opus: {harness: claude-code, model: opus, effort: high, "
+        "permission: full}\n",
+    )
+    w = await World(tmp_path, fake_claude).start()
+    try:
+        go = w.session(
+            (await w.app.registry.call("session.spawn", {"agent": "go"}))["log_id"]
+        )
+        plain = w.session(
+            (await w.app.registry.call("session.spawn", {"agent": "opus"}))["log_id"]
+        )
+        await turn(go, "hello")
+        await turn(plain, "hello")
+        await until(lambda: plain.cost_usd, what="the plain session's cost")
+        assert go.cost_usd is None
+        assert go.wire()["cost_usd"] is None and go.meta()["cost_usd"] is None
+        assert sum(go.turn_tokens) > 0
+        go.cost_usd = 0.0597  # a meta written before this change held Claude's
+        assert go.wire()["cost_usd"] is None and go.meta()["cost_usd"] is None
+        assert plain.wire()["cost_usd"] == plain.cost_usd > 0
+    finally:
+        await w.stop()

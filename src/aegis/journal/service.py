@@ -46,6 +46,7 @@ from ..transcript.store import read_store
 from ..usage import tables
 from ..usage.context import successor_start
 from ..usage.owners import owner_of
+from ..usage.store import has_connection
 from ..usage.store import sessions as stored_sessions
 from ..usage.store import stores
 from ..usage.turns import Derived, SessionInfo, UsageDeriver
@@ -368,6 +369,7 @@ class Journal:
             queue=(meta.get("worker") or {}).get("queue") or None,
             starter=next((meta[k] for k in LINKS if meta.get(k)), None),
             pool=meta.get("pool") or None,
+            connection=has_connection(meta),
             account=lambda pool: self.accounts().get(pool),
             replay_start=self._replay_start(con),
         )
