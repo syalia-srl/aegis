@@ -125,7 +125,9 @@ async def test_a_go_limit_on_claude_code_cools_go_and_not_claude(world):
     assert app.cooling.until("claude-code", "opus", now, "claude") is None
     _, g = app.start_spec(spec, guarded=False)
     assert g.state == "closed" and "cooling" in g.why
-    claude = dataclasses.replace(spec, pool=None, model="opus", cascade=("opus", "sonnet"))
+    claude = dataclasses.replace(
+        spec, pool=None, model="opus", cascade=("opus", "sonnet")
+    )
     started, g = app.start_spec(claude, guarded=False)
     assert g.may_start and started.model == "opus"
 

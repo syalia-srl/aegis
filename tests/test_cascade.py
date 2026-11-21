@@ -151,7 +151,9 @@ def test_a_pool_fall_on_another_pool_cools_that_pool_and_not_claude():
     c = Cooling()
     c.cool("claude-code", "deepseek-v4.1-flash", Fall("pool", None), T, "opencode-go")
     assert c.until("claude-code", "glm-5", T, "opencode-go") == T + DEFAULT_COOL_S
-    assert c.until("opencode", "opencode-go/kimi", T, "opencode-go") == T + DEFAULT_COOL_S
+    assert (
+        c.until("opencode", "opencode-go/kimi", T, "opencode-go") == T + DEFAULT_COOL_S
+    )
     assert c.until("claude-code", "opus", T, "claude") is None
     assert c.until("claude-code", "opus", T) is None
     assert c._until == {("opencode-go", "pool", "opencode-go"): T + DEFAULT_COOL_S}
@@ -182,7 +184,10 @@ def test_a_connection_model_fall_is_keyed_by_its_endpoint():
     go = lambda m: "opencode-go"  # noqa: E731
     assert pick(["m", "n"], -1, GO, open_gate, c, T, go) == ("n", "")
     assert pick(["m", "n"], -1, GATEWAY, open_gate, c, T, lambda m: None) == ("m", "")
-    assert pick(["m"], -1, "claude-code", open_gate, c, T, lambda m: "claude") == ("m", "")
+    assert pick(["m"], -1, "claude-code", open_gate, c, T, lambda m: "claude") == (
+        "m",
+        "",
+    )
 
 
 def test_pick_asks_the_pool_of_each_candidate():
@@ -195,7 +200,9 @@ def test_pick_asks_the_pool_of_each_candidate():
         seen.append(m)
         return pools[m]
 
-    assert pick(["opencode-go/a", "opencode/b"], -1, "opencode", open_gate, c, T, pool) == (
+    assert pick(
+        ["opencode-go/a", "opencode/b"], -1, "opencode", open_gate, c, T, pool
+    ) == (
         "opencode/b",
         "",
     )
