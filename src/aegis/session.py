@@ -299,6 +299,11 @@ class SpawnSpec:
     # model; () otherwise. Fixed at spawn: the position in use is the index
     # of ``model`` in it.
     cascade: tuple[str, ...] = ()
+    # The pool this session draws on when it names one (quota_gate.pool_of):
+    # a quota provider's name, or "none" for an account aegis reads no gauge
+    # for. None derives it from harness and model, as every record from
+    # before it does. Read from the record, never from ``.aegis.yaml``.
+    pool: str | None = None
     # The owner's knowledge setting when it was spawned (setup.Records):
     # native starts every process of it without the harness's own skills and
     # memory, and lets a store skill take a harness command's name. Fixed at
@@ -349,6 +354,8 @@ class SpawnSpec:
             d["keep_harness_tools"] = list(self.keep_harness_tools)
         if self.cascade:
             d["cascade"] = list(self.cascade)
+        if self.pool:
+            d["pool"] = self.pool
         if self.knowledge_native:
             d["knowledge_native"] = True
         if self.tags:
@@ -382,6 +389,7 @@ class SpawnSpec:
             continues=d.get("continues"),
             keep_harness_tools=tuple(d.get("keep_harness_tools") or ()),
             cascade=_cascade_of(d.get("cascade")),
+            pool=d.get("pool") or None,
             knowledge_native=bool(d.get("knowledge_native")),
             tags=dict(d.get("tags") or {}),
             **{k: bool(d.get(k, default)) for k, default in SWITCHES.items()},

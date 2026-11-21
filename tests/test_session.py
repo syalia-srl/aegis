@@ -577,3 +577,18 @@ async def test_turn_output_takes_the_final_count_from_message_delta(h):
     assert s.turn_tokens == [52, 84]
     s._on_line(json.dumps({"type": "stream_event", "event": delta}))
     assert s.turn_tokens == [52, 84]
+
+
+def test_an_old_record_loads_with_no_pool(tmp_path):
+    spec = SpawnSpec.from_record(
+        {"agent": "a", "harness": "claude-code", "model": "opus"}, tmp_path
+    )
+    assert spec.pool is None
+    assert "pool" not in spec.record()
+
+
+def test_a_recorded_pool_round_trips_as_written(tmp_path):
+    for pool in ("opencode-go", "none"):
+        spec = SpawnSpec("a", "opus", "high", "full", tmp_path, pool=pool)
+        assert spec.record()["pool"] == pool
+        assert SpawnSpec.from_record(spec.record(), tmp_path).pool == pool
