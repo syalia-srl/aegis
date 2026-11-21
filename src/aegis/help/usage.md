@@ -88,6 +88,19 @@ The older views still work: `--sessions` lists the costliest sessions,
 `--tools` the cost and calls by activity, `--session <handle>` one session and
 `--model <id>` one model.
 
+## The pool a session draws on
+
+The gauge beside a session shows the account that session spends, not the one
+its harness usually spends. aegis resolves the pool once — the one the session's
+record names, else what its harness and model imply — publishes it on the
+session card, and the sidebar draws the gauge that name points at. A session
+whose pool is `none` shows no gauge, because aegis reads no account for it.
+
+A limit cools the pool it names, not the harness: Go's limit holds new Go work
+and leaves Claude's models alone, and a model that fell on one endpoint does not
+hold another endpoint's. `quota:` notices follow the same pool, so a session on
+Go hears Go's windows and not Claude's.
+
 ## Where a quota gauge says it will land
 
 A gauge's arrow is where the window ends at its reset if you keep spending at
