@@ -510,7 +510,9 @@ sharing one stored sign-in race to refresh its single-use token, and the losers
 are logged out. So every Claude Code process the server starts as itself
 (sessions, recaps, side notes) gets `CLAUDE_CODE_OAUTH_TOKEN` from a 0600 file
 (`claude/login.py`), read at each spawn, unless the server's environment or the
-pool file already sets it. A turn that fails to sign in (`Result.auth_failed`)
+pool file already sets it. A session with a connection is the exception: it runs
+on its endpoint's key, gets none of the four Anthropic variables it would
+inherit, and, when isolated, links no `.credentials.json` (`claude/connection.py`). A turn that fails to sign in (`Result.auth_failed`)
 raises one card, in the first failing session's transcript, which every later
 failure joins. Its field goes to the person-only `claude.token` operation, which
 checks the shape, asks Claude Code itself with one `claude -p` in a scratch

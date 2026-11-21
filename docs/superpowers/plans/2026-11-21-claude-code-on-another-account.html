@@ -324,7 +324,7 @@ details.task ol,details.task p{padding-right:4px}
 
 <h2 id="close-b"><span class="n">B</span>Close PR B</h2>
 
-<details class="task" id="task-18" data-state="pending"><summary><span class="n">18</span><span class="t">Help, changelog, and the PR</span><span class="s">pending</span><span class="f">src/aegis/help/config.md, src/aegis/help/usage.md, src/aegis/help/cli.md, changelog.d/, DESIGN.md</span></summary>
+<details class="task" id="task-18" data-state="done"><summary><span class="n">18</span><span class="t">Help, changelog, and the PR</span><span class="s">pending</span><span class="f">src/aegis/help/config.md, src/aegis/help/usage.md, src/aegis/help/cli.md, changelog.d/, DESIGN.md</span></summary>
 <ol>
   <li>Help: the four agent keys beside <code>keep_harness_tools</code>, with the isolation warning; <code>pool</code> and unpriced turns on <code>usage.md</code>; <code>--probe</code> on <code>commands.md</code>. An <code>added</code> fragment.</li>
   <li>DESIGN.md's paragraph on Claude Code's sign-in gains the connection exception.</li>
@@ -355,6 +355,15 @@ details.task ol,details.task p{padding-right:4px}
   <li><b>The card is <code>Session.wire()</code>, not <code>Session.card()</code>.</b> A3 put <code>pool</code> where the sessions channel builds its message; the spec's word "card" names the same thing.</li>
   <li><b>A linked server on an older aegis draws no gauge.</b> Its cards carry no <code>pool</code>, and <code>providerFor</code> matches on the pool alone now: that is the spec's rule, and the PR body says so.</li>
   <li><b>The browser test needs the Playwright build the worktree pins.</b> This server had an older one; A3 proved the test with it through a temporary plugin outside the repo, and installed nothing. CI has the pinned build.</li>
+  <li><b>B1's connection is one nested record key.</b> <code>record()</code> writes <code>connection: {base_url, api_key_file?, env?}</code>, only when there is one; the key file's path is in it, never the key. <code>SpawnSpec</code> was already not hashable (its <code>tags</code> map); <code>Connection</code> is, with <code>env</code> as a tuple of pairs.</li>
+  <li><b>Settings keeps the file's text.</b> <code>AgentDoc</code> holds the raw connection map: no <code>~</code> expansion and <code>env</code> as written, so a save is byte-faithful and a refused value is reported on its row without touching the file. The agent in memory carries the expanded path.</li>
+  <li><b>A refused connection leaves the four fields empty</b> on the <code>Agent</code>, so nothing reaches a spec.</li>
+  <li><b>B2 factors the environment once</b> (<code>claude/connection.py</code>) and uses it from the session, the recap, <code>/btw</code> and the group-name call. A handoff with an <code>agent</code> resolves afresh and takes its connection; one without copies the old spec's, as a resume does.</li>
+  <li><b><code>/model</code> on a connection</b> keeps Claude Code's commands but offers the session's own model and cascade plus the agents on the same <code>base_url</code>; <code>configure</code> refuses another model.</li>
+  <li><b>The host policy drops the connection</b> when it moves the harness away from <code>claude-code</code>, and <code>pool_of</code> derives the pool again (<code>app.py:1675</code>).</li>
+  <li><b>B3 reads connection stores first.</b> A connection session that is not isolated also writes <code>~/.claude/projects</code>, whose file repeats its message ids; the scanner prices the aegis store first, so the replay is not priced as Claude. <code>rebuild</code> keeps <code>pool</code> and <code>connection</code> in the meta, and <code>has_connection</code> is one check in <code>usage/store.py</code>.</li>
+  <li><b>B4 shares the probe's launch</b> (<code>login.ask</code>) and adds <code>--probe</code> to the full doctor report rather than replacing it. Two doctor tests now stub the Go provider instead of <code>read_key</code>, because the provider holds the function reference at import; doctor also expands <code>~</code> in <code>api_key_file</code>, as a start already did.</li>
+  <li><b>The connection PR is stacked on A.</b> It branches from <code>pool-attribution</code> so a review of A does not move; when A merges, it is rebased onto main and its diff is the connection alone.</li>
 </ul>
 </main>
 </div>
