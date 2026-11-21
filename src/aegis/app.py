@@ -1672,6 +1672,7 @@ class App:
             priming = (
                 f"{priming}\n\n{req.system_prompt}" if priming else req.system_prompt
             )
+        moved = req.harness != spec.harness
         spec = dataclasses.replace(
             spec,
             agent=req.agent,
@@ -1686,6 +1687,11 @@ class App:
             isolated=req.isolated,
             primer=req.primer,
             notices=req.notices,
+            # A connection belongs to claude-code, as in agents.resolve: a
+            # policy that moves the spawn to another harness drops it and its
+            # pool, which pool_of then derives from the harness and model.
+            connection=None if moved else spec.connection,
+            pool=None if moved else spec.pool,
         )
         return spec, dict(req.env)
 
