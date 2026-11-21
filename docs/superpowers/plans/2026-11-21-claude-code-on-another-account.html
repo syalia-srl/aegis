@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>aegis · plan · Claude Code on another account: the pool a session draws on, and a connection per agent</title>
+<style>
+/* The house theme of docs/superpowers/specs/2026-11-21-claude-code-on-another-account-design.html */
+:root{
+  --bg:#11100e;--chrome:#0b0a09;--side:#0d0c0b;--surface:#191814;--raised:#1d1b17;--rule:#2a2721;
+  --ink:#dcd9cf;--strong:#f1ede2;--muted:#8a867b;--faint:#6f6b62;
+  --accent:#e0a872;--accent-soft:rgba(224,168,114,.16);--on-accent:#1a140d;
+  --ok:#9db07e;--err:#d9806f;--err-bg:#221512;--warn:#e0a872;--comms:#9fb4d0;
+  --font-ui:system-ui,-apple-system,'Segoe UI',sans-serif;
+  --font-prose:Georgia,serif;
+  --font-mono:ui-monospace,Menlo,monospace;
+  --r:6px;--r-lg:10px;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:56px}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font-ui);font-size:14px;line-height:1.5}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{font-family:var(--font-mono);font-size:.86em;background:var(--raised);border:1px solid var(--rule);border-radius:4px;padding:0 4px;color:var(--strong);overflow-wrap:anywhere}
+.chrome{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:14px;height:40px;padding:0 18px;background:var(--chrome);border-bottom:1px solid var(--rule);font-family:var(--font-mono);font-size:12px;color:var(--muted)}
+.chrome .tab{height:100%;display:flex;align-items:center;padding:0 14px;background:var(--bg);color:var(--strong);box-shadow:inset 0 2px 0 var(--accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.chrome .st{margin-left:auto;display:flex;gap:10px}
+.pill{font-family:var(--font-mono);font-size:11px;border:1px solid var(--rule);border-radius:999px;padding:1px 9px;color:var(--muted);white-space:nowrap}
+.pill.acc{color:var(--accent);border-color:#5a4430}
+.wrap{display:grid;grid-template-columns:230px minmax(0,1fr);max-width:1220px;margin:0 auto}
+nav.toc{position:sticky;top:40px;align-self:start;height:calc(100vh - 40px);overflow:auto;padding:28px 10px 28px 18px;font-family:var(--font-mono);font-size:11.5px;border-right:1px solid var(--rule)}
+nav.toc a{display:block;padding:4px 8px;margin:1px 0;border-radius:var(--r);color:var(--muted)}
+nav.toc a:hover{background:var(--raised);color:var(--strong);text-decoration:none}
+nav.toc a.on{color:var(--strong);background:var(--raised);box-shadow:inset 2px 0 0 var(--accent)}
+nav.toc .sub{padding-left:20px;font-size:11px}
+main{padding:34px 46px 120px;min-width:0}
+@media (max-width:900px){.wrap{grid-template-columns:1fr}nav.toc{display:none}main{padding:24px 18px 80px}}
+h1{font-family:var(--font-mono);font-weight:500;font-size:22px;color:var(--strong);margin:0 0 6px;letter-spacing:-.01em}
+.lede{font-family:var(--font-prose);font-size:18px;color:var(--ink);max-width:72ch;margin:14px 0 0;line-height:1.55}
+h2{font-family:var(--font-mono);font-weight:500;font-size:15px;color:var(--strong);margin:52px 0 10px;padding-top:14px;border-top:1px solid var(--rule)}
+h2 .n{color:var(--accent);margin-right:10px}
+h3{font-family:var(--font-mono);font-weight:500;font-size:13px;color:var(--accent);margin:28px 0 8px}
+p,li{font-family:var(--font-prose);font-size:16px;line-height:1.6;max-width:74ch}
+li{margin:4px 0}
+.meta{font-family:var(--font-mono);font-size:11.5px;color:var(--faint);display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.note{font-family:var(--font-mono);font-size:11.5px;color:var(--muted);background:var(--surface);border:1px solid var(--rule);border-radius:var(--r);padding:8px 12px;max-width:none}
+.progress{height:6px;background:var(--raised);border-radius:3px;margin:22px 0 4px;overflow:hidden}
+.progress i{display:block;height:100%;background:var(--ok);width:0}
+#count{font-family:var(--font-mono);font-size:11.5px;color:var(--muted)}
+details.task{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-lg);margin:10px 0;padding:0 16px}
+details.task>summary{cursor:pointer;list-style:none;padding:12px 0;display:grid;grid-template-columns:34px minmax(0,1fr) auto;gap:10px;align-items:baseline}
+details.task>summary::-webkit-details-marker{display:none}
+summary .n{font-family:var(--font-mono);color:var(--accent)}
+summary .t{color:var(--strong);font-weight:500}
+summary .f{grid-column:2;font-family:var(--font-mono);font-size:11px;color:var(--faint);overflow-wrap:anywhere}
+summary .s{font-family:var(--font-mono);font-size:11px;color:var(--muted)}
+details[data-state=doing]{border-color:var(--accent)}
+details[data-state=done] summary .s{color:var(--ok)}
+details[data-state=doing] summary .s{color:var(--accent)}
+details.task ol,details.task p{padding-right:4px}
+.verify{border-left:2px solid var(--ok);padding:6px 12px;margin:10px 0 16px;background:rgba(157,176,126,.08);font-family:var(--font-mono);font-size:12px;overflow-wrap:anywhere;max-width:none}
+.verify b{color:var(--ok);font-weight:500}
+.who{font-family:var(--font-mono);font-size:10.5px;color:var(--accent)}
+.who.q{color:var(--comms)}
+.who.u{color:var(--err)}
+.tbl{width:100%;border-collapse:collapse;margin:14px 0;font-size:13px}
+.tbl th{text-align:left;font-family:var(--font-mono);font-weight:500;font-size:11px;color:var(--faint);padding:7px 10px;border-bottom:1px solid var(--rule)}
+.tbl td{padding:9px 10px;border-bottom:1px solid var(--rule);vertical-align:top;color:var(--ink)}
+.tbl td:first-child{color:var(--strong);font-family:var(--font-mono);font-size:12px;white-space:nowrap}
+.tbl .why{color:var(--muted)}
+@media (max-width:640px){
+  .chrome .st .pill:not(.acc){display:none}
+  .chrome{gap:8px;padding:0 10px}
+  .chrome .tab{padding:0 8px}
+  .tbl thead{display:none}
+  .tbl,.tbl tbody,.tbl tr,.tbl td{display:block;width:auto}
+  .tbl tr{padding:10px 0;border-bottom:1px solid var(--rule)}
+  .tbl td{border:0;padding:2px 0}
+  .tbl td:first-child{white-space:normal;margin-bottom:2px}
+  code{overflow-wrap:anywhere}
+  details.task{padding:0 12px}
+}
+</style>
+</head>
+<body>
+
+<div class="chrome">
+  <span>aegis</span>
+  <span class="tab">plan · Claude Code on another account</span>
+  <span class="st"><span class="pill acc">proposed · not started</span><span class="pill">2026-11-21</span><span class="pill">2 PRs · 18 tasks</span></span>
+</div>
+
+<div class="wrap">
+<nav class="toc" id="toc">
+  <a href="#runs">How this runs</a>
+  <a href="#a1">Slice A1 · One resolver</a>
+  <a class="sub" href="#task-1">1 · pool_of</a>
+  <a class="sub" href="#task-2">2 · the record</a>
+  <a class="sub" href="#task-3">3 · the four sites</a>
+  <a href="#a2">Slice A2 · Cooling and billing</a>
+  <a class="sub" href="#task-4">4 · Cooling</a>
+  <a class="sub" href="#task-5">5 · the catalogue</a>
+  <a class="sub" href="#task-6">6 · billing</a>
+  <a href="#a3">Slice A3 · Card and sidebar</a>
+  <a class="sub" href="#task-7">7 · the card</a>
+  <a class="sub" href="#task-8">8 · providerFor</a>
+  <a href="#a4">Slice A4 · Claude-only paths</a>
+  <a class="sub" href="#task-9">9 · observe, refresh, sign-in</a>
+  <a href="#close-a">Close PR A</a>
+  <a class="sub" href="#task-10">10 · help, changelog, PR</a>
+  <a href="#b1">Slice B1 · The fields</a>
+  <a class="sub" href="#task-11">11 · the four keys</a>
+  <a class="sub" href="#task-12">12 · Settings</a>
+  <a class="sub" href="#task-13">13 · resolve and the record</a>
+  <a class="sub" href="#task-14">14 · doctor</a>
+  <a href="#b2">Slice B2 · The process</a>
+  <a class="sub" href="#task-15">15 · the child's environment</a>
+  <a href="#b3">Slice B3 · Cost</a>
+  <a class="sub" href="#task-16">16 · unpriced turns</a>
+  <a href="#b4">Slice B4 · The probe</a>
+  <a class="sub" href="#task-17">17 · doctor --probe</a>
+  <a href="#close-b">Close PR B</a>
+  <a class="sub" href="#task-18">18 · help, changelog, PR</a>
+  <a href="#departs">Where this plan departs</a>
+</nav>
+
+<main>
+<h1>Claude Code on another account: the plan</h1>
+<div class="meta"><span>docs/superpowers/plans/2026-11-21-claude-code-on-another-account.html</span><span>·</span><span>spec: docs/superpowers/specs/2026-11-21-claude-code-on-another-account-design.html</span><span>·</span><span>against main a2c8d5e</span></div>
+<p class="lede">Two PRs. <b>A</b> makes the pool a property of the session, so a Claude Code session that talks to OpenCode Go is measured, guarded and billed as Go's. <b>B</b> gives a <code>claude-code</code> agent a connection of its own — endpoint, key, pool, restricted environment — so that session is started without the Claude sign-in token. One commit per task where it can be; B1 and B2 share a PR, because a record that names a pool while the process still holds Claude's environment would make the card lie.</p>
+
+<div class="progress"><i id="bar"></i></div>
+<div id="count">0 of 18 tasks done</div>
+
+<h2 id="runs">How this runs</h2>
+<ul>
+  <li><b>Issue, then worktree, then PR.</b> One issue per PR, filed before the branch from <code>origin/main</code>. Neither issue is filed, and nothing is branched, until the person approves this plan.</li>
+  <li><b>A first; B branches from <code>origin/main</code> after A merges</b>, never from A's branch (a stacked PR closes itself when its base merges).</li>
+  <li><b>The slice is the unit of work</b>, one queue worker per slice on <code>general</code>, each after the one before has come back: the slices touch the same files and would collide in one worktree. A1 before A2, A3 and A4; B1, then B2, then B3 and B4 in that order.</li>
+  <li><b>A worker runs only the tests its tasks name</b> in the verify blocks, plus <code>make lint-docs</code> when it touched a help page. The full suite is CI's job: merge <code>main</code>, open the PR, let CI run the suite and the bench.</li>
+  <li><b>A review agent only where the work can hide something:</b> A2 (recorded state and keyed cooling) and B2 (a child's environment, a credential). A1, A3, A4, B1, B3 and B4 have tests that pin their behaviour.</li>
+  <li><b>No merge without the person's yes.</b> Each PR ends green, with its screenshots in the body, and stops there.</li>
+  <li><b>Isolation is the agent's switch, not a rule.</b> The person answered: a connection session is not forced into isolation; <code>aegis doctor</code> warns when a connection agent leaves it off, and B2 keeps the decided cut of the credentials link for the sessions that do run isolated.</li>
+</ul>
+
+<h2 id="a1"><span class="n">A1</span>One resolver, and the four sites</h2>
+<p>No behaviour changes here: every agent and every existing record keeps the pool <code>pool_for</code> answers today. This slice is what #457's own pool would need anyway.</p>
+
+<details class="task" id="task-1" data-state="done"><summary><span class="n">1</span><span class="t"><code>pool_of</code>, <code>pool_of_record</code> and <code>NONE</code></span><span class="s">pending</span><span class="f">src/aegis/quota_gate.py, tests/test_quota_gate.py</span></summary>
+<ol>
+  <li><code>NONE = "none"</code> beside <code>pool_for</code> (<code>:82</code>): the name a session records when aegis reads no gauge for its account. <code>pool_for</code> stays as it is — the derivation — and keeps its tests (<code>tests/test_quota_gate.py:38-41</code>).</li>
+  <li><code>pool_of(spec, model=None)</code>: <code>spec.pool</code> when it names a pool; <code>None</code> when it is <code>NONE</code>; else <code>pool_for(spec.harness, model or spec.model)</code>. The <code>model</code> argument asks for another model of the same session, as a cascade's pick does.</li>
+  <li><code>pool_of_record(rec)</code>: the same over a spawn record or a meta (<code>rec.get("pool")</code>, <code>rec.get("harness")</code>, <code>rec.get("model")</code>), which is how a starter is read.</li>
+  <li>The <code>POOLS</code> comment (<code>:39-40</code>) becomes "Pool name → the harness that draws on it by default; a session may name another (pool_of)".</li>
+</ol>
+<div class="verify"><b>verify</b> <code>uv run pytest tests/test_quota_gate.py -q</code> — a spec with pool <code>opencode-go</code> and harness <code>claude-code</code> answers <code>opencode-go</code>; <code>"none"</code> answers None; a spec with no pool answers what <code>pool_for</code> does; a record shaped like a meta does the same.</div>
+</details>
+
+<details class="task" id="task-2" data-state="done"><summary><span class="n">2</span><span class="t"><code>pool</code> on the spawn record, written but never set</span><span class="s">pending</span><span class="f">src/aegis/session.py, tests/test_session.py</span></summary>
+<ol>
+  <li><code>SpawnSpec.pool: str | None = None</code>, after <code>cascade</code>; <code>record()</code> writes <code>"pool"</code> only when set; <code>from_record</code> reads <code>d.get("pool")</code>, so an old record loads as today.</li>
+  <li>Nothing sets it in A: the field is read-only until B1 copies an agent's pool into it. A resume therefore reads the pool from its record, never from <code>.aegis.yaml</code>.</li>
+</ol>
+<div class="verify"><b>verify</b> <code>uv run pytest tests/test_session.py -q</code> — an old record loads with <code>pool</code> None and no key added; a spec with pool <code>"none"</code> round-trips as the string, not as None.</div>
+</details>
+
+<details class="task" id="task-3" data-state="done"><summary><span class="n">3</span><span class="t">The four sites ask the session's pool</span><span class="s">pending</span><span class="f">src/aegis/app.py, guards.py, notices.py, schedules.py, tests/test_guards.py, tests/test_notices.py, tests/test_schedules_e2e.py</span></summary>
+<ol>
+  <li><code>app.py:1079</code>: <code>pool = pool_of(spec, model or spec.model)</code>, which the guards of a start read.</li>
+  <li><code>guards.py:172</code>: each starter's guard is read on <code>pool_of_record(r)</code>, not on <code>pool_for</code> of its harness and model.</li>
+  <li><code>notices.py:813</code>: <code>pool = pool_of(s.spec)</code>, so a session gets its own pool's <code>quota:</code> notices.</li>
+  <li><code>schedules.py:298-315</code>: <code>_line</code> takes the <code>SpawnSpec</code> it already has at each of its four callers (<code>:272</code>, <code>:277</code>, <code>:371</code>, <code>:394</code>) and asks <code>pool_of(spec)</code>.</li>
+</ol>
+<div class="verify"><b>verify</b> <code>uv run pytest tests/test_guards.py tests/test_notices.py tests/test_schedules_e2e.py -q</code> — an agent guard on <code>opencode-go</code> holds a <code>claude-code</code> session whose pool is <code>opencode-go</code>; a starter's record naming that pool counts; such a session gets <code>quota:opencode-go</code> and not <code>quota:claude</code>; a schedule's line is read on the pool its fire draws on.</div>
+</details>
+
+<h2 id="a2"><span class="n">A2</span>Cooling and billing</h2>
+<p>A Go limit must stop cooling Opus, and a Go turn must stop being billed to Claude. This is the slice where a mistake hides in a key, so the tests name the keys.</p>
+
+<details class="task" id="task-4" data-state="done"><summary><span class="n">4</span><span class="t"><code>Cooling</code> by its owner and its pool, and both <code>pick</code> calls</span><span class="s">pending</span><span class="f">src/aegis/cascade.py, src/aegis/app.py, tests/test_cascade.py, tests/test_cascade_app.py</span></summary>
+<ol>
+  <li><code>cooling_owner(harness, base_url)</code>: <code>base_url</code> or <code>harness</code>. It is <b>the</b> key a model fall is written and read under, so <code>cool</code> and <code>until</code> cannot disagree.</li>
+  <li><code>Cooling.cool(owner, model, fall, now, pool=None)</code>: a model fall keys <code>(owner, "model", model)</code>; a pool fall keys <code>(pool or owner, "pool", pool or owner)</code> — for a connection with <code>pool: none</code>, <code>(base_url, "pool", base_url)</code>, so two unmetered gateways never share a fall. <code>_pool</code> goes; the provider-prefix fallback stays for an OpenCode model with no pool (its "pool" is the prefix).</li>
+  <li><code>until(owner, model, now, pool=None)</code> reads both keys and answers the later end when it is still ahead; <code>earliest</code> and <code>wire</code> are unchanged in shape. The wire names the pool for a pool fall; nothing reads it on main (open question 6 in the spec, now answered).</li>
+  <li><code>pick(models, after, owner, gate, cooling, now, pool_of=lambda m: None)</code>: the pool is a callable of the candidate model, because a cascade with no connection can change pool from one model to the next. It asks <code>cooling.until(owner, model, now, pool_of(model))</code>.</li>
+  <li><code>App.cool</code> takes the owner, the model, the fall and the session's pool and endpoint; <code>start_spec</code> and <code>cascade_next</code> both call <code>pick</code> with <code>cooling_owner(spec.harness, base_url)</code> and <code>lambda m: pool_of(spec, m)</code>, and <code>App.gate</code>'s third argument becomes the pool.</li>
+</ol>
+<div class="verify"><b>verify</b> <code>uv run pytest tests/test_cascade.py tests/test_cascade_app.py -q</code> — a pool fall on a <code>claude-code</code> session with pool <code>opencode-go</code> cools that pool and not <code>claude</code>; two <code>pool: none</code> gateways do not share one; a model fall of a connection session is keyed by its endpoint, and <code>pick</code> on the same connection skips it while a fall on another endpoint does not.</div>
+</details>
+
+<details class="task" id="task-5" data-state="done"><summary><span class="n">5</span><span class="t">The cooling rows of the catalogue</span><span class="s">pending</span><span class="f">src/aegis/config_ops.py, tests/test_config_coverage.py</span></summary>
+<ol>
+  <li><code>models.list</code>'s <code>cooling_until</code> (<code>config_ops.py:147</code>) is a <code>max</code> of <code>until</code> over the keys its <code>used_by</code> agents draw on — each agent's pool and its <code>cooling_owner</code> — together with today's harness key, and <code>None</code> when every key is past.</li>
+  <li>A row is a catalogue of models, not a session: it has no endpoint of its own, which is why the agents that use it supply it.</li>
+</ol>
+<div class="verify"><b>verify</b> <code>uv run pytest tests/test_config_coverage.py -q</code>, and a unit assert (in <code>tests/test_cascade.py</code>) that a model used only by a connection agent reports that endpoint's fall while a model used by both keeps the harness fall.</div>
+</details>
+
+<details class="task" id="task-6" data-state="done"><summary><span class="n">6</span><span class="t">The turn is billed to the session's account</span><span class="s">pending</span><span class="f">src/aegis/usage/turns.py, src/aegis/journal/service.py, src/aegis/app.py, src/aegis/usage/importer.py, tests/usage/test_turns.py</span></summary>
+<ol>
+  <li><code>SessionInfo</code> gains <code>pool: str | None = None</code>, and its <code>account</code> callable is asked by pool instead of by harness.</li>
+  <li><code>journal/service.py:370</code> passes <code>pool=meta.get("pool")</code>, and <code>app.py:603</code>'s <code>accounts</code> is keyed by <code>p["name"]</code> instead of <code>p["harness"]</code>.</li>
+  <li><code>_billing</code> (<code>:742-753</code>): <code>codex</code> unchanged; a recorded <code>NONE</code> answers <code>api</code>; a claude-code turn with no recorded pool still answers <code>api</code> when its init names a key (as today), else <code>account("claude")</code>; an OpenCode turn is billed by <code>account(pool_for(harness, model))</code> when it has one, else <code>api</code>.</li>
+  <li>The importer (<code>usage/importer.py:241</code>) builds a bare <code>SessionInfo</code>, so what it derives keeps today's default.</li>
+</ol>
+<div class="verify"><b>verify</b> <code>uv run pytest tests/usage/test_turns.py -q</code> — beside <code>ACCOUNTS</code> (<code>:424</code>) and the parametrized case (<code>:446</code>): a <code>claude-code</code> turn whose record names <code>opencode-go</code> bills <code>opencode-go:&lt;account&gt;</code>, one whose record names <code>none</code> bills <code>api</code>, and a record with no pool bills exactly as today.</div>
+</details>
+
+<h2 id="a3"><span class="n">A3</span>The card and the sidebar</h2>
+<p>Python decides, the browser draws. Two rules become one.</p>
+
+<details class="task" id="task-7" data-state="done"><summary><span class="n">7</span><span class="t">The card carries the resolved pool</span><span class="s">pending</span><span class="f">src/aegis/session.py, tests/test_quota_wire.py</span></summary>
+<ol>
+  <li><code>Session.card()</code> adds <code>"pool": pool_of(spec)</code> — the <b>resolved</b> pool, not the record's field. Every session must carry one: a client that matched on a field only a B1 session has would draw no gauge for anyone.</li>
+  <li>The value is published with the other fields that change at once, so a spawn's card and every later one agree.</li>
+</ol>
+<div class="verify"><b>verify</b> <code>uv run pytest tests/test_quota_wire.py -q</code> — a session with no recorded pool carries the pool <code>pool_for</code> answers for its harness and model.</div>
+</details>
+
+<details class="task" id="task-8" data-state="done"><summary><span class="n">8</span><span class="t"><code>providerFor</code> by name, and the sidebar's browser test</span><span class="s">pending</span><span class="f">src/aegis/client/js/gauges.js, parts/sidebar.js (unchanged), tests/test_pool_browser.py (new)</span></summary>
+<ol>
+  <li><code>providerFor(s, providers)</code> becomes <code>providers.find(p =&gt; p.name === s.pool) || null</code>; its only caller, <code>parts/sidebar.js:854</code>, is unchanged. A pool <code>none</code>, or none at all, still answers null.</li>
+  <li>There is no sidebar gauge test on main to change: add <code>tests/test_pool_browser.py</code>, a session whose card names <code>opencode-go</code> and one whose card names <code>claude</code>, at 1280 and 390 px.</li>
+</ol>
+<div class="verify"><b>verify</b> <code>uv run pytest tests/test_pool_browser.py -q</code> — a <code>claude-code</code> session with pool <code>opencode-go</code> draws the OpenCode Go gauge, not Claude's, at both widths.</div>
+</details>
+
+<h2 id="a4"><span class="n">A4</span>What only Claude's pool does</h2>
+<p>Three paths read or repair the Claude account. Each must ask the pool first, and with no connection anywhere the file must behave exactly as now.</p>
+
+<details class="task" id="task-9" data-state="done"><summary><span class="n">9</span><span class="t">observe, the refresh, and the sign-in card</span><span class="s">pending</span><span class="f">src/aegis/registry.py, src/aegis/quota/__init__.py, src/aegis/session.py (the Host protocol), tests/test_signin_core.py, tests/test_signin_status.py</span></summary>
+<ol>
+  <li><code>Quota.observe</code> takes a session's <code>rate_limit_event</code> only when <code>pool_of(s.spec) == "claude"</code>; the test belongs where the session reports it, <code>Host.rate_limit</code> (<code>registry.py:576</code>, declared at <code>session.py:241</code>).</li>
+  <li><code>Quota.turn_ended</code> nudges the Claude reading only after a turn whose pool is <code>claude</code>. It stays routed by harness; OpenCode was never nudged, and a Go session refreshing nothing after its turn stays a non-goal.</li>
+  <li><code>session.py:1577</code>: <code>SignIns.failed</code> is called only when the session's pool is <code>claude</code>. Any other <code>auth_failed</code> stays an ordinary failed turn whose error text names the endpoint.</li>
+</ol>
+<div class="verify"><b>verify</b> <code>uv run pytest tests/test_signin_core.py tests/test_signin_status.py -q</code>, plus an assert in <code>tests/test_session.py</code> that a <code>rate_limit_event</code> from a session with pool <code>opencode-go</code> leaves Claude's reading untouched.</div>
+</details>
+
+<h2 id="close-a"><span class="n">A</span>Close PR A</h2>
+
+<details class="task" id="task-10" data-state="done"><summary><span class="n">10</span><span class="t">Help, changelog, and the PR</span><span class="s">pending</span><span class="f">src/aegis/help/config.md, src/aegis/help/usage.md, changelog.d/, DESIGN.md</span></summary>
+<ol>
+  <li>Help: the pool on a session card and cooling by pool; a <code>changed</code> changelog fragment.</li>
+  <li>DESIGN.md says a pool is an account and that a session may name another than its harness's.</li>
+  <li>Merge <code>main</code>, open the PR with the bench table CI prints, and shoot the sidebar of an OpenCode Go pool and a Claude one at desktop and 390 px to <code>&lt;issue&gt;/</code> on <code>pr-shots</code>.</li>
+</ol>
+<div class="verify"><b>verify</b> <code>make lint-docs</code>; CI green; screenshots linked in the PR body.</div>
+</details>
+
+<h2 id="b1"><span class="n">B1</span>The fields</h2>
+<p>A connection belongs to an agent. It is named in <code>.aegis.yaml</code>, refused there when it is wrong, and copied into the spawn record so a resume never moves.</p>
+
+<details class="task" id="task-11" data-state="pending"><summary><span class="n">11</span><span class="t">The four keys, parsed and refused</span><span class="s">pending</span><span class="f">src/aegis/agents.py, src/aegis/config.py (AGENT_KEYS), tests/test_agent_config.py</span></summary>
+<ol>
+  <li><code>Agent</code> gains <code>base_url: str = ""</code>, <code>pool: str = ""</code>, <code>api_key_file: str = ""</code> and <code>env: dict[str, str] = field(default_factory=dict)</code>; <code>AGENT_KEYS</code> (<code>config.py:78-82</code>) gains the four names.</li>
+  <li>A helper reads them from the agent map and answers one error at a time, which lands in <code>Agent.error</code> like every other refusal: <code>base_url</code> only on <code>claude-code</code>, an http or https URL without userinfo and without <code>${…}</code>; <code>pool</code> required with it, from the keys of <code>PROVIDERS</code> or <code>none</code>, never <code>codex</code> and never <code>claude</code>; <code>api_key_file</code> and <code>env</code> only with it.</li>
+  <li><code>env</code> refuses the names the spec lists: <code>ANTHROPIC_AUTH_TOKEN</code>, <code>ANTHROPIC_API_KEY</code>, <code>CLAUDE_CODE_OAUTH_TOKEN</code>, <code>ANTHROPIC_CUSTOM_HEADERS</code>, <code>ANTHROPIC_BASE_URL</code>, <code>CLAUDE_CONFIG_DIR</code>, <code>HOME</code>, and any name ending in <code>_TOKEN</code>, <code>_KEY</code> or <code>_SECRET</code>.</li>
+  <li>The nested <code>provider:</code> map is merged before it is read (<code>agents.py:129-135</code>), so the four keys are validated there too and a connection written inside it is refused: that map names models, not an account.</li>
+</ol>
+<div class="verify"><b>verify</b> <code>uv run pytest tests/test_agent_config.py -q</code> — one case per refusal, and an agent with none of the four parses exactly as before.</div>
+</details>
+
+<details class="task" id="task-12" data-state="pending"><summary><span class="n">12</span><span class="t">The Settings rows and the key coverage</span><span class="s">pending</span><span class="f">src/aegis/config.py (AgentDoc, _set_agent), client/js/settings.js, tests/test_config_coverage.py, tests/test_config_write.py</span></summary>
+<ol>
+  <li><code>AgentDoc</code> (<code>config.py:769</code>) gains the four fields, <code>config.py:883</code> fills them and <code>_set_agent</code> (<code>:1423</code>) writes them back; <code>settings.js</code> shows them read-only on the agent card, as #1066 to #1068 did their keys.</li>
+  <li><code>FULL</code> (<code>tests/test_config_coverage.py:29</code>) gains a second agent with <code>base_url</code>, <code>pool</code>, <code>api_key_file</code> and <code>env</code>, valid as written; <code>reader_keys</code> checks the reader and <code>settings.js</code> names them.</li>
+</ol>
+<div class="verify"><b>verify</b> <code>uv run pytest tests/test_config_coverage.py tests/test_config_write.py -q</code> — a save keeps the four keys and the comments around them.</div>
+</details>
+
+<details class="task" id="task-13" data-state="pending"><summary><span class="n">13</span><span class="t"><code>resolve</code> copies the connection; the spec and its record keep it</span><span class="s">pending</span><span class="f">src/aegis/agents.py, src/aegis/session.py, tests/test_agent_config.py, tests/test_session.py</span></summary>
+<ol>
+  <li><code>Connection</code>: <code>base_url</code>, <code>api_key_file</code> (a path or None for the pool's own key) and <code>env</code> as a tuple of pairs, so <code>SpawnSpec</code> stays hashable. <code>SpawnSpec</code> gains <code>pool</code> (set now) and <code>connection</code>.</li>
+  <li><code>agents.resolve</code> copies both. A spawn that overrides <code>harness</code> drops both and derives the pool again; one that overrides <code>model</code> keeps both, so a cascade runs on one account.</li>
+  <li><code>record()</code> writes the connection's <b>path</b>, never the key; <code>from_record</code> reads it; a resume uses the record, not the edited agent. A restart rebuilds the spec from its record and keeps the endpoint after the agent is edited; a handoff resolves the agent afresh and takes its connection.</li>
+</ol>
+<div class="verify"><b>verify</b> <code>uv run pytest tests/test_agent_config.py tests/test_session.py -q</code> — the harness override drops the connection, the model override keeps it, the record holds a path, and a restart of a connection session keeps its endpoint after its agent is edited.</div>
+</details>
+
+<details class="task" id="task-14" data-state="pending"><summary><span class="n">14</span><span class="t">doctor's static findings for a connection</span><span class="s">pending</span><span class="f">src/aegis/doctor.py, tests/test_doctor.py</span></summary>
+<ol>
+  <li><code>_agent</code> (<code>doctor.py:281</code>) skips Claude Code's catalog for a connection and reports: ok "claude-code deepseek-v4.1-flash at opencode.ai, pool opencode-go"; error when the key is missing (a file problem read at doctor time, or the pool's reader returning nothing); warn for <code>pool: none</code>, for a <code>quota:</code> guard naming another pool than the agent's (it can never hold it), and for a connection agent that does not set <code>isolated</code>, whose tool children can read the person's <code>~/.claude/.credentials.json</code>.</li>
+  <li>doctor still spends nothing and writes nothing.</li>
+</ol>
+<div class="verify"><b>verify</b> <code>uv run pytest tests/test_doctor.py -q</code> — each finding, and no catalog row for the connection.</div>
+</details>
+
+<h2 id="b2"><span class="n">B2</span>The process</h2>
+<p>Same PR as B1: a record that names a pool while the process still holds Claude's environment would make the card lie.</p>
+
+<details class="task" id="task-15" data-state="pending"><summary><span class="n">15</span><span class="t">The child's environment, the one-shots and <code>/model</code></span><span class="s">pending</span><span class="f">src/aegis/claude/harness.py, src/aegis/harness.py, src/aegis/session.py, src/aegis/oneshot.py, src/aegis/quota/core.py, src/aegis/quota/opencode.py, tests/test_session.py, tests/fake_claude.py, tests/test_btw.py, tests/test_quota_opencode.py</span></summary>
+<ol>
+  <li><code>Launch</code> carries the connection (<code>session.py:929</code>). <code>ClaudeSession</code> (<code>claude/harness.py:66-93</code>) then, for a connection: removes <code>CLAUDE_CODE_OAUTH_TOKEN</code>, <code>ANTHROPIC_API_KEY</code>, <code>ANTHROPIC_AUTH_TOKEN</code> and <code>ANTHROPIC_BASE_URL</code> from what it inherits; adds <code>ANTHROPIC_BASE_URL</code>, <code>ANTHROPIC_AUTH_TOKEN</code> (the key) and the agent's <code>env</code>; does not call <code>login.with_token</code>; and for an <code>isolated</code> session makes no link to <code>.credentials.json</code> (<code>isolated_env</code> gains the switch, <code>:39-48</code>).</li>
+  <li>Order: the agent's <code>env</code> first, then what aegis fixes for the harness (<code>NO_AUTO_MEMORY</code>, MCP refs, the isolated config dir), so a name aegis sets still wins.</li>
+  <li>The key: <code>api_key_file</code> when given, else the pool's own. A given file is checked when the process starts, as <code>claude/login.py</code> checks its own token file: missing, not mode 0600, or not owned by the server's user refuses the start with the agent's error, and doctor reports the same (task 14). <code>QuotaProvider</code> (<code>quota/core.py:113</code>) gains <code>inference_key: Callable[[], str | None] | None = None</code>; Go sets it to <code>read_key</code> (<code>quota/opencode.py:84</code>) and Claude and Cursor leave it unset, which is an error for a pool with no key. Read at each process start, like the token.</li>
+  <li>The recap and <code>/btw</code> one-shots (<code>oneshot.py</code>) build the same environment for a connection agent; <code>/model</code> for such a session offers <code>agents.model_suggestions</code>, not Claude's catalog.</li>
+</ol>
+<div class="verify"><b>verify</b> <code>uv run pytest tests/test_session.py tests/test_btw.py tests/test_quota_opencode.py -q</code> — the child has <code>ANTHROPIC_BASE_URL</code> and the key and no <code>CLAUDE_CODE_OAUTH_TOKEN</code>, even with a token file present; a key file at mode 0644 refuses the start; an isolated connection session's dir has no <code>.credentials.json</code>; <code>read_key</code> serves as the inference key from the database and from <code>auth.json</code>.</div>
+</details>
+
+<h2 id="b3"><span class="n">B3</span>Cost</h2>
+<p>Claude Code prices every model as Opus, so a Go turn would be recorded at about 27 times its cost. A connection's turn says what it knows: tokens, no dollars.</p>
+
+<details class="task" id="task-16" data-state="pending"><summary><span class="n">16</span><span class="t">Unpriced turns, and no dollars on the card</span><span class="s">pending</span><span class="f">src/aegis/usage/turns.py, src/aegis/session.py, src/aegis/api/sessions.py, src/aegis/usage/scan.py, src/aegis/doctor.py, tests/usage/test_turns.py, tests/usage/test_cost_scan.py, tests/test_meta.py, tests/test_session.py, tests/test_doctor.py</span></summary>
+<ol>
+  <li><code>_close</code> (<code>usage/turns.py:624</code>): with a connection the result's total is ignored and neither <code>billed</code> nor <code>_prev_total</code> moves; <code>_rates</code> answers <code>None</code>, so the turn is <code>unpriced</code> with every token counted.</li>
+  <li>The card's and the API's <code>cost_usd</code> are dropped with it (<code>session.py:1597</code>, <code>:642</code>; <code>api/sessions.py:152</code>, <code>:245-253</code>).</li>
+  <li><code>usage/scan.py</code> (<code>:113</code>, <code>:319-321</code>) does not force Claude's table on a transcript whose session had a connection, with or without an init line.</li>
+  <li>doctor warns about a <code>usd</code>-only budget on an unpriced agent: it would count nothing.</li>
+</ol>
+<div class="verify"><b>verify</b> <code>uv run pytest tests/usage/test_turns.py tests/usage/test_cost_scan.py tests/test_meta.py tests/test_session.py tests/test_doctor.py -q</code> — a connection turn with <code>total_cost_usd</code> 0.0597 lands <code>unpriced</code> with its tokens; the card shows no dollars; a replayed transcript is not priced as Claude.</div>
+</details>
+
+<h2 id="b4"><span class="n">B4</span>The probe</h2>
+
+<details class="task" id="task-17" data-state="pending"><summary><span class="n">17</span><span class="t"><code>aegis doctor --probe &lt;agent&gt;</code></span><span class="s">pending</span><span class="f">src/aegis/doctor.py, src/aegis/cli.py, tests/test_doctor.py, src/aegis/help/</span></summary>
+<ol>
+  <li>An opt-in probe in the shape of <code>login.probe</code> (<code>claude/login.py:141</code>): a scratch <code>CLAUDE_CONFIG_DIR</code>, <code>claude -p --model &lt;model&gt; --output-format json --tools "" --setting-sources ""</code>, the agent's connection environment as B2 builds it, and <code>Reply with the word ok.</code> on stdin.</li>
+  <li>It reads <code>is_error</code>; a <code>400 MissingSessionID</code> is reported as the endpoint refusing the call, which is what a Claude Code release that stops sending the header would show.</li>
+</ol>
+<div class="verify"><b>verify</b> <code>uv run pytest tests/test_doctor.py -q</code> with a fake binary: ok, <code>is_error</code>, and the missing-header message. The real call is the smoke test, never CI.</div>
+</details>
+
+<h2 id="close-b"><span class="n">B</span>Close PR B</h2>
+
+<details class="task" id="task-18" data-state="pending"><summary><span class="n">18</span><span class="t">Help, changelog, and the PR</span><span class="s">pending</span><span class="f">src/aegis/help/config.md, src/aegis/help/usage.md, src/aegis/help/cli.md, changelog.d/, DESIGN.md</span></summary>
+<ol>
+  <li>Help: the four agent keys beside <code>keep_harness_tools</code>, with the isolation warning; <code>pool</code> and unpriced turns on <code>usage.md</code>; <code>--probe</code> on <code>commands.md</code>. An <code>added</code> fragment.</li>
+  <li>DESIGN.md's paragraph on Claude Code's sign-in gains the connection exception.</li>
+  <li>Merge <code>main</code> into the branch, open the PR with CI's bench table, and shoot the agent's Settings card and a Go session's card at desktop and 390 px.</li>
+</ol>
+<div class="verify"><b>verify</b> <code>make lint-docs</code>; CI green; screenshots linked in the PR body.</div>
+</details>
+
+<h2 id="departs">Where this plan departs from the spec</h2>
+<p>Seeded while writing the plan; it grows with each worker's report before the PR.</p>
+<ul>
+  <li><b>The card's pool is resolved, not recorded.</b> <code>card()</code> carries <code>pool_of(spec)</code> for every session, not <code>spec.pool</code>. A card that carried only a recorded pool would leave every existing session without one, and the sidebar would draw no gauge at all until B1 set a pool. The record's field is what <code>pool_of</code> prefers, so the two never disagree.</li>
+  <li><b><code>cooling_owner</code> is a function, and <code>pick</code> takes the pool as a callable.</b> A cascade with no connection can change pool from one model to the next (OpenCode models under different prefixes), so the pool of the candidate model is asked per model, like its gate.</li>
+  <li><b><code>Cooling.wire</code> has no caller on main a2c8d5e.</b> Found while writing this plan; it answers open question 6 of the spec. The wire still names the pool for a pool fall so a later reader is not misled.</li>
+  <li><b><code>App.gate</code> takes the pool as its third argument.</b> It still answers open: it is the host policy's gate, whose lines left with multi-user mode (#958); only the argument stops naming a harness.</li>
+  <li><b>There is no sidebar gauge test to change.</b> <code>providerFor</code> has no test on main, so A3 adds <code>tests/test_pool_browser.py</code> rather than editing one.</li>
+  <li><b>R1-01 is answered: no forced isolation.</b> The person keeps <code>isolated</code> as the agent's own switch, with a doctor warning for a connection agent that leaves it off; B2 still removes the credentials link for an isolated connection session. Isolation would not close the reach anyway — <code>HOME</code> is unchanged, so <code>~/.claude/.credentials.json</code> stays readable — and the plan does not pretend otherwise.</li>
+  <li><b>Two gaps a builder's read of the plan found</b> (the spec's author, on its own text): the run-time check of <code>api_key_file</code> — missing, not 0600, another owner — was only in doctor's task, and is now step 3 of task 15, where the key is read; and B1's task asserts that a restart keeps the record's connection after the agent is edited.</li>
+  <li><b><code>pool_of</code> takes a <code>Pooled</code> protocol, not <code>SpawnSpec</code>.</b> A1's first commit added the resolver before a spec had a <code>pool</code>, and <code>quota_gate</code> must not import <code>session</code>; <code>SpawnSpec</code> satisfies the protocol structurally.</li>
+  <li><b>Test stubs gained <code>pool=None</code>.</b> <code>tests/test_notices.py</code>'s <code>SimpleNamespace</code> spec did; any other stub that reaches <code>notices.pending</code>, <code>quota_guard</code> or <code>Schedules._line</code> without one fails with <code>AttributeError</code>, which CI will name.</li>
+  <li><b>A1's schedules test sets <code>a.spec</code> by hand</b> (<code>dataclasses.replace</code>), because nothing writes a pool into a spec until B1; that line goes when B1 lands.</li>
+  <li><b>There is no quota help page.</b> The spec said "the quota and usage pages"; <code>src/aegis/help/</code> has <code>usage.md</code> and <code>sign-in.md</code>, so A and B document <code>pool</code> and unpriced turns on <code>usage.md</code>.</li>
+  <li><b>A2's fall key keeps a pool in its own space.</b> <code>_pool_key(owner, model, pool)</code>: a named pool keys <code>(pool, "pool", pool)</code>; an endpoint keys itself, so two unmetered gateways never share; a harness that derives a pool keys the pool alone, so all Claude Code sessions share <code>claude</code>; a harness with no derived pool keeps its own name in front (<code>("opencode", "pool", "claude")</code> for a <code>claude/x</code> model); and <code>pool: none</code> without an endpoint cools the model alone. A pool fall never cools Claude by accident.</li>
+  <li><b><code>App._cooling_owner(spec)</code> passes no endpoint yet.</b> It is <code>cooling_owner(spec.harness, None)</code> until <code>SpawnSpec.connection</code> exists; B1 replaces its body with the connection's <code>base_url</code>.</li>
+  <li><b>The cooling wire changed shape.</b> A pool fall emits <code>{"pool", "until"}</code>; a model fall emits <code>{"harness"|"endpoint", "model", "until"}</code>. Nothing reads it on main, and a <code>pool: none</code> pool fall shows the endpoint URL in <code>pool</code> — accepted, since the field is for a person reading a future client.</li>
+  <li><b><code>_is_endpoint</code> reads the text, not a type.</b> A <code>base_url</code> without a scheme would be treated as a harness; B1 refuses anything but an http or https URL, so it cannot reach here.</li>
+  <li><b>A recorded pool outranks <code>apiKeySource</code> in billing.</b> B1 refuses <code>pool: claude</code> on a connection and records no pool on an agent without one, so no turn that bills today changes.</li>
+  <li><b>The card is <code>Session.wire()</code>, not <code>Session.card()</code>.</b> A3 put <code>pool</code> where the sessions channel builds its message; the spec's word "card" names the same thing.</li>
+  <li><b>A linked server on an older aegis draws no gauge.</b> Its cards carry no <code>pool</code>, and <code>providerFor</code> matches on the pool alone now: that is the spec's rule, and the PR body says so.</li>
+  <li><b>The browser test needs the Playwright build the worktree pins.</b> This server had an older one; A3 proved the test with it through a temporary plugin outside the repo, and installed nothing. CI has the pinned build.</li>
+</ul>
+</main>
+</div>
+
+<script>
+// progress, as in the 2026-11-15 plan
+const tasks=[...document.querySelectorAll('details.task')];
+const done=tasks.filter(t=>t.dataset.state==='done').length;
+document.getElementById('bar').style.width=(100*done/tasks.length)+'%';
+document.getElementById('count').textContent=done+' of '+tasks.length+' tasks done';
+tasks.forEach(t=>{const s=t.querySelector('summary .s');if(s)s.textContent=t.dataset.state;if(t.dataset.state==='done')t.open=false;});
+// contents rail highlight, as in the 2026-11-21 spec
+const links=[...document.querySelectorAll('nav.toc a')];
+const io=new IntersectionObserver(es=>es.forEach(en=>{
+  if(en.isIntersecting)links.forEach(a=>a.classList.toggle('on',a.getAttribute('href')==='#'+en.target.id));
+}),{rootMargin:'-45% 0px -50% 0px'});
+document.querySelectorAll('h2[id],details.task[id]').forEach(h=>io.observe(h));
+</script>
+</body>
+</html>

@@ -46,6 +46,7 @@ from .kinds import (
     edit_purpose,
     is_shell_exit,
 )
+from ..quota_gate import NONE, pool_for
 from .context import START, Replay, band
 from .prices import Prices, codex_prices_for, prices_for
 from .store import split_cache
@@ -76,7 +77,11 @@ class SessionInfo:
     agent: str | None = None
     queue: str | None = None
     starter: str | None = None
-    account: Callable[[str], str | None] = lambda harness: None
+    # The pool its spawn recorded (quota_gate.pool_of), "none" for an account
+    # aegis reads no gauge for, or None to derive it from harness and model.
+    pool: str | None = None
+    # The account a pool is logged in as, "<pool>:<hash>", asked by pool name.
+    account: Callable[[str], str | None] = lambda pool: None
     replay_start: int = START  # successors' median start context here
 
 
@@ -740,17 +745,22 @@ class UsageDeriver:
         return rows, list(whatif.values())
 
     def _billing(self) -> str:
-        """The login a turn ran on: Claude's subscription unless its init
-        names an API key, OpenCode Go's only for a Go model, Codex's plan."""
+        """The login a turn ran on: the account of the pool its spawn
+        recorded (``none``: api), else Claude's subscription for Claude Code
+        unless its init names an API key, the account of the pool its harness
+        and model imply (OpenCode Go's only for a Go model), Codex's plan."""
         if self.harness == "codex":
             return "codex"
-        if self.harness == "claude-code" and self._key_source not in (None, "none"):
+        if self.info.pool == NONE:
             return "api"
-        if self.harness == "opencode" and not (self.model or "").startswith(
-            "opencode-go/"
-        ):
-            return "api"
-        return self.info.account(self.harness) or "api"
+        if self.info.pool:
+            return self.info.account(self.info.pool) or "api"
+        if self.harness == "claude-code":
+            if self._key_source not in (None, "none"):
+                return "api"
+            return self.info.account("claude") or "api"
+        pool = pool_for(self.harness, self.model)
+        return (self.info.account(pool) if pool else None) or "api"
 
     def _shares(self, t: _Turn, msgs: list[_Msg], prices: dict) -> dict[str, Fraction]:
         """Each call's share of the turn, summing to 1."""

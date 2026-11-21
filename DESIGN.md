@@ -519,6 +519,18 @@ runs no step of the OAuth flow. The usage endpoint refuses that token, so each
 turn's `rate_limit_event` (`stream.RateLimit`) feeds `QuotaService.observe`, and
 once one has, an unauthorized fetch no longer marks the gauges failed.
 
+**A pool is an account, and a session may name another than its harness's.**
+`quota:` guards, gauges, notices, cooling and billing ask a session's pool,
+resolved once by `quota_gate.pool_of`: the pool its spawn record carries, else
+what its harness and model imply (`pool_for`, the derivation). The card
+publishes it and the sidebar draws the gauge by that name, so the rule lives in
+Python and the browser only draws. `POOLS` keeps mapping each pool to the
+harness that draws on it by default. A pool fall cools the account itself,
+while a model fall cools its owner — a connection's endpoint, else the harness —
+so a limit on one endpoint never holds another's models. The Claude-only paths —
+the `rate_limit_event` reading, the turn-end refresh and the sign-in card — act
+only for a session whose pool is `claude`.
+
 **Where aegis has a tool, the harness's twin is off.** A Claude Code session
 with aegis's tools starts with `--disallowedTools` naming every Claude Code tool
 aegis replaces (`claude/process.py` `REPLACED_TOOLS`: subagents, messaging,

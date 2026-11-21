@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from . import notice_sources
-from .quota_gate import Gate, lines_gate, pool_for, quota_errors
+from .quota_gate import Gate, lines_gate, pool_of_record, quota_errors
 
 AGENT_ACTIONS = ("refuse", "warn")
 # The notice's third line when the agent gives no advice.
@@ -169,7 +169,7 @@ def levels(
         (
             f"agent {r.get('agent')}",
             agents.get(str(r.get("agent"))),
-            pool_for(str(r.get("harness") or ""), r.get("model")),
+            pool_of_record(r),
         )
         for r in starters(rec, lookup)
     ]

@@ -38,7 +38,7 @@ from . import host, notice_sources
 from .guards import SOURCE as GUARD
 from .notice_sources import Item
 from .monitors import iso_now
-from .quota_gate import pool_for
+from .quota_gate import pool_of
 from .transcript.entries import NOTICE_HEADER
 
 if TYPE_CHECKING:
@@ -810,7 +810,7 @@ class Notices:
         It runs only on the event loop, as levels() does, and never awaits:
         two calls cannot interleave, so it needs no lock. Do not call it from
         a thread."""
-        pool = pool_for(s.spec.harness, s.spec.model)
+        pool = pool_of(s.spec)
         active = {
             k: v
             for k, v in self.levels().items()

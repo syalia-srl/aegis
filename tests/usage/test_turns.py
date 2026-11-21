@@ -421,11 +421,12 @@ def test_a_resume_after_an_exit_that_carries_the_total_on_counts_the_rise():
     assert [t.cost for t in run(r).turns] == [Decimal("0.50"), Decimal("0.20")]
 
 
-ACCOUNTS = {"claude-code": "claude:a1b2", "opencode": "opencode-go:c3d4"}
+# Keyed by pool, as App builds the journal's accounts from the quota snapshot.
+ACCOUNTS = {"claude": "claude:a1b2", "opencode-go": "opencode-go:c3d4"}
 
 
-def _info(harness):
-    return SessionInfo(harness=harness, account=ACCOUNTS.get)
+def _info(harness, pool=None):
+    return SessionInfo(harness=harness, pool=pool, account=ACCOUNTS.get)
 
 
 @pytest.mark.parametrize(
@@ -443,6 +444,38 @@ def test_a_claude_session_bills_its_login_unless_it_ran_on_a_key(source, want):
 
 
 @pytest.mark.parametrize(
+    "pool, source, want",
+    [
+        ("opencode-go", "none", "opencode-go:c3d4"),
+        ("none", "none", "api"),
+        (None, "none", "claude:a1b2"),
+        (None, "ANTHROPIC_API_KEY", "api"),
+        # A recorded pool is the account, whatever key the init names.
+        ("opencode-go", "ANTHROPIC_AUTH_TOKEN", "opencode-go:c3d4"),
+    ],
+)
+def test_a_claude_session_bills_the_pool_its_record_names(pool, source, want):
+    r = UseRec()
+    r.spawn()
+    r.claude({"type": "system", "subtype": "init", "apiKeySource": source,
+              "cwd": "/w", "model": "deepseek-v4.1-flash"})  # fmt: skip
+    r.own("send", text="go")
+    r.assistant("m1", inp=100, text="ok")
+    r.result(cost_total=0.10)
+    assert run(r, _info("claude-code", pool)).turns[0].billing == want
+
+
+def test_a_bare_session_info_bills_as_before():
+    """The importer's SessionInfo names no pool and no account."""
+    r = UseRec()
+    r.spawn()
+    r.own("send", text="go")
+    r.assistant("m1", inp=100, text="ok")
+    r.result(cost_total=0.10)
+    assert run(r, SessionInfo(kind="outside")).turns[0].billing == "api"
+
+
+@pytest.mark.parametrize(
     "model, want", [("opencode-go/deepseek-v4-pro", "opencode-go:c3d4"),
                     ("anthropic/claude-opus-5-5", "api")])  # fmt: skip
 def test_an_opencode_session_bills_go_only_on_a_go_model(model, want):
@@ -451,6 +484,20 @@ def test_an_opencode_session_bills_go_only_on_a_go_model(model, want):
     d = _feed("opencode", "opencode",
               [(opencode_step("s1", inp=300, out=40, read=1000), []), (None, _result())],
               info=_info("opencode"), model=model)  # fmt: skip
+    assert d.turns[0].billing == want
+
+
+@pytest.mark.parametrize("harness", ["opencode", "cursor", "pi"])
+@pytest.mark.parametrize(
+    "pool, want",
+    [("opencode-go", "opencode-go:c3d4"), ("none", "api"), ("claude", "claude:a1b2")],
+)
+def test_a_harness_session_bills_the_pool_its_record_names(harness, pool, want):
+    """A recorded pool is the account on any harness, and ``none`` is api,
+    whatever pool the harness and model would imply."""
+    d = _feed(harness, harness,
+              [(None, _call("a", "Read", {"file_path": "/w/a.py"})), (None, _result())],
+              info=_info(harness, pool), model="opencode-go/deepseek-v4-pro")  # fmt: skip
     assert d.turns[0].billing == want
 
 

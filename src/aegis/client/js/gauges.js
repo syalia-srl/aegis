@@ -242,17 +242,13 @@ export function quotaTile(p, w, now) {
   return t;
 }
 
-// The quota a session spends: the provider of its harness, and for OpenCode
-// the one its model names (`opencode-go/deepseek-v4-pro` spends OpenCode Go;
-// `openrouter/...` spends nothing aegis reads). None when aegis reads no quota
-// for it.
+// The quota a session spends: the provider its card names as its pool, which
+// the server resolves (quota_gate.pool_of), so a claude-code session on
+// OpenCode Go spends Go's. None when aegis reads no quota for it: a pool of
+// none, or one with no reading here.
 export function providerFor(s, providers) {
-  if (!s) return null;
-  return (
-    providers.find(
-      (p) => p.harness === s.harness && (s.harness !== "opencode" || (s.model || "").startsWith(`${p.name}/`)),
-    ) || null
-  );
+  if (!s || !s.pool) return null;
+  return providers.find((p) => p.name === s.pool) || null;
 }
 
 export function noteRow(note) {

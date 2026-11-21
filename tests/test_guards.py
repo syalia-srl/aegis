@@ -614,3 +614,55 @@ def test_a_schedule_line_takes_no_stop():
 
     with pytest.raises(ValidationError, match="takes no stop"):
         LineMap.model_validate({"used": 80, "stop": 97})
+
+
+def test_a_starter_is_read_on_the_pool_its_record_names():
+    recs = {"s-fair": {"agent": "fair", "pool": "opencode-go", **CC}}
+    worker = {"agent": "deepseek", "started_by": "s-fair", **CC}
+    over = levels(worker, None, {"fair": TIGHT}, {}, recs.get, "claude")
+    assert over == [("agent fair", TIGHT, "opencode-go")]
+    assert worst(over, snap(99), NOW).state == "open"
+    go = Guard({"opencode-go": {"weekly": 50}})
+    over = levels(worker, None, {"fair": go}, {}, recs.get, "claude")
+    assert worst(over, snap(60, pool="opencode-go", kind="weekly"), NOW).state == (
+        "closed"
+    )
+
+
+GO_GUARDED = """\
+default_agent: opus
+agents:
+  opus: {harness: claude-code, model: opus, effort: high, permission: full}
+  go:
+    harness: claude-code
+    model: deepseek
+    effort: low
+    permission: full
+    quota:
+      opencode-go: {weekly: {used: 50}}
+"""
+
+
+async def test_an_agent_guard_holds_a_session_on_the_pool_it_names(
+    tmp_path, fake_claude
+):
+    """A claude-code session whose record names opencode-go is held by its
+    agent's opencode-go guard, and Claude's gauge does not hold it."""
+    import dataclasses
+
+    from aegis.session import SpawnSpec
+
+    (tmp_path / ".aegis.yaml").write_text(GO_GUARDED)
+    w = await World(tmp_path, fake_claude).start()
+    try:
+        spec = SpawnSpec("go", "deepseek", "low", "full", tmp_path)
+        w.app.quota.snapshot = lambda: snap(60, pool="opencode-go", kind="weekly")
+        # With no recorded pool the session draws on claude: the guard is not it.
+        assert w.app.quota_guard(spec).state == "open"
+        on_go = dataclasses.replace(spec, pool="opencode-go")
+        g = w.app.quota_guard(on_go)
+        assert g.state == "closed" and g.why.startswith("agent go: ")
+        w.app.quota.snapshot = lambda: snap(99)
+        assert w.app.quota_guard(on_go).state == "open"
+    finally:
+        await w.stop()

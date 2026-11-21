@@ -1,3 +1,5 @@
+# ruff: noqa: F811  (pytest fixtures imported from other test modules)
+import dataclasses
 import json
 import errno
 import os
@@ -12,6 +14,8 @@ from aegis.transcript.entries import fold_records
 from aegis.transcript.store import Store, read_store
 
 from .conftest import cmdline, until
+from .test_agents import turn, world  # noqa: F401  (fixture)
+from .test_claude_login import BAD, cards, put
 
 
 class Harness:
@@ -577,3 +581,83 @@ async def test_turn_output_takes_the_final_count_from_message_delta(h):
     assert s.turn_tokens == [52, 84]
     s._on_line(json.dumps({"type": "stream_event", "event": delta}))
     assert s.turn_tokens == [52, 84]
+
+
+def test_an_old_record_loads_with_no_pool(tmp_path):
+    spec = SpawnSpec.from_record(
+        {"agent": "a", "harness": "claude-code", "model": "opus"}, tmp_path
+    )
+    assert spec.pool is None
+    assert "pool" not in spec.record()
+
+
+def test_a_recorded_pool_round_trips_as_written(tmp_path):
+    for pool in ("opencode-go", "none"):
+        spec = SpawnSpec("a", "opus", "high", "full", tmp_path, pool=pool)
+        assert spec.record()["pool"] == pool
+        assert SpawnSpec.from_record(spec.record(), tmp_path).pool == pool
+
+
+# -- What only Claude's pool does (registry.rate_limit, turn_ended, sign_in_failed)
+
+
+def _on_pool(s, pool: str | None) -> None:
+    """Give a live session the pool a connection would record on its spawn."""
+    s.spec = dataclasses.replace(s.spec, pool=pool)
+
+
+def _claude_session_percent(app) -> float | None:
+    for p in app.quota.snapshot()["providers"]:
+        if p["name"] == "claude":
+            for w in p["windows"]:
+                if w["kind"] == "session":
+                    return w["percent"]
+    return None
+
+
+async def test_only_a_claude_pool_session_moves_claudes_reading(world, monkeypatch):
+    monkeypatch.setenv("FAKE_CLAUDE_RATE_LIMIT", "0.37")
+    go, claude = await world.spawn(), await world.spawn()
+    _on_pool(go, "opencode-go")
+    before = _claude_session_percent(world.app)
+    await turn(go, "hello")  # its rate_limit_event is read before its result
+    assert _claude_session_percent(world.app) == before != 37.0
+    await turn(claude, "hello")  # no connection: today's behaviour
+    await until(lambda: _claude_session_percent(world.app) == 37.0, what="the gauge")
+
+
+async def test_a_turn_end_passes_the_session_pool_to_the_quota(world, monkeypatch):
+    seen: list[tuple] = []
+    monkeypatch.setattr(world.app.quota, "turn_ended", lambda *a: seen.append(a))
+    go, plain, ungauged = await world.spawn(), await world.spawn(), await world.spawn()
+    _on_pool(go, "opencode-go")
+    _on_pool(ungauged, "none")
+    for s in (go, plain, ungauged):
+        await turn(s, "hello")
+    assert seen == [
+        ("claude-code", "opencode-go"),
+        ("claude-code", "claude"),
+        # None would mean Claude to Quota.turn_ended; no account says so.
+        ("claude-code", "none"),
+    ]
+
+
+async def test_a_failed_sign_in_off_claudes_pool_raises_no_claude_card(
+    world, monkeypatch
+):
+    put(BAD)
+    raised: list[str] = []
+    real = world.app.sessions.sign_in.failed
+    monkeypatch.setattr(
+        world.app.sessions.sign_in,
+        "failed",
+        lambda s, h="claude-code": (raised.append(s.handle), real(s, h)),
+    )
+    go = await world.spawn()
+    _on_pool(go, "opencode-go")
+    await turn(go, "hello")
+    assert raised == [] and cards(go) == []
+    claude = await world.spawn()
+    await turn(claude, "hello")  # no connection: the card, as today
+    await until(lambda: cards(claude), what="the card")
+    assert raised == [claude.handle]
