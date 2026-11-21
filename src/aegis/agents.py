@@ -209,7 +209,10 @@ def _agent(name: str, raw: Any) -> Agent:
     )  # fmt: skip
     return Agent(
         name=str(name),
-        **values,
+        harness=values["harness"],
+        model=values["model"],
+        effort=values["effort"],
+        permission=values["permission"],
         priming=str(priming) if priming else None,
         keep_harness_tools=keep,
         exit=str(d.get("exit") or ""),
