@@ -278,7 +278,7 @@ details.task ol,details.task p{padding-right:4px}
 <div class="verify"><b>verify</b> <code>uv run pytest tests/test_agent_config.py tests/test_session.py -q</code> — the harness override drops the connection, the model override keeps it, the record holds a path, and a restart of a connection session keeps its endpoint after its agent is edited.</div>
 </details>
 
-<details class="task" id="task-14" data-state="pending"><summary><span class="n">14</span><span class="t">doctor's static findings for a connection</span><span class="s">pending</span><span class="f">src/aegis/doctor.py, tests/test_doctor.py</span></summary>
+<details class="task" id="task-14" data-state="done"><summary><span class="n">14</span><span class="t">doctor's static findings for a connection</span><span class="s">pending</span><span class="f">src/aegis/doctor.py, tests/test_doctor.py</span></summary>
 <ol>
   <li><code>_agent</code> (<code>doctor.py:281</code>) skips Claude Code's catalog for a connection and reports: ok "claude-code deepseek-v4.1-flash at opencode.ai, pool opencode-go"; error when the key is missing (a file problem read at doctor time, or the pool's reader returning nothing); warn for <code>pool: none</code>, for a <code>quota:</code> guard naming another pool than the agent's (it can never hold it), and for a connection agent that does not set <code>isolated</code>, whose tool children can read the person's <code>~/.claude/.credentials.json</code>.</li>
   <li>doctor still spends nothing and writes nothing.</li>

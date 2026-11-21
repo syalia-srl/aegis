@@ -25,6 +25,7 @@ from asyncio.subprocess import PIPE, STDOUT
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from . import launch
 from .claude import login
@@ -49,6 +50,8 @@ from .links import LinkStore
 from . import mcp_servers, scopes
 from .ops import OpError
 from .policy import McpServer
+from .quota import opencode as go_quota
+from .quota_gate import NONE
 from .harness_versions import OUTSIDE, VERSION_TIMEOUT_S, judge
 from .knowledge import embed
 from .ranking import annotate, ranking
@@ -300,6 +303,8 @@ def _agent(a: Agent, f: Found | None) -> list[Finding]:
                 row,
             )
         ]
+    if a.base_url:
+        return _connection(a, row)
     out: list[Finding] = [
         Finding("warn", f"{row}.models", f"{m} is listed twice; the second is ignored", row)
         for m in a.repeated
@@ -343,6 +348,68 @@ def _agent(a: Agent, f: Found | None) -> list[Finding]:
             row,
         )
     ]
+
+
+def _connection(a: Agent, row: str) -> list[Finding]:
+    """A connection agent's findings. Claude Code's catalog is Anthropic's, so
+    its models are not compared with it; the key is looked for, never sent."""
+    host = urlsplit(a.base_url).hostname or a.base_url
+    out: list[Finding] = []
+    if problem := _key_problem(a):
+        out.append(Finding("error", f"{row}.api_key_file", problem, row))
+    if a.pool == NONE:
+        out.append(
+            Finding("warn", f"{row}.pool", "no gauge meters this agent's spend", row)
+        )
+    others = sorted(k for k in (a.guard.lines if a.guard else {}) if k != a.pool)
+    if others:
+        out.append(
+            Finding(
+                "warn",
+                f"{row}.quota",
+                f"the quota: guard names {', '.join(others)}, which never holds "
+                f"this agent's sessions: they draw on pool {a.pool}",
+                row,
+            )
+        )
+    if a.budget and all(c.measure == "usd" for c in a.budget):
+        out.append(
+            Finding(
+                "warn",
+                f"{row}.budget",
+                "a usd budget counts nothing on a connection, whose turns are "
+                "unpriced; cap it in tokens",
+                row,
+            )
+        )
+    if not a.isolated:
+        out.append(
+            Finding(
+                "warn",
+                f"{row}.isolated",
+                "without isolated: true its sessions share the person's ~/.claude, "
+                "and its tool children can read .credentials.json",
+                row,
+            )
+        )
+    return out or [
+        Finding("ok", row, f"{a.harness} {a.model} at {host}, pool {a.pool}", row)
+    ]
+
+
+def _key_problem(a: Agent) -> str | None:
+    """Why the connection has no usable key, or None when it has one: its
+    api_key_file, else the pool's own key."""
+    if a.api_key_file:
+        path = Path(a.api_key_file)
+        if not path.is_file():
+            return f"{path} does not exist"
+        return login.file_problem(path)
+    if a.pool == "opencode-go":
+        if go_quota.read_key():
+            return None
+        return "no key: OpenCode holds no Go key here; sign in or set api_key_file"
+    return f"no key: pool {a.pool} has none of its own; set api_key_file"
 
 
 def _intelligence(model: str) -> str:

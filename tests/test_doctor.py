@@ -388,3 +388,117 @@ async def test_a_failing_version_read_warns_unknown_and_still_lists_models(
     assert [f.level for f in claude] == ["warn"], claude
     assert "could not be read" in claude[0].message
     assert "--version` failed" in claude[0].message
+
+
+def go_config(tmp_path: Path, extra: str = "", pool: str = "opencode-go") -> str:
+    return (
+        "agents:\n  go:\n    harness: claude-code\n    model: deepseek-v4.1-flash\n"
+        "    effort: high\n    permission: full\n"
+        "    base_url: https://opencode.ai/inference/go/anthropic\n"
+        f"    pool: {pool}\n" + extra
+    )
+
+
+def key_file(tmp_path: Path, mode: int = 0o600) -> Path:
+    k = tmp_path / "go.key"
+    k.write_text("sk-test")
+    k.chmod(mode)
+    return k
+
+
+async def test_a_connection_is_ok_without_a_catalog_row(
+    tmp_path, fake_claude, fake_opencode, monkeypatch
+):
+    monkeypatch.setattr("aegis.quota.opencode.read_key", lambda: "sk-go")
+    found = await run(
+        tmp_path,
+        go_config(tmp_path, "    isolated: true\n"),
+        fake_claude,
+        fake_opencode,
+    )
+    rows = [f for f in found if f.row == "agents.go"]
+    assert [(f.level, f.message) for f in rows] == [
+        ("ok", "claude-code deepseek-v4.1-flash at opencode.ai, pool opencode-go")
+    ]
+
+
+async def test_a_connection_without_the_pools_key_is_an_error(
+    tmp_path, fake_claude, fake_opencode, monkeypatch
+):
+    monkeypatch.setattr("aegis.quota.opencode.read_key", lambda: None)
+    found = await run(
+        tmp_path,
+        go_config(tmp_path, "    isolated: true\n"),
+        fake_claude,
+        fake_opencode,
+    )
+    (f,) = at(found, "agents.go.api_key_file")
+    assert f.level == "error" and "no Go key" in f.message
+
+
+@pytest.mark.parametrize(
+    "setup, fragment",
+    [
+        (lambda p: p / "missing.key", "does not exist"),
+        (lambda p: key_file(p, 0o644), "must be mode 0600"),
+    ],
+)
+async def test_a_key_file_that_cannot_be_used_is_an_error(
+    tmp_path, fake_claude, fake_opencode, setup, fragment
+):
+    path = setup(tmp_path)
+    text = go_config(tmp_path, f"    isolated: true\n    api_key_file: {path}\n")
+    found = await run(tmp_path, text, fake_claude, fake_opencode)
+    (f,) = at(found, "agents.go.api_key_file")
+    assert f.level == "error" and fragment in f.message
+
+
+async def test_pool_none_warns_and_needs_a_key_file(
+    tmp_path, fake_claude, fake_opencode
+):
+    found = await run(
+        tmp_path,
+        go_config(tmp_path, "    isolated: true\n", pool="none"),
+        fake_claude,
+        fake_opencode,
+    )
+    (key,) = at(found, "agents.go.api_key_file")
+    assert key.level == "error" and "pool none has none of its own" in key.message
+    (warn,) = at(found, "agents.go.pool")
+    assert warn.level == "warn" and "no gauge" in warn.message
+
+
+async def test_a_connection_warns_for_isolation_guard_and_usd_budget(
+    tmp_path, fake_claude, fake_opencode
+):
+    k = key_file(tmp_path)
+    text = go_config(
+        tmp_path,
+        f"    api_key_file: {k}\n"
+        "    quota: {claude: {weekly_all: 80}}\n"
+        "    budget: [{usd: 5, per: session}]\n",
+    )
+    found = await run(tmp_path, text, fake_claude, fake_opencode)
+    levels = {f.where: f.level for f in found if f.row == "agents.go"}
+    assert levels == {
+        "agents.go.isolated": "warn",
+        "agents.go.quota": "warn",
+        "agents.go.budget": "warn",
+    }
+    (guard,) = at(found, "agents.go.quota")
+    assert "names claude" in guard.message
+    assert not at(found, "agents.go.model")  # no catalog comparison
+
+
+async def test_a_tokens_budget_and_its_own_pool_guard_do_not_warn(
+    tmp_path, fake_claude, fake_opencode
+):
+    k = key_file(tmp_path)
+    text = go_config(
+        tmp_path,
+        f"    isolated: true\n    api_key_file: {k}\n"
+        "    quota: {opencode-go: {weekly: 80}}\n"
+        "    budget: [{usd: 5, per: session}, {tokens: 1000000, per: 7d}]\n",
+    )
+    found = await run(tmp_path, text, fake_claude, fake_opencode)
+    assert [f.level for f in found if f.row == "agents.go"] == ["ok"]
