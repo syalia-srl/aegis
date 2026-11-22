@@ -2083,11 +2083,15 @@ class App:
 
     def _meta_of_session(self, log_id: str) -> dict:
         """A session's meta, live or archived; {} when it has none (an old
-        store, a crash before the meta was written)."""
+        store, a crash before the meta was written). A turn can end before
+        the first publish writes the file, so a live session answers with its
+        own card: its usage row then carries its agent, pool and connection
+        instead of the defaults, which billed a Go turn to Claude."""
         try:
             meta = json.loads(self.sessions.metas.path(log_id).read_text())
         except (OSError, ValueError):
-            return {}
+            live = self.sessions.sessions.get(log_id)
+            return live.meta() if live is not None else {}
         return meta if isinstance(meta, dict) else {}
 
     def place_of(self, caller: Caller) -> Place:

@@ -661,6 +661,27 @@ async def test_a_restart_keeps_the_endpoint_after_its_agent_is_edited(
         await w.stop()
 
 
+async def test_a_live_session_answers_its_meta_before_the_file_is_written(
+    tmp_path, fake_claude
+):
+    """A turn can end before the first publish writes the meta; the journal
+    then asks the live session, so its usage row keeps its agent, pool and
+    connection instead of billing a Go turn to Claude."""
+    cfg = tmp_path / ".aegis.yaml"
+    cfg.write_text(_go(tmp_path, "https://one.example/anthropic"))
+    w = await World(tmp_path, fake_claude).start()
+    try:
+        r = await w.app.registry.call("session.spawn", {"agent": "go"})
+        s = w.session(r["log_id"])
+        w.app.sessions.metas.path(s.log_id).unlink()
+        meta = w.app._meta_of_session(s.log_id)
+        assert meta["agent"] == "go"
+        assert meta["pool"] == "none"
+        assert meta["connection"]
+    finally:
+        await w.stop()
+
+
 # -- What only Claude's pool does (registry.rate_limit, turn_ended, sign_in_failed)
 
 
