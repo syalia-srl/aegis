@@ -134,3 +134,76 @@ def test_peer_read_never_shows_a_side_note():
         "summary": "the secret side question",
     }
     assert _render(e, True) is None
+
+
+# -- A connection agent's one-shot (task 15) ---------------------------------
+
+BTW_ON_GO = """\
+btw: {agent: go}
+agents:
+  go:
+    harness: claude-code
+    model: m
+    effort: high
+    permission: full
+    base_url: https://opencode.ai/inference/go/anthropic
+    pool: opencode-go
+    env: {ANTHROPIC_DEFAULT_HAIKU_MODEL: m-small}
+"""
+
+
+async def test_a_connection_agents_one_shot_runs_on_its_endpoint(
+    tmp_path, fake_claude, monkeypatch
+):
+    import json
+
+    from aegis import oneshot
+    from aegis.session import Connection
+
+    from .test_claude_login import GOOD, put
+
+    put(GOOD)
+    auth = tmp_path / "auth.json"
+    auth.write_text(json.dumps({"opencode-go": {"type": "api", "key": "sk-go"}}))
+    monkeypatch.setenv("OPENCODE_AUTH", str(auth))
+    log = tmp_path / "env.log"
+    monkeypatch.setenv("FAKE_CLAUDE_ENV_LOG", str(log))
+    (tmp_path / ".aegis.yaml").write_text(BTW_ON_GO)
+    cfg = oneshot.load_generator(tmp_path, "btw")
+    assert cfg["connection"] == Connection(
+        base_url="https://opencode.ai/inference/go/anthropic",
+        env=(("ANTHROPIC_DEFAULT_HAIKU_MODEL", "m-small"),),
+    )
+    assert cfg["pool"] == "opencode-go"
+    out = await oneshot.run(
+        oneshot.argv(fake_claude, cfg["model"], btw.BtwOut, btw.SYSTEM),
+        tmp_path / "oneshot",
+        20,
+        btw.prompt("why?", btw.window([]), EMPTY_STANDING, []),
+        connection=cfg["connection"],
+        pool=cfg["pool"],
+    )
+    assert oneshot.parse(out, btw.BtwOut)[0] is not None
+    env = json.loads(log.read_text().splitlines()[-1])
+    assert env["ANTHROPIC_BASE_URL"] == "https://opencode.ai/inference/go/anthropic"
+    assert env["ANTHROPIC_AUTH_TOKEN"] == "sk-go"
+    assert env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] == "m-small"
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in env
+
+
+async def test_a_one_shot_without_a_key_fails_in_words(tmp_path, monkeypatch):
+    import pytest
+
+    from aegis import oneshot
+    from aegis.session import Connection
+
+    monkeypatch.setenv("OPENCODE_AUTH", str(tmp_path / "absent.json"))
+    with pytest.raises(oneshot.OneshotError, match="no key"):
+        await oneshot.run(
+            ["claude"],
+            tmp_path,
+            5,
+            "q",
+            connection=Connection(base_url="https://gw.example/anthropic"),
+            pool="opencode-go",
+        )

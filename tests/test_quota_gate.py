@@ -1,6 +1,8 @@
 import pytest
 
-from aegis.quota_gate import decide, pool_for, validate
+from types import SimpleNamespace
+
+from aegis.quota_gate import NONE, decide, pool_for, pool_of, pool_of_record, validate
 
 NOW = 10_000.0
 
@@ -39,6 +41,43 @@ def test_the_pool_of_a_harness():
     assert pool_for("opencode", "opencode-go/kimi") == "opencode-go"
     assert pool_for("opencode", "anthropic/sonnet") is None
     assert pool_for("codex", "gpt") == "codex"
+
+
+def spec(harness, model, pool=None):
+    return SimpleNamespace(harness=harness, model=model, pool=pool)
+
+
+def test_a_recorded_pool_wins_over_the_harness():
+    assert pool_of(spec("claude-code", "deepseek", "opencode-go")) == "opencode-go"
+    assert pool_of(spec("claude-code", "opus", NONE)) is None
+
+
+def test_no_recorded_pool_derives_as_pool_for():
+    for h, m in [
+        ("claude-code", "opus"),
+        ("opencode", "opencode-go/kimi"),
+        ("opencode", "anthropic/sonnet"),
+        ("codex", "gpt"),
+    ]:
+        assert pool_of(spec(h, m)) == pool_for(h, m)
+
+
+def test_pool_of_asks_another_model_of_the_session():
+    s = spec("opencode", "opencode-go/kimi")
+    assert pool_of(s, "anthropic/sonnet") is None
+    assert pool_of(s) == "opencode-go"
+    s = spec("claude-code", "opus", "opencode-go")
+    assert pool_of(s, "sonnet") == "opencode-go"
+
+
+def test_a_record_reads_as_a_spec():
+    go = {"harness": "claude-code", "model": "x", "pool": "opencode-go"}
+    assert pool_of_record(go) == "opencode-go"
+    assert pool_of_record({"harness": "claude-code", "pool": "none"}) is None
+    assert pool_of_record({"harness": "claude-code", "model": "opus"}) == "claude"
+    oc = {"harness": "opencode", "model": "opencode-go/kimi"}
+    assert pool_of_record(oc) == "opencode-go"
+    assert pool_of_record({}) is None
 
 
 @pytest.mark.parametrize(

@@ -1173,7 +1173,7 @@ export class Settings {
       this.draw();
     }, "link danger");
     const fold = h("details", { className: "set-priming", open: !!a.priming }, h("summary", { textContent: a.priming ? "Priming" : "Add a priming" }), priming);
-    card.append(name, h("div", { className: "picks" }, harness, effort, permission), casc, h("div", { className: "set-card-foot" }, fold, this.keepFold(a), this.mcpFold(a), this.scopeFold(a), this.quotaFold(a.quota, "agents.*.quota"), this.budgetFold(a), this.productFold(a), this.exitFold(a), star, del));
+    card.append(name, h("div", { className: "picks" }, harness, effort, permission), casc, h("div", { className: "set-card-foot" }, fold, this.keepFold(a), this.mcpFold(a), this.scopeFold(a), this.quotaFold(a.quota, "agents.*.quota"), this.budgetFold(a), this.connectionFold(a), this.productFold(a), this.exitFold(a), star, del));
     if (isDefault) card.classList.add("is-default");
     return card;
   }
@@ -1278,6 +1278,21 @@ export class Settings {
     });
     const fold = h("details", { className: "set-priming set-budget" }, h("summary", { textContent: "Budget" }), ...lines, h("p", { className: "set-none", textContent: "Past a cap its sessions are told to finish, and no turn a person did not start runs until the cap has room. Edit budget: in .aegis.yaml; help: config, Budget an agent." }));
     fold.dataset.key = "agents.*.budget";
+    return fold;
+  }
+
+  // A claude-code agent's connection (agents.py): the endpoint, the pool it
+  // is metered on, its key file and its env, shown as the file has them; a
+  // save writes them back unchanged. They are edited in .aegis.yaml.
+  connectionFold(a) {
+    const keys = ["base_url", "pool", "api_key_file"].filter((k) => a[k]);
+    const env = a.env != null && typeof a.env === "object" && !Array.isArray(a.env) ? Object.entries(a.env) : null;
+    if (!keys.length && a.env == null) return null;
+    const lines = keys.map((k) => h("div", { className: "kv" }, h("span", { textContent: k }), h("span", { textContent: a[k] })));
+    if (env) lines.push(...env.map(([k, v]) => h("div", { className: "kv" }, h("span", { textContent: `env ${k}` }), h("span", { textContent: String(v) }))));
+    else if (a.env != null) lines.push(h("div", { className: "kv" }, h("span", { textContent: "env invalid" }), h("span", { textContent: JSON.stringify(a.env) })));
+    const fold = h("details", { className: "set-priming set-connection" }, h("summary", { textContent: "Connection" }), ...lines, h("p", { className: "set-none", textContent: "Claude Code runs against this endpoint instead of Anthropic, metered on the pool. Edit base_url, pool, api_key_file and env in .aegis.yaml; help: config." }));
+    fold.dataset.key = "agents.*.base_url agents.*.pool agents.*.api_key_file agents.*.env";
     return fold;
   }
 

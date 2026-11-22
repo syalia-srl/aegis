@@ -9,7 +9,10 @@ Settings row it belongs to. A model the catalog does not list is a warning, not
 an error: a CLI alias can resolve without being listed. ``propose`` is the
 first config ``aegis init`` and the Settings page's Set up offer.
 
-The doctor writes nothing: probe stderr goes to a temporary directory.
+The doctor writes nothing and spends nothing: probe stderr goes to a
+temporary directory. ``probe``, behind ``aegis doctor --probe <agent>``, is the
+one exception: it spends one call on a connection agent's account to ask
+Claude Code itself whether the endpoint answers.
 """
 
 from __future__ import annotations
@@ -25,10 +28,11 @@ from asyncio.subprocess import PIPE, STDOUT
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from . import launch
-from .claude import login
-from .agents import EFFORTS, HARNESSES, Agent
+from .claude import connection, login
+from .agents import EFFORTS, HARNESSES, Agent, connection_of
 from .cgroups import parse_size, total_ram
 from .claude.control import Catalog, Model
 from .config import (
@@ -49,6 +53,7 @@ from .links import LinkStore
 from . import mcp_servers, scopes
 from .ops import OpError
 from .policy import McpServer
+from .quota_gate import NONE
 from .harness_versions import OUTSIDE, VERSION_TIMEOUT_S, judge
 from .knowledge import embed
 from .ranking import annotate, ranking
@@ -300,6 +305,8 @@ def _agent(a: Agent, f: Found | None) -> list[Finding]:
                 row,
             )
         ]
+    if a.base_url:
+        return _connection(a, row)
     out: list[Finding] = [
         Finding("warn", f"{row}.models", f"{m} is listed twice; the second is ignored", row)
         for m in a.repeated
@@ -343,6 +350,60 @@ def _agent(a: Agent, f: Found | None) -> list[Finding]:
             row,
         )
     ]
+
+
+def _connection(a: Agent, row: str) -> list[Finding]:
+    """A connection agent's findings. Claude Code's catalog is Anthropic's, so
+    its models are not compared with it; the key is looked for, never sent."""
+    host = urlsplit(a.base_url).hostname or a.base_url
+    out: list[Finding] = []
+    if problem := _key_problem(a):
+        out.append(Finding("error", f"{row}.api_key_file", problem, row))
+    if a.pool == NONE:
+        out.append(
+            Finding("warn", f"{row}.pool", "no gauge meters this agent's spend", row)
+        )
+    others = sorted(k for k in (a.guard.lines if a.guard else {}) if k != a.pool)
+    if others:
+        out.append(
+            Finding(
+                "warn",
+                f"{row}.quota",
+                f"the quota: guard names {', '.join(others)}, which never holds "
+                f"this agent's sessions: they draw on pool {a.pool}",
+                row,
+            )
+        )
+    if a.budget and all(c.measure == "usd" for c in a.budget):
+        out.append(
+            Finding(
+                "warn",
+                f"{row}.budget",
+                "a usd budget counts nothing on a connection, whose turns are "
+                "unpriced; cap it in tokens",
+                row,
+            )
+        )
+    if not a.isolated:
+        out.append(
+            Finding(
+                "warn",
+                f"{row}.isolated",
+                "without isolated: true its sessions share the person's ~/.claude, "
+                "and its tool children can read .credentials.json",
+                row,
+            )
+        )
+    return out or [
+        Finding("ok", row, f"{a.harness} {a.model} at {host}, pool {a.pool}", row)
+    ]
+
+
+def _key_problem(a: Agent) -> str | None:
+    """Why the connection has no usable key, or None when it has one: its
+    api_key_file, else the pool's own key, checked as a session start reads
+    it (claude/connection.py)."""
+    return connection.key_problem(a.api_key_file or None, a.pool)
 
 
 def _intelligence(model: str) -> str:
@@ -707,6 +768,59 @@ async def doctor(
     if snap.multi_user_error:
         out.append(Finding("error", "multi_user", snap.multi_user_error))
     return out
+
+
+# What the Go gateway answers a request without x-claude-code-session-id,
+# which Claude Code sends itself (claude/connection.py).
+MISSING_SESSION_ID = "MissingSessionID"
+
+
+async def probe(
+    roots: Roots,
+    bins: dict[str, str],
+    name: str,
+    timeout: float = login.PROBE_TIMEOUT_S,
+) -> Finding:
+    """Ask Claude Code itself whether agent ``name``'s connection answers: one
+    call on its first model, with the environment a session of it starts
+    with, in a scratch config directory (``login.ask``). It spends one call on
+    the agent's account; nothing else runs it."""
+    row = f"agents.{name}"
+    path = roots.config_root / CONFIG_FILE
+    data, error = load(path) if path.is_file() else (None, f"no {CONFIG_FILE}")
+    if data is None:
+        return Finding("error", row, f"cannot probe: {error}", row)
+    snap = Snapshot.parse(path, None, data, socket.gethostname())
+    a = next((a for a in snap.agents if a.name == name), None)
+    if a is None:
+        return Finding("error", row, f"no agent {name!r} to probe", row)
+    conn = connection_of(a)
+    if a.error or a.harness != "claude-code" or conn is None:
+        return Finding(
+            "error",
+            row,
+            a.error or "--probe checks a claude-code agent with a base_url",
+            row,
+        )
+    try:
+        env = connection.base_env(conn, a.pool)
+    except connection.KeyProblem as e:
+        return Finding("error", f"{row}.api_key_file", str(e), row)
+    res = await login.ask(bins["claude-code"], a.model, env, timeout)
+    host = urlsplit(a.base_url).hostname or a.base_url
+    if isinstance(res, str):
+        return Finding("error", row, res, row)
+    if res.get("is_error"):
+        said = str(res.get("result") or "no reason given")
+        if MISSING_SESSION_ID in said:
+            said = f"400 {MISSING_SESSION_ID}"
+        return Finding("error", row, f"the endpoint refused the call: {said}", row)
+    return Finding(
+        "ok",
+        row,
+        f"Claude Code answered at {host} ({a.model}, pool {a.pool})",
+        row,
+    )
 
 
 def _claude_token(now: float) -> Finding | None:

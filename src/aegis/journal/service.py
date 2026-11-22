@@ -43,9 +43,11 @@ from pathlib import Path
 from ..guards import LINKS
 from ..quota.core import PACE_HISTORY_LONG, PACE_HISTORY_SHORT
 from ..transcript.store import read_store
+from ..meta import rebuild as recovered_meta
 from ..usage import tables
 from ..usage.context import successor_start
 from ..usage.owners import owner_of
+from ..usage.store import has_connection
 from ..usage.store import sessions as stored_sessions
 from ..usage.store import stores
 from ..usage.turns import Derived, SessionInfo, UsageDeriver
@@ -120,8 +122,8 @@ class Journal:
         self._publish = publish
         self._derivers: dict[str, Deriver] = {}
         # A session's meta (owner, kind, harness, continues, agent, worker
-        # queue, starter) and the account each harness is logged in as, read
-        # when its usage deriver is made.
+        # queue, starter, pool) and the account each pool is logged in as,
+        # read when its usage deriver is made.
         self.meta_of = meta_of
         self.accounts = accounts
         self._usage: dict[str, UsageDeriver] = {}
@@ -305,7 +307,7 @@ class Journal:
                 self._derivers[log_id] = d
             if u is None:
                 try:
-                    u = self._usage_deriver(con, log_id)
+                    u = self._usage_deriver(con, log_id, store_path)
                     for r in before:
                         u.feed(r)
                     self._usage[log_id] = u
@@ -352,13 +354,27 @@ class Journal:
         return n
 
     # -- usage ---------------------------------------------------------------
-    def _usage_deriver(self, con, log_id: str) -> UsageDeriver:
+    def _usage_deriver(
+        self, con, log_id: str, store_path: Path | None = None
+    ) -> UsageDeriver:
         """A session's usage deriver, from its meta; a store with no meta
         derives with the defaults."""
         try:
             meta = self.meta_of(log_id) or {}
         except Exception:
             meta = {}
+        if store_path is not None:
+            # A rebuild has no live session to ask, and a live one's meta file
+            # can land before the turn that needed it, or with a field still
+            # empty (its pool is written null until the agent resolves one):
+            # what the store's spawn recorded fills those in, one step slower.
+            # Without it a rebuilt Go turn bills to Claude (cdd14827).
+            try:
+                recovered = recovered_meta(store_path) or {}
+            except Exception:
+                recovered = {}
+            if recovered:
+                meta = {**recovered, **{k: v for k, v in meta.items() if v is not None}}
         info = SessionInfo(
             person=str(meta.get("owner") or ""),
             kind=_kind(meta),
@@ -367,7 +383,9 @@ class Journal:
             agent=meta.get("agent") or None,
             queue=(meta.get("worker") or {}).get("queue") or None,
             starter=next((meta[k] for k in LINKS if meta.get(k)), None),
-            account=lambda harness: self.accounts().get(harness),
+            pool=meta.get("pool") or None,
+            connection=has_connection(meta),
+            account=lambda pool: self.accounts().get(pool),
             replay_start=self._replay_start(con),
         )
         return UsageDeriver(info, self._repo_of(con))
@@ -421,7 +439,7 @@ class Journal:
             if self._halt.is_set():
                 return n
             try:
-                u = self._usage_deriver(con, s.log_id)
+                u = self._usage_deriver(con, s.log_id, s.path)
                 for r in read_store(s.path)[0]:
                     n += self._usage_insert(con, s.log_id, u.feed(r))
             except Exception:

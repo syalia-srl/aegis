@@ -85,7 +85,7 @@ from .agents import (
     model_suggestions,
     resolve,
 )
-from .cascade import Cooling, Fall, classify, pick
+from .cascade import Cooling, Fall, classify, cooling_owner, pick
 from .cgroups import SessionCgroups
 from .channels import Channels, Throttle
 from .claude.process import PERMISSION_MODE, ControlError
@@ -139,7 +139,7 @@ from .quota_gate import (
     Gate,
     continued,
     opens_again,
-    pool_for,
+    pool_of,
     refusal,
 )
 from .btws import SideNotes
@@ -479,6 +479,20 @@ class ArchiveParams(_Strict):
     )
 
 
+def _cooling_owner(spec: SpawnSpec) -> str:
+    """The owner a session's model falls are written and read under. A spec
+    carries no connection yet, so it is the harness; the connection's
+    endpoint takes its place when SpawnSpec gains one."""
+    return cooling_owner(spec.harness, None)
+
+
+def _cooling_pool(spec: SpawnSpec, model: str | None = None) -> str | None:
+    """The pool a session's falls are written and read under: the one its
+    spawn recorded, ``none`` kept (pool_of reads it as None, which would let
+    a harness derive a pool the session does not draw on), else pool_of's."""
+    return spec.pool or pool_of(spec, model)
+
+
 def _dead(e: Exception) -> OpError:
     return OpError(
         "session_dead",
@@ -601,7 +615,7 @@ class App:
             self.publish,
             meta_of=self._meta_of_session,
             accounts=lambda: {
-                p["harness"]: f"{p['name']}:{p['account']}"
+                p["name"]: f"{p['name']}:{p['account']}"
                 for p in self.quota.snapshot()["providers"]
                 if p["account"]
             },
@@ -638,7 +652,8 @@ class App:
         reg.workflows = self.workflows
         reg.browsers = self.browsers
         self.catalogs = commands.Catalogs(
-            roots.state_root / "stderr" / "catalog-probe.log"
+            roots.state_root / "stderr" / "catalog-probe.log",
+            lambda: self.config.current().agents,
         )
         # The last sends that carried a nonce, oldest first: (log_id, nonce)
         # -> the delivery a retry answers with instead of delivering again.
@@ -1034,8 +1049,8 @@ class App:
         self.whos[key] = who
         return host_tokens.mint(self.host_secret, key, ttl)
 
-    def gate(self, owner: str | None, harness: str, model: str | None) -> Gate:
-        """Whether a harness may start on that pool for its owner: always,
+    def gate(self, owner: str | None, pool: str | None, model: str | None) -> Gate:
+        """Whether a session may start on that pool for its owner: always,
         since quota lines per token left with multi-user mode (#958). The
         guards on agents and queues are ``guard``."""
         return Gate("open")
@@ -1076,7 +1091,7 @@ class App:
         cur = self.config.current()
         agents = {a.name: a.guard for a in cur.agents}
         queues = {n: q.get("guard") for n, q in cur.queues.items()}
-        pool = pool_for(spec.harness, model or spec.model)
+        pool = pool_of(spec, model)
         over = guards.levels(
             spec.record(), queue, agents, queues, self._record_of, pool
         )
@@ -1318,7 +1333,13 @@ class App:
         if spec.model not in spec.cascade:
             return spec, gate(spec.model)
         model, why = pick(
-            spec.cascade, -1, spec.harness, gate, self.cooling, time.time()
+            spec.cascade,
+            -1,
+            _cooling_owner(spec),
+            gate,
+            self.cooling,
+            time.time(),
+            lambda m: _cooling_pool(spec, m),
         )
         if model is None:
             return spec, Gate("closed", why)
@@ -1331,21 +1352,26 @@ class App:
         fall = classify(spec.harness, text)
         if fall is None:
             return None
-        until = self.cool(spec.harness, spec.model, fall)
+        owner = _cooling_owner(spec)
+        until = self.cool(owner, spec.model, fall, _cooling_pool(spec))
         model, _ = pick(
             spec.cascade,
             spec.cascade.index(spec.model),
-            spec.harness,
-            lambda m: self.gate(spec.owner, spec.harness, m),
+            owner,
+            lambda m: self.gate(spec.owner, pool_of(spec, m), m),
             self.cooling,
             time.time(),
+            lambda m: _cooling_pool(spec, m),
         )
         return model, until
 
-    def cool(self, harness: str, model: str, fall: Fall) -> float:
-        """Cool a model that fell, and arm the timer that releases what it
-        held when the first cooling model is free again."""
-        end = self.cooling.cool(harness, model, fall, time.time())
+    def cool(
+        self, owner: str, model: str, fall: Fall, pool: str | None = None
+    ) -> float:
+        """Cool a model that fell, under its cooling owner (cascade.cooling_owner)
+        and the session's pool, and arm the timer that releases what it held
+        when the first cooling model is free again."""
+        end = self.cooling.cool(owner, model, fall, time.time(), pool)
         self._arm_cooling()
         return end
 
@@ -1647,6 +1673,7 @@ class App:
             priming = (
                 f"{priming}\n\n{req.system_prompt}" if priming else req.system_prompt
             )
+        moved = req.harness != spec.harness
         spec = dataclasses.replace(
             spec,
             agent=req.agent,
@@ -1661,6 +1688,11 @@ class App:
             isolated=req.isolated,
             primer=req.primer,
             notices=req.notices,
+            # A connection belongs to claude-code, as in agents.resolve: a
+            # policy that moves the spawn to another harness drops it and its
+            # pool, which pool_of then derives from the harness and model.
+            connection=None if moved else spec.connection,
+            pool=None if moved else spec.pool,
         )
         return spec, dict(req.env)
 
@@ -2051,11 +2083,15 @@ class App:
 
     def _meta_of_session(self, log_id: str) -> dict:
         """A session's meta, live or archived; {} when it has none (an old
-        store, a crash before the meta was written)."""
+        store, a crash before the meta was written). A turn can end before
+        the first publish writes the file, so a live session answers with its
+        own card: its usage row then carries its agent, pool and connection
+        instead of the defaults, which billed a Go turn to Claude."""
         try:
             meta = json.loads(self.sessions.metas.path(log_id).read_text())
         except (OSError, ValueError):
-            return {}
+            live = self.sessions.sessions.get(log_id)
+            return live.meta() if live is not None else {}
         return meta if isinstance(meta, dict) else {}
 
     def place_of(self, caller: Caller) -> Place:

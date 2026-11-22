@@ -69,6 +69,18 @@ Each one has:
   none of the machine's harness config, its priming as the whole prompt, and
   no nudges or notices. `help_read library#product-agents` says what each does.
 
+- `base_url:`, `pool:`, `api_key_file:` and `env:` (optional, Claude Code) run
+  this agent's sessions on an endpoint of its own — another account or a
+  gateway that speaks Anthropic's API — instead of Anthropic. `pool:` is
+  required with `base_url:` and names the account those sessions spend: one
+  aegis meters (`claude`, `opencode-go`, `cursor`), or `none` for one it does
+  not. With `opencode-go` the key is the one the Go gauge reads;
+  `api_key_file:` names a 0600 file of your own. `env:` adds names to the
+  process but may not carry a credential: the key travels in the file or from
+  the pool. A session with a connection never gets the Claude sign-in token,
+  and `isolated:` still decides whether it loads this machine's Claude Code
+  config — `aegis doctor` warns when it does.
+
 The harness can also be written as `provider:` with the harness's name, or as
 a nested `provider:` map whose `name` is the harness and whose other keys are
 the fields. aegis keeps whichever form the file uses.

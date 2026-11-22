@@ -236,3 +236,29 @@ async def test_a_harness_that_cannot_contain_refuses_the_start(world, monkeypatc
     world.gate.rewrite = dict(SWITCHES)
     with pytest.raises(OpError, match="cannot run with harness_tools yet"):
         await spawn(world.app)
+
+
+async def test_a_policy_that_moves_the_harness_drops_the_connection(world):
+    """A connection belongs to claude-code: a host that moves the spawn to
+    another harness drops it and its pool, and pool_of derives the pool from
+    the harness and model again, as agents.resolve does for an override."""
+    from aegis.quota_gate import pool_of
+    from aegis.session import Connection
+
+    spec = SpawnSpec(
+        agent="opus",
+        model="opus",
+        effort="high",
+        permission="full",
+        cwd=world.root,
+        pool="none",
+        connection=Connection(base_url="https://gw.example/anthropic"),
+    )
+    world.gate.rewrite = {"harness": "opencode", "model": "opencode-go/kimi-k2"}
+    moved, _ = await world.app.admit(spec)
+    assert moved.harness == "opencode"
+    assert moved.connection is None and moved.pool is None
+    assert pool_of(moved) == "opencode-go"
+    world.gate.rewrite = {"model": "sonnet"}
+    kept, _ = await world.app.admit(spec)
+    assert kept.connection == spec.connection and kept.pool == "none"

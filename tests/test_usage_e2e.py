@@ -156,3 +156,50 @@ def test_the_journal_reads_what_finished_windows_spent(tmp_path):
     con.execute("INSERT INTO usage_quota VALUES('claude:a', 'session', 1.0, 40.0, 2.0)")
     con.close()
     assert j.usual_spend("claude:a", "session", 18000.0) == 40.0
+
+
+GO_CONFIG = """\
+default_agent: opus
+agents:
+  opus: {harness: claude-code, model: opus, effort: high, permission: full}
+  go-claude:
+    harness: claude-code
+    model: deepseek-v4.1-flash
+    effort: high
+    permission: full
+    base_url: https://gw.example/anthropic
+    pool: opencode-go
+    isolated: true
+    api_key_file: {key}
+"""
+
+
+@pytest.fixture
+async def go_world(tmp_path, fake_claude):
+    key = tmp_path / "go.key"
+    key.write_text("sk-test\n")
+    key.chmod(0o600)
+    (tmp_path / ".aegis.yaml").write_text(GO_CONFIG.replace("{key}", str(key)))
+    w = await World(tmp_path, fake_claude).start()
+    yield w
+    await w.stop()
+
+
+async def test_a_rebuild_bills_a_connection_turn_to_its_pool(go_world, tmp_path):
+    """A rebuild has no live session to ask, and a live one's meta file can
+    land after the turn that needed it: what the spawn recorded has to answer,
+    or a Go turn comes out of the rebuild billed to Claude (cdd14827)."""
+    r = await go_world.app.registry.call("session.spawn", {"agent": "go-claude"})
+    await turn(go_world.session(r["log_id"]), "thanks")
+    go_world.app.journal.flush()
+
+    live = dump(go_world.app.journal.path)
+    again = Journal(go_world.app.roots.state_root, None, db_path=tmp_path / "again.db")
+    again.rebuild()
+    assert dump(tmp_path / "again.db") == live
+    # The pool has no login here, so billing names the account as "api"; what
+    # says the connection survived the rebuild is the turn being unpriced and
+    # nothing being charged for it.
+    assert {r[9] for r in live["usage_turns"]} == {0.0}
+    assert {r[10] for r in live["usage_turns"]} == {"unpriced"}
+    assert {r[22] for r in live["usage_turns"]} == {"go-claude"}

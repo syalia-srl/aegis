@@ -436,3 +436,52 @@ def test_an_agent_without_budget_writes_none(tmp_path):
     assert doc.agents[0].budget is None
     assert write(p, doc, stamp_of(p)) == []
     assert "budget" not in safe(p)["agents"]["opus"]
+
+
+CONNECTION = """\
+agents:
+  go:
+    harness: claude-code
+    model: deepseek-v4.1-flash
+    effort: high
+    permission: full
+    # The Go plan's endpoint
+    base_url: https://opencode.ai/inference/go/anthropic
+    pool: opencode-go  # the gauge it draws on
+    api_key_file: ~/.config/aegis/go.key
+    env:
+      # Claude Code's small model, served by the same endpoint
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: deepseek-v4.1-flash
+"""
+
+
+def test_a_save_keeps_the_connection_and_its_comments(tmp_path):
+    p, doc = setup(tmp_path, CONNECTION)
+    a = doc.agents[0]
+    assert (a.base_url, a.pool, a.api_key_file) == (
+        "https://opencode.ai/inference/go/anthropic",
+        "opencode-go",
+        "~/.config/aegis/go.key",
+    )
+    assert a.env == {"ANTHROPIC_DEFAULT_HAIKU_MODEL": "deepseek-v4.1-flash"}
+    a.effort = "max"
+    assert write(p, doc, stamp_of(p)) == []
+    text = p.read_text()
+    assert text == CONNECTION.replace("effort: high", "effort: max")
+
+
+def test_a_refused_connection_is_named_and_never_dropped(tmp_path):
+    p, doc = setup(tmp_path, CONNECTION.replace("pool: opencode-go", "pool: codex"))
+    text = p.read_text()
+    assert doc.agents[0].pool == "codex"
+    doc.default_agent = "go"
+    (f,) = write(p, doc, stamp_of(p))
+    assert f.row == "agents.go" and "pool codex" in f.message
+    assert p.read_text() == text
+
+
+def test_an_agent_without_a_connection_writes_none(tmp_path):
+    p, doc = setup(tmp_path, WORKSPACE)
+    assert write(p, doc, stamp_of(p)) == []
+    opus = safe(p)["agents"]["opus"]
+    assert not {"base_url", "pool", "api_key_file", "env"} & set(opus)

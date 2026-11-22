@@ -315,6 +315,29 @@ def test_result_reports_the_turns_own_cost():
     ]
 
 
+def test_a_connections_turn_names_no_dollars():
+    """A connection's turn is unpriced: Claude Code's total_cost_usd prices
+    another endpoint's tokens at list rates, and nobody is charged it
+    (usage/turns.py bills the same turn 0), so the footer keeps the time and
+    leaves the money out."""
+    r = Rec()
+    r.own(
+        "spawn",
+        agent="go-claude",
+        model="deepseek-v4.1-flash",
+        cwd="/home/udl",
+        connection={"base_url": "https://opencode.ai/inference/go/anthropic"},
+    )
+    r.result(cost=0.07)
+    r.result(cost=0.14)
+    f, _ = run(r)
+    assert [e["summary"] for e in f.entries()] == [
+        "spawned go-claude · deepseek-v4.1-flash · /home/udl",
+        "done in 1.5s",
+        "done in 1.5s",
+    ]
+
+
 def test_an_error_result_after_an_interrupt_reads_interrupted():
     r = Rec()
     r.own("interrupt")

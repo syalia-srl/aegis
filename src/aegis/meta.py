@@ -135,4 +135,7 @@ def rebuild(store_path: Path) -> dict | None:
         "cost_usd": None,
         "context_tokens": None,
         "context_window": None,
+        # What the usage readers price by (spec 08): a connection's turns are
+        # unpriced, and it bills its pool's account.
+        **{k: spawn[k] for k in ("pool", "connection") if spawn.get(k)},
     }

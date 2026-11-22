@@ -313,3 +313,69 @@ def test_codex_requests_are_priced_by_their_turns_model(tmp_path, repo_path):
         2 * float(codex_prices_for("openai/gpt-6.1-sol").input)
     )
     assert session.unpriced["calls"] == 1 and session.unpriced["tokens"] == 1000
+
+
+GW = {"base_url": "https://gw.example/anthropic"}
+INIT = {"type": "system", "subtype": "init", "model": "claude-opus-4-7"}
+
+
+@pytest.mark.parametrize("init", [True, False], ids=["init", "no-init"])
+def test_a_connection_session_is_not_priced_as_claude(tmp_path, repo_path, init):
+    """Its endpoint's prices are not Anthropic's, whatever the model id, and
+    without an init line it never falls back to Claude's default model."""
+    state = tmp_path / ".aegis" / "state"
+    lines = [("2026-06-01T12:00:00Z", _assistant("msg_one"))]
+    if init:
+        lines.insert(0, ("2026-06-01T11:59:59Z", INIT))
+    _store(state, "20260601-120000-aaaaaa", repo_path, lines, connection=GW)
+
+    scanner = _scanner(repo_path)
+    scanner.run([], state, foreign=False)
+
+    [session] = scanner.sessions.values()
+    assert session.unpriced == {"calls": 1, "tokens": 10 + 20 + 100}
+    assert _cost(scanner) == 0
+
+
+def test_claude_codes_file_of_a_connection_session_is_not_priced(tmp_path, repo_path):
+    """Claude Code writes the same lines to ~/.claude/projects, which is read
+    first for every other session; a connection's own store takes its ids."""
+    projects = tmp_path / "projects" / "-home-apiad-Workspace"
+    projects.mkdir(parents=True)
+    (projects / "s1.jsonl").write_text(_claude_record(repo_path) + "\n")
+    state = tmp_path / ".aegis" / "state"
+    _store(
+        state,
+        "20260601-120000-aaaaaa",
+        repo_path,
+        [("2026-06-01T12:00:00Z", _assistant("msg_shared"))],
+        connection=GW,
+    )
+
+    scanner = _scanner(repo_path)
+    scanner.run([(projects, "claude", "c")], state)
+
+    assert _calls(scanner) == 1 and _cost(scanner) == 0
+    [session] = [s for s in scanner.sessions.values() if s.unpriced]
+    assert session.key == "aegis:20260601-120000-aaaaaa"
+
+
+def test_a_session_without_a_connection_is_priced_as_today(tmp_path, repo_path):
+    state = tmp_path / ".aegis" / "state"
+    _store(
+        state,
+        "20260601-120000-aaaaaa",
+        repo_path,
+        [("2026-06-01T12:00:00Z", _assistant("msg_one"))],
+        pool="none",
+    )
+
+    scanner = _scanner(repo_path)
+    scanner.run([], state, foreign=False)
+
+    want = prices_for("claude-opus-4-7").cost(
+        inp=10, out=20, cc5=0, cc1=0, cache_read=100
+    )
+    assert _cost(scanner) == pytest.approx(float(want), rel=1e-6)
+    [session] = scanner.sessions.values()
+    assert not session.unpriced["calls"]

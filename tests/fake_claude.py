@@ -1046,7 +1046,23 @@ def oneshot() -> None:
     )
 
 
+def log_env() -> None:
+    """FAKE_CLAUDE_ENV_LOG: append, one JSON line per process, the variables
+    that say which endpoint and sign-in it runs on and its config dir."""
+    path = os.environ.get("FAKE_CLAUDE_ENV_LOG")
+    if not path:
+        return
+    seen = {
+        k: v
+        for k, v in os.environ.items()
+        if k.startswith(("ANTHROPIC_", "CLAUDE_", "AEGIS_SESSION"))
+    }
+    with open(path, "a") as f:
+        f.write(json.dumps(seen) + "\n")
+
+
 def main() -> None:
+    log_env()
     if "-p" in sys.argv and _arg("--output-format") == "json":
         if "--json-schema" not in sys.argv:
             probe()

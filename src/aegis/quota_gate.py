@@ -30,13 +30,15 @@ caller passes the snapshot ``Quota.snapshot()`` returns and the time.
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TypeGuard, cast
+from typing import Protocol, TypeGuard, cast
 
 from .quota import PROVIDERS
 
 STALE_S = 900.0
-# Pool name -> the harness that draws on it, and the windows a line may name.
+# Pool name -> the harness that draws on it by default; a session may name
+# another (pool_of). And the windows a line may name.
 POOLS = {p.name: p.harness for p in PROVIDERS} | {"codex": "codex"}
 KINDS = {p.name: tuple(k for k, _ in p.bar_windows) for p in PROVIDERS}
 MODES = ("closed", "open", "lines")
@@ -80,7 +82,7 @@ class Gate:
 
 
 def pool_for(harness: str, model: str | None) -> str | None:
-    """The pool a session draws on; the client's providerFor (gauges.js)."""
+    """The pool a session draws on by default, from its harness and model."""
     for name, h in POOLS.items():
         if h != harness:
             continue
@@ -88,6 +90,42 @@ def pool_for(harness: str, model: str | None) -> str | None:
             continue
         return name
     return None
+
+
+# The pool a session names when aegis reads no gauge for its account.
+NONE = "none"
+
+
+class Pooled(Protocol):
+    """What ``pool_of`` reads of a spawn spec (session.SpawnSpec)."""
+
+    @property
+    def harness(self) -> str: ...
+    @property
+    def model(self) -> str | None: ...
+    @property
+    def pool(self) -> str | None: ...
+
+
+def _resolve(pool: object, harness: str, model: str | None) -> str | None:
+    if pool == NONE:
+        return None
+    if isinstance(pool, str) and pool:
+        return pool
+    return pool_for(harness, model)
+
+
+def pool_of(spec: Pooled, model: str | None = None) -> str | None:
+    """The account a session draws on: the pool its spawn recorded, else
+    what its harness and model imply (pool_for). A recorded ``none`` is
+    None, an account with no gauge. ``model`` asks for another model of the
+    same session, as a cascade's pick does."""
+    return _resolve(spec.pool, spec.harness, model or spec.model)
+
+
+def pool_of_record(rec: Mapping) -> str | None:
+    """The same for a spawn record or a meta, as guards.levels reads a starter."""
+    return _resolve(rec.get("pool"), rec.get("harness") or "", rec.get("model"))
 
 
 def _reading(snapshot: dict, pool: str) -> dict | None:

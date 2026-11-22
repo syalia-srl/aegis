@@ -26,6 +26,7 @@ from typing import Any
 from .. import files
 from .. import layout as canvas
 from ..usage.kinds import activity
+from ..usage.store import has_connection
 from ..artifacts import EVENTS_KEPT
 from ..dictation import without_note
 from ..claude.stream import (
@@ -212,6 +213,11 @@ class Fold:
         self._seen_init = False
         self._interrupted = False
         self._last_cost = 0.0
+        # Whether the spawn recorded a connection (spec 08): its turns are
+        # unpriced, so the dollars Claude Code reports for them are its own
+        # list prices for another endpoint, not money anyone is charged
+        # (usage/turns.py bills the same turn 0).
+        self._unpriced = False
         self._parsers: dict[str, Any] = {}
         # file key -> the latest version's sent file, and where that file is:
         # its entry's id and its index in the entry's files.
@@ -659,6 +665,7 @@ class Fold:
             agent = rec.get("agent") or rec.get("profile")
             star = "*" if rec.get("overridden") else ""
             line = f"spawned {agent}{star} · {rec.get('model')} · {rec.get('cwd')}"
+            self._unpriced = has_connection(rec)
             return self._upsert(
                 _entry(f"e{i}", "system", "ok", ts, d.SYSTEM_GLYPH, summary=line)
             )
@@ -1727,7 +1734,7 @@ class Fold:
                 # Claude's total_cost_usd is a running total for the process.
                 turn = ev.cost_usd - self._last_cost
                 self._last_cost = ev.cost_usd
-                if turn > 0:
+                if turn > 0 and not self._unpriced:
                     parts.append(d.money(turn))
             if ev.stop_reason and ev.stop_reason not in ("end_turn", "stop_sequence"):
                 parts.append(ev.stop_reason)

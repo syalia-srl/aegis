@@ -14,14 +14,17 @@ import json
 import os
 import signal
 from pathlib import Path
-from typing import TypeVar
+from typing import TYPE_CHECKING, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
 from . import launch
-from .claude import login
-from .agents import ConfigError, load_agents, read_config
+from .claude import connection as claude_connection, login
+from .agents import ConfigError, connection_of, load_agents, read_config
 from .codex.config import split_model
+
+if TYPE_CHECKING:
+    from .session import Connection
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -55,7 +58,11 @@ def load_generator(config_root: Path, key: str) -> dict | None:
             "error": f"{key}: agent {name!r} runs on {agent.harness}, which has no "
             f"one-shot calls; use one on {', '.join(HARNESSES)}"
         }
-    return {"agent": name, "harness": agent.harness, "model": agent.model}
+    out = {"agent": name, "harness": agent.harness, "model": agent.model}
+    if conn := connection_of(agent):
+        # Its calls go to its endpoint with its key, like its sessions.
+        out |= {"connection": conn, "pool": agent.pool}
+    return out
 
 
 def argv(
@@ -221,12 +228,22 @@ async def run(
     timeout: float,
     prompt: str,
     harness: str = "claude-code",
+    connection: Connection | None = None,
+    pool: str | None = None,
 ) -> str:
     """stdout of one call (launch.py). A cancelled caller kills its claude:
-    one left running would keep billing."""
+    one left running would keep billing. A claude-code agent's ``connection``
+    sends the call to its endpoint with its key, and no Claude token."""
     cwd.mkdir(parents=True, exist_ok=True)
-    env = {**os.environ, "MAX_THINKING_TOKENS": "0"}
-    if harness == "claude-code":
+    thinking = {"MAX_THINKING_TOKENS": "0"}
+    env = {**os.environ, **thinking}
+    if harness == "claude-code" and connection is not None:
+        try:
+            # aegis's own variable on top of the agent's env, as in a session.
+            env = {**claude_connection.base_env(connection, pool), **thinking}
+        except claude_connection.KeyProblem as e:
+            raise OneshotError(str(e)) from e
+    elif harness == "claude-code":
         env = login.with_token(env) or env
     try:
         proc = await launch.child(

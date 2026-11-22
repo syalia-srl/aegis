@@ -437,3 +437,48 @@ async def test_the_clock_task_wakes_at_least_once_a_minute(world):
     assert world.app.schedules.wait_s() == 60.0
     t[0] += 270
     assert world.app.schedules.wait_s() == pytest.approx(30, abs=1)
+
+
+async def test_a_schedule_line_is_read_on_the_pool_its_fire_draws_on(world):
+    """A claude-code target whose record names opencode-go is held by the
+    schedule's Go line; the same session drawing on Claude is not."""
+    import dataclasses
+
+    t = frozen(world)
+    a = await world.spawn()
+    await turn(a, "hello")
+    now = time.time()
+    world.app.quota.snapshot = lambda: {
+        "providers": [
+            {
+                "name": "opencode-go",
+                "label": "OpenCode Go",
+                "harness": "opencode",
+                "state": "ok",
+                "read_at": now - 30,
+                "windows": [
+                    {
+                        "kind": "weekly",
+                        "label": "week",
+                        "percent": 70.0,
+                        "projected": None,
+                        "resets_at": now + 86400,
+                    }
+                ],
+            }
+        ]
+    }
+    a.spec = dataclasses.replace(a.spec, pool="opencode-go")
+    create(
+        world,
+        "go-line",
+        "keep going",
+        fire={"target": "existing", "session": a.log_id},
+        quota={"opencode-go": {"weekly": 50}},
+    )
+    await tick(world, t)
+    (held,) = runs(world, "go-line", "tick")
+    assert held["why"] == "quota" and not inbox(a)
+    a.spec = dataclasses.replace(a.spec, pool=None)
+    await world.app.schedules.step()
+    await until(lambda: inbox(a), 10, "the released message")

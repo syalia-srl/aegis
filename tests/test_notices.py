@@ -94,6 +94,7 @@ def session(
     spawned_from=None,
     harness="claude-code",
     model="opus",
+    pool=None,
 ):
     return SimpleNamespace(
         log_id=log_id,
@@ -101,6 +102,7 @@ def session(
         spec=SimpleNamespace(
             harness=harness,
             model=model,
+            pool=pool,
             owner=owner,
             spawned_by=spawned_by,
             spawned_from=spawned_from,
@@ -468,6 +470,20 @@ def test_quota_reaches_only_sessions_that_draw_on_that_pool(stub):
     assert n.pending(zen) == ""
     got = n.pending(go)
     assert "quota:opencode-go · warn" in got and "quota:claude" not in got
+
+
+def test_quota_follows_the_pool_a_session_records(stub):
+    """A claude-code session whose record names opencode-go hears Go's quota
+    and not Claude's; one that names none hears neither."""
+    n = stub.notices
+    stub.quota = Quota("warning")
+    go = session("g", model="deepseek", pool="opencode-go")
+    off = session("n", model="deepseek", pool="none")
+    stub.sessions.sessions |= {"g": go, "n": off}
+    got = n.pending(go)
+    assert "quota:opencode-go · warn" in got and "quota:claude" not in got
+    assert "quota:" not in n.pending(off)
+    assert "quota:claude · warn" in n.pending(stub.a)
 
 
 def test_a_kind_turned_off_mid_episode_says_so_instead_of_a_reading(stub):

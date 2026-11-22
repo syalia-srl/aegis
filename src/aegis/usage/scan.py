@@ -13,7 +13,10 @@ without a price is counted as unpriced rather than charged at another's rate.
 Only Claude sessions are priced. An OpenCode session's tokens, from its
 ``session.step.ended`` lines, are counted as unpriced work. A Codex session's requests,
 from its ``thread/tokenUsage/updated`` lines, are priced by ``codex_prices_for``
-with the model of their turn's ``aegis/turn`` line.
+with the model of their turn's ``aegis/turn`` line. A Claude Code session on an
+agent's connection is not priced either: its endpoint's prices are not
+Anthropic's, whatever its model id says. Its store is read before Claude Code's
+files, which hold the same message ids and would price them as Claude's.
 """
 
 from __future__ import annotations
@@ -39,12 +42,14 @@ from .locality import (
     repos_mentioned,
 )
 from .prices import codex_prices_for, prices_for
-from .store import lines, sessions, split_cache
+from .store import StoredSession, lines, sessions, split_cache
 
 log = logging.getLogger(__name__)
 
 DEFAULT_PROVIDER = "claude-code"
 DEFAULT_MODEL = "opus"
+# The provider of a session on an agent's connection: no price table.
+CONNECTION = "connection"
 
 
 @dataclass
@@ -314,14 +319,23 @@ class Scanner:
         by the 1-hour share measured on the lines that did report it, rather
         than pricing them all at the 5-minute rate.
         """
-        for stored in sessions(state_dir):
-            provider = (
-                DEFAULT_PROVIDER if stored.harness == "claude-code" else stored.harness
-            )
+        self._scan_stored(list(sessions(state_dir)))
+
+    def _scan_stored(self, stored_sessions: Iterable[StoredSession]) -> None:
+        for stored in stored_sessions:
+            if stored.connection:
+                provider = CONNECTION
+            elif stored.harness == "claude-code":
+                provider = DEFAULT_PROVIDER
+            else:
+                provider = stored.harness
             key = f"aegis:{stored.log_id}"
             cwd: str | None = None
-            # A Codex request never borrows Claude's default model's price.
-            model = "" if stored.harness == "codex" else DEFAULT_MODEL
+            # A Codex or connection request never borrows Claude's default
+            # model's price, with or without an init line.
+            model = (
+                "" if stored.harness == "codex" or stored.connection else DEFAULT_MODEL
+            )
             for line in lines(stored.path):
                 if line.src == "aegis" and line.obj.get("kind") == "spawn":
                     cwd = line.obj.get("cwd") or cwd
@@ -459,10 +473,13 @@ class Scanner:
                 found = sorted([*root.rglob("*.jsonl"), *root.rglob("*.jsonl.gz")])
                 claude_files += [(f, source, prefix) for f in found]
 
+        stored = list(sessions(Path(state_dir))) if state_dir else []
+        # A connection's lines first: Claude Code's file of the same session
+        # repeats its message ids, and read first would price them as Claude's.
+        self._scan_stored(s for s in stored if s.connection)
         for path, source, prefix in claude_files:
             self.scan_claude(path, source, prefix)
-        if state_dir:
-            self.scan_store(Path(state_dir))
+        self._scan_stored(s for s in stored if not s.connection)
 
         # Take the 1h cache share from the full-fidelity rows already read
         # rather than assuming one.

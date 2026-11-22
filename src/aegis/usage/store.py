@@ -29,6 +29,15 @@ class StoredSession:
     handle: str
     harness: str
     path: Path
+    # Its meta names an agent's connection: tokens with no Anthropic price.
+    connection: bool = False
+
+
+def has_connection(rec: dict) -> bool:
+    """Whether a spawn record or a meta holds a connection, read as
+    ``Connection.from_record`` reads it: a map with a ``base_url``."""
+    c = rec.get("connection")
+    return isinstance(c, dict) and bool(c.get("base_url"))
 
 
 def iso(ts: float | None) -> str | None:
@@ -63,6 +72,7 @@ def sessions(state_dir: Path) -> Iterator[StoredSession]:
             handle=str(meta.get("handle") or path.stem),
             harness=str(meta.get("harness") or "claude-code"),
             path=path,
+            connection=has_connection(meta),
         )
 
 

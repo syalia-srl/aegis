@@ -39,6 +39,7 @@ from .notices import TEXT_MAX
 from .ops import OpError
 from .roots import Roots
 from .policy import EventKind, McpServer, Refused
+from .quota_gate import NONE, pool_of
 from .session import Host, Session, SpawnSpec
 from .transcript.entries import Fold, fold_records, tool_output
 from .transcript.store import Store, read_store, stored
@@ -259,7 +260,9 @@ class Registry(Host):
         if self.queues is not None:
             self.queues.turn_ended(session)
         if self.quota is not None:
-            self.quota.turn_ended(session.spec.harness)
+            # A pool that resolves to no account is passed as NONE: None
+            # would mean Claude to Quota.turn_ended.
+            self.quota.turn_ended(session.spec.harness, pool_of(session.spec) or NONE)
         self._retire_predecessor(session)
         self._pending_handoff(session)
         self._close_when_finished(session)
@@ -570,11 +573,18 @@ class Registry(Host):
             self.know_how.reset(session)
 
     def sign_in_failed(self, session: Session) -> None:
+        """A Claude Code session on another account (a connection) failed to
+        sign in to that endpoint, not to Claude: no Claude sign-in card, the
+        turn stays an ordinary failed one. Other harnesses keep their card."""
+        spec = session.spec
+        if spec.harness == "claude-code" and pool_of(spec) != "claude":
+            return
         if self.sign_in is not None:
-            self.sign_in.failed(session, session.spec.harness)
+            self.sign_in.failed(session, spec.harness)
 
     def rate_limit(self, session: Session, windows: dict) -> None:
-        if self.quota is not None:
+        """Only a session drawing on Claude's pool reports Claude's windows."""
+        if self.quota is not None and pool_of(session.spec) == "claude":
             self.quota.observe(windows)
 
     def quota_hold(self, session: Session) -> str | None:

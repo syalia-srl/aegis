@@ -46,6 +46,7 @@ from typing import Any, Literal
 from . import attachments, cache, harness_versions, launch as launching, restarts
 from . import layout as canvas
 from .artifacts import ArtifactError, Board
+from .claude.connection import KeyProblem
 from .claude.control import Catalog
 from .claude.process import ControlError
 from .claude.stream import (
@@ -64,6 +65,7 @@ from .meta import MetaStore
 from .names import default_title
 from .ops import OpError
 from .policy import McpServer
+from .quota_gate import pool_of
 from .park import TIMER_TOOLS
 from .scopes import ANY as ANY_SCOPE, Scope
 from .transcript.entries import EMPTY_STANDING, Fold, fold_records
@@ -260,6 +262,42 @@ SWITCHES = {"harness_tools": True, "isolated": False, "primer": True, "notices":
 
 
 @dataclass(frozen=True)
+class Connection:
+    """The endpoint a claude-code session runs against instead of Anthropic
+    (agents.py): its URL, the file its key is read from at each process start
+    (None: the pool's own key), and the variables added to its process, as
+    pairs so the spec stays hashable. The record holds the path, never the
+    key."""
+
+    base_url: str
+    api_key_file: str | None = None
+    env: tuple[tuple[str, str], ...] = ()
+
+    def record(self) -> dict:
+        d: dict = {"base_url": self.base_url}
+        if self.api_key_file:
+            d["api_key_file"] = self.api_key_file
+        if self.env:
+            d["env"] = dict(self.env)
+        return d
+
+    @classmethod
+    def from_record(cls, raw: Any) -> "Connection | None":
+        """The connection a record holds; None when it holds none, as every
+        record from before connections does."""
+        if not isinstance(raw, dict) or not raw.get("base_url"):
+            return None
+        env = raw.get("env")
+        return cls(
+            base_url=str(raw["base_url"]),
+            api_key_file=str(raw["api_key_file"]) if raw.get("api_key_file") else None,
+            env=tuple((str(k), str(v)) for k, v in env.items())
+            if isinstance(env, dict)
+            else (),
+        )
+
+
+@dataclass(frozen=True)
 class SpawnSpec:
     """What a session's process runs with, fixed at spawn and recorded in the
     spawn record and the meta. A resume reads it from there, never from
@@ -299,6 +337,15 @@ class SpawnSpec:
     # model; () otherwise. Fixed at spawn: the position in use is the index
     # of ``model`` in it.
     cascade: tuple[str, ...] = ()
+    # The pool this session draws on when it names one (quota_gate.pool_of):
+    # a quota provider's name, or "none" for an account aegis reads no gauge
+    # for. None derives it from harness and model, as every record from
+    # before it does. Read from the record, never from ``.aegis.yaml``.
+    pool: str | None = None
+    # The agent's connection (Connection), copied at spawn; None: Anthropic,
+    # with the Claude sign-in. Read from the record like the pool, so editing
+    # the agent never moves an old session to another endpoint.
+    connection: Connection | None = None
     # The owner's knowledge setting when it was spawned (setup.Records):
     # native starts every process of it without the harness's own skills and
     # memory, and lets a store skill take a harness command's name. Fixed at
@@ -349,6 +396,10 @@ class SpawnSpec:
             d["keep_harness_tools"] = list(self.keep_harness_tools)
         if self.cascade:
             d["cascade"] = list(self.cascade)
+        if self.pool:
+            d["pool"] = self.pool
+        if self.connection:
+            d["connection"] = self.connection.record()
         if self.knowledge_native:
             d["knowledge_native"] = True
         if self.tags:
@@ -382,6 +433,8 @@ class SpawnSpec:
             continues=d.get("continues"),
             keep_harness_tools=tuple(d.get("keep_harness_tools") or ()),
             cascade=_cascade_of(d.get("cascade")),
+            pool=d.get("pool") or None,
+            connection=Connection.from_record(d.get("connection")),
             knowledge_native=bool(d.get("knowledge_native")),
             tags=dict(d.get("tags") or {}),
             **{k: bool(d.get(k, default)) for k, default in SWITCHES.items()},
@@ -639,7 +692,7 @@ class Session:
             if self._proc or self.asleep_why == "idle"
             else self.last_status,
             "asleep_why": self.asleep_why,
-            "cost_usd": self.cost_usd,
+            "cost_usd": None if self.spec.connection else self.cost_usd,
             "context_tokens": self.context_tokens,
             "context_window": self.context_window,
             "activity": self.activity,
@@ -716,6 +769,10 @@ class Session:
         m["cache_hit"] = cache.hit_rate(self.cache_recent)
         m["cache_alarm"] = cache.alarm(self.cache_recent, self.spec.harness)
         m["turn_tokens"] = self.turn_tokens
+        # The pool it draws on, resolved: every card names one (or null for an
+        # account with no gauge), so the sidebar matches on it alone
+        # (gauges.js providerFor) instead of deriving it from harness and model.
+        m["pool"] = pool_of(self.spec)
         m.update(self._host.card(self))
         return m
 
@@ -909,31 +966,42 @@ class Session:
             attachments.ensure_inbox, self.state_root, self.log_id
         )
         self.exit_via = launching.resolve_via(self.spec.agent)
-        proc = self.harness.process(
-            Launch(
-                via=self.exit_via,
-                cwd=cwd,
-                model=self.spec.model,
-                effort=self.spec.effort,
-                permission=self.spec.permission,
-                resume_id=resume,
-                mcp=mcp,
-                system_prompt=system_prompt,
-                stderr_path=self._stderr_path,
-                on_line=self._on_line,
-                on_exit=on_exit,
-                on_error=self._on_error,
-                read_dirs=(inbox,),
-                cgroup=self._host.cgroup(self),
-                log_id=self.log_id,
-                keep_harness_tools=self.spec.keep_harness_tools,
-                knowledge_native=self.spec.knowledge_native,
-                env=self.host_env,
-                extra_mcp=extra_mcp,
-                harness_tools=self.spec.harness_tools,
-                home=home,
+        try:
+            proc = self.harness.process(
+                Launch(
+                    via=self.exit_via,
+                    cwd=cwd,
+                    model=self.spec.model,
+                    effort=self.spec.effort,
+                    permission=self.spec.permission,
+                    resume_id=resume,
+                    mcp=mcp,
+                    system_prompt=system_prompt,
+                    stderr_path=self._stderr_path,
+                    on_line=self._on_line,
+                    on_exit=on_exit,
+                    on_error=self._on_error,
+                    read_dirs=(inbox,),
+                    cgroup=self._host.cgroup(self),
+                    log_id=self.log_id,
+                    keep_harness_tools=self.spec.keep_harness_tools,
+                    knowledge_native=self.spec.knowledge_native,
+                    env=self.host_env,
+                    extra_mcp=extra_mcp,
+                    harness_tools=self.spec.harness_tools,
+                    home=home,
+                    connection=self.spec.connection,
+                    pool=self.spec.pool,
+                )
             )
-        )
+        except KeyProblem as e:
+            # The key is read at each start: a key file gone, opened up or
+            # handed to another user refuses it, with the agent's error.
+            text = f"agent {self.spec.agent}: {e}"
+            self._record(
+                {"kind": "harness_error", "text": f"This session cannot start: {text}"}
+            )
+            raise OpError("bad_connection", text) from e
         # Before the start: a harness can speak while it starts (OpenCode's
         # session.created), and a line read while stopping is dropped.
         self._stopping = False
@@ -1593,7 +1661,9 @@ class Session:
                     changes["status"] = "idle"
                 if not ev.is_error:
                     changes["restart_continues"] = 0
-                if ev.cost_usd is not None:
+                # A connection's total prices another endpoint at Anthropic's
+                # rates: its card shows tokens and no dollars (spec 08).
+                if ev.cost_usd is not None and self.spec.connection is None:
                     changes["cost_usd"] = ev.cost_usd
                 if ev.context_window:
                     changes["context_window"] = ev.context_window

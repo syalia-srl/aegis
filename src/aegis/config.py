@@ -79,6 +79,7 @@ AGENT_KEYS = (
     "harness", "provider", "model", "models", "effort", "permission", "priming",
     "keep_harness_tools", "exit", "mcp",
     "harness_tools", "isolated", "primer", "notices", "tools", "quota", "budget",
+    "base_url", "pool", "api_key_file", "env",
 )  # fmt: skip
 QUEUE_KEYS = ("agent", "priority", "quiet", "quota", "max_pending")
 
@@ -794,6 +795,13 @@ class AgentDoc(BaseModel):
     # The budget: node as the file has it (budgets.py), whatever its shape:
     # a save writes it back unchanged, a wrong one too; None: no budget:.
     budget: Any = None
+    # Its connection (agents.py) as the agent's own map has it, ~ unexpanded:
+    # shown read-only and written back unchanged. env is kept whatever its
+    # shape, like budget; None: no env:.
+    base_url: str = ""
+    pool: str = ""
+    api_key_file: str = ""
+    env: Any = None
 
 
 class QueueDoc(BaseModel):
@@ -895,6 +903,7 @@ def doc_from(data: dict) -> ConfigDoc:
             tools=_tools_raw(data, a.name),
             quota=_quota_raw((data.get("agents") or {}).get(a.name)),
             budget=_budget_raw((data.get("agents") or {}).get(a.name)),
+            **_connection_raw((data.get("agents") or {}).get(a.name)),
         )
         for a in agents_from(data)
     ]
@@ -973,6 +982,18 @@ def _budget_raw(node: object) -> Any:
     if not isinstance(node, dict) or "budget" not in node:
         return None
     return json.loads(json.dumps(cast(dict, node)["budget"], default=str))
+
+
+def _connection_raw(node: object) -> dict:
+    """An agent's connection keys as its own map has them, so a save neither
+    expands the key file's ~ nor drops a connection the reader refuses."""
+    d = cast(dict, node) if isinstance(node, dict) else {}
+    out: dict[str, Any] = {
+        k: str(d[k]) for k in ("base_url", "pool", "api_key_file") if d.get(k)
+    }
+    if "env" in d:
+        out["env"] = json.loads(json.dumps(d["env"], default=str))
+    return out
 
 
 def _mcp_raw(data: dict, name: str) -> list[str]:
@@ -1481,6 +1502,15 @@ def _set_agent(node: CommentedMap, a: AgentDoc) -> None:
         _put(node, "budget", a.budget)
     else:
         node.pop("budget", None)
+    for k in ("base_url", "pool", "api_key_file"):
+        if getattr(a, k):
+            _put(node, k, getattr(a, k))
+        else:
+            node.pop(k, None)
+    if a.env is not None:
+        _put(node, "env", a.env)
+    else:
+        node.pop("env", None)
     for k, default in SWITCHES.items():
         if getattr(a, k) != default:
             _put(node, k, getattr(a, k))

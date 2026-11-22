@@ -46,9 +46,10 @@ from .kinds import (
     edit_purpose,
     is_shell_exit,
 )
+from ..quota_gate import NONE, pool_for
 from .context import START, Replay, band
 from .prices import Prices, codex_prices_for, prices_for
-from .store import split_cache
+from .store import has_connection, split_cache
 
 MAX_WAIT = 28_800  # an idle gap counts at most 8 hours
 WAKE = re.compile(r"^> from ([\w-]+)")
@@ -76,7 +77,14 @@ class SessionInfo:
     agent: str | None = None
     queue: str | None = None
     starter: str | None = None
-    account: Callable[[str], str | None] = lambda harness: None
+    # The pool its spawn recorded (quota_gate.pool_of), "none" for an account
+    # aegis reads no gauge for, or None to derive it from harness and model.
+    pool: str | None = None
+    # The account a pool is logged in as, "<pool>:<hash>", asked by pool name.
+    account: Callable[[str], str | None] = lambda pool: None
+    # The session ran on an agent's connection (spec 08): another endpoint,
+    # whose prices are not Anthropic's. Its spawn record says so too.
+    connection: bool = False
     replay_start: int = START  # successors' median start context here
 
 
@@ -237,6 +245,7 @@ class UsageDeriver:
         self.harness = info.harness
         self.cwd = ""
         self.model: str | None = None  # the spawn's or the harness's init
+        self.connection = info.connection
         self._parsers: dict = {}
         self._turn: _Turn | None = None
         self._turns = 0
@@ -412,6 +421,7 @@ class UsageDeriver:
             self.cwd = str(rec.get("cwd") or self.cwd)
             self.harness = str(rec.get("harness") or self.harness)
             self.model = rec.get("model") or self.model
+            self.connection = self.connection or has_connection(rec)
             return Derived()
         if kind == "send":
             if rec.get("steered"):
@@ -609,6 +619,8 @@ class UsageDeriver:
         return MODES.get(m[1], "other")
 
     def _rates(self, m: _Msg) -> Prices | None:
+        if self.connection:  # the endpoint's prices, even for a Claude-like id
+            return None
         if self.harness == "claude-code":
             return prices_for(m.model or self.model)
         if self.harness == "codex":
@@ -631,7 +643,9 @@ class UsageDeriver:
     ) -> Derived:
         t, self._turn = self._turn, None
         billed: Decimal | None = None
-        if total is not None:
+        # A connection's total is Claude Code pricing another endpoint's tokens
+        # at Anthropic's rates: ignored, and the running total never moves.
+        if total is not None and not self.connection:
             c = Decimal(str(total))
             if self._prev_total is None or c < self._prev_total:
                 billed = c
@@ -740,17 +754,22 @@ class UsageDeriver:
         return rows, list(whatif.values())
 
     def _billing(self) -> str:
-        """The login a turn ran on: Claude's subscription unless its init
-        names an API key, OpenCode Go's only for a Go model, Codex's plan."""
+        """The login a turn ran on: the account of the pool its spawn
+        recorded (``none``: api), else Claude's subscription for Claude Code
+        unless its init names an API key, the account of the pool its harness
+        and model imply (OpenCode Go's only for a Go model), Codex's plan."""
         if self.harness == "codex":
             return "codex"
-        if self.harness == "claude-code" and self._key_source not in (None, "none"):
+        if self.info.pool == NONE:
             return "api"
-        if self.harness == "opencode" and not (self.model or "").startswith(
-            "opencode-go/"
-        ):
-            return "api"
-        return self.info.account(self.harness) or "api"
+        if self.info.pool:
+            return self.info.account(self.info.pool) or "api"
+        if self.harness == "claude-code":
+            if self._key_source not in (None, "none"):
+                return "api"
+            return self.info.account("claude") or "api"
+        pool = pool_for(self.harness, self.model)
+        return (self.info.account(pool) if pool else None) or "api"
 
     def _shares(self, t: _Turn, msgs: list[_Msg], prices: dict) -> dict[str, Fraction]:
         """Each call's share of the turn, summing to 1."""
