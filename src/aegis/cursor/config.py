@@ -56,6 +56,9 @@ KIND_NAMES = {
 # The effort-like keys a model id's bracket overrides carry, in the order the
 # catalog shows them (``effort``, ``reasoning_effort``, ``reasoning``).
 _EFFORT = re.compile(r"(?:reasoning_effort|effort|reasoning)=([^,\]]+)")
+# ``context=300k`` / ``context=200000`` in the same bracket (measured on the
+# catalog's modelIds); the gauge's denominator when ACP sends no window.
+_CONTEXT = re.compile(r"context=([^,\]]+)")
 
 
 def argv(bin: str) -> list[str]:
@@ -122,6 +125,25 @@ def effort_of(model_id: str) -> str | None:
     return m.group(1) if m else None
 
 
+def window_of(model_id: str) -> int | None:
+    """The context window a model id carries in its bracket, or None.
+
+    Forms measured in Cursor's catalog: ``context=300k``, ``context=200000``.
+    """
+    m = _CONTEXT.search(model_id.partition("[")[2])
+    if not m:
+        return None
+    raw = m.group(1).strip().lower()
+    try:
+        if raw.endswith("k"):
+            return int(float(raw[:-1]) * 1000)
+        if raw.endswith("m"):
+            return int(float(raw[:-1]) * 1_000_000)
+        return int(raw)
+    except ValueError:
+        return None
+
+
 def models_from(entries: list, current: str = "") -> tuple[Model, ...]:
     """The catalog ``session/new`` answers with, one model per entry.
 
@@ -129,7 +151,8 @@ def models_from(entries: list, current: str = "") -> tuple[Model, ...]:
     ``default[]``), which is unique across a catalog (measured on the 46), and
     what the person writes in ``.aegis.yaml``; ``label`` is the name Cursor
     shows (``Auto``); ``resolved`` the exact modelId ``session/set_model``
-    accepts; and ``efforts`` the single effort the id already carries.
+    accepts; ``efforts`` the single effort the id already carries; and
+    ``window`` the ``context=`` override when the id names one (#1119).
     """
     models: list[Model] = []
     for m in entries:
@@ -146,6 +169,7 @@ def models_from(entries: list, current: str = "") -> tuple[Model, ...]:
                 label=label,
                 doc=_doc_of(m),
                 efforts=(effort,) if effort else (),
+                window=window_of(model_id),
             )
         )
     if current and not any(current in (m.value, m.resolved) for m in models):
@@ -157,6 +181,7 @@ def models_from(entries: list, current: str = "") -> tuple[Model, ...]:
                 label=current,
                 doc="",
                 efforts=(effort,) if effort else (),
+                window=window_of(current),
             )
         )
     return tuple(models)

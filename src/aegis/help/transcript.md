@@ -22,9 +22,13 @@ started and two token counts for this turn: ↑ counts the new input fed to the
 model (your message, tool results, files read), and ↓ counts what the model
 wrote. ↑ leaves out the cached context that the model rereads on every call.
 Both counts start at zero with each turn and flash when a call adds to them.
-Esc Esc interrupts the turn: one Esc arms it and the row says
-"Esc again to interrupt" for a second. With reduced motion set in your system, the row keeps
-one verb and stops moving.
+Cursor's ACP does not report tokens, so those counts and the context gauge for
+a Cursor session are an estimate from the text and tools the turn streamed
+(`chars // 4`), filled when the turn ends; a model id that carries
+`context=300k` (or similar) sets the gauge's window. Esc Esc interrupts the
+turn: one Esc arms it and the row says "Esc again to interrupt" for a second.
+With reduced motion set in your system, the row keeps one verb and stops
+moving.
 
 While a tool call runs, the working row shows that call instead of its
 asterisk: the call's icon pulses and the verb says what kind of work it is,

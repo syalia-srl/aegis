@@ -85,7 +85,7 @@ The system prompt has no channel:
 |---|---|---|
 | aegis MCP per session | ✅ `session/new.mcpServers` carries the URL and the session token as a header | ❌ no injection point: MCP config is read from fixed paths |
 | streaming, tools, title | ✅ chunks, `tool_call`, generated title | ⚠ deltas and tool events, no title |
-| token counts for the card | ❌ none | ✅ per turn |
+| token counts for the card | estimate (`chars // 4`) on turn end (#1119); no ACP usage | ✅ per turn |
 | model change mid-run | ✅ `session/set_mode` and `set_model` | only between turns |
 | permission levels | ✅ `plan` / `ask` / `agent`, with each `session/request_permission` answered per level | ⚠ flags only |
 | interrupt | kill the process, `session/load` to continue | kill the process |
@@ -211,8 +211,11 @@ real app, as the fake Claude and fake Codex do:
 
 ## Out of scope
 
-- Cost and token counts: Cursor reports neither through ACP. The card shows no
-  cost and no context gauge for these sessions, and the help page says so.
+- Cost: Cursor reports none through ACP, so the card shows no dollar amount.
+  Token counts are estimated from streamed text and tools (`chars // 4`) and
+  emitted as a `Step` on turn end (#1119); a real ACP `usage_update`, when
+  Cursor adds one, should replace that estimate. The gauge's window comes from
+  the model id's `context=` override when present.
 - `session/cancel`: until Cursor implements it, an interrupt kills the process.
 - An approval card for `session/request_permission`: requests are answered by
   the level's policy at once — a card would ask the person to decide what the

@@ -31,8 +31,11 @@ every harness. Measured on cursor-agent 2026.10.14 (spec
 - ``session_info_update`` carries the title. ``available_commands_update``
   carries the command list, which process.py keeps for the catalog instead of
   an event. There is no usage line of any kind: Cursor reports no tokens over
-  ACP, so no ``Usage`` or ``Step`` ever exists, and a card for this harness
-  shows neither cost nor context.
+  ACP (measured on the fixture and on live turns). The card still needs a
+  context gauge, so the parser estimates tokens as ``chars // 4`` from the
+  echo, thought and message chunks, and tool inputs and outputs it already
+  sees, and emits one ``Step`` with that ``Usage`` on ``aegis/turn_done``
+  (#1119). Cost stays unset: ACP still names none.
 """
 
 from __future__ import annotations
@@ -47,11 +50,13 @@ from ..claude.stream import (
     Ignored,
     Init,
     Result,
+    Step,
     Text,
     Thinking,
     Title,
     ToolCall,
     ToolOutput,
+    Usage,
 )
 from .config import SERVER, tool_name
 
@@ -113,6 +118,11 @@ def _output(content: list, raw: dict | None = None) -> tuple[str, dict | None]:
     return "\n".join(texts), diff
 
 
+def _tokens(chars: int) -> int:
+    """Rough token count from characters: Cursor ACP sends none (#1119)."""
+    return max(0, chars // 4)
+
+
 class Parser:
     def __init__(self) -> None:
         self.session_id: str | None = None
@@ -128,12 +138,48 @@ class Parser:
         # What is known about each open tool call, to re-emit it as its input
         # and title arrive (tool id -> (name, input)).
         self.tools: dict[str, list] = {}
+        # Chars seen this session / this turn's model output, for the estimate
+        # emitted as Usage on turn_done. tool_in remembers how many input
+        # chars each open call has already contributed, so a later rawInput
+        # only counts the growth.
+        self.session_chars = 0
+        self.turn_out_chars = 0
+        self.tool_in: dict[str, int] = {}
 
     def end_turn(self) -> None:
         """The turn ended: nothing of it may reach the next."""
         self.key = None
         self.kind = None
         self.acc = ""
+        self.turn_out_chars = 0
+
+    def _note(self, n: int, *, out: bool = False) -> None:
+        if n <= 0:
+            return
+        self.session_chars += n
+        if out:
+            self.turn_out_chars += n
+
+    def _note_tool_input(self, tid: str, inp: dict) -> None:
+        n = len(json.dumps(inp, sort_keys=True, default=str))
+        prev = self.tool_in.get(tid, 0)
+        if n > prev:
+            self._note(n - prev)
+            self.tool_in[tid] = n
+
+    def _estimated_usage(self) -> Usage | None:
+        """One Usage for the turn: input is everything counted so far except
+        this turn's model-side chars; output is those. ``context`` is then the
+        session total, which the card's gauge reads."""
+        if self.session_chars <= 0:
+            return None
+        out = _tokens(self.turn_out_chars)
+        inp = _tokens(max(0, self.session_chars - self.turn_out_chars))
+        if inp == 0 and out == 0:
+            # Under four chars total: still show a non-zero context so the
+            # gauge is not left empty after a real turn.
+            return Usage(input=1, cache_creation=0, cache_read=0, output=0)
+        return Usage(input=inp, cache_creation=0, cache_read=0, output=out)
 
     def feed(self, line: str) -> list[Event]:
         try:
@@ -188,20 +234,29 @@ class Parser:
 
     def _echo(self, p: dict) -> list[Event]:
         text = str(p.get("text") or "")
-        return [Echo(text=text)] if text else []
+        if not text:
+            return []
+        self._note(len(text))
+        return [Echo(text=text)]
 
     def _command(self, p: dict) -> list[Event]:
         line = str(p.get("line") or "")
-        return [Echo(text=line)] if line else []
+        if not line:
+            return []
+        self._note(len(line))
+        return [Echo(text=line)]
 
     def _turn_done(self, p: dict) -> list[Event]:
         """The turn's last line: flush the text the chunks drew as the whole
-        blocks the store keeps, then close the turn with a Result.
+        blocks the store keeps, emit the estimated Usage as a Step, then
+        close the turn with a Result.
 
         ``stop_reason`` is Cursor's own ``stopReason`` (``end_turn``,
         ``cancelled``, ``refusal``, ``max_tokens``, ``max_turn_requests``), or
         ``interrupted`` when aegis killed the child to stop it."""
         out = self._flush()
+        if (usage := self._estimated_usage()) is not None:
+            out.append(Step(usage=usage))
         stop = str(p.get("stop_reason") or "end_turn")
         span = p.get("duration_ms")
         # The reason travels in ``stop_reason`` only when the turn succeeded:
@@ -266,6 +321,7 @@ class Parser:
             self.key = f"{'t' if kind == 'thinking' else 'p'}{self.blocks}"
             self.kind = kind
         self.acc += text
+        self._note(len(text), out=True)
         return out + [self._part()]
 
     # -- session/update --------------------------------------------------
@@ -293,6 +349,7 @@ class Parser:
             raw if isinstance(raw, dict) else {},
         )
         self.tools[tid] = [name, inp]
+        self._note_tool_input(tid, inp)
         return [ToolCall(id=tid, name=name, input=inp, parent=None, usage=None)]
 
     def _u_tool_call_update(self, p: dict) -> list[Event]:
@@ -333,8 +390,10 @@ class Parser:
             }
             changed = True
         if changed:
+            self._note_tool_input(tid, inp if isinstance(inp, dict) else {})
             out.append(ToolCall(id=tid, name=name, input=inp, parent=None, usage=None))
         if status in ("completed", "failed"):
+            self._note(len(text), out=True)
             out.append(
                 ToolOutput(
                     id=tid,
@@ -344,6 +403,7 @@ class Parser:
                 )
             )
             self.tools.pop(tid, None)
+            self.tool_in.pop(tid, None)
         return out
 
     def _u_available_commands_update(self, p: dict) -> list[Event]:

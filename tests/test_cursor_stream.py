@@ -151,3 +151,35 @@ def test_each_chunk_line_carries_the_message_so_far():
         for u in updates()
         if u.get("sessionUpdate") == "agent_message_chunk"
     )
+
+
+def test_turn_done_emits_an_estimated_usage_step():
+    """Cursor ACP has no usage line (measured on the fixture: zero hits for
+    usage/token). The parser estimates chars//4 and emits one Step on
+    turn_done so the card's context gauge has a number (#1119)."""
+    from aegis.claude.stream import Step, Usage
+
+    p = Parser()
+    steps: list[Step] = []
+    for r in records():
+        for ev in p.feed(r["line"]):
+            if isinstance(ev, Step):
+                steps.append(ev)
+    assert len(steps) == 1
+    u = steps[0].usage
+    assert isinstance(u, Usage)
+    assert u.context > 0
+    # Rough floor: the fixture's visible thought+message alone is 228 chars.
+    assert u.context >= 228 // 4
+
+
+def test_window_of_reads_context_from_the_model_id():
+    from aegis.cursor.config import models_from, window_of
+
+    assert window_of("claude-opus-5[thinking=true,context=300k,effort=high]") == 300_000
+    assert window_of("x[context=200000]") == 200_000
+    assert window_of("default") is None
+    (m,) = models_from(
+        [{"modelId": "opus[context=200k]", "name": "Opus", "description": "x"}]
+    )
+    assert m.window == 200_000
