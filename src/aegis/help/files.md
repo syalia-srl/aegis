@@ -172,10 +172,10 @@ name the words under them when that sheet has text. The wheel still scrolls
 the document while a tool is on. Annotate off leaves the reader's zoom, find,
 and sheet controls in reach.
 
-The tools on a PDF need Mozilla's viewer, which aegis does not ship: run
+The tools on a PDF need Mozilla's reader, which aegis does not ship: run
 `aegis pdfjs install` once on the server (about 6 MB, checked against a pinned
-hash), then reload the page. Until then a PDF opens in the browser's own
-viewer, without the tools. Images have them either way.
+hash), then reload. Until then a PDF opens in the browser's own reader,
+without the tools. Images have them either way.
 
 Each mark adds a number and a note to the same comment tray used for text.
 On a wide window the list sits beside the picture, so the preview keeps its
