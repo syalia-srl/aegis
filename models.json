@@ -1,7 +1,7 @@
 {
   "source": "Artificial Analysis",
   "url": "https://artificialanalysis.ai",
-  "refreshed": "2026-11-22",
+  "refreshed": "2026-11-23",
   "models": {
     "fable": {
       "aa": "claude-fable-5-2",
@@ -86,13 +86,6 @@
       "intelligence": 31.7,
       "price_in": 1.4,
       "price_out": 4.4
-    },
-    "opencode/inkling-2-small-free": {
-      "aa": "inkling-2-small",
-      "coding": null,
-      "intelligence": 30.6,
-      "price_in": 0.3,
-      "price_out": 1
     },
     "opencode-go/mimo-v2.6-pro": {
       "aa": "mimo-v2-6-pro",
