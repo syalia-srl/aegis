@@ -22,8 +22,9 @@ from typing import Any
 
 TOOLS = frozenset(
     """
-    agents_list artifact_close artifact_create artifact_read artifact_send
-    artifact_update browser_click browser_close browser_eval browser_events
+    agents_list annotation_view artifact_close artifact_create artifact_read
+    artifact_send artifact_update browser_click browser_close browser_eval
+    browser_events
     browser_goto browser_handover browser_list browser_open browser_press
     browser_request browser_resize browser_screenshot browser_snapshot
     browser_type config_doctor config_suggest feed_cancel feed_list feed_pause
