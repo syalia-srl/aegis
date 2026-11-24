@@ -168,23 +168,35 @@ async def test_agents_cannot_use_the_persons_focus_action(world):
 
 
 @pytest.mark.parametrize("submitted", [False, True])
-async def test_deepseek_reports_the_actual_send_button_result(tmp_path, submitted):
+@pytest.mark.parametrize(
+    "name,url",
+    [
+        ("web-deepseek", "https://chat.deepseek.com/"),
+        ("web-qwen", "https://chat.qwen.ai/"),
+        ("web-chatgpt", "https://chatgpt.com/"),
+    ],
+)
+async def test_provider_reports_the_actual_send_button_result(
+    tmp_path, submitted, name, url
+):
     manager_type = importlib.import_module("aegis.web_agent.transport").WebBridges
     chrome = Chrome(tmp_path, lambda *_: None)
     session = SimpleNamespace(
         log_id="web-one",
         handle="research",
-        spec=SimpleNamespace(harness="web-deepseek"),
+        spec=SimpleNamespace(harness=name),
         record_card=lambda _: None,
     )
     manager = manager_type(chrome)
     chrome.on_answer = manager.answered
     bridge = manager.for_session(session)
     ext = Driven(chrome, lambda _: {"value": {"submitted": submitted}})
-    await (await grant(chrome, ext, bridge, url="https://chat.deepseek.com/"))
+    await (await grant(chrome, ext, bridge, url=url))
     chrome.tabs["qwen"]["eval"] = True
     if submitted:
         assert await bridge("send", {"text": "A task"}) == {"submitted": True}
+        assert ext.calls[-2]["op"] == "type"
+        assert ext.calls[-2]["args"]["submit"] is False
     else:
         with pytest.raises(CallError, match="submission_refused"):
             await bridge("send", {"text": "A task that did not get submitted"})

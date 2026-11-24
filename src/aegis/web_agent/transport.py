@@ -6,7 +6,7 @@ import asyncio
 from typing import Any
 
 from ..chrome import CallError, Chrome
-from .providers import DEEPSEEK_SEND, PROVIDERS, STOP_SCRIPT
+from .providers import PROVIDERS, STOP_SCRIPT
 
 
 class WebBridges:
@@ -182,15 +182,15 @@ class BrowserBridge:
                 {
                     "target": self.provider.input,
                     "text": args["text"],
-                    "submit": self.provider.name != "web-deepseek",
+                    "submit": self.provider.send is None,
                 },
             )
-            if self.provider.name == "web-deepseek":
-                submitted = await self._eval(DEEPSEEK_SEND)
+            if script := self.provider.send_script:
+                submitted = await self._eval(script)
                 if submitted.get("submitted") is not True:
                     raise CallError(
                         "submission_refused",
-                        "DeepSeek did not enable its Send button; check the draft in Chrome",
+                        f"{self.provider.label} did not enable its Send button; check the draft in Chrome",
                     )
             self.chrome.acted(self.tab, self.session.handle, "web harness submit")
             return {"submitted": True}

@@ -132,3 +132,72 @@ def test_gemini_user_messages_exclude_accessibility_previews_and_nested_wrappers
     users = page.evaluate(provider("web-gemini").observe_script)["users"]
     assert len(users) == 1
     assert users[0]["text"] == "Search Chrome help"
+
+
+def test_deepseek_read_aloud_control_completes_the_actual_answer(page):
+    page.set_content(
+        '<div data-virtual-list-item-key="2"><div class="ds-message"><div class="ds-markdown ds-assistant-message-main-content"><p>AEGIS_READY</p></div></div><div class="ds-flex"><div role="button" aria-label="Read aloud"></div></div></div>'
+    )
+    answer = page.evaluate(provider("web-deepseek").observe_script)["messages"][0]
+    assert answer["markdown"] == "AEGIS_READY"
+    assert answer["complete"] is True
+
+
+@pytest.mark.parametrize("name", ["web-qwen", "web-chatgpt", "web-deepseek"])
+@pytest.mark.parametrize("disabled", [True, False])
+def test_provider_send_uses_the_enabled_button(page, name, disabled):
+    control = (
+        (
+            '<div role="button" class="ds-button--primary ds-button--circle" aria-disabled="'
+            + str(disabled).lower()
+            + '"></div>'
+        )
+        if name == "web-deepseek"
+        else (
+            '<button aria-label="Send" '
+            + ("disabled" if disabled else "")
+            + "></button>"
+        )
+    )
+    page.set_content(control)
+    page.evaluate(
+        "document.querySelector('button,[role=button]').addEventListener('click',()=>document.body.dataset.sent='yes')"
+    )
+    assert page.evaluate(provider(name).send_script) == {"submitted": not disabled}
+    assert (page.get_attribute("body", "data-sent") == "yes") is not disabled
+
+
+@pytest.mark.parametrize(
+    "done,status,identity,complete",
+    [
+        (True, "finished", "answer-1", True),
+        (False, "finished", "answer-1", False),
+        (True, "streaming", "answer-1", False),
+        (True, "finished", "another-answer", False),
+    ],
+)
+def test_qwen_requires_its_own_explicit_finished_answer_state(
+    page, done, status, identity, complete
+):
+    page.set_content(
+        '<div class="chat-response-message" id="chat-response-message-answer-1"><div class="phase-answer">AEGIS_READY</div></div>'
+    )
+    page.evaluate(
+        """([done,status,id])=>{
+      document.querySelector('.chat-response-message').__reactFiber$fixture={memoizedProps:{message:{id,role:'assistant',done,content_list:[{phase:'thinking_summary',status:'finished'},{phase:'answer',status}]}}};
+    }""",
+        [done, status, identity],
+    )
+    assert (
+        page.evaluate(provider("web-qwen").observe_script)["messages"][0]["complete"]
+        is complete
+    )
+
+
+def test_qwen_css_disabled_send_is_refused(page):
+    page.set_content('<button aria-label="Send" class="send-button disabled"></button>')
+    page.evaluate(
+        "document.querySelector('button').addEventListener('click',()=>document.body.dataset.sent='yes')"
+    )
+    assert page.evaluate(provider("web-qwen").send_script) == {"submitted": False}
+    assert page.get_attribute("body", "data-sent") is None
