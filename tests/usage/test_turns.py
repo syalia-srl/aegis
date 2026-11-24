@@ -406,6 +406,93 @@ def test_a_cursor_turn_has_parts_with_no_tokens():
     assert sum(p.secs for p in d.parts) == t.secs == 2.0
 
 
+def test_a_cursor_turn_with_estimated_usage_is_priced_at_api_rates():
+    """Counterfactual (#1132): estimated Step tokens × Claude list prices."""
+    from aegis.claude.stream import Step, Usage
+    from aegis.usage.prices import prices_for
+
+    d = _feed(
+        "cursor",
+        "cursor",
+        [
+            (None, _call("a", "Read", {"file_path": "/w/a.py"})),
+            (
+                None,
+                [
+                    Step(
+                        usage=Usage(
+                            input=10_000, cache_creation=0, cache_read=0, output=500
+                        )
+                    ),
+                    *_result(),
+                ],
+            ),
+        ],
+        model="claude-sonnet-5",
+    )
+    t = d.turns[0]
+    want = prices_for("claude-sonnet-5").cost(
+        inp=10_000, out=500, cc5=0, cc1=0, cache_read=0
+    )
+    assert (t.cost_kind, t.cost, t.model) == ("priced", want, "claude-sonnet-5")
+    assert (t.tok_in, t.tok_out) == (10_000, 500)
+    assert sum(p.cost for p in d.parts) == want
+
+
+def test_a_cursor_turn_with_an_unknown_model_stays_unpriced():
+    from aegis.claude.stream import Step, Usage
+
+    d = _feed(
+        "cursor",
+        "cursor",
+        [
+            (
+                None,
+                [
+                    Step(
+                        usage=Usage(
+                            input=1000, cache_creation=0, cache_read=0, output=100
+                        )
+                    ),
+                    *_result(),
+                ],
+            ),
+        ],
+        model="default",
+    )
+    t = d.turns[0]
+    assert (t.cost_kind, t.cost, t.tok_in + t.tok_out) == ("unpriced", Decimal(0), 1100)
+
+
+def test_a_cursor_turn_bills_the_cursor_account():
+    from aegis.claude.stream import Step, Usage
+
+    info = SessionInfo(
+        harness="cursor",
+        account=lambda h: "cursor:c0ffee" if h == "cursor" else None,
+    )
+    d = _feed(
+        "cursor",
+        "cursor",
+        [
+            (
+                None,
+                [
+                    Step(
+                        usage=Usage(
+                            input=1000, cache_creation=0, cache_read=0, output=50
+                        )
+                    ),
+                    *_result(),
+                ],
+            ),
+        ],
+        info=info,
+        model="claude-sonnet-5",
+    )
+    assert d.turns[0].billing == "cursor:c0ffee"
+
+
 def test_a_resume_after_an_exit_that_carries_the_total_on_counts_the_rise():
     """Seen on real stores: after an exit or a server stop, the resumed Claude's
     total_cost_usd goes on from where it was."""

@@ -112,7 +112,8 @@ async def test_a_prompt_runs_a_turn_with_the_model_and_the_session(cx):
     s = cx.session
     assert cx.prose() == ["you said: hello"]
     assert s.model_id == "fake-pro" and s.resume_id
-    assert s.context_tokens is None  # initialize carries no token counts (measured)
+    # ACP still sends no usage; the parser estimates from streamed chars (#1119).
+    assert s.context_tokens is not None and s.context_tokens > 0
     assert s.wire()["harness_label"] == "Cursor Agent"
     assert any(e["summary"] == "Cursor Agent · fake-pro" for e in s.entries())
 

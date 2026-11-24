@@ -7,7 +7,7 @@ from decimal import Decimal
 
 import pytest
 
-from aegis.usage.prices import PRICES, prices_for
+from aegis.usage.prices import PRICES, codex_prices_for, cursor_prices_for, prices_for
 
 
 def test_a_dated_id_and_a_context_suffix_price_as_the_base_model():
@@ -59,3 +59,15 @@ def test_cache_writes_follow_the_input_price(model):
 def test_cache_reads_take_each_models_own_multiple(model, multiple):
     p = PRICES[model]
     assert p.cache_read == p.input * Decimal(multiple)
+
+
+def test_cursor_prices_follow_the_underlying_api_model():
+    """Counterfactual (#1132): Cursor model ids price as Claude/OpenAI lists."""
+    assert cursor_prices_for("claude-sonnet-5[effort=high,context=200k]") == prices_for(
+        "claude-sonnet-5"
+    )
+    assert cursor_prices_for("openai/gpt-6.1-sol") == codex_prices_for(
+        "openai/gpt-6.1-sol"
+    )
+    assert cursor_prices_for("gpt-6.1-sol") == codex_prices_for("openai/gpt-6.1-sol")
+    assert cursor_prices_for("default") is None
