@@ -773,7 +773,7 @@ class AgentDoc(BaseModel):
     model: str = ""
     # The cascade, when the agent names two or more models; empty for a
     # one-model agent, which uses ``model``.
-    models: list[str] = Field(default_factory=list)
+    models: list[str] | dict[str, Any] = Field(default_factory=list)
     effort: str = ""
     permission: str = ""
     priming: str | None = None
@@ -886,7 +886,7 @@ def doc_from(data: dict) -> ConfigDoc:
             name=a.name,
             harness=a.harness,
             model=a.model,
-            models=list(a.models) if len(a.models) > 1 else [],
+            models=a.model_selector or (list(a.models) if len(a.models) > 1 else []),
             effort=a.effort,
             permission=a.permission,
             priming=a.priming,
@@ -1439,7 +1439,10 @@ def _set_agent(node: CommentedMap, a: AgentDoc) -> None:
     # file already lists it under models:, which a person wrote as a list.
     held = isinstance(provider, dict) and ("model" in provider or "models" in provider)
     holder = provider if held else node
-    if len(a.models) > 1:
+    if isinstance(a.models, dict):
+        holder.pop("model", None)
+        _put(holder, "models", dict(a.models))
+    elif len(a.models) > 1:
         holder.pop("model", None)
         _put(holder, "models", list(a.models))
     elif isinstance(listed := holder.get("models"), list):

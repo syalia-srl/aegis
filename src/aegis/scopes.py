@@ -30,7 +30,7 @@ TOOLS = frozenset(
     feed_resume feed_start file_send gc_propose gc_read help_read help_search journal_note
     journal_search knowledge_import knowledge_stats layout_read layout_set
     memory_delete memory_read memory_save memory_search mention_reply meta
-    models_list models_catalog
+    models_list models_catalog models_preview
     monitor_cancel monitor_list monitor_sessions monitor_start notice_announce
     peer_handoff peer_read plan_update queue_enqueue queues_list quota_read schedule_create
     schedule_delete schedule_fire schedule_list schedule_pause schedule_resume

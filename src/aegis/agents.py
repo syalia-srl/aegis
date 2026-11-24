@@ -97,6 +97,7 @@ class Agent:
     # Its spending caps (budgets.py, #1068); (): no cap.
     budget: tuple[budgets.Cap, ...] = ()
     description: str = ""
+    model_selector: dict = field(default_factory=dict)
 
     @property
     def enabled(self) -> bool:
@@ -107,7 +108,7 @@ class Agent:
             "name": self.name,
             "harness": self.harness,
             "model": self.model,
-            "models": list(self.models),
+            "models": self.model_selector or list(self.models),
             "effort": self.effort,
             "permission": self.permission,
             "enabled": self.enabled,
@@ -135,22 +136,42 @@ def _agent(name: str, raw: Any) -> Agent:
         d |= {k: v for k, v in provider.items() if k != "name"}
         if provider.get("name"):
             d["harness"] = provider["name"]
-    models, repeated, models_error = _models(d)
+    selector = dict(d["models"]) if isinstance(d.get("models"), dict) else {}
+    selector_error = None
+    if selector:
+        providers = selector.get("providers")
+        if set(selector) != {"providers", "free"} or selector.get("free") is not True:
+            selector_error = "a model selector needs providers and free: true only"
+        elif (
+            not isinstance(providers, list)
+            or not providers
+            or not all(isinstance(p, str) and p and "/" not in p for p in providers)
+        ):
+            selector_error = "model providers must be a nonempty list of provider IDs"
+        elif d.get("model") not in (None, ""):
+            selector_error = "give model or models, not both"
+        elif d.get("harness") != "opencode":
+            selector_error = "free-provider selectors currently require OpenCode"
+    models, repeated, models_error = (
+        _models({k: v for k, v in d.items() if k != "models"})
+        if selector
+        else _models(d)
+    )
     if models:
         d["model"] = models[0]
     values = {f: "" if d.get(f) in (None, "") else str(d[f]) for f in FIELDS}
-    missing = [f for f in FIELDS if not values[f]]
+    missing = [f for f in FIELDS if not values[f] and not (f == "model" and selector)]
     if missing:
         verb = "is" if len(missing) == 1 else "are"
         error: str | None = f"{', '.join(missing)} {verb} missing"
     else:
         error = next((e for f in FIELDS if (e := _invalid(f, values[f]))), None)
         error = error or next(
-            (e for m in models or (values["model"],)
+            (e for m in models or ((values["model"],) if values["model"] else ())
              if (e := _model_error(values["harness"], m))),
             None,
         )  # fmt: skip
-    error = models_error or error
+    error = selector_error or models_error or error
     priming = d.get("priming")
     keep, keep_error = _keep(d.get("keep_harness_tools"))
     mcp = d.get("mcp")
@@ -169,6 +190,7 @@ def _agent(name: str, raw: Any) -> Agent:
     )  # fmt: skip
     return Agent(
         name=str(name),
+        model_selector=dict(selector),
         **values,
         priming=str(priming) if priming else None,
         description=str(d.get("description") or "").strip(),
@@ -302,11 +324,15 @@ def resolve(
         if overrides.get(f) not in (None, "") and overrides[f] != fields[f]
     )
     fields |= {f: str(overrides[f]) for f in overridden}
+    if agent.model_selector and "harness" in overridden:
+        raise OpError("bad_model", "a free-provider agent cannot change its harness")
     if fields["harness"] not in SUPPORTED_HARNESSES:
         raise OpError(
             "harness_unsupported", f"{fields['harness']} is not supported yet"
         )
-    if err := _model_error(fields["harness"], fields["model"]):
+    if not agent.model_selector and (
+        err := _model_error(fields["harness"], fields["model"])
+    ):
         raise OpError("bad_model", err)
     # An explicit model is the person's choice: it runs alone, with no cascade.
     own = not {"model", "harness"} & set(overridden)
@@ -322,6 +348,7 @@ def resolve(
         keep_harness_tools=agent.keep_harness_tools,
         **{k: getattr(agent, k) for k in SWITCHES},
         cascade=cascade,
+        model_selector=dict(agent.model_selector),
         overridden=overridden,
         spawned_by=spawned_by,
         group=group,

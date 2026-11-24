@@ -188,6 +188,7 @@ class Registry(Host):
         self.group_changed: Callable[[str], None] | None = None
         # The app's start_spec: a spec -> the spec to start (its cascade's
         # first model free now) and the gate it passes.
+        self.model_catalog = None
         self.start_spec = None
         # The app's cascade_next, which cools and picks (Host.cascade_next).
         self.cascade = None
@@ -516,6 +517,20 @@ class Registry(Host):
         types into it, interrupts it or hands it off but the engine (spec §05).
         The reason comes from the run (workflows.Workflows.lock)."""
         return None if self.workflows is None else self.workflows.lock(session)
+
+    async def prepare_turn(self, session: Session) -> None:
+        if self.model_catalog is not None:
+            await self.model_catalog.prepare_turn(session)
+
+    async def check_model(self, session: Session, model: str) -> None:
+        if self.model_catalog is not None:
+            await self.model_catalog.refresh()
+            await self.model_catalog.app.who_of_key(
+                session.spec.owner or self.model_catalog.app.user
+            )
+            why = self.model_catalog.restriction(session.spec, model)
+            if why:
+                raise OpError("model_ineligible", why)
 
     def cascade_next(
         self, session: Session, text: str

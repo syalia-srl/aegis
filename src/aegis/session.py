@@ -183,6 +183,12 @@ class Host:
     def catalog_ready(self, session: "Session", catalog: Catalog) -> None:
         """A process answered ``initialize``: its cwd's commands and models."""
 
+    async def prepare_turn(self, session: "Session") -> None:
+        """Refresh and enforce a dynamic session's model eligibility."""
+
+    async def check_model(self, session: "Session", model: str) -> None:
+        """Validate a model change against the session's model selector."""
+
     def quota_hold(self, session: "Session") -> str | None:
         """Why the session's owner may not start a turn now (quota_gate.py),
         or None when it may."""
@@ -320,6 +326,8 @@ class SpawnSpec:
     # parent: a queue worker's enqueuer. spawned_by would make the worker a
     # child in the tree.
     started_by: str | None = None
+    model_selector: dict = dataclasses.field(default_factory=dict)
+    models_observed_at: float | None = None
 
     def record(self) -> dict:
         """The fields a spawn record and a meta carry."""
@@ -347,6 +355,9 @@ class SpawnSpec:
             d["continues"] = self.continues
         if self.keep_harness_tools:
             d["keep_harness_tools"] = list(self.keep_harness_tools)
+        if self.model_selector:
+            d["model_selector"] = dict(self.model_selector)
+            d["models_observed_at"] = self.models_observed_at
         if self.cascade:
             d["cascade"] = list(self.cascade)
         if self.knowledge_native:
@@ -382,6 +393,8 @@ class SpawnSpec:
             continues=d.get("continues"),
             keep_harness_tools=tuple(d.get("keep_harness_tools") or ()),
             cascade=_cascade_of(d.get("cascade")),
+            model_selector=dict(d.get("model_selector") or {}),
+            models_observed_at=d.get("models_observed_at"),
             knowledge_native=bool(d.get("knowledge_native")),
             tags=dict(d.get("tags") or {}),
             **{k: bool(d.get(k, default)) for k, default in SWITCHES.items()},
@@ -867,6 +880,8 @@ class Session:
             if generation == self._generation:
                 self._on_exit(code, tail)
 
+        if self.spec.model_selector:
+            await self._host.prepare_turn(self)
         await self._check_version()
         resume = self.resume_id
         if self.admitted:
@@ -1030,6 +1045,8 @@ class Session:
         change through a control request first; the spec, which the next
         ``--resume`` is built from, takes only what applied, and a refusal is
         raised after that is recorded."""
+        if model and self.spec.model_selector:
+            await self._host.check_model(self, model)
         proc = self._proc if self.running else None
         when = (
             "on_resume"
@@ -1199,6 +1216,8 @@ class Session:
         steered: bool = False,
         by_person: bool = False,
     ) -> None:
+        if self.spec.model_selector:
+            await self._host.prepare_turn(self)
         await self.ensure_running()
         assert self._proc is not None
         if not self.title and not text.startswith("/"):
