@@ -409,6 +409,9 @@
 .aegis .row.user.pending .body:after{content:"not read yet";display:block;font-size:11px;color:var(--faint);margin-top:4px;font-family:var(--font-chrome)}
 .aegis .row.user .body .dictated{font-size:11px;color:var(--faint);margin-top:4px;font-family:var(--font-chrome)}
 .aegis .row.prose .body{font-family:var(--font-prose);font-size:var(--prose-size);line-height:1.55;color:var(--ink);overflow-wrap:anywhere}
+.aegis .row.prose .stream-char{animation:stream-char-in .12s linear both;animation-delay:var(--stream-delay)}
+@keyframes stream-char-in{from{opacity:0}to{opacity:1}}
+@media (prefers-reduced-motion:reduce){.aegis .row.prose .stream-char{animation:none}}
 .aegis .row.prose .g{color:var(--ink)}
 /* reading: the margin mark on agent messages */
 /* The read mark and the read-aloud chip side by side, centred on the first
