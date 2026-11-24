@@ -17,7 +17,9 @@ pytestmark = [pytest.mark.browser, pytest.mark.slow]
 @pytest.fixture
 def full_server(tmp_path: Path, fake_claude: str, fake_opencode: str):
     (tmp_path / ".aegis.yaml").write_text(FULL)
-    s = Server(tmp_path, fake_claude, fake_opencode).start()
+    s = Server(tmp_path, fake_claude, fake_opencode)
+    s.args = ["--name", "preview"]
+    s.start()
     yield s
     s.stop()
 
@@ -90,4 +92,41 @@ def test_settings_has_no_tokens_section_or_member_ui(full_server, page):
     page.wait_for_selector("#set-network")
     assert page.locator("#set-tokens").count() == 0
     assert page.locator("#set-member").count() == 0
+    assert page.errors == []
+
+
+def test_agent_and_queue_descriptions_save_and_reload(full_server, page):
+    open_settings(page, full_server.url)
+    agent = '[data-row="agents.opus"] [data-key="agents.*.description"]'
+    queue = '[data-row="queues.general"] [data-key="queues.*.description"]'
+    page.fill(agent, "Review difficult changes.")
+    page.fill(queue, "General implementation and debugging.")
+    page.click("#set-save")
+    page.wait_for_function(
+        "document.querySelector('#set-status').textContent === 'Saved'"
+    )
+    data = YAML(typ="safe").load((full_server.root / ".aegis.yaml").read_text())
+    assert data["agents"]["opus"]["description"] == "Review difficult changes."
+    assert (
+        data["queues"]["general"]["description"]
+        == "General implementation and debugging."
+    )
+    page.reload()
+    page.wait_for_selector(agent)
+    assert page.input_value(agent) == "Review difficult changes."
+    assert page.input_value(queue) == "General implementation and debugging."
+    page.eval_on_selector_all(".set-priming", "els => els.forEach(e => e.open = false)")
+    page.locator(agent).scroll_into_view_if_needed()
+    page.screenshot(path=str(full_server.root / "descriptions-desktop.png"))
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.locator(queue).scroll_into_view_if_needed()
+    page.screenshot(path=str(full_server.root / "descriptions-phone.png"))
+    assert page.evaluate("document.documentElement.scrollWidth") <= 390
+    assert page.errors == []
+
+    page.set_viewport_size({"width": 1280, "height": 800})
+    page.click("#tab-add")
+    page.click("#sp-agent input")
+    page.wait_for_selector('#sp-agent .opt .meta:text-is("Review difficult changes.")')
+    page.screenshot(path=str(full_server.root / "descriptions-picker.png"))
     assert page.errors == []

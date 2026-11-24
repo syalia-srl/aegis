@@ -53,6 +53,9 @@ Each one has:
   catalog's plain id (an id's own bracketed overrides — effort, context,
   flags — come with it when it is set). `models:` instead names an
   ordered list, a cascade (below);
+- `description:` (optional) explains when another agent or a person should choose
+  this agent. It appears in `agents_list` and the agent picker. It is separate
+  from `priming:`, which instructs the agent itself;
 - `effort:` low, medium, high, xhigh or max; a Cursor model carries the effort
   inside its id, so a change while it runs is accepted only when it is that
   same effort, and any other is refused;
@@ -443,7 +446,10 @@ started a session yet.
 `queues:` maps a queue's name to `agent:` (the agent its workers start from)
 and `priority:` (its share of the workers, a whole number from 0 up; 1 when
 left out). A queue with no agent, or a priority that is not such a number, is
-reported and takes no tasks. `quiet:` is true unless set to false: a worker
+reported and takes no tasks. `description:` optionally explains which tasks belong on the queue; agents read
+it with `queues_list`. Settings edits descriptions for both agents and queues,
+and `hosts:` can override them per server. Empty descriptions are omitted.
+`quiet:` is true unless set to false: a worker
 then has no tab, only a dimmed card in the Fleet, unless it fails.
 
 `max_workers:` is how many queue workers run at once on the server, every

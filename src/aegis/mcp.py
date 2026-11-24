@@ -212,6 +212,15 @@ def primer(
     parts = {name: text if has(tool) else "" for name, (tool, text) in PARTS.items()}
     if parts["help"]:
         parts["help"] = HELP.format(features=", ".join(named(FEATURES)))
+    discovery = []
+    if has("agents_list") and has("session_spawn"):
+        discovery.append(
+            "Read agents_list for agent descriptions before choosing a peer."
+        )
+    if has("queues_list") and has("queue_enqueue"):
+        discovery.append(
+            "Read queues_list for queue descriptions before choosing a queue."
+        )
     return TEMPLATE.format(
         handle=session.handle,
         server=server_name,
@@ -220,7 +229,7 @@ def primer(
         browsers=BROWSERS if browsers and has("browser_open") else "",
         waits=waits,
         **parts,
-    )
+    ) + ("\n\nDelegation discovery:\n" + "\n".join(discovery) if discovery else "")
 
 
 # Only where browsers run (browsers.py): elsewhere the tools answer

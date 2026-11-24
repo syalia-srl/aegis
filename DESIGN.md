@@ -1738,3 +1738,11 @@ split is by who is there to answer: a refusal nobody can answer would stop a
 nightly job over a warning. Nothing in it can stop a session for good, and the
 startup check only logs, because a server that will not start is worse than any
 version mismatch.
+
+
+Agent and queue descriptions are optional routing guidance in configuration,
+not session instructions. Settings preserves and edits them. `agents.list`
+and `queues.list` expose them before delegation; queue discovery respects the
+caller's queue scope and omits the internal mention queue. Agent pickers show
+the descriptions, and the primer points to discovery only when the session
+has both the discovery and delegation tools.

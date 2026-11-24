@@ -2653,3 +2653,41 @@ async def test_real_codex_subscription_quota(monkeypatch):
     snapshot = await asyncio.to_thread(fetch_usage, binary)
     assert snapshot.windows
     assert all(w.span_s and w.resets_at for w in snapshot.windows)
+
+
+async def test_real_opencode_discovers_agent_and_queue_descriptions(
+    tmp_path, fake_claude
+):
+    """Uses a configured Kilo free provider; no paid model fallback."""
+    import os
+    from .test_agents import World
+
+    if not os.environ.get("AEGIS_LIVE_KILO"):
+        pytest.skip("set AEGIS_LIVE_KILO=1 with kilo-free configured in OpenCode")
+    opencode = shutil.which("opencode")
+    assert opencode
+    (tmp_path / ".aegis.yaml").write_text(
+        "default_agent: opus\nagents:\n"
+        "  opus: {harness: opencode, model: kilo-free/kilo-auto/free, effort: low, permission: full, description: Diagnose public fixtures., tools: {allow: [agents_list, queues_list, turn_end]}}\n"
+        "queues:\n  free: {agent: opus, description: Public repeatable checks.}\n"
+    )
+    world = await World(tmp_path, fake_claude, opencode=opencode).start()
+    try:
+        session = await world.spawn()
+        await session.send(
+            "Call agents_list and queues_list now. Then report the exact description of the opus agent and the free queue. Do not use other tools except turn_end to finish. Do not read files or delegate."
+        )
+        await until(
+            lambda: session.status == "idle",
+            timeout=180,
+            what="real OpenCode discovery",
+        )
+        tools = [e for e in session.entries() if e["kind"] == "tool"]
+        assert any(e["title"] == "agents_list" and e["status"] == "ok" for e in tools)
+        assert any(e["title"] == "queues_list" and e["status"] == "ok" for e in tools)
+        prose = "\n".join(e["md"] for e in session.entries() if e["kind"] == "prose")
+        assert "Diagnose public fixtures." in prose
+        assert "Public repeatable checks." in prose
+        assert session.cost_usd == 0
+    finally:
+        await world.stop()
