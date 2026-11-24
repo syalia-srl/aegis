@@ -237,6 +237,9 @@ them too.
 
 aegis tells every live session when the host runs short: the disk is full,
 memory is short, the CPU is saturated or the quota runs ahead of pace. A
+queue worker, a workflow node and a schedule's run are told none of these,
+only announcements: they have a task, and the notice's advice is for whoever
+runs the work. A
 notice never starts a turn, and never goes into the system prompt. It rides
 on the session's next message. During a turn, Claude Code reads it right after
 the agent's next tool call of any kind. Codex, OpenCode, Cursor and pi read it on
@@ -280,9 +283,8 @@ The text tells an agent to free or cut back only what its own session
 created and never to touch shared caches or another session's work. Only
 one session asks you about the rest: per kind and per owner, the first
 session you opened that the notice reaches. Every other session you opened
-is told that another one is asking; a spawned session reports to the agent
-that started it, and a queue worker, a workflow node or a schedule's run
-never asks anyone. When the asker closes, the next session you opened takes
+is told that another one is asking, and a spawned session reports to the
+agent that started it. When the asker closes, the next session you opened takes
 over. cpu and announce have no asker.
 
 The `notices:` block in `.aegis.yaml` moves the lines or turns a kind off
