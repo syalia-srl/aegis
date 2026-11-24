@@ -163,8 +163,8 @@ def test_provider_send_uses_the_enabled_button(page, name, disabled):
     page.evaluate(
         "document.querySelector('button,[role=button]').addEventListener('click',()=>document.body.dataset.sent='yes')"
     )
-    assert page.evaluate(provider(name).send_script) == {"submitted": not disabled}
-    assert (page.get_attribute("body", "data-sent") == "yes") is not disabled
+    assert page.evaluate(provider(name).send_ready_script) == {"ready": not disabled}
+    assert page.get_attribute("body", "data-sent") is None
 
 
 @pytest.mark.parametrize(
@@ -199,5 +199,17 @@ def test_qwen_css_disabled_send_is_refused(page):
     page.evaluate(
         "document.querySelector('button').addEventListener('click',()=>document.body.dataset.sent='yes')"
     )
-    assert page.evaluate(provider("web-qwen").send_script) == {"submitted": False}
+    assert page.evaluate(provider("web-qwen").send_ready_script) == {"ready": False}
     assert page.get_attribute("body", "data-sent") is None
+
+
+def test_deepseek_virtual_items_keep_identity_when_older_answers_unmount(page):
+    def answer(key, text):
+        return f'<div data-virtual-list-item-key="{key}"><div class="ds-markdown">{text}</div><div role="button" aria-label="Read aloud"></div></div>'
+
+    page.set_content(answer("2", "Old answer") + answer("4", "Current answer"))
+    before = page.evaluate(provider("web-deepseek").observe_script)
+    page.locator('[data-virtual-list-item-key="2"]').evaluate("e=>e.remove()")
+    after = page.evaluate(provider("web-deepseek").observe_script)
+    assert before["messages"][1]["id"] == after["messages"][0]["id"] == "4"
+    assert after["partial_history"] is True

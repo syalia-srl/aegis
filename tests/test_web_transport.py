@@ -190,13 +190,14 @@ async def test_provider_reports_the_actual_send_button_result(
     manager = manager_type(chrome)
     chrome.on_answer = manager.answered
     bridge = manager.for_session(session)
-    ext = Driven(chrome, lambda _: {"value": {"submitted": submitted}})
+    ext = Driven(chrome, lambda _: {"value": {"ready": submitted}})
     await (await grant(chrome, ext, bridge, url=url))
     chrome.tabs["qwen"]["eval"] = True
     if submitted:
         assert await bridge("send", {"text": "A task"}) == {"submitted": True}
-        assert ext.calls[-2]["op"] == "type"
-        assert ext.calls[-2]["args"]["submit"] is False
+        typed = [call for call in ext.calls if call["op"] == "type"]
+        assert len(typed) == 1 and typed[0]["args"]["submit"] is False
+        assert ext.calls[-1]["op"] == "click"
     else:
         with pytest.raises(CallError, match="submission_refused"):
             await bridge("send", {"text": "A task that did not get submitted"})
@@ -255,3 +256,38 @@ async def test_native_web_bash_calls_the_real_mcp_as_its_own_session(world):
     finally:
         await session.stop()
     assert not auth_path.exists()
+
+
+async def test_native_submission_focuses_once_and_waits_without_retyping(tmp_path):
+    attempts = []
+
+    def answer(message):
+        if message["op"] == "eval":
+            attempts.append(message)
+            return {"value": {"ready": len(attempts) == 3}}
+        return {}
+
+    chrome, _, bridge, ext, _ = setup_bridge(tmp_path, answer)
+    await (await grant(chrome, ext, bridge))
+    assert await bridge("send", {"text": "A single draft"}) == {"submitted": True}
+    assert [call["op"] for call in ext.calls] == [
+        "focus",
+        "type",
+        "eval",
+        "eval",
+        "eval",
+        "click",
+    ]
+    assert ext.calls[1]["args"]["submit"] is False
+
+
+async def test_gemini_press_follows_settled_text_insertion(tmp_path):
+    from aegis.web_agent.providers import PROVIDERS
+
+    chrome, manager, bridge, ext, _ = setup_bridge(tmp_path)
+    manager.bridges["web-one"].provider = PROVIDERS["web-gemini"]
+    await (await grant(chrome, ext, bridge, url="https://gemini.google.com/app"))
+    await bridge("send", {"text": "A focused draft"})
+    assert [call["op"] for call in ext.calls] == ["focus", "type", "press"]
+    assert ext.calls[1]["args"]["submit"] is False
+    assert ext.calls[2]["args"]["key"] == "Enter"

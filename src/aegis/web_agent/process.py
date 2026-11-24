@@ -197,7 +197,7 @@ class WebProcess:
             self.ledger.update(conversation={**expected, "url": conversation})
         known = self.ledger.data.get("observed", {})
         ids = [m["id"] for m in page["messages"]]
-        if set(known) - set(ids):
+        if not page.get("partial_history") and set(known) - set(ids):
             raise RecoveryError(
                 "Previously observed answers disappeared; reconcile the source conversation before continuing"
             )
