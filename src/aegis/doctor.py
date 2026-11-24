@@ -65,6 +65,10 @@ LABELS = {
     "codex": "Codex",
     "cursor": "Cursor Agent",
     "pi": "pi",
+    "web-gemini": "Gemini web",
+    "web-deepseek": "DeepSeek web",
+    "web-qwen": "Qwen web",
+    "web-chatgpt": "ChatGPT web",
 }
 
 
@@ -82,6 +86,7 @@ class Found:
             "harness": self.harness,
             "label": LABELS[self.harness],
             "bin": self.bin,
+            "builtin": self.harness.startswith("web-"),
             "version": self.version,
             "models": [m.wire() for m in self.models],
             "error": self.error,
@@ -131,6 +136,13 @@ async def _catalog(name: str, bins: dict[str, str], cwd: Path) -> Catalog:
 async def _find(
     name: str, bins: dict[str, str], cwd: Path, accepted: dict[str, list[str]]
 ) -> Found:
+    if name.startswith("web-"):
+        from importlib.metadata import version
+
+        cat = await _catalog(
+            name, {"claude-code": "", "opencode": "", "codex": "", "cursor": ""}, cwd
+        )
+        return Found(name, None, version("aegis-harness"), cat.models)
     bin = shutil.which(bins.get(name, name))
     if bin is None:
         return Found(name, None, error=f"{bins.get(name, name)} is not on PATH")
@@ -651,7 +663,11 @@ async def doctor(
             out.append(Finding("error", where, f.error))
         elif not (f.verdict and f.verdict["state"] in OUTSIDE):
             out.append(
-                Finding("ok", where, f"{f.bin}, {f.version}, {len(f.models)} models")
+                Finding(
+                    "ok",
+                    where,
+                    f"{f.bin or 'built-in Chrome driver'}, {f.version}, {len(f.models)} models",
+                )
             )
     if any(a.harness == "claude-code" for a in snap.agents):
         if (token := _claude_token(time.time())) is not None:

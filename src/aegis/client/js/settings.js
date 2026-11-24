@@ -726,10 +726,10 @@ export class Settings {
       ...this.found.map((f) =>
         h(
           "span",
-          { className: f.bin && !f.error ? "set-harness" : "set-harness off" },
+          { className: (f.bin || f.builtin) && !f.error ? "set-harness" : "set-harness off" },
           h("b", { textContent: f.label }),
           " ",
-          f.bin ? (f.error ? "cannot run" : `${f.version.replace(/\s*\(.*\)$/, "")}, ${plural(f.models.length, "model")}`) : "not installed",
+          f.builtin ? this.t("settings.chromeDriver") : f.bin ? (f.error ? "cannot run" : `${f.version.replace(/\s*\(.*\)$/, "")}, ${plural(f.models.length, "model")}`) : "not installed",
           this.versionTag(f),
         ),
       ),
@@ -889,7 +889,7 @@ export class Settings {
   harnessLabel(x) {
     const f = this.found.find((f) => f.harness === x);
     const name = f ? f.label : x;
-    return f && !f.bin ? `${name} (not installed)` : name;
+    return f && !f.bin && !f.builtin ? `${name} (not installed)` : name;
   }
 
   modelOptions(harness) {

@@ -107,6 +107,10 @@ const SPRITE = `<defs>
 <symbol id="g-h-codex" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.8l5.4 3.1v6.2L8 14.2l-5.4-3.1V4.9z"/><circle cx="8" cy="8" r="2"/></symbol>
 <symbol id="g-h-cursor" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M3.5 2.5l9 5.2-4 1-1.8 3.8z"/></symbol>
 <symbol id="g-h-pi" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2.5 4.5h11M6 4.5v8M10.5 4.5v6.5c0 1 .5 1.5 1.5 1.5"/></symbol>
+<symbol id="g-h-web-gemini" viewBox="0 0 16 16"><use href="#g-globe"/></symbol>
+<symbol id="g-h-web-deepseek" viewBox="0 0 16 16"><use href="#g-globe"/></symbol>
+<symbol id="g-h-web-qwen" viewBox="0 0 16 16"><use href="#g-globe"/></symbol>
+<symbol id="g-h-web-chatgpt" viewBox="0 0 16 16"><use href="#g-globe"/></symbol>
 <symbol id="g-e-low" viewBox="0 0 16 16" fill="currentColor"><rect x="1.6" y="10.5" width="1.6" height="3" rx=".5"/><rect x="4.4" y="8.5" width="1.6" height="5" rx=".5" opacity=".3"/><rect x="7.2" y="6.5" width="1.6" height="7" rx=".5" opacity=".3"/><rect x="10.0" y="4.5" width="1.6" height="9" rx=".5" opacity=".3"/><rect x="12.8" y="2.5" width="1.6" height="11" rx=".5" opacity=".3"/></symbol>
 <symbol id="g-e-medium" viewBox="0 0 16 16" fill="currentColor"><rect x="1.6" y="10.5" width="1.6" height="3" rx=".5"/><rect x="4.4" y="8.5" width="1.6" height="5" rx=".5"/><rect x="7.2" y="6.5" width="1.6" height="7" rx=".5" opacity=".3"/><rect x="10.0" y="4.5" width="1.6" height="9" rx=".5" opacity=".3"/><rect x="12.8" y="2.5" width="1.6" height="11" rx=".5" opacity=".3"/></symbol>
 <symbol id="g-e-high" viewBox="0 0 16 16" fill="currentColor"><rect x="1.6" y="10.5" width="1.6" height="3" rx=".5"/><rect x="4.4" y="8.5" width="1.6" height="5" rx=".5"/><rect x="7.2" y="6.5" width="1.6" height="7" rx=".5"/><rect x="10.0" y="4.5" width="1.6" height="9" rx=".5" opacity=".3"/><rect x="12.8" y="2.5" width="1.6" height="11" rx=".5" opacity=".3"/></symbol>

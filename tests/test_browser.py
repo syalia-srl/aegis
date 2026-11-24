@@ -335,6 +335,33 @@ def picked(pg, sel: str) -> str:
     return pg.evaluate(f"document.querySelector('{sel}').value")
 
 
+def test_spawn_web_provider_uses_chrome_model_and_native_connection(server, page):
+    page.goto(server.url)
+    online(page)
+    page.click("#tab-add")
+    page.wait_for_function("document.querySelector('#sp-agent').value === 'opus'")
+    choices = page.eval_on_selector("#sp-harness", "el => el.options.map(o => o.value)")
+    assert {"web-gemini", "web-deepseek", "web-qwen", "web-chatgpt"} <= set(choices)
+    pick(page, "#sp-harness", "Qwen")
+    assert picked(page, "#sp-harness") == "web-qwen"
+    assert picked(page, "#sp-model") == "web"
+    assert page.is_hidden("#sp-model")
+    assert page.is_hidden("#sp-effort")
+    pick(page, "#sp-harness", "Claude Code")
+    assert picked(page, "#sp-model") == "opus"
+    assert page.is_visible("#sp-effort")
+    pick(page, "#sp-harness", "Qwen")
+    page.fill("#sp-text", "Find a source for this research task")
+    page.click("#sp-go")
+    page.wait_for_selector("#a2[data-view=session]")
+    page.wait_for_selector(".row.web-connection")
+    assert "Qwen" in page.inner_text("#chip-model")
+    assert page.get_attribute("#chip-model use", "href") == "#g-h-web-qwen"
+    assert page.eval_on_selector("#chip-model svg", "el => el.getBBox().width > 0")
+    assert page.is_hidden("#chip-effort")
+    assert not page.errors
+
+
 def set_theme(pg, name: str) -> None:
     """Pick a theme in Settings' "This browser" section, then go back to the
     view the page was on."""

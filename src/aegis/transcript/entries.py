@@ -34,6 +34,7 @@ from ..claude.stream import (
     Compact,
     Delta,
     Echo,
+    ExternalUser,
     Event,
     Garbled,
     Init,
@@ -50,6 +51,7 @@ from ..codex.stream import Parser as CodexParser
 from ..cursor.stream import Parser as CursorParser
 from ..pi.stream import Parser as PiParser
 from ..opencode.stream import Parser as OpenCodeParser
+from ..web_agent.stream import Parser as WebParser
 from . import describe as d
 from .plan_clock import replan, switch
 from .wire import wire
@@ -63,6 +65,7 @@ PARSERS: dict[str, Any] = {
     "codex": CodexParser,
     "cursor": CursorParser,
     "pi": PiParser,
+    "web": WebParser,
 }
 
 
@@ -1133,6 +1136,18 @@ class Fold:
                     detail=det,
                 )
             )
+        if kind == "web_connection":
+            return self._upsert(
+                _entry(
+                    "web-connection",
+                    "web_connection",
+                    str(rec.get("state") or "waiting"),
+                    ts,
+                    "globe",
+                    summary=str(rec.get("text") or ""),
+                    detail={"tab": rec.get("tab"), "url": rec.get("url")},
+                )
+            )
         if kind == "chrome_request":
             # An agent's ask for a tab of the person's browser (chrome_ops):
             # Give and Refuse until answered, then one line.
@@ -1467,6 +1482,18 @@ class Fold:
 
     # -- what Claude said ----------------------------------------------
     def _event(self, id: str, ts: float | None, ev: Event) -> list[dict]:
+        if isinstance(ev, ExternalUser):
+            return self._upsert(
+                _entry(
+                    f"external:{ev.source}:{ev.id}",
+                    "user",
+                    "ok",
+                    ts,
+                    d.USER_GLYPH,
+                    md=f"From {ev.source}:\n\n{ev.text}",
+                    detail={"source": ev.source, "message_id": ev.id},
+                )
+            )
         if isinstance(ev, Echo):
             ops: list[dict] = []
             typed = None

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import os
 import tempfile
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
@@ -96,6 +96,8 @@ class Launch:
     # An isolated session's own config directory (isolated_dirs); None reads
     # the person's, as every other session does.
     home: Path | None = None
+    # The host's private, session-bound browser bridge, for a web harness.
+    web: Callable[[str, dict], Awaitable[dict]] | None = None
 
 
 # The switches a driver may guarantee (Harness.contains, #983).
@@ -217,4 +219,10 @@ def harness_for(
         from .pi.harness import Pi
 
         return Pi(pi_bin)
+    from .web_agent.providers import PROVIDERS
+
+    if provider := PROVIDERS.get(name):
+        from .web_agent.harness import WebHarness
+
+        return WebHarness(provider)
     raise ValueError(f"no harness named {name!r}")

@@ -525,6 +525,40 @@ so its chunk lines each carry the block's text so far as a keyed part and are
 stored — they are the only copy, and a fresh fold rebuilds exactly what
 streamed (`cursor/stream.py`).
 
+**Web agents share one driver and four page adapters.** `web_agent/process.py`
+implements the same Process contract as a lightweight asyncio task with no idle
+PID. Real Bash children use the normal launcher, cgroup and process group.
+`web_agent/providers.py` supplies provider selectors and a common DOM observer
+for Gemini, DeepSeek, Qwen and ChatGPT. No provider branch enters Session's turn
+state machine; `web_agent/stream.py` emits its existing typed events and the
+native transcript records connection status as one updating row.
+
+`web_agent/transport.py` binds each session to one exclusive, explicitly granted
+tab in the person's Chrome extension. It retains grant, Scripts and manual
+ownership checks before observations and actions, pins the conversation URL and
+never accepts model-supplied JavaScript. New sessions require empty chats;
+resume requires the same conversation. A consent answer belongs to the bridge,
+not the model's inbox. Manual source messages have independent identities and
+fold as ExternalUser events without consuming pending composer input. Before
+a new task is submitted, the driver reconciles completed manual responses and
+their marked commands. Changed or missing observed history stops execution. The composer chooses the provider; actual models and
+modes stay in Chrome. The driver reports no guessed model identity, usage or cost.
+
+Only one completed top-level Bash fence with the exact first nonblank line
+`# aegis: execute` requests local execution. The primer acknowledgement never
+executes. Read/write and disabled harness tools refuse Bash; auto/full allow it.
+The child gets a private CallAuth reference for that session's MCP, never the
+controller's credentials. Results carry stdout/stderr/exit code, with 64 KiB
+previews per stream and full private local output files; timeout is 120 seconds.
+`web_agent/ledger.py` atomically persists command and outbound-message phases.
+An uncertain command or submission stops for reconciliation, never blind replay.
+Interrupt kills the Bash process group and asks the provider to stop. Remaining
+group members are also stopped at normal command completion; the group identity
+outlives its Bash leader and output draining. Session updates follow pending
+manual results and precede the next composer task. Extra MCP
+transports, automatic web artifact import and provider-specific research events
+remain outside this first implementation.
+
 **Claude Code signs in with a token nobody refreshes.** Claude Code processes
 sharing one stored sign-in race to refresh its single-use token, and the losers
 are logged out. So every Claude Code process the server starts as itself

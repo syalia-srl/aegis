@@ -147,6 +147,10 @@ class Host:
         OpError when one cannot be given, which refuses the start."""
         return ()
 
+    def web_bridge(self, session: "Session"):
+        """The host's private Chrome transport for a web harness, if configured."""
+        return None
+
     async def admit_resume(self, session: "Session") -> None:
         """Ask the host policy before a stopped session's process starts again
         (#959); raises policy.Refused to keep it stopped."""
@@ -950,6 +954,7 @@ class Session:
                 extra_mcp=extra_mcp,
                 harness_tools=self.spec.harness_tools,
                 home=home,
+                web=self._host.web_bridge(self),
             )
         )
         # Before the start: a harness can speak while it starts (OpenCode's

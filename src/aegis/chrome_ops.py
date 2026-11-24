@@ -19,6 +19,7 @@ from .browsers import SNAPSHOT_MAX, event_line
 from .chrome import CallError, Chrome, PairError
 from .monitors import iso_now
 from .ops import Caller, OpError
+from .web_agent.transport import WebBridges
 
 if TYPE_CHECKING:
     from .app import App
@@ -41,6 +42,10 @@ class ChromeAnswer(BaseModel):
 
 class ChromeTab(BaseModel):
     tab: str
+
+
+class ChromeFocus(ChromeTab):
+    log_id: str
 
 
 class ChromeScripts(BaseModel):
@@ -68,6 +73,8 @@ class BrowserRequest(BaseModel):
 def register_chrome_ops(app: App) -> Chrome:
     r = app.registry
     chrome = Chrome(app.roots.state_root, app.publish)
+    web_bridges = WebBridges(chrome)
+    app.sessions.web_for = web_bridges.for_session
 
     def sessions() -> list[dict]:
         return [
@@ -96,6 +103,8 @@ def register_chrome_ops(app: App) -> Chrome:
             rec |= {"tab": tab["name"], "title": tab["title"], "url": tab["url"]}
         if s is not None:
             s.record_card(rec)
+        if web_bridges.answered(req, outcome, tab):
+            return  # backing-tab consent is driver control, not a model prompt
         asked = req["url"] if req["kind"] == "open" else req["match"]
         if outcome == "granted" and tab is not None:
             wake(
@@ -122,6 +131,8 @@ def register_chrome_ops(app: App) -> Chrome:
             "Read it with browser_snapshot; browser_events gives the full log."
         )
         for log_id in woken:
+            if web_bridges.handles(log_id):
+                continue  # the driver observes its backing tab when control returns
             wake(
                 log_id,
                 f"> from chrome:{tab['name']} · back · {iso_now()}",
@@ -292,6 +303,16 @@ def register_chrome_ops(app: App) -> Chrome:
         if caller.is_agent:
             raise OpError("people_only", "only the person gives a tab back")
         await chrome.hold(p.tab, "agent")
+
+    @r.op("chrome.focus", ChromeFocus, names=(("log_id", "session"),), access="read")
+    async def focus(p: ChromeFocus, caller):
+        """Show a session's granted tab in the person's Chrome window."""
+        if caller.is_agent:
+            raise OpError("people_only", "only the person brings a Chrome tab forward")
+        try:
+            return await chrome.call(p.log_id, p.tab, "focus", {})
+        except CallError as error:
+            raise OpError(error.code, error.message) from error
 
     @r.op("chrome.scripts", ChromeScripts)
     async def scripts(p: ChromeScripts, caller):

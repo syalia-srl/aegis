@@ -35,10 +35,11 @@ from .ops import OpError
 from . import scopes
 from .roots import CONFIG_FILE
 from .scopes import Scope
+from .web_agent.providers import PROVIDERS as WEB_PROVIDERS
 from .session import SWITCHES, SpawnSpec
 
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
-HARNESSES = ("claude-code", "opencode", "codex", "cursor", "pi")
+HARNESSES = ("claude-code", "opencode", "codex", "cursor", "pi", *WEB_PROVIDERS)
 SUPPORTED_HARNESSES = HARNESSES
 FIELDS = ("harness", "model", "effort", "permission")
 # Least to most: an agent spawns sessions with at most its own permission.

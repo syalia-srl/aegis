@@ -219,6 +219,12 @@ export class TranscriptPart {
   }
 
   wire() {
+    this.entries.addEventListener("click", (event) => {
+      const tab = event.target.closest("[data-web-focus]")?.dataset.webFocus;
+      if (tab && this.key) this.mount.callFor(this.key, "chrome.focus", { tab }).catch((error) => {
+        toast(error.message, { kind: "error", root: this.mount.root });
+      });
+    });
     byId(this.pane, "nav-up").addEventListener("click", () => this.transcript.message(-1));
     byId(this.pane, "nav-down").addEventListener("click", () => this.transcript.message(1));
     byId(this.pane, "nav-pos").addEventListener("click", () => this.transcript.firstUnread());

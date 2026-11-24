@@ -98,6 +98,15 @@ class Echo:
 
 
 @dataclass(frozen=True)
+class ExternalUser:
+    """A person's message observed outside the composer, with source identity."""
+
+    id: str
+    text: str
+    source: str
+
+
+@dataclass(frozen=True)
 class Delta:
     """A few more characters of an open text (``prose``) or reasoning
     (``thinking``) part. Folded live and never stored: the part's closing
@@ -215,7 +224,8 @@ class Garbled:
 
 
 Event = (
-    Init
+    ExternalUser
+    | Init
     | Text
     | Thinking
     | ToolCall

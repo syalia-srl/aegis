@@ -368,8 +368,15 @@ async def _environ(pid: int) -> dict[str, str]:
     """A process in the middle of ``exec`` reads as an empty environment: the
     fake claude is a script that execs Python, and a read right after the spawn
     lands there in most runs. Every child has PATH, so it marks a real read."""
-    await until(lambda: "PATH" in _read_environ(pid), timeout=10, what="its environ")
-    return _read_environ(pid)
+    snapshot = {}
+
+    def ready():
+        nonlocal snapshot
+        snapshot = _read_environ(pid)
+        return "PATH" in snapshot
+
+    await until(ready, timeout=10, what="its environ")
+    return snapshot
 
 
 CONFIG_EXIT = """\
@@ -664,3 +671,14 @@ async def test_a_stopped_server_leaves_no_exit_behind(tmp_path, fake_claude):
     await node.stop()
     assert launch.exits_in_force() is None
     assert launch.resolve_via() is None
+
+
+async def test_environ_returns_the_checked_snapshot_without_reading_exec_twice(
+    monkeypatch,
+):
+    snapshots = iter([{"PATH": "/bin", "HTTPS_PROXY": "http://proxy.example:3128"}, {}])
+    monkeypatch.setattr(
+        sys.modules[__name__], "_read_environ", lambda _: next(snapshots)
+    )
+    env = await _environ(123)
+    assert env["HTTPS_PROXY"] == "http://proxy.example:3128"
