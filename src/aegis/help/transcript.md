@@ -77,6 +77,12 @@ and is coloured in the theme's own palette. A wide table scrolls sideways with
 its first column pinned, and in a narrow transcript each row becomes a small
 card. Task lists show checkboxes.
 
+While a reply streams, new letters fade in smoothly instead of appearing a
+word at a time. The animation catches up during bursts and adds at most about
+300 ms to the display. Earlier letters keep their progress as more tokens
+arrive. Opening an existing transcript shows it immediately. With reduced
+motion set in your system, new text appears without animation.
+
 Each code block and each table has a copy button, shown when you hover it or
 select its row. A table pastes as Markdown into a chat and as cells into a
 spreadsheet. The c key copies the selected reply's Markdown.
