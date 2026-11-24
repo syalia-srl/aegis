@@ -117,3 +117,37 @@ async def test_aegis_call_output_carries_no_notice(noticed, tmp_path):
     await turn(s, mcp("session_list"))
     rows = [e["title"] for e in s.entries() if e["kind"] == "inbox"]
     assert rows and rows[0].startswith("aegis:notice · disk · warn")
+
+
+async def test_codex_shell_calls_authenticate_without_a_token_in_its_environment(
+    tmp_path, fake_codex
+):
+    from aegis.call_auth import AUTH_VAR
+    from .conftest import until
+
+    (tmp_path / ".aegis.yaml").write_text(
+        "agents:\n  cx: {harness: codex, model: openai/fake-pro, effort: high, permission: full}\n"
+    )
+    world = await World(tmp_path, "unused", codex=fake_codex).start()
+    try:
+        r = await world.app.registry.call("session.spawn", {"agent": "cx"})
+        s = world.app.sessions.sessions[r["log_id"]]
+        await s.start()
+        auth = s._proc._call_auth.path
+        assert auth.stat().st_mode & 0o777 == 0o600
+        assert auth.parent.stat().st_mode & 0o777 == 0o700
+        output = tmp_path / "shell-result.json"
+        await turn(
+            s,
+            f'/sh test -z "$AEGIS_SESSION_TOKEN" && {AEGIS} call session_list > {output}',
+        )
+        me = [row for row in json.loads(output.read_text()) if row.get("you")]
+        assert [row["handle"] for row in me] == [s.handle]
+        await s.stop()
+        await until(
+            lambda: not auth.exists(), timeout=3, what="private credentials removed"
+        )
+        assert not auth.parent.exists()
+        assert AUTH_VAR not in os.environ
+    finally:
+        await world.stop()

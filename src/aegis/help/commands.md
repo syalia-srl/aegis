@@ -164,7 +164,11 @@ as well made with the tool.
 
 aegis gives each session's process `AEGIS_MCP_URL` and `AEGIS_SESSION_TOKEN`,
 the same endpoint and token as its tools, and every command the agent runs
-inherits them. A program the agent starts, such as a test run or a build
+inherits them. Codex filters the token from its shell, so aegis gives that
+shell `AEGIS_CALL_AUTH`, the path of a private credentials file, instead.
+`aegis call` and `aegis tools` read it automatically; the file is removed
+when the Codex process ends. Never print or copy its contents. A program the
+agent starts, such as a test run or a build
 script, can therefore act as the agent. Outside a session neither is set, and
 `aegis call` says so and exits with code 2. The token ends with the agent's
 process: a restart mints a new one.
