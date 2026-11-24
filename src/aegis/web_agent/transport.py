@@ -191,10 +191,16 @@ class BrowserBridge:
                     },
                 )
                 if script := self.provider.send_ready_script:
+                    last_rect = None
                     for attempt in range(21):
                         self._check(args)
                         submitted = await self._eval(script)
-                        if submitted.get("ready") is True:
+                        rect = submitted.get("rect")
+                        if (
+                            submitted.get("ready") is True
+                            and rect is not None
+                            and rect == last_rect
+                        ):
                             await self.chrome.call(
                                 self.session.log_id,
                                 self.tab,
@@ -202,6 +208,7 @@ class BrowserBridge:
                                 {"target": self.provider.send},
                             )
                             break
+                        last_rect = rect if submitted.get("ready") is True else None
                         if attempt == 20:
                             raise CallError(
                                 "submission_refused",

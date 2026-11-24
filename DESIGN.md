@@ -529,7 +529,10 @@ streamed (`cursor/stream.py`).
 implements the same Process contract as a lightweight asyncio task with no idle
 PID. Real Bash children use the normal launcher, cgroup and process group.
 `web_agent/providers.py` supplies provider selectors and a common DOM observer
-for Gemini, DeepSeek, Qwen and ChatGPT. No provider branch enters Session's turn
+for Gemini, DeepSeek, Qwen and ChatGPT. Qwen reads the matching rendered message's original Markdown rather than
+Monaco's visual headers, line numbers and nonbreaking spaces; an editor without
+its original source is not executable. Send readiness includes stable
+coordinates after instant scrolling. No provider branch enters Session's turn
 state machine; `web_agent/stream.py` emits its existing typed events and the
 native transcript records connection status as one updating row.
 
