@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 
 from .test_agents import mcp
+from .test_tabbar_browser import session_tabs
 from .test_browser import (  # noqa: F401
     beta_session,
     browser,
@@ -393,7 +394,8 @@ def test_dragging_a_member_to_the_gap_leaves(server, page):  # noqa: F811
     assert page.errors == []
 
 
-def test_far_tab_cannot_drop_into_a_group(linked, browser, page):  # noqa: F811
+@pytest.mark.parametrize("orientation", ["Horizontal", "Vertical"])
+def test_far_tab_cannot_drop_into_a_group(linked, browser, page, orientation):  # noqa: F811
     page.goto(linked.alpha.url)
     page.wait_for_selector("#a2[data-view=fleet]")
     a = spawn(page, "hello")
@@ -401,6 +403,8 @@ def test_far_tab_cannot_drop_into_a_group(linked, browser, page):  # noqa: F811
     lid = beta_session(linked, browser)
     far = f"#tablist .tab[data-id='beta/{lid}']"
     page.wait_for_selector(far)
+    session_tabs(page, orientation)
+    assert page.locator(far).locator(".where").inner_text() == "beta"
     before = bar(page)
     classes = drag_over(page, far, "#tablist .tab.named", "left")
     assert "nodrop" in classes.split(), classes
@@ -409,6 +413,16 @@ def test_far_tab_cannot_drop_into_a_group(linked, browser, page):  # noqa: F811
     page.wait_for_timeout(400)
     assert bar(page) == before
     assert page.locator(far).count() == 1
+    page.click(far)
+    page.wait_for_selector(f"{far}.on")
+    page.wait_for_selector(".row.user", state="visible")
+    page.fill("#input", "sent through the linked tab")
+    page.press("#input", "Enter")
+    turns_done(page, 2)
+    remote = browser.new_page()
+    remote.goto(f"{linked.beta.url}#s={lid}")
+    remote.locator(".row.user", has_text="sent through the linked tab").wait_for()
+    remote.close()
     assert page.errors == []
 
 
@@ -753,4 +767,174 @@ def test_a_group_takes_its_generated_name_and_title(names_server, page):  # noqa
         page.screenshot(path=str(out / "desktop.png"))
         page.set_viewport_size({"width": 390, "height": 844})
         page.screenshot(path=str(out / "phone.png"))
+    assert page.errors == []
+
+
+def test_vertical_pointer_drags_keep_group_actions_and_cancel_on_layout_change(
+    server,  # noqa: F811
+    page,
+):
+    a, b, c, d = three_and_one(page, server)
+    key = group_key(page)
+    session_tabs(page, "Vertical")
+    page.wait_for_function(
+        "!document.querySelector('#tablist .tab use[href=\"#g-work\"]')"
+    )
+    page.wait_for_function(BAR_JS, arg=[[key, [a, b, c]], [d, []]])
+
+    def row(sid):
+        return page.locator(f'#tablist [data-id="{sid}"]')
+
+    row(a).hover()
+    hover_card = page.locator(".tabcard:not([hidden])")
+    hover_card.wait_for()
+    tablist_box = page.locator("#tablist").bounding_box()
+    assert hover_card.bounding_box()["x"] >= tablist_box["x"] + tablist_box["width"]
+
+    def over(src, target, side):
+        # A session patch can redraw the list between finding a node and
+        # measuring it. Start the native gesture after the rows have settled.
+        page.evaluate("window.dragRows = null")
+        page.wait_for_function("""() => {
+          const rows = [...document.querySelectorAll('#tablist .tab')];
+          const sample = window.dragRows;
+          const now = performance.now();
+          if (!sample || rows.length !== sample.rows.length ||
+              rows.some((row, i) => row !== sample.rows[i])) {
+            window.dragRows = {rows, since: now};
+            return false;
+          }
+          return now - sample.since >= 350;
+        }""")
+        src.wait_for()
+        target.wait_for()
+        source_box = src.bounding_box()
+        dest = target.bounding_box()
+        assert source_box and dest, "drag source and target must both have a box"
+        page.mouse.move(
+            source_box["x"] + 15, source_box["y"] + source_box["height"] / 2
+        )
+        page.mouse.down()
+        page.mouse.move(
+            source_box["x"] + 60, source_box["y"] + source_box["height"] / 2, steps=5
+        )
+        y = dest["y"] + (3 if side == "above" else dest["height"] - 3)
+        page.mouse.move(dest["x"] + 30, y, steps=5)
+        page.mouse.move(dest["x"] + 32, y)
+
+    def move(src, target, side, expected):
+        over(src, target, side)
+        indicator = ".drop.drop-after" if side == "below" else ".drop:not(.drop-after)"
+        target.and_(page.locator(indicator)).wait_for(timeout=3000)
+        page.mouse.up()
+        page.wait_for_function(BAR_JS, arg=expected)
+
+    move(row(c), row(b), "above", [[key, [a, c, b]], [d, []]])
+    move(row(c), row(b), "below", [[key, [a, b, c]], [d, []]])
+    head = page.locator("#tablist .tab.named")
+    move(head, row(d), "below", [[d, []], [key, [a, b, c]]])
+    move(head, row(d), "above", [[key, [a, b, c]], [d, []]])
+
+    over(row(d), row(a), "above")
+    row(a).and_(page.locator(".drop")).wait_for(timeout=3000)
+    page.mouse.up()
+    page.wait_for_function(BAR_JS, arg=[[key, [a, b, c, d]]])
+    e = spawn(page)
+    page.wait_for_function(BAR_JS, arg=[[key, [a, b, c, d]], [e, []]])
+    group = page.locator("#tablist .tblock.grp").bounding_box()
+    start = row(b).bounding_box()
+    gap_y = (group["y"] + group["height"] + row(e).bounding_box()["y"]) / 2
+    page.mouse.move(start["x"] + 15, start["y"] + start["height"] / 2)
+    page.mouse.down()
+    page.mouse.move(start["x"] + 38, gap_y, steps=8)
+    page.mouse.move(start["x"] + 40, gap_y)
+    page.locator("#tablist.drop-gap").wait_for()
+    page.mouse.up()
+    page.wait_for_function(BAR_JS, arg=[[key, [a, c, d]], [b, []], [e, []]])
+
+    over(row(c), row(c), "above")
+    row(c).and_(page.locator(".nodrop")).wait_for(timeout=3000)
+    page.mouse.up()
+    expected = [[key, [a, c, d]], [b, []], [e, []]]
+    assert bar(page) == expected
+    over(row(d), row(c), "above")
+    row(c).and_(page.locator(".drop")).wait_for(timeout=3000)
+    page.locator("#sessions-toggle").evaluate("button => button.click()")
+    assert page.locator("#tablist :is(.drop,.dragging,.nodrop)").count() == 0
+    page.mouse.up()
+    assert bar(page) == expected
+    page.locator("#sessions-toggle").click()
+    page.reload()
+    page.wait_for_function(BAR_JS, arg=expected)
+    page.set_viewport_size({"width": 1280, "height": 175})
+    tablist = page.locator("#tablist")
+    tablist.evaluate("list => list.scrollTop = 0")
+    source = head.bounding_box()
+    strip = tablist.bounding_box()
+    assert row(e).bounding_box()["y"] > strip["y"] + strip["height"]
+    page.mouse.move(source["x"] + 15, source["y"] + source["height"] / 2)
+    page.mouse.down()
+    page.mouse.move(source["x"] + 45, strip["y"] + strip["height"] - 5, steps=10)
+    page.mouse.move(source["x"] + 47, strip["y"] + strip["height"] - 5)
+    page.wait_for_function("document.querySelector('#tablist').scrollTop > 30")
+    page.keyboard.press("Escape")
+    page.mouse.up()
+    assert bar(page) == expected
+    assert page.errors == []
+
+
+def test_folded_navigation_preserves_group_folds_and_reveals_the_selected_row(
+    server,  # noqa: F811
+    page,
+):
+    a, b, c, d = three_and_one(page, server)
+    key = group_key(page)
+    row_b = page.locator(f'#tablist [data-id="{b}"]')
+    row_b.click(button="right")
+    page.locator(".cmenu [data-id=quiet]").click()
+    row_b.wait_for(state="detached")
+    page.locator("#tablist .tab.named .cnt").click()
+    fold = page.locator("#tablist .tab.named .cnt")
+    assert fold.inner_text() == "+3"
+    page.locator(f'#tablist [data-id="{a}"]').wait_for(state="detached")
+
+    session_tabs(page, "Vertical")
+    assert fold.inner_text() == "+3"
+    page.locator("#tablist .tab.named").press("Enter")
+    page.wait_for_function(f"location.hash === '#g={key}'")
+    page.wait_for_selector("#a2[data-view=fleet] #cards .card")
+    page.locator("#tab-fleet").click()
+    page.wait_for_selector("#a2[data-view=fleet]")
+    assert page.locator("#tablist.vertical").is_visible()
+    target = [spawn(page) for _ in range(5)][-1]
+    page.set_viewport_size({"width": 1280, "height": 225})
+    page.locator("#sessions-toggle").click()
+    page.click("#tab-more")
+    page.locator(f'#switcher [data-id="{c}"]').click()
+    page.wait_for_function(f"location.hash === '#s={c}'")
+    assert page.locator("#tablist .tab.out.on").get_attribute("data-id") == c
+    assert page.locator("#tablist").is_hidden()
+    page.keyboard.press("Alt+p")
+    page.locator(f'#switcher [data-id="{target}"]').click()
+    page.wait_for_function(f"location.hash === '#s={target}'")
+    page.evaluate("document.hasFocus = () => false")
+    report(page, attention="needs_you", line="Which build?", replies=[])
+    turns_done(page, 1)
+    page.evaluate("delete document.hasFocus")
+    page.locator(f'#tablist [data-id="{target}"] svg.ic.need').wait_for(
+        state="attached"
+    )
+    assert page.locator("#tablist").is_hidden()
+    reopen = page.get_by_role("button", name="Show sessions")
+    reopen.press("Enter")
+    page.wait_for_function("""() => {
+      const list = document.querySelector('#tablist');
+      const row = list.querySelector('.tab.on');
+      return list.scrollTop > 0 && row.getBoundingClientRect().bottom <=
+        list.getBoundingClientRect().bottom + 1;
+    }""")
+    assert page.evaluate("document.activeElement.id") == "sessions-toggle"
+    assert fold.inner_text() == "+3"
+    assert bar(page)[0] == [key, []]
+    assert [d, []] in bar(page)
     assert page.errors == []

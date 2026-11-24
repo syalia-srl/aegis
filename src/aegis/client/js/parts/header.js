@@ -20,7 +20,7 @@ import { attach as attachMenu } from "../menu.js";
 import { installBell } from "../ping.js";
 import { pushSupported } from "../pushpanel.js";
 import { attachTabCard } from "../tabcard.js";
-import { patchTab, renderTabs, stepMove } from "../tabs.js";
+import { cancelTabDrag, patchTab, renderTabs, stepMove } from "../tabs.js";
 import { Switcher } from "../switcher.js";
 
 // The markup this part owns. The ids stay as they are: they are the browser
@@ -28,7 +28,8 @@ import { Switcher } from "../switcher.js";
 // scoped to the part's own element.
 const HEADER_HTML = `
 <button class="hdr-burger" id="hdr-burger" data-t-title="header.menu" data-t-aria="header.menu" aria-expanded="false" aria-controls="hdr-menu"></button>
-<div class="tab home" id="tab-fleet" data-t-title="header.fleetTitle" data-t="header.fleet"></div>
+<button class="sessions-toggle keys-btn" id="sessions-toggle" type="button" aria-controls="tablist" aria-expanded="false" hidden><span data-t="header.sessions"></span></button>
+<button class="tab home" id="tab-fleet" type="button" data-t-title="header.fleetTitle" data-t="header.fleet"></button>
 <div class="tablist" id="tablist"></div>
 <button class="tab-more" id="tab-more" data-t-title="header.moreTitle" data-t-aria="header.more" aria-haspopup="menu" hidden></button>
 <button class="new-session needs-net" id="tab-add" type="button" data-t-title="header.newTitle" data-t-aria="header.new"><span class="plus">+</span><span class="lbl" data-t="header.new"></span></button>
@@ -77,6 +78,7 @@ export class HeaderPart {
     const n = (id) => byId(this.el, id);
     this.burger = n("hdr-burger");
     this.fleetTab = n("tab-fleet");
+    this.sessionsToggle = n("sessions-toggle");
     this.list = n("tablist");
     this.more = n("tab-more");
     this.add = n("tab-add");
@@ -154,6 +156,13 @@ export class HeaderPart {
       meta: (key) => this.mount.state.sessions.get(key),
       card: (m) => this.act.card?.(m),
       items: (key) => this.act.menu?.(key),
+      place: (box, row) => {
+        // In the left list, a card below its row would cover the next rows.
+        const left = this.vertical ? this.list.getBoundingClientRect().right + 6 : row.left;
+        const top = this.vertical ? Math.max(8, Math.min(row.top, innerHeight - box.offsetHeight - 8)) : row.bottom + 6;
+        box.style.left = `${Math.max(8, Math.min(left, innerWidth - box.offsetWidth - 8))}px`;
+        box.style.top = `${top}px`;
+      },
     });
     attachMenu(
       this.list,
@@ -168,10 +177,12 @@ export class HeaderPart {
       },
     );
 
-    this.onPhone = () => this.size();
-    this.phone.addEventListener("change", this.onPhone);
     this.onHideMenu = () => this.setMenu(false);
-    this.phone.addEventListener("change", this.onHideMenu);
+    this.onPhone = () => {
+      this.placeTabs();
+      this.setMenu(false);
+    };
+    this.phone.addEventListener("change", this.onPhone);
 
     this.icons();
     this.wire();
@@ -185,21 +196,21 @@ export class HeaderPart {
     // It also fires when a tab redraws: only a new width forces the focus.
     this.listObserver = new ResizeObserver(([e]) => {
       this.size();
-      const width = e.contentRect.width;
-      // a narrower strip can leave the shown tab out of reach
-      this.focus(width !== this.width);
-      this.width = width;
+      const extent = this.vertical ? e.contentRect.height : e.contentRect.width;
+      this.focus(extent !== this.extent);
+      this.extent = extent;
     });
     this.listObserver.observe(this.list);
     this.mutationObserver = new MutationObserver(() => this.size());
     this.mutationObserver.observe(this.list, { childList: true });
-    this.size();
+    this.placeTabs();
   }
 
   // A part draws its own glyphs; the sprite is in the mount's root (glyphs.js
   // installed it there).
   icons() {
     this.burger.append(icon("menu"));
+    this.sessionsToggle.prepend(icon("panel"));
     this.menuFleet.append(icon("fleet"));
     this.bell.append(icon("bell"));
     this.settingsBtn.prepend(icon("gear"));
@@ -216,6 +227,7 @@ export class HeaderPart {
     // The Fleet tab, the menu's, New session and the views.
     this.fleetTab.addEventListener("click", () => this.act.go?.("#fleet"));
     this.menuFleet.addEventListener("click", () => this.act.go?.("#fleet"));
+    this.sessionsToggle.addEventListener("click", () => this.act.sessionTabs.toggle());
     this.add.addEventListener("click", () => this.act.spawn?.());
     byId(this.el, "models-btn").addEventListener("click", () => this.act.go?.("#models"));
     this.settingsBtn.addEventListener("click", () => this.act.go?.("#settings"));
@@ -245,6 +257,50 @@ export class HeaderPart {
       if (ev.target.closest("button")) this.setMenu(false);
     });
     window.addEventListener("hashchange", this.onHideMenu);
+  }
+
+  placeTabs() {
+    const prefs = this.act.sessionTabs;
+    if (!prefs) {
+      this.size();
+      return;
+    }
+    const phone = this.phone.matches;
+    const hasHeader = prefs.hasHeader;
+    const vertical = !phone && hasHeader && prefs.orientation === "vertical";
+    const collapsed = vertical && prefs.collapsed;
+    // Update these controls in JS so media-query CSS cannot blur them first.
+    const active = document.activeElement;
+    const inList = this.list.contains(active);
+    const moving = vertical !== this.vertical;
+    const changed = moving || collapsed !== this.collapsed;
+    if (changed || String(phone) !== this.el.dataset.phone) cancelTabDrag(this.list);
+    this.el.dataset.phone = String(phone);
+    if (changed) {
+      this.tabCard.hide();
+      this.vertical = vertical;
+      this.collapsed = collapsed;
+      this.root.classList.toggle("sessions-left", vertical && !collapsed);
+      this.list.hidden = collapsed;
+      if (vertical && moving) this.root.insertBefore(this.list, this.root.querySelector("main.view"));
+      else if (!vertical && this.list.parentElement !== this.el) this.el.insertBefore(this.list, this.more);
+      this.list.classList.toggle("vertical", vertical);
+      this.sessionsToggle.hidden = !vertical;
+      this.sessionsToggle.setAttribute("aria-expanded", String(vertical && !collapsed));
+      const action = this.t(collapsed ? "header.showSessions" : "header.collapseSessions");
+      this.sessionsToggle.setAttribute("aria-label", action);
+      this.sessionsToggle.title = action;
+      this.focus(true);
+    }
+    this.size();
+    if (!hasHeader) return;
+    const fallback = phone ? this.burger : vertical ? this.sessionsToggle : this.fleetTab;
+    if ((inList && collapsed) || (active === this.sessionsToggle && !vertical) ||
+        (active === this.burger && !phone) || (active === this.fleetTab && phone)) {
+      fallback.focus({ preventScroll: true });
+    } else if (inList && moving && active !== document.activeElement) {
+      active.focus({ preventScroll: true });
+    }
   }
 
   tabs() {
@@ -305,10 +361,13 @@ export class HeaderPart {
     const id = tab?.dataset.id ?? null;
     if (!force && id === this.focused) return;
     this.focused = id;
-    if (!tab) return;
+    if (!tab || this.list.hidden) return;
     const strip = this.list.getBoundingClientRect();
     const r = tab.getBoundingClientRect();
-    if (r.left < strip.left) this.list.scrollLeft -= strip.left - r.left;
+    if (this.vertical) {
+      if (r.top < strip.top) this.list.scrollTop -= strip.top - r.top;
+      else if (r.bottom > strip.bottom) this.list.scrollTop += r.bottom - strip.bottom;
+    } else if (r.left < strip.left) this.list.scrollLeft -= strip.left - r.left;
     else if (r.right > strip.right) this.list.scrollLeft += r.right - strip.right;
   }
 
@@ -331,7 +390,7 @@ export class HeaderPart {
   // The strip's button: while the tabs overflow, and always on a phone, where
   // the header has no room for another. Its count is every open session.
   size() {
-    this.more.hidden = !this.phone.matches && this.list.scrollWidth <= this.list.clientWidth + 1;
+    this.more.hidden = !this.vertical && !this.phone.matches && this.list.scrollWidth <= this.list.clientWidth + 1;
     this.more.replaceChildren(`${this.mount.state.ordered.length} `, icon("caret-d"));
   }
 
@@ -415,10 +474,11 @@ export class HeaderPart {
     this.listObserver.disconnect();
     this.mutationObserver.disconnect();
     this.phone.removeEventListener("change", this.onPhone);
-    this.phone.removeEventListener("change", this.onHideMenu);
     window.removeEventListener("hashchange", this.onHideMenu);
+    cancelTabDrag(this.list);
     this.tabCard.hide();
     this.switcher.close();
+    this.list.remove();
     this.el.remove();
   }
 }

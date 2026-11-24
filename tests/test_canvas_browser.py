@@ -75,6 +75,105 @@ def test_an_agents_layout_draws_the_page_beside_the_transcript(server, page):  #
     assert page.errors == []
 
 
+def test_session_list_fold_preserves_canvas_composer_and_details(server, page):  # noqa: F811
+    page.add_init_script(
+        "if (self === top) localStorage.setItem('aegis.session-tabs.orientation', 'vertical')"
+    )
+    page.goto(server.url)
+    page.wait_for_selector("#a2[data-view=fleet]")
+    spawn(page)
+    aid, _ = _artifact(page, server, PICK, 0)
+    mcp(
+        page,
+        3,
+        "layout_set",
+        {
+            "windows": [
+                {
+                    "n": 1,
+                    "columns": [
+                        {"w": 0.6, "panes": [{"id": "transcript"}]},
+                        {"w": 0.4, "panes": [{"id": aid}]},
+                    ],
+                }
+            ]
+        },
+    )
+    frame = f'#canvas iframe[data-artifact="{aid}"]'
+    page.frame_locator(frame).locator("#st").filter(has_text="{}").wait_for()
+    frame_state = page.frame_locator(frame).locator("#st")
+    frame_state.evaluate("() => window.foldTest = 'still running'")
+    page.fill("#input", "/many 45")
+    page.press("#input", "Enter")
+    turns_done(page, 4)
+    page.fill("#input", "unsent message")
+    page.evaluate("""() => {
+      const send = WebSocket.prototype.send;
+      WebSocket.prototype.send = function(data) {
+        if (typeof data === 'string' && data.includes('"attachment.put"') && !window.releaseUpload) {
+          window.releaseUpload = () => { WebSocket.prototype.send = send; send.call(this, data); };
+        } else send.call(this, data);
+      };
+    }""")
+    page.set_input_files(
+        "#attach-pick",
+        {"name": "keep.txt", "mimeType": "text/plain", "buffer": b"kept"},
+    )
+    page.wait_for_function("typeof window.releaseUpload === 'function'")
+    page.locator("#atts .att.uploading").wait_for()
+    page.evaluate("""() => {
+        const transcript = document.querySelector('#tr');
+        const rows = document.querySelectorAll('#entries .row');
+        window.keptAnchor = rows[Math.floor(rows.length / 2)];
+        const top = transcript.getBoundingClientRect().top;
+        transcript.scrollTop += window.keptAnchor.getBoundingClientRect().top - top - 8;
+    }""")
+    anchor_visible = """() => {
+      const tr = document.querySelector('#tr').getBoundingClientRect();
+      const row = window.keptAnchor.getBoundingClientRect();
+      return window.keptAnchor.isConnected && row.top >= tr.top - 1 && row.top < tr.top + 70;
+    }"""
+    page.wait_for_function(anchor_visible)
+    page.evaluate(
+        """sel => {
+      window.kept = [document.querySelector(sel), document.querySelector('#input')];
+      window.keptWindow = window.kept[0].contentWindow;
+      window.keptRoute = location.hash;
+    }""",
+        frame,
+    )
+    view = page.locator("main.v-session")
+    width = view.bounding_box()["width"]
+    panel = page.locator("#a2").get_attribute("data-side")
+    toggle = page.locator("#sessions-toggle")
+    for key in (None, "Enter", "Space"):
+        if key:
+            toggle.press(key)
+        else:
+            toggle.click()
+        collapsed = toggle.get_attribute("aria-expanded") == "false"
+        assert view.bounding_box()["width"] == width + (232 if collapsed else 0)
+        assert toggle.evaluate("b => b === document.activeElement")
+        assert page.locator("#a2").get_attribute("data-side") == panel
+        assert page.locator("#input").input_value() == "unsent message"
+        page.wait_for_function(anchor_visible)
+        assert frame_state.evaluate("() => window.foldTest") == "still running"
+        assert page.locator("#atts .att.uploading").get_attribute("title") == "keep.txt"
+        assert page.evaluate(
+            """sel => window.kept[0] === document.querySelector(sel)
+          && window.kept[1] === document.querySelector('#input')
+          && window.keptWindow === window.kept[0].contentWindow
+          && location.hash === window.keptRoute""",
+            frame,
+        )
+    page.click("#nav-side")
+    assert page.locator("#a2").get_attribute("data-side") != panel
+    assert toggle.get_attribute("aria-expanded") == "false"
+    page.evaluate("window.releaseUpload()")
+    page.locator("#atts .att.done").wait_for()
+    assert page.errors == []
+
+
 def test_a_layout_that_arrives_before_its_entries_waits_for_them(server, page):  # noqa: F811
     page.goto(server.url)
     page.wait_for_selector("#a2[data-view=fleet]")
@@ -664,10 +763,18 @@ def test_a_second_window_runs_its_page_live(server, page, browser):  # noqa: F81
     assert held.inner_text() == "in window 2 · open"
     assert page.locator("iframe[data-artifact]").count() == 0
     assert page.locator(f'#canvas .pane[data-pane="{aid}"]').count() == 0
-    two = _window_page(browser, f"{server.url}#w=2:{sid}")
+    two = _watch(browser.new_page(viewport={"width": 1280, "height": 800}))
+    two.add_init_script(
+        "if (self === top) localStorage.setItem('aegis.session-tabs.orientation', 'vertical')"
+    )
+    two.goto(f"{server.url}#w=2:{sid}")
     inner = two.frame_locator(f'#canvas iframe[data-artifact="{aid}"]')
     inner.locator("#st").filter(has_text="{}").wait_for()
     assert two.locator("#a2").get_attribute("data-view") == "window"
+    assert not two.locator("#a2").evaluate(
+        "el => el.classList.contains('sessions-left')"
+    )
+    assert two.locator("#sessions-toggle").is_hidden()
     assert two.locator("#tr-pane").is_hidden() and two.locator("#side").is_hidden()
     assert two.locator("header.tabs").is_hidden()
     assert two.title().endswith(" · window 2"), two.title()

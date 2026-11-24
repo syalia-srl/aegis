@@ -326,9 +326,9 @@ your name as the author; the agent that wrote it is not told its own.
 
 ## Order the tabs
 
-The tab bar's order is this browser's own, and a reload keeps it. Sessions can
+The session tabs' order is this browser's own, and a reload keeps it. Sessions can
 also sit in a group: one block in the bar, drawn under the group's name, with
-no session at its head. Click the count chip to fold the block to one tab and
+a group name at its head. Click the count chip to fold the block to one tab and
 `+N`, and again to unfold it. Click the group's name to open its page: the
 Fleet over just its members, in the same order, quiet sessions and workers
 included, where a card opens that session.
@@ -367,11 +367,20 @@ alert while one needs you. Unfold the block to see which. The member you are
 looking at is the one exception: it stays drawn beside the block, in the
 group's colour, and the block stays folded.
 
-Alt+Shift+[ and Alt+Shift+] move the tab in front one place left or right, by
+Alt+Shift+[ and Alt+Shift+] move the tab in front one place earlier or later, by
 the same rules, from the message box too: a member within its group, a lone
 tab around its neighbours. Dragging the group's name carries its whole block.
+Drop to the left or right in the top strip, or above or below in the left list.
 
 ## Switch between sessions
+
+To put session tabs down the left, open **Settings → This browser** and
+choose **Vertical** under **Session tabs**. Choose **Horizontal** to put
+them back across the top. The choice takes effect immediately. Use **Sessions**
+in the header to collapse or reopen the left list. Its fold is independent
+of the session details panel. The browser remembers both choices for new and
+reloaded windows. At 760 px or less, the horizontal strip takes over until
+the window is wide enough for the saved layout.
 
 Alt+P lists every open session: this server's at the top, then each linked
 server's in the Fleet's order, then the quiet ones from all of them, each
@@ -388,9 +397,9 @@ plan item, or what it is doing.
 - Opening a quiet session brings its tab back, as a click on its Fleet card
   does.
 - The "N ▾" button at the end of the tab bar opens the same list. It shows
-  while the tabs overflow, and always on a phone, where it is the way in. On
-  a phone the list fills the screen, and the close button beside its field
-  takes you back.
+  while the horizontal tabs overflow, on a phone, and whenever the desktop
+  list is vertical, even with the left list collapsed. On a phone the
+  switcher fills the screen, and the close button beside its field takes you back.
 
 Alt+J opens the next session that needs you, in that same order, and lands
 with the start of its last message at the top of the transcript, where its

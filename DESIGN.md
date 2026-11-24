@@ -327,7 +327,15 @@ session collection keeps its scope (`gc.py`).
 server's open sessions, the same in every browser, so Close on any browser removes
 the tab everywhere and nothing accumulates in a browser. Which tab is focused and
 the order of the tabs belong to each browser (the URL hash and local storage); the
-server never sees them.
+server never sees them. In the standalone full client, `composeFull` owns two
+browser-local preferences for session tab orientation and left-list folding.
+The header moves its single list between the strip and a 232 px grid column,
+with the same order, actions, group folds and switcher. The header and
+connection banner span the grid. The view and its nested details panel stay
+in place. At widths up to 760 px the list uses the phone strip, and secondary
+canvas windows omit the header. Embedded mounts keep their layout and skip
+the standalone preferences. The active list axis controls drag placement and
+scrolling. The list owns its drag until drop, drag end or a layout change.
 
 **A session's card is published when it changes, at most four times a second.**
 Status, handle, title, model and the agent's standing go out at once; activity,
@@ -1367,10 +1375,10 @@ opens it under the row. Usage shows the quota the session spends, matched on the
 its model names. The panel's width and whether it is collapsed
 (`data-side=closed`) belong to the browser, in localStorage, as the theme does.
 
-**One page for every screen.** A phone gets the desktop's markup. Below 760 px
-one CSS block wraps the tab bar onto its own row, turns the side panel into a
-drawer (`data-side=open`, opened by the panel button), shows the monitor card as a
-sheet over that drawer, stacks the Fleet band and draws each archive row as two
+**One page for every screen.** A phone gets the desktop's markup. At 760 px
+and below the header uses its one-row strip and phone menu. The side panel
+becomes a drawer (`data-side=open`, opened by the panel button), and the monitor
+card appears as a sheet over it. The Fleet band stacks and each archive row takes two
 lines with Reopen beside them, a tap on the row reading it; under `(pointer: coarse)` touch
 targets grow to 44 px and Enter in either composer, a session's or the new tab's, adds a line. The navigator's
 buttons are the exception: they draw at 34 px and take a tap 44 px tall

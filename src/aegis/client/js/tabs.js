@@ -57,21 +57,8 @@ export class TabOrder {
 // key of the group in view, if one is.
 export function renderTabs(list, metas, focusId, actions) {
   const t = actions.t || labelsFor("en");
-  // The gap between blocks: a member dropped there leaves its group (#1039).
-  // Assigned each draw (not added) so a redraw never stacks handlers.
-  list.ondragover = (ev) => {
-    if (!dragging || ev.target !== list) return;
-    if (!dropAction(list, ev.clientX, actions.here || "")) return;
-    ev.preventDefault();
-    list.classList.add("drop-gap");
-  };
-  list.ondragleave = () => list.classList.remove("drop-gap");
-  list.ondrop = (ev) => {
-    if (!dragging || ev.target !== list) return;
-    ev.preventDefault();
-    list.classList.remove("drop-gap");
-    runDrop(list, ev, actions);
-  };
+  cancelTabDrag(list);
+  wireDrag(list, actions);
   list.replaceChildren(
     ...blocksOf(metas, actions.here || "").flatMap((b) => {
       const box = document.createElement("div");
@@ -133,6 +120,7 @@ export function patchTab(list, m, focusId, actions) {
   if (old.closest(".tblock.grp, .tblock.out")) return false;
   const box = old.closest(".tblock");
   if (box && box.dataset.group !== groupKey(m, actions.here || "")) return false;
+  if (old === tabDrags.get(list)?.source) cancelTabDrag(list);
   old.replaceWith(tab(m, focusId, actions, "solo"));
   return true;
 }
@@ -192,6 +180,13 @@ function groupTab(b, folded, actions) {
     return node;
   }
   node.draggable = true;
+  node.tabIndex = 0;
+  node.setAttribute("role", "button");
+  node.addEventListener("keydown", (ev) => {
+    if (ev.target !== node || (ev.key !== "Enter" && ev.key !== " ")) return;
+    ev.preventDefault();
+    onGroup?.(b.key);
+  });
   const name = document.createElement("span");
   name.className = "hn";
   name.textContent = b.head.name;
@@ -209,39 +204,134 @@ function groupTab(b, folded, actions) {
     clearTimeout(clickTimer);
     onRenameStart?.(b.key);
   });
-  node.addEventListener("dragstart", (ev) => {
-    ev.dataTransfer.setData("text/aegis-tab", b.key);
-    ev.dataTransfer.effectAllowed = "move";
-    const box = node.closest(".tblock");
-    dragging = {
-      group: b.key,
-      block: true,
-      far: !hereKey(b.key, actions.here || ""),
-      keys: JSON.parse(box.dataset.keys),
-    };
-    box.classList.add("dragging");
-  });
-  node.addEventListener("dragend", () => {
-    dragging = null;
-    node.closest(".tblock")?.classList.remove("dragging");
-  });
-  node.addEventListener("dragover", (ev) => {
-    if (!dragging || !ev.dataTransfer.types.includes("text/aegis-tab")) return;
-    if (!dropAction(node, ev.clientX, actions.here || "")) return node.classList.add("nodrop");
-    ev.preventDefault();
-    node.classList.add("drop");
-  });
-  node.addEventListener("dragleave", () => node.classList.remove("drop", "nodrop"));
-  node.addEventListener("drop", (ev) => {
-    ev.preventDefault();
-    node.classList.remove("drop", "nodrop");
-    runDrop(node, ev, actions);
-  });
   return node;
 }
 
-// What is being dragged: a whole named block (`block`), or one tab of a block.
-let dragging = null;
+const tabDrags = new WeakMap();
+const TAB_DRAG_TYPE = "text/aegis-tab";
+let dragSerial = 0;
+
+function clearFeedback(list, drag) {
+  drag.target?.classList.remove("drop", "drop-after", "nodrop");
+  drag.target = null;
+  list.classList.remove("drop-gap");
+  list.style.removeProperty("--drop-gap-y");
+}
+
+function stopScrolling(drag) {
+  cancelAnimationFrame(drag.frame);
+  drag.frame = 0;
+}
+
+export function cancelTabDrag(list) {
+  const drag = tabDrags.get(list);
+  if (!drag) return;
+  drag.source.removeEventListener("dragend", drag.end);
+  drag.mark.classList.remove("dragging");
+  clearFeedback(list, drag);
+  stopScrolling(drag);
+  tabDrags.delete(list);
+}
+
+function wireDrag(list, actions) {
+  const target = (node) => node === list ? list : node.closest(".tab");
+  const here = () => actions.here || "";
+  const vertical = () => list.classList.contains("vertical");
+  const position = (ev) => vertical() ? ev.clientY : ev.clientX;
+
+  list.ondragstart = (ev) => {
+    const source = ev.target.closest(".tab[draggable=true]");
+    if (!source || !ev.dataTransfer) return;
+    cancelTabDrag(list);
+    const box = source.closest(".tblock");
+    const block = source.classList.contains("named");
+    const group = box.dataset.group;
+    const mark = block ? box : source;
+    const serial = String(++dragSerial);
+    const end = () => cancelTabDrag(list);
+    tabDrags.set(list, {
+      serial, source, mark, end, group, block, far: !hereKey(group, here()),
+      keys: block ? JSON.parse(box.dataset.keys) : [source.dataset.id],
+      target: null, frame: 0,
+    });
+    ev.dataTransfer.setData(TAB_DRAG_TYPE, serial);
+    ev.dataTransfer.effectAllowed = "move";
+    mark.classList.add("dragging");
+    source.addEventListener("dragend", end);
+  };
+
+  list.ondragover = (ev) => {
+    const drag = tabDrags.get(list);
+    if (!drag || !ev.dataTransfer?.types.includes(TAB_DRAG_TYPE)) return;
+    const isVertical = vertical();
+    const at = position(ev);
+    if (paint(ev.target, ev.clientX, ev.clientY)) ev.preventDefault();
+    scrollAtEdge(ev.clientX, ev.clientY);
+
+    function paint(node, x, y) {
+      clearFeedback(list, drag);
+      if (!node || !list.contains(node)) return;
+      const t = target(node);
+      if (!t) return;
+      const action = dropAction(drag, t, isVertical ? y : x, here(), isVertical);
+      if (t === list) {
+        if (action) {
+          list.classList.add("drop-gap");
+          if (isVertical) list.style.setProperty("--drop-gap-y", `${y - list.getBoundingClientRect().top}px`);
+        }
+      } else {
+        drag.target = t;
+        t.classList.add(action ? "drop" : "nodrop");
+        if (action?.after) t.classList.add("drop-after");
+      }
+      return action;
+    }
+
+    function scrollAtEdge(x, y) {
+      const bounds = list.getBoundingClientRect();
+      const start = isVertical ? bounds.top : bounds.left;
+      const end = isVertical ? bounds.bottom : bounds.right;
+      const edge = Math.min(24, (end - start) / 3);
+      const delta = at < start + edge ? -8 : at > end - edge ? 8 : 0;
+      const scroll = isVertical ? "scrollTop" : "scrollLeft";
+      stopScrolling(drag);
+      if (!delta) return;
+      const step = () => {
+        const before = list[scroll];
+        list[scroll] += delta;
+        if (list[scroll] === before) {
+          drag.frame = 0;
+          return;
+        }
+        paint(document.elementFromPoint(x, y), x, y);
+        drag.frame = requestAnimationFrame(step);
+      };
+      drag.frame = requestAnimationFrame(step);
+    }
+  };
+
+  list.ondragleave = (ev) => {
+    const drag = tabDrags.get(list);
+    if (!drag) return;
+    // Chromium can omit relatedTarget as a drag crosses a row's children.
+    const next = ev.relatedTarget || document.elementFromPoint(ev.clientX, ev.clientY);
+    if (list.contains(next)) return;
+    clearFeedback(list, drag);
+    stopScrolling(drag);
+  };
+
+  list.ondrop = (ev) => {
+    const drag = tabDrags.get(list);
+    if (!drag || ev.dataTransfer?.getData(TAB_DRAG_TYPE) !== drag.serial) return;
+    ev.preventDefault();
+    const t = target(ev.target);
+    const action = t && dropAction(drag, t, position(ev), here(), vertical());
+    cancelTabDrag(list);
+    if (action?.move) actions.onMove?.(action.move, action.before);
+    else if (action?.join) actions.onJoin?.(action.join, action.group);
+    else if (action?.leave) actions.onLeave?.(action.leave);
+  };
+}
 
 // A block's key on this server, or null for one on a linked server.
 function hereKey(key, here) {
@@ -251,50 +341,42 @@ function hereKey(key, here) {
 // A block that names a group rather than a lone session.
 const namesGroup = (key) => key.split("@")[0].startsWith("grp-");
 
-// What dropping on element `t` at `x` does (#1039): a move within the block, a
+// What dropping on element `t` at an axis position does (#1039): a move within the block, a
 // join of another block (or of a lone tab, as a new group), a leave on the gap
 // between blocks, or undefined where the tab may not go.
-function dropAction(t, x, here) {
-  if (!dragging) return undefined;
-  const box = t.closest ? t.closest(".tblock") : null;
-  const middle = (n) => n.getBoundingClientRect().left + n.getBoundingClientRect().width / 2;
+function dropAction(drag, t, position, here, vertical) {
+  const box = t.closest(".tblock");
   if (!box) {
     // The gap between blocks: a member of a group leaves it; a whole block or
     // a lone tab has nowhere to go.
-    if (dragging.block || dragging.far || !namesGroup(dragging.group || "")) return undefined;
-    return hereKey(dragging.group, here) ? { leave: dragging.keys } : undefined;
+    if (drag.block || drag.far || !namesGroup(drag.group || "")) return undefined;
+    return hereKey(drag.group, here) ? { leave: drag.keys } : undefined;
   }
+  const bounds = t.getBoundingClientRect();
+  const middle = vertical ? bounds.top + bounds.height / 2 : bounds.left + bounds.width / 2;
+  const after = position > middle;
   const key = box.dataset.group;
   const local = hereKey(key, here);
-  if (dragging.block) {
-    if (key === dragging.group || !local) return undefined;
-    return { move: dragging.keys, before: x > middle(t) ? firstKey(box.nextElementSibling) : firstKey(box) };
+  if (drag.block) {
+    if (key === drag.group || !local) return undefined;
+    return { move: drag.keys, after, before: firstKey(after ? box.nextElementSibling : box) };
   }
-  if (key === dragging.group) {
+  if (key === drag.group) {
     // Within its own block a tab reorders; the head is not a place to move to.
-    if (!t.classList.contains("member") || dragging.keys.includes(t.dataset.id)) return undefined;
-    const after = x > middle(t);
+    if (!t.classList.contains("member") || drag.keys.includes(t.dataset.id)) return undefined;
     return {
-      move: dragging.keys,
+      move: drag.keys,
+      after,
       before: after ? (t.nextElementSibling?.dataset.id ?? firstKey(box.nextElementSibling)) : t.dataset.id,
     };
   }
   // Another block: both ends must be this server's (links.py, #1039).
-  if (dragging.far || !local) return undefined;
+  if (drag.far || !local) return undefined;
   const head = box.querySelector(".tab.named");
-  if (head) return { join: dragging.keys, group: hereKey(head.dataset.group, here) };
+  if (head) return { join: drag.keys, group: hereKey(head.dataset.group, here) };
   const target = box.querySelector(".tab[data-id]")?.dataset.id;
   if (!target) return undefined;
-  return { join: [target, ...dragging.keys.filter((k) => k !== target)], group: "new" };
-}
-
-// Run what a drop does, through the page's own actions.
-function runDrop(t, ev, actions) {
-  const a = dropAction(t, ev.clientX, actions.here || "");
-  if (!a) return;
-  if (a.move) actions.onMove?.(a.move, a.before);
-  else if (a.join) actions.onJoin?.(a.join, a.group);
-  else if (a.leave) actions.onLeave?.(a.leave);
+  return { join: [target, ...drag.keys.filter((k) => k !== target)], group: "new" };
 }
 
 const firstKey = (box) => (box ? JSON.parse(box.dataset.keys)[0] : null);
@@ -320,23 +402,33 @@ export function stepMove(list, key, d) {
 
 function tab(m, focusId, actions, role) {
   const { onFocus, onClose, t = labelsFor("en") } = actions;
-  const node = document.createElement("div");
+  const node = document.createElement("button");
   node.className = `tab ${role}${m.key === focusId ? " on" : ""}${m.state === "asleep" ? " asleep" : ""}${m.off ? " off" : ""}`;
   node.classList.toggle("blink", !!m.blink);
   node.draggable = true;
+  node.type = "button";
   node.dataset.id = m.key;
-  const said = t("tabs.said", { handle: m.handle, title: m.title || t("sidebar.untitled"), state: stateLabel(t, m.attention) || m.state });
+  const state = stateLabel(t, m.attention) || stateLabel(t, m.state) || m.state;
   const mark = markNode(m);
   const term = m.kind === "term" || m.kind === "browser";
   if (term) {
     // A terminal is named by its name; its command is in the title.
-    node.title = said;
+    node.title = t("tabs.said", { handle: m.handle, title: m.title || t("sidebar.untitled"), state });
+    let status;
+    if (m.kind === "term") {
+      if (m.mark === "running") status = t("fleet.termRunning");
+      else if (m.state === "exited") status = t("fleet.termExited", { code: m.code });
+      else status = t("fleet.termEnded", { reason: m.reason || "" });
+    } else if (m.mark === "person") status = t("fleet.termYouHold");
+    else if (m.mark === "agent") status = t("fleet.termAgentHolds");
+    else status = t("fleet.termStopped", { reason: m.reason || "" });
+    node.setAttribute("aria-label", t(`tabs.said.${m.kind}`, { name: m.name, state: status }));
     const name = Object.assign(document.createElement("span"), { className: "tname" });
     name.replaceChildren(...iconText(PANE_ICON[m.kind === "term" ? "term" : "browser"], m.name));
     node.append(mark, name);
   } else {
     // The whole handle, and the title under it cut to the handle's width (#586).
-    node.setAttribute("aria-label", said);
+    node.setAttribute("aria-label", t("tabs.said", { handle: m.handle, title: m.title || t("sidebar.untitled"), state }));
     const lines = Object.assign(document.createElement("span"), { className: "l2" });
     lines.append(
       Object.assign(document.createElement("span"), { className: "hn", textContent: m.handle }),
@@ -351,36 +443,5 @@ function tab(m, focusId, actions, role) {
   if (m.server) node.append(Object.assign(document.createElement("span"), { className: "where", textContent: m.server }));
   node.addEventListener("click", () => onFocus(m.key));
   closeOnMiddle(node, () => onClose(m.key));
-  node.addEventListener("dragstart", (ev) => {
-    ev.dataTransfer.setData("text/aegis-tab", m.key);
-    ev.dataTransfer.effectAllowed = "move";
-    const box = node.closest(".tblock");
-    // A tab travels alone and may join another block, leave its own, or
-    // reorder within it; a named head carries its whole block (#1039).
-    dragging = {
-      group: box.dataset.group,
-      block: false,
-      far: !hereKey(box.dataset.group, actions.here || ""),
-      keys: [m.key],
-    };
-    node.classList.add("dragging");
-  });
-  node.addEventListener("dragend", () => {
-    dragging = null;
-    node.closest(".tblock")?.classList.remove("dragging");
-    node.classList.remove("dragging");
-  });
-  node.addEventListener("dragover", (ev) => {
-    if (!dragging || !ev.dataTransfer.types.includes("text/aegis-tab")) return;
-    if (!dropAction(node, ev.clientX, actions.here || "")) return node.classList.add("nodrop");
-    ev.preventDefault();
-    node.classList.add("drop");
-  });
-  node.addEventListener("dragleave", () => node.classList.remove("drop", "nodrop"));
-  node.addEventListener("drop", (ev) => {
-    ev.preventDefault();
-    node.classList.remove("drop", "nodrop");
-    runDrop(node, ev, actions);
-  });
   return node;
 }
