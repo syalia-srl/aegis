@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Streamed reply fade-in</title>
+<style>body{max-width:760px;margin:32px auto;padding:0 20px;font:17px/1.6 system-ui;color:#20252a}code{overflow-wrap:anywhere}</style>
+<h1>Streamed reply fade-in</h1>
+<p>Status: implemented. Issue #1125.</p>
+<p>Slow token delivery produces abrupt word-by-word updates. The frontend fades newly rendered graphemes at its own pace while keeping the complete entry available to copying, search and other consumers.</p>
+<p>The transcript applies the effect only to live prose patches. A WeakMap associates a row with its rendered text and pending absolute start times. Replacing that row transfers pending times rather than restarting the animation. A final block replacing a live entry under another id carries the same state.</p>
+<p>Characters start up to 18 ms apart, compressed to fit within a 180 ms horizon, and fade over 120 ms. At most 120 graphemes animate; a large burst reveals earlier text immediately. The effect therefore cannot create a growing playback queue.</p>
+<p>Snapshots, resumes, hidden documents and reduced motion render immediately. Markdown reconciliation that changes an existing visible prefix renders immediately rather than replaying text. Controls and code headers are excluded. No backend or protocol change is needed.</p>
+<p>Verification covers real streamed replies in a browser, overlapping patches, bursts, finalization, Unicode, historical rendering, reduced motion, selection and scroll stability at desktop and phone widths.</p>
+</html>

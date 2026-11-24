@@ -34,6 +34,7 @@ import { CARET_ICON, icon } from "./glyphs.js";
 import { unwatch, watch } from "./highlight.js";
 import * as menu from "./menu.js";
 import { offsetsIn, rangeIn } from "./quote.js";
+import { fadeReply } from "./streaming.js";
 
 const WINDOW = 200;
 
@@ -437,6 +438,7 @@ export class Transcript {
   apply(ops, { live = true } = {}) {
     let added = false;
     let freed = 0; // the height of a row removed in this batch, not yet taken over
+    let freedReply = null; // a finalized block may replace its live id
     const replies = [];
     for (const op of ops) {
       if (op.upsert) {
@@ -457,11 +459,15 @@ export class Transcript {
           else {
             this.watch.unobserve(old);
             this.drop(old);
-            swap(old, this.mount(e));
+            const n = this.mount(e);
+            if (live && e.kind === "prose" && (e.live || prev?.live)) fadeReply(old, n);
+            swap(old, n);
           }
         }
         else if (!known) {
           const n = this.mount(e);
+          if (live && e.kind === "prose" && (e.live || freedReply)) fadeReply(freedReply, n);
+          freedReply = null;
           // A whole block replaces its live entry under a new id: removed,
           // then appended. The new row's placeholder is the removed row's
           // height, so the list does not shrink for a frame (#668).
@@ -473,9 +479,11 @@ export class Transcript {
         // A known entry above the mounted rows changes only its data.
         if (done && live) replies.push(e.id);
       } else if (op.remove !== undefined) {
+        const wasLive = this.entries.get(op.remove)?.live;
         this.entries.delete(op.remove);
         const old = this.nodes.get(op.remove);
         if (old) {
+          if (wasLive && old.matches(".prose")) freedReply = old;
           freed = old.offsetHeight;
           this.watch.unobserve(old);
           this.drop(old);

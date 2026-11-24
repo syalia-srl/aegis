@@ -95,15 +95,21 @@ def select(pg, sel: str, word: str) -> None:
         """([sel, word]) => {
           const body = [...document.querySelectorAll(sel)].filter((b) => b.textContent.includes(word)).at(-1);
           const w = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+          const start = body.textContent.indexOf(word);
+          const r = document.createRange();
+          let offset = 0, started = false;
           for (let n; (n = w.nextNode()); ) {
-            const i = n.data.indexOf(word);
-            if (i < 0) continue;
-            const r = document.createRange();
-            r.setStart(n, i);
-            r.setEnd(n, i + word.length);
-            getSelection().removeAllRanges();
-            getSelection().addRange(r);
-            return;
+            if (!started && start < offset + n.length) {
+              r.setStart(n, start - offset);
+              started = true;
+            }
+            if (started && start + word.length <= offset + n.length) {
+              r.setEnd(n, start + word.length - offset);
+              getSelection().removeAllRanges();
+              getSelection().addRange(r);
+              return;
+            }
+            offset += n.length;
           }
           throw new Error("no " + word);
         }""",
