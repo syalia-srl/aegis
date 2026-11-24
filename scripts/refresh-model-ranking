@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Rebuild src/aegis/data/models.json from Artificial Analysis.
+"""Publish Artificial Analysis scores and models.dev provider offers.
 
 Run before a release, as ``AA_API_KEY=... uv run scripts/refresh-model-ranking``,
 then read the diff and commit it (know-how/releasing.md). It reads the model
@@ -10,7 +10,9 @@ it can map, the Coding and Intelligence Indexes and the list price per million
 tokens, sorted by Intelligence Index, with today's date. It prints every catalog
 model it could not map: those stay unranked until an alias below covers them.
 
-``--base FILE --out FILE`` is the nightly run (.github/workflows/model-ranking.yml):
+``--catalog-only --base FILE --out FILE`` refreshes offers without calling
+the benchmark API and preserves the benchmark date. The full daily run uses
+``--base FILE --out FILE`` (.github/workflows/model-ranking.yml):
 it keeps every model ``FILE`` maps, re-scored under its recorded slug, so the
 models a logged-in machine's catalog lists survive a runner that cannot list
 them; a harness that fails to start is skipped rather than fatal; and it writes
@@ -27,7 +29,7 @@ import os
 import re
 import sys
 import tempfile
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import httpx
@@ -37,8 +39,14 @@ from aegis.doctor import detect
 # The free-tier route: the other language-model routes answer 403 to a free key.
 URL = "https://artificialanalysis.ai/api/v2/language/models/free"
 OUT = Path(__file__).resolve().parents[1] / "src" / "aegis" / "data" / "models.json"
+CATALOG_URL = "https://models.dev/api.json"
 HARNESSES = ("claude-code", "opencode")
-BINS = {"claude-code": "claude", "opencode": "opencode", "codex": "codex", "cursor": "cursor-agent"}
+BINS = {
+    "claude-code": "claude",
+    "opencode": "opencode",
+    "codex": "codex",
+    "cursor": "cursor-agent",
+}
 
 # Catalog id -> Artificial Analysis slug, for names that do not normalize.
 ALIASES: dict[str, str] = {
@@ -98,51 +106,118 @@ def scored(models: dict[str, dict]) -> int:
     return sum(1 for v in models.values() if v.get("intelligence") is not None)
 
 
+def offers_from(catalog: dict) -> dict[str, dict]:
+    """Public advertised offers, independent of a runner's logins.
+
+    Unknown prices are not free. Zero token prices do not promise quota.
+    """
+    offers = {}
+    for provider, p in catalog.items():
+        for model, m in p.get("models", {}).items():
+            if m.get("status") in ("deprecated", "discontinued"):
+                continue
+            cost = m.get("cost") or {}
+            price_in, price_out = cost.get("input"), cost.get("output")
+            free = None
+            if price_in is not None and price_out is not None:
+                free = price_in == 0 and price_out == 0
+            offers[f"{provider}/{model}"] = {
+                "provider": provider,
+                "provider_name": p.get("name", provider),
+                "model": model,
+                "label": m.get("name", model),
+                "canonical": m.get("canonical_model_id", ""),
+                "price_in": price_in,
+                "price_out": price_out,
+                "free": free,
+                "tool_call": m.get("tool_call") is True,
+                "source_url": p.get("doc") or "https://models.dev",
+            }
+    return offers
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", type=Path, help="keep and re-score this file's models")
     ap.add_argument("--out", type=Path, default=OUT)
+    ap.add_argument(
+        "--catalog-only",
+        action="store_true",
+        help="keep benchmark scores; refresh provider offers only",
+    )
     args = ap.parse_args()
+    base_data = json.loads(args.base.read_text()) if args.base else {}
+    base = base_data.get("models", {})
     key = os.environ.get("AA_API_KEY")
-    if not key:
+    if not key and not args.catalog_only:
         print("AA_API_KEY is not set", file=sys.stderr)
         return 2
-    with tempfile.TemporaryDirectory() as d:
-        found = asyncio.run(detect(Path(d), BINS, HARNESSES))
-    if broken := [f for f in found if f.error]:
-        for f in broken:
-            print(f"{f.harness}: {f.error}", file=sys.stderr)
-        if args.base is None:
+    response = httpx.get(CATALOG_URL, timeout=60)
+    response.raise_for_status()
+    offers = offers_from(response.json())
+    if not offers or len(offers) < len(base_data.get("offers", {})) / 2:
+        print(
+            "refused: provider catalogue is empty or lost over half its offers",
+            file=sys.stderr,
+        )
+        return 1
+    found = []
+    if args.catalog_only:
+        if not scored(base):
+            print("refused: --catalog-only needs a scored --base", file=sys.stderr)
             return 1
-    aa = fetch(key)
+        aa_entries = {m["aa"]: m for m in base.values() if m.get("aa")}
+    else:
+        with tempfile.TemporaryDirectory() as d:
+            found = asyncio.run(detect(Path(d), BINS, HARNESSES))
+        for f in found:
+            if f.error:
+                print(f"{f.harness}: {f.error}", file=sys.stderr)
+                if args.base is None:
+                    return 1
+        aa_entries = {slug: entry(m) for slug, m in fetch(key).items()}
     models: dict[str, dict] = {}
     unmapped: list[str] = []
-    base = json.loads(args.base.read_text())["models"] if args.base else {}
     for value, old in base.items():
-        if old.get("aa") in aa:
-            models[value] = entry(aa[old["aa"]])
+        if old.get("aa") in aa_entries:
+            models[value] = aa_entries[old["aa"]]
     for f in found:
         if f.error:
             continue
         for m in f.models:
-            slug = slug_for(m.value, m.resolved, set(aa))
+            slug = slug_for(m.value, m.resolved, set(aa_entries))
             if slug is None:
                 unmapped.append(f"{f.harness} {m.value}")
             else:
-                models[m.value] = entry(aa[slug])
+                models[m.value] = aa_entries[slug]
+    # Retain every benchmark, even when the CI runner cannot list a provider.
+    for slug, score in aa_entries.items():
+        models.setdefault(slug, score)
+    for value, offer in offers.items():
+        slug = slug_for(offer["canonical"], value, set(aa_entries))
+        if slug is None:
+            slug = slug_for(offer["label"], "", set(aa_entries))
+        if slug is not None:
+            models[value] = aa_entries[slug]
+        offer["aa"] = slug
     ordered = sorted(
         models.items(),
         key=lambda kv: (
             kv[1]["intelligence"] is not None,
             kv[1]["intelligence"] or 0.0,
-            kv[1]["coding"] or 0.0,
+            kv[1].get("coding") or 0.0,
         ),
         reverse=True,
     )
     data = {
         "source": "Artificial Analysis",
         "url": "https://artificialanalysis.ai",
-        "refreshed": date.today().isoformat(),
+        "refreshed": base_data["refreshed"]
+        if args.catalog_only
+        else date.today().isoformat(),
+        "catalog_refreshed": datetime.now(timezone.utc).isoformat(),
+        "catalog_source_url": CATALOG_URL,
+        "offers": offers,
         "models": dict(ordered),
     }
     if base and scored(models) < scored(base) / 2:
@@ -154,7 +229,9 @@ def main() -> int:
     args.out.write_text(json.dumps(data, indent=2) + "\n")
     for u in unmapped:
         print(f"unmapped: {u}")
-    print(f"{len(models)} models scored, {len(unmapped)} unmapped")
+    print(
+        f"{scored(models)} identifiers scored, {len(offers)} provider offers, {len(unmapped)} unmapped harness models"
+    )
     return 0
 
 

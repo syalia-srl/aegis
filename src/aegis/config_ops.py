@@ -13,7 +13,7 @@ import os
 import time
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .config import ConfigDoc, McpDoc, mcp_raw, stamp_from, write
 from . import mcp_servers
@@ -27,6 +27,13 @@ if TYPE_CHECKING:
     from .app import App
 
 DETECT_TTL_S = 60.0
+
+
+class CatalogParams(BaseModel):
+    provider: str | None = None
+    free: bool | None = None
+    offset: int = Field(default=0, ge=0)
+    limit: int = Field(default=50, ge=1, le=200)
 
 
 class McpTest(BaseModel):
@@ -115,6 +122,49 @@ def register_config_ops(app: App) -> None:
     async def config_propose(_, caller):
         """The first configuration `aegis init` would write here."""
         return propose(await detected()).model_dump()
+
+    @r.op("models.catalog", CatalogParams, agent=True, read=True, access="read")
+    async def models_catalog(p: CatalogParams, caller):
+        """Public provider offers, scores and free status from the shared
+        catalogue. These are advertised offers, not a claim that this
+        machine has credentials or quota. Filter by provider or free status;
+        paginate with offset and limit. Unknown free status is null."""
+        rk = ranking()
+        scored_ids = {s.aa for s in rk.models.values() if s.intelligence is not None}
+        by_slug = {s.aa: s for s in rk.models.values()}
+        ordered = sorted(
+            scored_ids,
+            key=lambda k: (by_slug[k].intelligence or 0, by_slug[k].coding or 0),
+            reverse=True,
+        )
+        ranks = {slug: i + 1 for i, slug in enumerate(ordered)}
+        rows = []
+        for value, offer in rk.offers.items():
+            if p.provider is not None and offer["provider"] != p.provider:
+                continue
+            if p.free is not None and offer["free"] is not p.free:
+                continue
+            score = by_slug.get(offer.get("aa") or "")
+            rows.append(
+                {
+                    "value": value,
+                    **offer,
+                    "rank": ranks.get(offer.get("aa")),
+                    "intelligence": score.intelligence if score else None,
+                    "coding": score.coding if score else None,
+                }
+            )
+        rows.sort(key=lambda m: (m["rank"] is None, m["rank"] or 0, m["value"]))
+        end = p.offset + p.limit
+        return {
+            "refreshed": rk.refreshed,
+            "catalog_refreshed": rk.catalog_refreshed,
+            "source_url": rk.url,
+            "catalog_source_url": "https://models.dev/api.json",
+            "total": len(rows),
+            "next_offset": end if end < len(rows) else None,
+            "models": rows[p.offset : end],
+        }
 
     @r.op("models.list", agent=True, read=True, access="read")
     async def models_list(_, caller):
