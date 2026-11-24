@@ -53,13 +53,22 @@ async def grant(chrome, ext, bridge, *, url="https://chat.qwen.ai/", log_id="web
     return task
 
 
-async def test_a_fresh_session_requests_a_new_tab_and_keeps_the_consent_card(tmp_path):
+async def test_a_fresh_session_opens_its_tab_with_scripts_without_a_consent_card(
+    tmp_path,
+):
     chrome, manager, bridge, ext, records = setup_bridge(tmp_path)
     task = await grant(chrome, ext, bridge)
     got = await task
     assert got["tab"] == "qwen"
     assert ext.last("request")["request"]["kind"] == "open"
-    assert records[0]["kind"] == "chrome_request"
+    assert ext.last("answer") == {
+        "t": "answer",
+        "request": ext.last("request")["request"]["id"],
+        "give": True,
+    }
+    assert ext.last("eval") == {"t": "eval", "tab": "qwen", "on": True}
+    assert chrome.tabs["qwen"]["eval"] is True
+    assert not any(r["kind"] == "chrome_request" for r in records)
     assert manager.handles("web-one") is True
 
 
@@ -74,6 +83,8 @@ async def test_a_grant_to_another_session_cannot_back_the_web_agent(tmp_path):
 async def test_manual_control_and_scripts_off_prevent_page_actions(tmp_path):
     chrome, _, bridge, ext, _ = setup_bridge(tmp_path)
     await (await grant(chrome, ext, bridge))
+    await chrome.scripts("qwen", False)
+    await chrome.scripts("qwen", False)
     with pytest.raises(CallError, match="scripts_off"):
         await bridge("observe", {})
     chrome.tabs["qwen"]["eval"] = True
@@ -123,10 +134,8 @@ async def test_the_host_binds_web_consent_without_delivering_it_as_a_model_task(
     task = await grant(chrome, ext, bridge, log_id=session.log_id)
     await task
     assert session.held == []
-    assert any(
-        e["kind"] == "chrome_request" and e["status"] == "granted"
-        for e in session.entries()
-    )
+    assert not any(e["kind"] == "chrome_request" for e in session.entries())
+    assert chrome.tabs["qwen"]["eval"] is True
 
 
 async def test_the_person_can_focus_a_backing_tab_while_holding_it(world):
@@ -159,23 +168,35 @@ async def test_agents_cannot_use_the_persons_focus_action(world):
 
 
 @pytest.mark.parametrize("submitted", [False, True])
-async def test_deepseek_reports_the_actual_send_button_result(tmp_path, submitted):
+@pytest.mark.parametrize(
+    "name,url",
+    [
+        ("web-deepseek", "https://chat.deepseek.com/"),
+        ("web-qwen", "https://chat.qwen.ai/"),
+        ("web-chatgpt", "https://chatgpt.com/"),
+    ],
+)
+async def test_provider_reports_the_actual_send_button_result(
+    tmp_path, submitted, name, url
+):
     manager_type = importlib.import_module("aegis.web_agent.transport").WebBridges
     chrome = Chrome(tmp_path, lambda *_: None)
     session = SimpleNamespace(
         log_id="web-one",
         handle="research",
-        spec=SimpleNamespace(harness="web-deepseek"),
+        spec=SimpleNamespace(harness=name),
         record_card=lambda _: None,
     )
     manager = manager_type(chrome)
     chrome.on_answer = manager.answered
     bridge = manager.for_session(session)
     ext = Driven(chrome, lambda _: {"value": {"submitted": submitted}})
-    await (await grant(chrome, ext, bridge, url="https://chat.deepseek.com/"))
+    await (await grant(chrome, ext, bridge, url=url))
     chrome.tabs["qwen"]["eval"] = True
     if submitted:
         assert await bridge("send", {"text": "A task"}) == {"submitted": True}
+        assert ext.calls[-2]["op"] == "type"
+        assert ext.calls[-2]["args"]["submit"] is False
     else:
         with pytest.raises(CallError, match="submission_refused"):
             await bridge("send", {"text": "A task that did not get submitted"})

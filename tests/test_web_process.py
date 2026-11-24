@@ -463,7 +463,10 @@ async def test_changed_permissions_are_conveyed_without_repriming(tmp_path):
         assert len(updates) == 1 and "Permission: read" in updates[0]
         assert (
             sum(
-                text.startswith("You are a research sidekick.") for text in browser.sent
+                text.startswith(
+                    "You are an Aegis agent connected through a browser bridge."
+                )
+                for text in browser.sent
             )
             == 1
         )
@@ -609,5 +612,80 @@ async def test_permission_update_follows_the_pending_manual_command_result(tmp_p
         )
         assert result < update < browser.sent.index("The queued task")
         assert process.ledger.get("manual-answer/0")["phase"] == "delivered"
+    finally:
+        await process.terminate()
+
+
+async def test_web_priming_is_compact_and_loads_workspace_context_only_on_demand(
+    tmp_path,
+):
+    from dataclasses import replace
+
+    (tmp_path / "AGENTS.md").write_text("WORKSPACE_SENTINEL " * 3000)
+    (tmp_path / "CLAUDE.md").write_text("ANCESTOR_SENTINEL " * 3000)
+    browser = Browser("printf 'compact works'")
+    process, events = make(tmp_path, browser)
+    process.context = replace(
+        process.context, system_prompt="DEFAULT_PRIMER_SENTINEL " * 3000
+    )
+    await process.start()
+    try:
+        await process.send("Research the actual requested topic")
+        await until(lambda: bool(done(events)), timeout=5)
+        brief = browser.sent[0]
+        assert len(brief) < 2000
+        assert not any(
+            s in brief
+            for s in (
+                "WORKSPACE_SENTINEL",
+                "ANCESTOR_SENTINEL",
+                "DEFAULT_PRIMER_SENTINEL",
+            )
+        )
+        assert "# aegis: execute" in brief
+        assert "aegis tools" in brief and "aegis call" in brief
+        assert str(tmp_path) in brief and "Permission: full" in brief
+        assert browser.sent[1] == "Research the actual requested topic"
+        assert "stdout:\ncompact works" in browser.results[0]
+    finally:
+        await process.terminate()
+
+
+async def test_chatgpt_pins_the_canonical_chat_after_its_provisional_route(tmp_path):
+    class ChatGPT(Browser):
+        provisional_observed = False
+
+        async def __call__(self, op, args):
+            page = await super().__call__(op, args)
+            if op == "start":
+                page["url"] = "https://chatgpt.com/"
+            if op == "observe":
+                if len(self.sent) == 1 and not self.provisional_observed:
+                    self.provisional_observed = True
+                    page["url"] = "https://chatgpt.com/c/local-chatgpt%3Atest"
+                else:
+                    page["url"] = (
+                        "https://chatgpt.com/c/canonical-chat"
+                        if self.sent
+                        else "https://chatgpt.com/"
+                    )
+            return page
+
+    browser = ChatGPT("printf 'verified' > canonical-proof")
+    process, events = make(tmp_path, browser)
+    process.provider = importlib.import_module("aegis.web_agent.providers").PROVIDERS[
+        "web-chatgpt"
+    ]
+    await process.start()
+    try:
+        await process.send("Verify this conversation")
+        await until(lambda: bool(done(events)), timeout=5)
+        assert done(events)[-1]["error"] is False
+        assert browser.provisional_observed is True
+        assert (tmp_path / "canonical-proof").read_text() == "verified"
+        assert (
+            process.ledger.data["conversation"]["url"]
+            == "https://chatgpt.com/c/canonical-chat"
+        )
     finally:
         await process.terminate()
