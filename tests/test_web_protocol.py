@@ -103,7 +103,9 @@ def test_an_existing_execution_is_not_reset_by_an_observation_replay(tmp_path):
 def test_saved_conversation_and_priming_are_reused_after_restart(tmp_path):
     path = tmp_path / "ledger.json"
     ledger = ledger_type()(path)
-    ledger.update(conversation={"url": "https://chat.qwen.ai/c/test", "device": "d"}, primed=True)
+    ledger.update(
+        conversation={"url": "https://chat.qwen.ai/c/test", "device": "d"}, primed=True
+    )
     resumed = ledger_type()(path)
     assert resumed.data["primed"] is True
     assert resumed.data["conversation"]["url"] == "https://chat.qwen.ai/c/test"

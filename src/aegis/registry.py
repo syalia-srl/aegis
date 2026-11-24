@@ -22,6 +22,7 @@ import secrets
 import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
+from typing import Any
 
 
 from .archive import Position, count_workers, page as archive_page
@@ -141,6 +142,7 @@ class Registry(Host):
         self.schedules = None
         self.workflows = None
         self.browsers = None  # browsers.py, set by the app: docked browser panes
+        self.web_for: Callable[[Session], Any] = lambda session: None
         self.quota = None
         self.notices = None  # notices.Notices, set by App
         self.sign_in = None  # signin.core.SignIns, set by App

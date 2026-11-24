@@ -19,8 +19,12 @@ class Ledger:
             if path.exists()
             else {"version": 1, "executions": {}}
         )
-        if self.data.get("version") != 1 or not isinstance(self.data.get("executions"), dict):
-            raise ValueError("Unsupported web session ledger; manual recovery is required")
+        if self.data.get("version") != 1 or not isinstance(
+            self.data.get("executions"), dict
+        ):
+            raise ValueError(
+                "Unsupported web session ledger; manual recovery is required"
+            )
 
     def _save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -55,10 +59,14 @@ class Ledger:
         self._save()
         return record
 
-    def _transition(self, key: str, allowed: tuple[str, ...], phase: str, **extra: object) -> None:
+    def _transition(
+        self, key: str, allowed: tuple[str, ...], phase: str, **extra: object
+    ) -> None:
         record = self.data["executions"][key]
         if record["phase"] not in allowed:
-            raise ValueError(f"Cannot transition execution from {record['phase']} to {phase}")
+            raise ValueError(
+                f"Cannot transition execution from {record['phase']} to {phase}"
+            )
         record.update(phase=phase, **extra)
         self._save()
 
@@ -75,10 +83,13 @@ class Ledger:
         self._transition(key, ("delivery-pending",), "delivered")
 
     def uncertain(self) -> list[str]:
-        return [key for key, r in self.data["executions"].items() if r["phase"] == "started"]
+        return [
+            key for key, r in self.data["executions"].items() if r["phase"] == "started"
+        ]
 
     def pending(self) -> list[str]:
         return [
-            key for key, r in self.data["executions"].items()
+            key
+            for key, r in self.data["executions"].items()
             if r["phase"] in ("completed", "delivery-pending")
         ]
