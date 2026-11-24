@@ -42,7 +42,10 @@ park: {claude-code: 1200}
 To add an agent to `.aegis.yaml`, map its name under `agents:` to a preset.
 Each one has:
 
-- `harness:` one of claude-code, opencode, codex, cursor or pi. Each aegis release
+- `harness:` one of claude-code, opencode, codex, cursor, pi, web-gemini,
+  web-deepseek, web-qwen or web-chatgpt. Web agents use your signed-in Chrome
+  through the extension (web-harnesses), with `model: web` and effort chosen
+  in Chrome. Each aegis release
   is tested with a range of versions of each harness; for OpenCode that is
   OpenCode 2 (`npm install -g @opencode/cli`), and for pi
   `npm install -g @earendil-works/pi-coding-agent` (the older
