@@ -401,9 +401,10 @@ const DRIVE = {
   async eval(tabId, a) {
     const row = (await shared())[tabId];
     if (!row?.eval) throw new Fail("scripts_off", "the person has not allowed scripts on this tab; ask them to turn on Scripts for it");
+    if (a.web) await dbg(tabId, "Emulation.setFocusEmulationEnabled", { enabled: true });
     const r = await dbg(tabId, "Runtime.evaluate", { expression: a.expression, returnByValue: true, awaitPromise: true, userGesture: true });
     if (r.exceptionDetails) throw new Fail("eval_failed", (r.exceptionDetails.exception?.description || r.exceptionDetails.text || "").split("\n")[0]);
-    return { value: r.result.value ?? null };
+    return { value: r.result.value ?? null, ...(a.web ? { web_ready: true } : {}) };
   },
   async screenshot(tabId, a) {
     const params = { format: "png" };
@@ -494,6 +495,7 @@ async function scripts(tabId, on, tell = true) {
   const all = await shared();
   const row = all[tabId];
   if (!row) return;
+  if (!on && attached.has(+tabId)) await dbg(+tabId, "Emulation.setFocusEmulationEnabled", { enabled: false });
   row.eval = on;
   await set({ shared: all });
   if (tell) send({ t: "eval", tab: row.name, on });
@@ -509,6 +511,7 @@ async function hold(tabId, holder, { ask = "", by = "", tell = true } = {}) {
   const all = await shared();
   const row = all[tabId];
   if (!row) return;
+  if (holder === "person" && attached.has(+tabId)) await dbg(+tabId, "Emulation.setFocusEmulationEnabled", { enabled: false });
   row.holder = holder;
   row.ask = holder === "person" ? ask : "";
   row.by = holder === "person" ? by : "";

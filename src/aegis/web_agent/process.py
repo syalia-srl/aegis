@@ -174,8 +174,13 @@ class WebProcess:
 
     async def _observe(self) -> dict:
         expected = self.ledger.data.get("conversation", {})
+        blank_reads = 0
         while True:
             page = await self._bridge("observe", {"url": expected.get("url")})
+            if page.get("url") in ("", "about:blank") and blank_reads < 5:
+                blank_reads += 1
+                await asyncio.sleep(POLL_S)
+                continue
             if not page.get("intervention"):
                 break
             await self._state("needs_you", str(page["intervention"]))

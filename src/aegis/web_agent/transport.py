@@ -176,12 +176,10 @@ class BrowserBridge:
                 return await self._eval(self.provider.observe_script)
             if op == "stop":
                 return await self._eval(STOP_SCRIPT)
-            # A newly opened inactive provider tab may not initialize its
-            # composer or conversation. Keep focus and input in one shared
-            # submission transaction across all native web sessions.
+            # The observer has prepared the page for background execution.
+            # Keep each short input transaction ordered across web sessions.
             async with self.manager.submissions:
                 self._check(args)
-                await self.chrome.call(self.session.log_id, self.tab, "focus", {})
                 await self.chrome.call(
                     self.session.log_id,
                     self.tab,
@@ -224,9 +222,17 @@ class BrowserBridge:
     async def _eval(self, expression: str) -> dict:
         assert self.tab is not None
         reply = await self.chrome.call(
-            self.session.log_id, self.tab, "eval", {"expression": expression}
+            self.session.log_id,
+            self.tab,
+            "eval",
+            {"expression": expression, "web": True},
         )
-        value = reply.get("value") if isinstance(reply, dict) else None
+        if not isinstance(reply, dict) or reply.get("web_ready") is not True:
+            raise CallError(
+                "extension_update_required",
+                "Update and reload Chrome extension 0.5.3 to run web sessions in background tabs",
+            )
+        value = reply.get("value")
         if not isinstance(value, dict):
             raise CallError(
                 "unsupported_layout",
