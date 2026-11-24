@@ -88,6 +88,25 @@ The older views still work: `--sessions` lists the costliest sessions,
 `--tools` the cost and calls by activity, `--session <handle>` one session and
 `--model <id>` one model.
 
+## ChatGPT quota through Codex
+
+A Codex login backed by ChatGPT shows a **ChatGPT** quota gauge in the Fleet
+and beside Codex sessions. aegis asks Codex's own `account/rateLimits/read`
+through a short app-server probe, without opening a thread or calling a
+model. It refreshes every minute and after turns, at most once per 30 seconds.
+Codex owns authentication and token refresh; aegis does not copy its OAuth
+token. API-key-only logins have no subscription gauge.
+
+The probe uses the file-backed ChatGPT login in `CODEX_HOME/auth.json`
+(default `~/.codex/auth.json`); `CODEX_AUTH` overrides the metadata file for
+diagnostics. Logins kept only in a system keyring are not detected yet.
+The allowance's actual duration determines whether it is the five-hour or
+weekly window: some plans return the week as the primary window. Other
+lengths keep the primary or secondary label and their own reset and span.
+With multiple buckets, aegis shows the `codex` bucket rather than combining
+separate model allowances. A failed fetch shows an explicit failure note or
+marks the last reading stale, like the other quota providers.
+
 ## Where a quota gauge says it will land
 
 A gauge's arrow is where the window ends at its reset if you keep spending at

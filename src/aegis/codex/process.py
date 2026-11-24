@@ -30,6 +30,7 @@ from typing import Any
 
 import httpx
 
+from ..call_auth import AUTH_VAR, CallAuth
 from ..claude.control import Catalog
 from .. import launch
 from ..harness import Launch, session_env
@@ -110,6 +111,7 @@ class CodexProcess:
         self._quiet = False
         # terminate() was called: nothing may start a child after it.
         self._closed = False
+        self._call_auth: CallAuth | None = None
 
     # -- what the session reads --------------------------------------
     @property
@@ -138,27 +140,36 @@ class CodexProcess:
         self._quiet = False
         mcp = self._launch.mcp
         self._launch.stderr_path.parent.mkdir(parents=True, exist_ok=True)
-        self._proc = await launch.child(
-            argv(
-                self._bin,
-                mcp[0] if mcp else None,
-                person_excludes(),
-                native=self._launch.knowledge_native,
-                servers=self._launch.extra_mcp,
-            ),
-            cwd=self._launch.cwd,
-            env=session_env(
-                self._launch, child_env(os.environ, mcp, self._launch.extra_mcp)
-            ),
-            stdin=launch.PIPE,
-            stdout=launch.PIPE,
-            stderr=launch.PIPE,
-            limit=LINE_LIMIT,
-            new_session=True,
-            cgroup=self._launch.cgroup,
-            oom=True,
-            via=self._launch.via,
+        env = session_env(
+            self._launch, child_env(os.environ, mcp, self._launch.extra_mcp)
         )
+        if mcp is not None:
+            self._call_auth = CallAuth(mcp)
+            assert env is not None
+            env[AUTH_VAR] = str(self._call_auth.path)
+        try:
+            self._proc = await launch.child(
+                argv(
+                    self._bin,
+                    mcp[0] if mcp else None,
+                    person_excludes(),
+                    native=self._launch.knowledge_native,
+                    servers=self._launch.extra_mcp,
+                ),
+                cwd=self._launch.cwd,
+                env=env,
+                stdin=launch.PIPE,
+                stdout=launch.PIPE,
+                stderr=launch.PIPE,
+                limit=LINE_LIMIT,
+                new_session=True,
+                cgroup=self._launch.cgroup,
+                oom=True,
+                via=self._launch.via,
+            )
+        except BaseException:
+            self._close_call_auth()
+            raise
         self._keep(self._drain(self._proc.stderr))
         self._keep(self._read())
         self._wait_task = asyncio.create_task(self._wait())
@@ -227,6 +238,7 @@ class CodexProcess:
         assert self._proc is not None
         proc = self._proc
         code = await _exited(proc)
+        self._close_call_auth()
         await self._signal(proc, signal.SIGKILL)  # whatever it left holds the thread
         self._fail_pending(Exited("codex app-server exited"))
         if self._quiet:
@@ -261,6 +273,12 @@ class CodexProcess:
         if self._wait_task is not None:
             self._wait_task.cancel()
         self._fail_pending(ConnectionResetError("codex app-server was stopped"))
+        self._close_call_auth()
+
+    def _close_call_auth(self) -> None:
+        if self._call_auth is not None:
+            self._call_auth.close()
+            self._call_auth = None
 
     async def _signal(self, proc: asyncio.subprocess.Process, sig: int) -> None:
         await launch.signal_process_async(proc.pid, sig, group=True)

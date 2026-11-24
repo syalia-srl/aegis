@@ -44,13 +44,14 @@ from .core import (
     severity_from,
     window_pace,
 )
+from .codex import PROVIDER as CODEX
 from .cursor import PROVIDER as CURSOR
 from .opencode import PROVIDER as OPENCODE_GO
 from .projection import Projector, half_life
 
 log = logging.getLogger("aegis.quota")
 
-PROVIDERS: tuple[QuotaProvider, ...] = (CLAUDE, OPENCODE_GO, CURSOR)
+PROVIDERS: tuple[QuotaProvider, ...] = (CLAUDE, OPENCODE_GO, CURSOR, CODEX)
 TICK_S = 60.0
 Publish = Callable[[str, list[dict]], None]
 

@@ -454,7 +454,13 @@ the primer alone moved Sonnet to a loop in none of nine live runs, and in the
 description in four of four. The cost is that every
 child of the agent inherits the token and can act as the agent. That is accepted:
 those children already run as the same user with the agent's files, and the
-token still dies with the harness process.
+token still dies with the harness process. Codex filters tokens from its
+shell environment, so `call_auth.CallAuth` creates a private temporary directory
+(mode 0700) and a credentials file (0600); only its path, `AEGIS_CALL_AUTH`,
+reaches the shell. `call._post` reads it when no token is in the environment.
+`CodexProcess` deletes it after a failed spawn, an exit or a stop, and a
+restart creates a new file. It grants the same session authority to processes
+of the same OS user; it is not a boundary between those processes.
 
 **A session's other MCP servers are composed at each start (#960).**
 `App.mcp_for` reads the config in force, so an edit applies at the next start:
@@ -1272,6 +1278,16 @@ the theme looks different on every machine. Anything a theme draws over the
 whole window, such as Phosphor's scanlines, is positioned against the root and
 never the viewport, because the landing page applies the same rules to a window
 that sits inside a page.
+
+**Codex asks its own account service about ChatGPT quota.** `quota.codex`
+registers beside the other providers and uses the file-backed ChatGPT login's
+account metadata to identify the subscription. A short `CodexProcess` probe
+asks `account/rateLimits/read` without a thread or inference, letting Codex
+handle OAuth and refresh. The existing quota service runs the blocking wrapper
+off the event loop, caches readings and reports failures. The payload's actual
+window duration maps the five-hour and weekly kinds, independent of whether
+they are primary or secondary. The `codex` bucket wins over the legacy view;
+other model buckets are not combined. Keyring-only detection is deferred.
 
 **A quota projection runs at the current rate.** `quota.projection.Projector`
 keeps, per billing and window kind, an exponentially weighted rate of the

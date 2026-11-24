@@ -47,8 +47,11 @@ def _free_port() -> int:
 
 
 class World:
-    def __init__(self, root: Path, fake: str, opencode: str = "opencode"):
+    def __init__(
+        self, root: Path, fake: str, opencode: str = "opencode", codex: str = "codex"
+    ):
         self.root, self.fake, self.opencode = root, fake, opencode
+        self.codex = codex
         self.port = _free_port()
         self.base = f"http://127.0.0.1:{self.port}"
         self.app: App | None = None
@@ -61,6 +64,7 @@ class World:
             make_roots(self.root, None),
             claude_bin=self.fake,
             opencode_bin=self.opencode,
+            codex_bin=self.codex,
             base_url=self.base,
             interrupt_timeout=1,
             policy=self.policy,
