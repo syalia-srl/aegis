@@ -114,6 +114,42 @@ const setHash = (hash, push = false) => {
 // A host's document is not ours to rename: the page's title is off limits.
 const setTitle = page ? setPageTitle : () => {};
 
+const TAB_ORIENTATION = "aegis.session-tabs.orientation";
+const TAB_COLLAPSED = "aegis.session-tabs.collapsed";
+let orientation = "horizontal";
+let sessionsCollapsed = false;
+if (page) {
+  try {
+    const savedOrientation = localStorage.getItem(TAB_ORIENTATION);
+    const savedCollapse = localStorage.getItem(TAB_COLLAPSED);
+    if (savedOrientation === "vertical") orientation = "vertical";
+    sessionsCollapsed = savedCollapse === "true";
+  } catch {
+    // Both preferences use their defaults when either read fails.
+  }
+}
+const saveTabPreference = (key, value) => {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // The current page keeps the choice even when storage is unavailable.
+  }
+};
+const sessionTabs = page ? {
+  get orientation() { return orientation; },
+  set orientation(value) {
+    orientation = value;
+    saveTabPreference(TAB_ORIENTATION, value);
+    header.placeTabs();
+  },
+  get collapsed() { return sessionsCollapsed; },
+  toggle() {
+    sessionsCollapsed = !sessionsCollapsed;
+    saveTabPreference(TAB_COLLAPSED, String(sessionsCollapsed));
+    header.placeTabs();
+  },
+} : null;
+
 const phoneHeader = matchMedia("(max-width:760px)"); // the one-row header (client.css)
 
 // Every node below is found under the root the mount built; the page keeps no
@@ -124,6 +160,7 @@ const $ = (id) => byId(root, id);
 // owns the strip's folds, the quiet marks and the switcher. The page hands it
 // the actions only the router and the Fleet know.
 const header = new HeaderPart(app, root, {
+  sessionTabs,
   open: (id) => openSession(id),
   openCard: (key) => openCard(key),
   close: (id) => closeById(id),
@@ -641,7 +678,9 @@ if (!page) {
 }
 
 function show(view, text) {
+  const windowChanged = (root.dataset.view === "window") !== (view === "window");
   root.dataset.view = view;
+  if (windowChanged) header.placeTabs();
   if (text) $("boot-text").textContent = text;
 }
 
@@ -812,6 +851,7 @@ teardown.push(() => modelsView.destroy());
 const settings = new Settings(app.conn, views.settings, {
   themes: THEMES,
   setTheme,
+  sessionTabs,
   speaker,
   lastSession: () => lastShown,
   openSession: (id) => openSession(id),

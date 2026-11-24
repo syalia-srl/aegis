@@ -55,7 +55,7 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 const readout = (l) => `start ${l.launch === "pace" ? "on pace" : `below ${l.launch}%`} · stop at ${l.stop}%`;
 
 export class Settings {
-  constructor(conn, box, { themes, setTheme, speaker = null, lastSession = () => null, openSession = () => {}, t = labelsFor("en") }) {
+  constructor(conn, box, { themes, setTheme, sessionTabs = null, speaker = null, lastSession = () => null, openSession = () => {}, t = labelsFor("en") }) {
     this.conn = conn;
     this.t = t;
     // The session the person last looked at, and how to go to it: Sign in
@@ -65,6 +65,7 @@ export class Settings {
     this.speaker = speaker; // app.js's Speaker: the Read aloud row chooses its voice (speak.js)
     this.box = box;
     this.themes = themes;
+    this.sessionTabs = sessionTabs;
     this.setTheme = setTheme; // app.js's: the one path that changes the theme
     this.wire = null; // the config the server last sent
     this.doc = null; // what the form shows
@@ -302,6 +303,17 @@ export class Settings {
       this.themeChip.setAttribute("aria-label", this.t("settings.theme"));
       this.themeChip.options = this.themes;
       this.themeChip.addEventListener("change", () => this.setTheme(this.themeChip.value));
+      const tabsLabel = this.t("settings.sessionTabs");
+      let tabsRow;
+      if (this.sessionTabs) {
+        const chip = select("session-tabs", ["horizontal", "vertical"], this.sessionTabs.orientation, (v) =>
+          this.t(`settings.sessionTabs.${v}`),
+        );
+        chip.id = "set-session-tabs";
+        chip.setAttribute("aria-label", tabsLabel);
+        chip.addEventListener("change", () => { this.sessionTabs.orientation = chip.value; });
+        tabsRow = h("div", { className: "set-browser-row" }, h("span", { className: "set-browser-k", textContent: tabsLabel }), chip);
+      }
       this.speakNode = h("div", { id: "set-speak" });
       this.drawSpeak();
       this.appNode = h("div", { id: "set-app" });
@@ -317,6 +329,7 @@ export class Settings {
         { className: "set-browser", id: "set-browser" },
         h("h3", { textContent: this.t("settings.thisBrowser") }),
         h("div", { className: "set-browser-row" }, h("span", { className: "set-browser-k", textContent: this.t("settings.theme") }), this.themeChip),
+        tabsRow,
         this.speakNode,
         this.appNode,
         this.pushNode,
