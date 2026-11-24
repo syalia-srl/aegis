@@ -142,3 +142,23 @@ def codex_prices_for(model: str | None) -> Prices | None:
     if model_id.endswith(":free"):
         return _ZERO
     return OPENAI.get(model_id) if provider == "openai" else None
+
+
+def cursor_prices_for(model: str | None) -> Prices | None:
+    """API list prices for the model under a Cursor session, or None.
+
+    Counterfactual (#1132): Cursor's plan does not bill per token. This is
+    what the same tokens would cost at the provider's API (Claude table, or
+    OpenAI when the id is ``openai/…`` / a bare ``gpt-…``). Unknown ids stay
+    unpriced rather than guessing another model's rate.
+    """
+    if not model:
+        return None
+    if p := prices_for(model):
+        return p
+    if "/" in model:
+        return codex_prices_for(model)
+    short = model.split("[", 1)[0].strip().lower()
+    if short.startswith("gpt-"):
+        return codex_prices_for(f"openai/{short}")
+    return None

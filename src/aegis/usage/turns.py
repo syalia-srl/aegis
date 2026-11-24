@@ -5,8 +5,10 @@ rows out, the same rows live and in a backfill. A turn opens at the first
 record after the previous one closed and closes on a harness result or on an
 own record that ends a turn (``TURN_ENDS``, ``close``), as the journal closes
 it. Its cost is Claude's running total's rise where Claude reports one, else
-its messages' priced tokens. The cost goes to the turn's messages by weight
-(their priced tokens, else their token count), the weight of text-only
+its messages' priced tokens. Cursor has no billed total: its ``Step`` carries
+an estimated ``Usage`` (#1119), priced at API list rates as ``priced`` (#1132),
+never written onto the session card. The cost goes to the turn's messages by
+weight (their priced tokens, else their token count), the weight of text-only
 messages spread over the messages with tool calls, and each message's share
 equally to its tool calls. Calls are grouped into parts by repo, purpose,
 activity and whether the purpose is settled.
@@ -35,7 +37,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from fractions import Fraction
 
-from ..claude.stream import Echo, Init, Result, ToolCall, ToolOutput
+from ..claude.stream import Echo, Init, Result, Step, ToolCall, ToolOutput, Usage
 from ..journal import shell
 from ..journal.derive import REPO_FLAG, TURN_ENDS
 from ..transcript.entries import PARSERS
@@ -47,7 +49,7 @@ from .kinds import (
     is_shell_exit,
 )
 from .context import START, Replay, band
-from .prices import Prices, codex_prices_for, prices_for
+from .prices import Prices, codex_prices_for, cursor_prices_for, prices_for
 from .store import split_cache
 
 MAX_WAIT = 28_800  # an idle gap counts at most 8 hours
@@ -401,10 +403,32 @@ class UsageDeriver:
         if isinstance(ev, ToolOutput):
             self._output(ts, ev)
             return Derived()
+        if isinstance(ev, Step) and self._src == "cursor":
+            # Cursor's estimate (#1119): one Step per turn_done. OpenCode's
+            # steps are read from the raw line in _usage_line instead.
+            self._cursor_usage(ts, ev.usage)
+            return Derived()
         if isinstance(ev, Result):
             cost = ev.cost_usd if self._src == "claude" else None
             return self._close(i, ts, cost, ev.duration_ms)
         return Derived()
+
+    def _cursor_usage(self, ts: float, u: Usage) -> None:
+        """The turn's estimated tokens as one message, so _close can price
+        them at API list rates (#1132)."""
+        t = self._open_turn(ts)
+        if any(m.tokens for m in t.msgs.values()):
+            return
+        key = f"cursor:{len(t.msgs)}"
+        m = _Msg(
+            model=self.model,
+            inp=u.input,
+            out=u.output,
+            cc5=u.cache_creation,
+            cr=u.cache_read,
+        )
+        m.calls, t.pending = t.pending, []
+        t.msgs[key] = m
 
     def _own(self, i: int, ts: float, rec: dict) -> Derived:
         kind = rec.get("kind")
@@ -613,6 +637,9 @@ class UsageDeriver:
             return prices_for(m.model or self.model)
         if self.harness == "codex":
             return codex_prices_for(m.model or self.model)
+        if self.harness == "cursor":
+            # Counterfactual API list prices for the estimated Step (#1132).
+            return cursor_prices_for(m.model or self.model)
         return None
 
     def _price(self, m: _Msg) -> Decimal | None:

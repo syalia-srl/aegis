@@ -225,8 +225,10 @@ refreshes.
 
 - **Cost** is at API list prices: Claude's own running total where it reports
   one (on a subscription too), else the turn's tokens priced for its model.
-  OpenCode's and Cursor's turns have no price per token: their tokens count as
-  unpriced, never as zero dollars.
+  Cursor turns use an estimated token count (ACP sends none) priced the same
+  way for the underlying model — counterfactual, not what the Cursor plan
+  billed. OpenCode's turns still have no price per token: those tokens count
+  as unpriced, never as zero dollars.
 - **Activity** is what a tool call's hands did: reading, testing, editing,
   committing, bookkeeping, server, web, other agents, showing; a turn with no
   tool call is talking.
