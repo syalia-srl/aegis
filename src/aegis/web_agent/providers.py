@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 
 @dataclass(frozen=True)
@@ -23,6 +23,7 @@ class Provider:
     users: str
     done: str
     conversation_prefix: str
+    send: str | None = None
 
     def accepts(self, url: str) -> bool:
         target, base = urlsplit(url), urlsplit(self.url)
@@ -32,13 +33,26 @@ class Provider:
         p = urlsplit(url)
         if self.accepts(url) and p.path.startswith(self.conversation_prefix):
             tail = p.path.removeprefix(self.conversation_prefix)
+            # ChatGPT replaces this provisional browser-local route with the
+            # persisted conversation id after accepting the first submission.
+            if self.name == "web-chatgpt" and unquote(tail).startswith(
+                "local-chatgpt:"
+            ):
+                return None
             if tail and tail != "new-chat":
                 return f"https://{p.netloc}{p.path}"
         return None
 
     @property
+    def send_script(self) -> str | None:
+        return (
+            _SEND.replace("__SELECTOR__", json.dumps(self.send)) if self.send else None
+        )
+
+    @property
     def observe_script(self) -> str:
         config = {
+            "provider": self.name,
             "answers": self.answers,
             "content": self.content,
             "users": self.users,
@@ -55,7 +69,7 @@ PROVIDERS = {
         'role=textbox[name="Enter a prompt for Gemini"]',
         "model-response",
         ".response-content, .markdown",
-        "user-query .query-text, .user-query-container",
+        "user-query .query-text",
         'button[aria-label="Good response"], button[aria-label="Copy"]',
         "/app/",
     ),
@@ -67,8 +81,9 @@ PROVIDERS = {
         ".ds-markdown",
         "",
         '[data-message-role="user"], .chat-user-message',
-        'button[aria-label="Copy"], [role="button"][aria-label="Copy"], [data-testid="copy-button"], [title="Copy"]',
+        'button[aria-label="Copy"], [role="button"][aria-label="Copy"], [data-testid="copy-button"], [title="Copy"], [role="button"][aria-label="Read aloud"]',
         "/a/chat/s/",
+        send=".ds-button--primary.ds-button--circle",
     ),
     "web-qwen": Provider(
         "web-qwen",
@@ -80,6 +95,7 @@ PROVIDERS = {
         ".chat-user-message",
         'button[aria-label="Regenerate"]',
         "/c/",
+        send='button[aria-label="Send"]',
     ),
     "web-chatgpt": Provider(
         "web-chatgpt",
@@ -91,6 +107,7 @@ PROVIDERS = {
         '[data-message-author-role="user"], [data-testid="user-message"]',
         'button[aria-label="Copy"], [data-testid="copy-turn-action-button"]',
         "/c/",
+        send='button[aria-label="Send"]',
     ),
 }
 
@@ -100,9 +117,9 @@ STOP_SCRIPT = r"""(() => {
   if (!b) return {stopped:false}; b.click(); return {stopped:true};
 })()"""
 
-DEEPSEEK_SEND = """(() => {
-  const b=document.querySelector('.ds-button--primary.ds-button--circle');
-  if(!b || b.getAttribute('aria-disabled')==='true') return {submitted:false};
+_SEND = """(() => {
+  const b=document.querySelector(__SELECTOR__);
+  if(!b || !b.getClientRects().length || b.disabled || b.getAttribute('aria-disabled')==='true' || b.classList.contains('ds-button--disabled') || b.classList.contains('disabled')) return {submitted:false};
   b.click(); return {submitted:true};
 })()"""
 
@@ -115,6 +132,18 @@ _OBSERVER = r"""(() => {
   const busy=controls.some(e=>visible(e)&&/^stop(?: response| generating| streaming)?$/i.test(e.getAttribute('aria-label')||e.innerText.trim()))
     || !!document.querySelector('.qwen-chat-status-card-title-animate');
   function completed(root){
+    // Qwen can omit the answer toolbar. Its rendered message still carries
+    // explicit completion and phase state. Bind that state to this exact
+    // answer; a finished thinking phase alone never permits execution.
+    if(cfg.provider==='web-qwen'){
+      const key=Object.keys(root).find(k=>k.startsWith('__reactFiber'));
+      for(let f=key&&root[key],depth=0;f&&depth<10;f=f.return,depth++){
+        const m=f.memoizedProps?.message;
+        if(m?.role==='assistant' && 'chat-response-message-'+m.id===root.id
+          && m.done===true && Array.isArray(m.content_list)
+          && m.content_list.some(p=>p.phase==='answer'&&p.status==='finished'))return true;
+      }
+    }
     for(let e=root;e&&e!==document.body;e=e.parentElement){
       if(e!==root && roots.filter(r=>e.contains(r)).length>1) break;
       if(Array.from(e.querySelectorAll(cfg.done)).some(visible)) return true;
@@ -173,7 +202,7 @@ _OBSERVER = r"""(() => {
     const parsed=answer?markdown(answer):{text:'',valid:false};
     return {id:identity(root,index),markdown:parsed.text,complete:!!answer&&parsed.valid&&completed(root)&&(!busy||index<roots.length-1)};
   });
-  const users=Array.from(document.querySelectorAll(cfg.users)).map((e,i)=>({id:e.getAttribute('data-message-id')||e.id||'user-'+i,text:e.innerText.trim()}));
+  const users=Array.from(document.querySelectorAll(cfg.users)).map((e,i)=>({id:e.getAttribute('data-message-id')||e.id||(cfg.users==='user-query .query-text'?'query-':'user-')+i,text:e.innerText.trim()}));
   const dialog=Array.from(document.querySelectorAll('[role=dialog],dialog')).find(e=>visible(e)&&/confirm your age|sign in|log in|verify|captcha/i.test(e.innerText));
   return {url:location.href,title:document.title,messages,users,busy,intervention:dialog?dialog.innerText.slice(0,300):null};
 })()"""

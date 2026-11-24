@@ -6,7 +6,7 @@ import asyncio
 from typing import Any
 
 from ..chrome import CallError, Chrome
-from .providers import DEEPSEEK_SEND, PROVIDERS, STOP_SCRIPT
+from .providers import PROVIDERS, STOP_SCRIPT
 
 
 class WebBridges:
@@ -77,24 +77,20 @@ class BrowserBridge:
             "open",
             "",
             url,
-            f"Open this session's {self.provider.label} conversation. Enable Scripts for the shared tab.",
+            f"Start this session's {self.provider.label} conversation.",
         )
         self.request_id = req["id"]
-        self.session.record_card(
-            {
-                "kind": "chrome_request",
-                "request_id": req["id"],
-                "req_kind": "open",
-                "match": "",
-                "url": url,
-                "why": req["why"],
-            }
-        )
         try:
+            # Selecting this harness authorizes its own new provider tab.
+            # Use the existing extension protocol so the grant remains owned
+            # by Chrome and can still be paused or revoked by the person.
+            await self.chrome.answer(req["id"], True)
             tab = await self.waiting
+            claimed = self._claim(tab)
+            await self.chrome.scripts(claimed["tab"], True)
+            return claimed
         finally:
             self.waiting = None
-        return self._claim(tab)
 
     def _claim(self, tab: dict) -> dict:
         name = tab["name"]
@@ -186,15 +182,15 @@ class BrowserBridge:
                 {
                     "target": self.provider.input,
                     "text": args["text"],
-                    "submit": self.provider.name != "web-deepseek",
+                    "submit": self.provider.send is None,
                 },
             )
-            if self.provider.name == "web-deepseek":
-                submitted = await self._eval(DEEPSEEK_SEND)
+            if script := self.provider.send_script:
+                submitted = await self._eval(script)
                 if submitted.get("submitted") is not True:
                     raise CallError(
                         "submission_refused",
-                        "DeepSeek did not enable its Send button; check the draft in Chrome",
+                        f"{self.provider.label} did not enable its Send button; check the draft in Chrome",
                     )
             self.chrome.acted(self.tab, self.session.handle, "web harness submit")
             return {"submitted": True}
