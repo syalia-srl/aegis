@@ -96,6 +96,7 @@ class Agent:
     guard: Guard | None = None
     # Its spending caps (budgets.py, #1068); (): no cap.
     budget: tuple[budgets.Cap, ...] = ()
+    description: str = ""
 
     @property
     def enabled(self) -> bool:
@@ -112,6 +113,7 @@ class Agent:
             "enabled": self.enabled,
             "error": self.error,
             "has_priming": bool(self.priming),
+            **({"description": self.description} if self.description else {}),
             **({"tools": self.tools} if self.tools else {}),
         }
 
@@ -169,6 +171,7 @@ def _agent(name: str, raw: Any) -> Agent:
         name=str(name),
         **values,
         priming=str(priming) if priming else None,
+        description=str(d.get("description") or "").strip(),
         keep_harness_tools=keep,
         exit=str(d.get("exit") or ""),
         mcp=tuple(mcp) if mcp_ok and mcp else (),

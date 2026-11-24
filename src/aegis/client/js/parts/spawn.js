@@ -402,7 +402,7 @@ export class SpawnPart {
     }));
     this.agentPick.options = this.roster.agents.map((a) => {
       const why = a.error || (a.enabled ? "" : `${a.harness} is not supported yet`);
-      return { value: a.name, label: why ? `${a.name} (${why})` : a.name, disabled: !a.enabled };
+      return { value: a.name, label: why ? `${a.name} (${why})` : a.name, disabled: !a.enabled, meta: a.description || "" };
     });
     const usable = this.roster.agents.filter((a) => a.enabled).map((a) => a.name);
     const keep = this.agentPick.dataset.picked;

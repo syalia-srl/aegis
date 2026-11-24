@@ -35,7 +35,7 @@ export async function catalogFor(mount, key) {
   const agents = (roster?.agents || [])
     .filter((a) => a.enabled)
     .sort((a, b) => (b.name === roster.default) - (a.name === roster.default))
-    .map((a) => ({ v: a.name, model: a.model, doc: `${a.harness} · ${a.model}`, source: "" }));
+    .map((a) => ({ v: a.name, model: a.model, doc: [a.description, `${a.harness} · ${a.model}`].filter(Boolean).join(" · "), source: "" }));
   return { ...cat, agents, tutorials: pages.filter((p) => p.kind === "tutorial") };
 }
 

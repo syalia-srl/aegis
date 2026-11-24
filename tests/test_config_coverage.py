@@ -30,10 +30,10 @@ FULL = """\
 default_agent: opus
 exit_via: far
 agents:
-  opus: {exit: "off", harness: claude-code, model: opus, effort: high, permission: full, priming: Be brief., keep_harness_tools: [Agent], mcp: [notes, phone], harness_tools: false, isolated: true, primer: false, notices: false, tools: {deny: [workflows], queues: [general], agents: [quick]}, quota: {claude: {weekly_all: {used: 80, projected: 90, stop: 97}}, on_closed: refuse, advice: File it.}, budget: [{usd: 2, per: session}, {tokens: 2000000, per: 24h}]}
+  opus: {exit: "off", harness: claude-code, model: opus, effort: high, permission: full, priming: Be brief., description: Complex implementation., keep_harness_tools: [Agent], mcp: [notes, phone], harness_tools: false, isolated: true, primer: false, notices: false, tools: {deny: [workflows], queues: [general], agents: [quick]}, quota: {claude: {weekly_all: {used: 80, projected: 90, stop: 97}}, on_closed: refuse, advice: File it.}, budget: [{usd: 2, per: session}, {tokens: 2000000, per: 24h}]}
   quick: {harness: claude-code, models: [haiku, sonnet], effort: low, permission: read}
 queues:
-  general: {agent: opus, priority: 3, quiet: false, quota: {opencode-go: {weekly: pace}, on_closed: reject}, max_pending: 50}
+  general: {agent: opus, description: General work., priority: 3, quiet: false, quota: {opencode-go: {weekly: pace}, on_closed: reject}, max_pending: 50}
 max_workers: 7
 model_ranking: false
 recap: {agent: quick}

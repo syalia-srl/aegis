@@ -1549,3 +1549,37 @@ def test_a_one_model_agent_has_no_cascade(tmp_path):
         }
     )
     assert resolve(agents, None, "o", {}, tmp_path).cascade == ()
+
+
+async def test_descriptions_are_discovered_through_real_mcp_calls(world):
+    from aegis.scopes import Scope
+    from dataclasses import replace
+
+    path = world.root / ".aegis.yaml"
+    path.write_text(
+        CONFIG.replace(
+            "priming: You review.", "priming: You review., description: Review changes."
+        ).replace(
+            "general: {agent: opus}",
+            "general: {agent: opus, description: General implementation.}",
+        )
+    )
+    a = await world.spawn()
+    said = await turn(a, mcp("agents_list"))
+    agents = json.loads(said.removeprefix("mcp ok: "))["agents"]
+    assert (
+        next(x for x in agents if x["name"] == "reviewer")["description"]
+        == "Review changes."
+    )
+    said = await turn(a, mcp("queues_list"))
+    queues = json.loads(said.removeprefix("mcp ok: "))
+    assert next(x for x in queues if x["name"] == "general") == {
+        "name": "general",
+        "agent": "opus",
+        "priority": 1,
+        "description": "General implementation.",
+    }
+    assert "mention" not in {x["name"] for x in queues}
+    a.spec = replace(a.spec, scope=Scope(queues=frozenset({"general"})))
+    said = await turn(a, mcp("queues_list"))
+    assert [x["name"] for x in json.loads(said.removeprefix("mcp ok: "))] == ["general"]
