@@ -80,7 +80,7 @@ HOME = os.environ.get("FAKE_CODEX_HOME") or "/tmp/fake-codex-home"
 LOG = os.environ.get("FAKE_CODEX_LOG")
 VERSION = "0.162.1"
 SCRIPTS = ("busy", "stream", "fail", "bash", "patch", "mcp", "spawn", "big", "ask",
-           "recall", "argv", "env", "body", "exit")  # fmt: skip
+           "recall", "argv", "env", "body", "exit", "sh")  # fmt: skip
 OUT = threading.Lock()
 STATE: dict = {"thread": None, "turn": None, "steer": [], "stop": threading.Event(),
                "lease": None, "body": None, "model": "", "provider": ""}  # fmt: skip
@@ -302,6 +302,24 @@ def run(t: Turn, name: str, args: str, text: str) -> None:
     elif name == "fail":
         t.shell("false", "boom", code=1)
         t.say("it failed")
+    elif name == "sh":
+        import fnmatch
+
+        env = dict(os.environ)
+        excluded = ["*KEY*", "*SECRET*", "*TOKEN*"]
+        for arg in sys.argv:
+            if arg.startswith("shell_environment_policy.exclude="):
+                excluded += json.loads(arg.split("=", 1)[1])
+        env = {
+            k: v
+            for k, v in env.items()
+            if not any(fnmatch.fnmatchcase(k.upper(), pat.upper()) for pat in excluded)
+        }
+        result = subprocess.run(
+            args, shell=True, env=env, capture_output=True, text=True
+        )
+        t.shell(args, result.stdout + result.stderr, result.returncode)
+        t.say("ran it")
     elif name == "bash":
         cmd, _, out = args.partition(" => ")
         t.shell(cmd, out)
@@ -384,6 +402,15 @@ def handle(msg: dict) -> dict | None:
         raise ValueError("the fake refuses to resume")
     if method == "thread/resume":
         return open_thread(p, p["threadId"])
+    if method == "account/rateLimits/read":
+        if os.environ.get("FAKE_CODEX_QUOTA_ERROR"):
+            raise ValueError(os.environ["FAKE_CODEX_QUOTA_ERROR"])
+        return json.loads(
+            os.environ.get(
+                "FAKE_CODEX_LIMITS",
+                '{"rateLimits":{"primary":{"usedPercent":12,"windowDurationMins":10080,"resetsAt":1800000000}}}',
+            )
+        )
     if method == "model/list":
         return {"data": [
             {"id": "fake-pro", "displayName": "Fake Pro", "hidden": False,

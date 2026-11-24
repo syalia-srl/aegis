@@ -66,7 +66,7 @@ def test_a_pool_the_policy_does_not_name_is_closed():
     assert decide(LINES, "codex", snap(), NOW).state == "closed"
 
 
-def test_codex_has_no_gauge_and_opens_only_when_named():
+def test_codex_explicit_open_and_closed_modes():
     assert decide({"codex": {"mode": "open"}}, "codex", snap(), NOW).state == "open"
     assert decide({"codex": {"mode": "closed"}}, "codex", snap(), NOW).state == "closed"
 
@@ -111,7 +111,7 @@ def test_the_why_names_the_window_and_the_line():
         ({}, True),
         ({"claude": {"mode": "open"}}, True),
         ({"codex": {"mode": "open"}}, True),
-        ({"codex": {"mode": "lines", "lines": {}}}, False),
+        ({"codex": {"mode": "lines", "lines": {}}}, True),
         ({"claude": {"mode": "lines"}}, False),
         (
             {
@@ -277,3 +277,29 @@ def test_pace_closes_above_100_and_a_map_projected_at_its_line(line, projected, 
     quota = {"claude": {"weekly_all": line}}
     g = lines_gate(quota, "claude", snap(w("weekly_all", 40, projected)), NOW)
     assert g.state == state
+
+
+def test_codex_weekly_quota_lines_control_the_gate_and_are_offered_once():
+    from aegis.quota_gate import pools_wire
+
+    policy = {
+        "codex": {"mode": "lines", "lines": {"weekly_all": {"launch": 50, "stop": 90}}}
+    }
+    assert validate(policy) == []
+    for used, state in ((12, "open"), (60, "closed"), (95, "stopped")):
+        assert (
+            decide(
+                policy, "codex", snap(w("weekly_all", used), name="codex"), NOW
+            ).state
+            == state
+        )
+    (codex,) = [p for p in pools_wire() if p["name"] == "codex"]
+    assert {w["kind"] for w in codex["windows"]} == {
+        "session",
+        "weekly_all",
+        "primary",
+        "secondary",
+    }
+    assert all(
+        w["pace"] for w in codex["windows"] if w["kind"] in ("session", "weekly_all")
+    )

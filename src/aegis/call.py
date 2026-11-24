@@ -16,11 +16,15 @@ import sys
 import httpx
 import typer
 
+from .call_auth import AUTH_VAR, read_auth
 from .harness import HEADER, SHELL_HEADER, TOKEN_VAR, URL_VAR
 
 
 def _post(method: str, params: dict) -> dict:
     url, token = os.environ.get(URL_VAR), os.environ.get(TOKEN_VAR)
+    if not token and (path := os.environ.get(AUTH_VAR)):
+        if auth := read_auth(path):
+            url, token = auth
     if not url or not token:
         typer.echo(
             f"not inside an aegis session: {URL_VAR} or {TOKEN_VAR} unset", err=True

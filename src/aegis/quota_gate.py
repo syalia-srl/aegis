@@ -1,7 +1,7 @@
 """Whether a token may start a harness now, from its policy and the pool gauges.
 
 A policy maps a pool (a quota provider's name: ``claude``, ``opencode-go``,
-``cursor``, or ``codex``, which has no gauge) to a mode. ``closed`` starts nothing there;
+``cursor`` or ``codex``) to a mode. ``closed`` starts nothing there;
 ``open`` starts anything; ``lines`` compares each listed window of the pool's
 reading with a launch line and a stop line. Below every launch line the token
 is open. At or above any stop line it is stopped: aegis interrupts its turns
@@ -21,8 +21,7 @@ latest of their resets: the time it opens at the latest.
 
 A pool the policy does not name is closed, and so is a session that draws on
 an account aegis reads no gauge for (OpenCode on a provider other than Go).
-Codex has no gauge, so its policy is only ever closed or open. No policy at
-all, the admin's case, is open. A reading older than STALE_S closes the gate
+No policy at all, the admin's case, is open. A reading older than STALE_S closes the gate
 and never stops anything: a failed poll must not interrupt work. Pure: the
 caller passes the snapshot ``Quota.snapshot()`` returns and the time.
 """
@@ -37,7 +36,7 @@ from .quota import PROVIDERS
 
 STALE_S = 900.0
 # Pool name -> the harness that draws on it, and the windows a line may name.
-POOLS = {p.name: p.harness for p in PROVIDERS} | {"codex": "codex"}
+POOLS = {p.name: p.harness for p in PROVIDERS}
 KINDS = {p.name: tuple(k for k, _ in p.bar_windows) for p in PROVIDERS}
 MODES = ("closed", "open", "lines")
 
@@ -55,7 +54,7 @@ def pools_wire() -> list[dict]:
             ],
         }
         for p in PROVIDERS
-    ] + [{"name": "codex", "label": "Codex", "windows": []}]
+    ]
 
 
 @dataclass(frozen=True)

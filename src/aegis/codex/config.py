@@ -7,6 +7,8 @@ Measured on codex-cli 0.162.1 (spec ``2026-10-09-aegis-2-codex-harness-design.md
 - The token travels in ``AEGIS_SESSION_TOKEN``, named by ``env_http_headers``,
   because argv is readable by every user through ``ps``. Codex's default shell
   policy hands that variable to the model's shell, so it is excluded there.
+  ``AEGIS_CALL_AUTH`` instead names a private, process-lived credentials file
+  for the shell CLI (``call_auth.py``).
 - Under ``approval_policy="never"`` an MCP call fails unless its server says
   ``default_tools_approval_mode="approve"``.
 - ``-c`` sets one key at a time and merges with the person's file, so a
@@ -34,6 +36,7 @@ import os
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
+from ..call_auth import AUTH_VAR
 from ..claude.control import Catalog, Model, _doc
 from ..mcp_servers import ref_name
 
@@ -171,7 +174,7 @@ def child_env(
     mcp: tuple[str, str] | None,
     servers: Sequence[McpServer] = (),
 ) -> dict[str, str]:
-    env = {k: v for k, v in base.items() if k != TOKEN_ENV}
+    env = {k: v for k, v in base.items() if k not in (TOKEN_ENV, AUTH_VAR)}
     if mcp is not None:
         env[TOKEN_ENV] = mcp[1]
     for s in servers:
