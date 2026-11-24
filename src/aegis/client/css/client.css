@@ -556,6 +556,8 @@
 .aegis .row.think summary{cursor:pointer}
 .aegis .row.think .md{font-family:var(--font-prose);font-size:14px;color:var(--muted);margin-top:4px}
 .aegis .row.sys{color:var(--faint);font-size:11.5px}
+.aegis .row.web-connection .body{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.aegis .row.web-connection.needs_you .g{color:var(--warn)}
 /* the prose view: a run of work as one line, on the run's first row (js/transcript.js) */
 .aegis #entries.prose-view .row[data-fold=in]:not(.run-open){display:none}
 .aegis #entries.prose-view .row[data-fold=head]:not(.run-open)>:not(.runline){display:none}

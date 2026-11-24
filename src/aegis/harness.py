@@ -219,4 +219,10 @@ def harness_for(
         from .pi.harness import Pi
 
         return Pi(pi_bin)
+    from .web_agent.providers import PROVIDERS
+
+    if provider := PROVIDERS.get(name):
+        from .web_agent.harness import WebHarness
+
+        return WebHarness(provider)
     raise ValueError(f"no harness named {name!r}")

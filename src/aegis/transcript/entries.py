@@ -50,6 +50,7 @@ from ..codex.stream import Parser as CodexParser
 from ..cursor.stream import Parser as CursorParser
 from ..pi.stream import Parser as PiParser
 from ..opencode.stream import Parser as OpenCodeParser
+from ..web_agent.stream import Parser as WebParser
 from . import describe as d
 from .plan_clock import replan, switch
 from .wire import wire
@@ -63,6 +64,7 @@ PARSERS: dict[str, Any] = {
     "codex": CodexParser,
     "cursor": CursorParser,
     "pi": PiParser,
+    "web": WebParser,
 }
 
 
@@ -1131,6 +1133,18 @@ class Fold:
                     title=str(rec.get("caption") or "") if sent else "secret requested",
                     summary=status,
                     detail=det,
+                )
+            )
+        if kind == "web_connection":
+            return self._upsert(
+                _entry(
+                    "web-connection",
+                    "web_connection",
+                    str(rec.get("state") or "waiting"),
+                    ts,
+                    "globe",
+                    summary=str(rec.get("text") or ""),
+                    detail={"tab": rec.get("tab"), "url": rec.get("url")},
                 )
             )
         if kind == "chrome_request":

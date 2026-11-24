@@ -169,9 +169,10 @@ async def test_legacy_state_is_an_error_and_the_doctor_writes_nothing(
 async def test_detect_finds_both_fakes_with_their_models(
     tmp_path, fake_claude, fake_opencode
 ):
-    claude, opencode, codex, cursor, _pi = await detect(
+    claude, opencode, codex, cursor, _pi, *web = await detect(
         tmp_path, bins(fake_claude, fake_opencode)
     )
+    assert len(web) == 4 and all(f.wire()["builtin"] for f in web)
     assert codex.error == "codex-not-installed is not on PATH"
     assert cursor.error == "cursor-not-installed is not on PATH"
     assert (claude.harness, claude.version, claude.error) == (
@@ -186,7 +187,7 @@ async def test_detect_finds_both_fakes_with_their_models(
 async def test_detect_probes_an_installed_cursor(
     tmp_path, fake_claude, fake_opencode, fake_cursor
 ):
-    _, _, _, cursor, _ = await detect(
+    _, _, _, cursor, *_ = await detect(
         tmp_path, bins(fake_claude, fake_opencode, cursor=fake_cursor)
     )
     assert cursor.error is None and cursor.bin == fake_cursor

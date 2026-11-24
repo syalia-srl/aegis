@@ -327,6 +327,12 @@ async function ribbon(tabId, extra = {}) {
 }
 
 const DRIVE = {
+  async focus(tabId) {
+    const tab = await chrome.tabs.get(tabId);
+    await chrome.tabs.update(tabId, { active: true });
+    await chrome.windows.update(tab.windowId, { focused: true });
+    return { focused: true };
+  },
   async snapshot(tabId) {
     // The tree of the document the tab shows now: a tab whose first grant
     // started on a blank page keeps the blank page's tree otherwise.
@@ -470,9 +476,9 @@ async function onCall(msg) {
     if (!grant) throw new Fail("not_granted", `chrome:${msg.tab} is not granted to you`);
     const run = DRIVE[msg.op];
     if (!run) throw new Fail("not_supported", `${msg.op} does not work on the person's tabs yet`);
-    if (all[tabId].holder === "person" && !["snapshot", "screenshot"].includes(msg.op))
+    if (all[tabId].holder === "person" && !["snapshot", "screenshot", "focus"].includes(msg.op))
       throw new Fail("person_has_control", `the person holds chrome:${msg.tab}`);
-    await attach(+tabId);
+    if (msg.op !== "focus") await attach(+tabId);
     reply({ ok: true, value: await run(+tabId, msg.args || {}, grant.handle) });
   } catch (e) {
     reply({ ok: false, code: e.code || "call_failed", message: String(e.message || e) });
