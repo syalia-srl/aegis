@@ -12,6 +12,10 @@ your own signed-in Chrome tabs. The common driver reads completed responses
 through the aegis extension and returns local command results to the same
 conversation. There is no provider API key or additional OAuth flow.
 
+Gemini and ChatGPT have completed end-to-end validation through Chrome, Bash,
+local aegis tools and the returned response. DeepSeek and Qwen remain experimental;
+their current adapters have not completed the same unattended validation.
+
 ## Start a session
 
 Pair your browser in Settings → Chrome first (chrome). In a new session,
@@ -43,7 +47,7 @@ The four names are web-gemini, web-deepseek, web-qwen and web-chatgpt. For examp
 ```yaml
 agents:
   research:
-    harness: web-qwen
+    harness: web-gemini
     model: web
     effort: high
     permission: full
