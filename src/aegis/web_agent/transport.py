@@ -191,6 +191,10 @@ class BrowserBridge:
                     },
                 )
                 if script := self.provider.send_ready_script:
+                    if self.provider.name == "web-qwen":
+                        # Qwen suppresses Enter after compositionend. Background
+                        # tabs can defer its 100 ms release timer to one second.
+                        await asyncio.sleep(1.1)
                     last_rect = None
                     for attempt in range(21):
                         self._check(args)
