@@ -55,9 +55,11 @@ estimated.
 
 ## Local commands
 
-The primer combines the normal aegis instructions, ancestor AGENTS.md and
-CLAUDE.md files and a short bridge brief. Its acknowledgement cannot execute
-commands. A completed response requests one local command with a top-level
+Web sessions receive a compact dedicated bridge brief: working directory,
+permissions, Bash execution and tool discovery. The task is sent separately.
+The normal coding-agent primer and ancestor AGENTS.md and CLAUDE.md files are
+not injected automatically; relevant context is loaded on demand. The brief’s
+acknowledgement cannot execute commands. A completed response requests one local command with a top-level
 Bash fence whose first nonblank line is exactly the execution marker:
 
 ~~~~markdown

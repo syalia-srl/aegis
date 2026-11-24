@@ -547,6 +547,11 @@ a new task is submitted, the driver reconciles completed manual responses and
 their marked commands. Changed or missing observed history stops execution. The composer chooses the provider; actual models and
 modes stay in Chrome. The driver reports no guessed model identity, usage or cost.
 
+Web priming contains only the dedicated bridge brief, working directory and
+permission. It omits the normal coding-agent system prompt and automatic
+ancestor instruction loading; the task arrives separately and context is
+discovered on demand.
+
 Only one completed top-level Bash fence with the exact first nonblank line
 `# aegis: execute` requests local execution. The primer acknowledgement never
 executes. Read/write and disabled harness tools refuse Bash; auto/full allow it.
