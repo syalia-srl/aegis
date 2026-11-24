@@ -63,6 +63,14 @@ Extra MCP servers are unsupported; the local aegis command provides aegis tools.
 Actual provider model identity, token usage and cost are unavailable and are not
 estimated.
 
+## Simple conversations
+
+Web agents answer messages without operational notices, automatic knowledge
+hints or reminders about CPU, memory, disk, plans and idle time. This also applies
+to resumed sessions. A normal final reply ends the turn automatically: no
+`turn_end` call is needed. Explicit Aegis calls, including queues and their
+result messages, remain available.
+
 ## Local commands
 
 Web sessions receive a compact dedicated bridge brief: working directory,
