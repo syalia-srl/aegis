@@ -77,6 +77,11 @@ AEGIS: dict[str, Command] = {
             "carrying what it waits on; alone, the configured handoff_at",
         ),
         Command("restart", "", "A fresh process on the same conversation"),
+        Command(
+            "gc",
+            "[days]",
+            "Review rebuildable repository files and approve a cleanup selection",
+        ),
         Command("btw", "<question>", "Ask a side question; the agent never sees it"),
         Command(
             "feedback",

@@ -38,6 +38,8 @@ class Ops:
     @property
     def fs(self) -> _fs: ...
     @property
+    def gc(self) -> _gc: ...
+    @property
     def group(self) -> _group: ...
     @property
     def harness(self) -> _harness: ...
@@ -411,6 +413,23 @@ class _fs:
         """A ticket URL for one file, such as an image a Markdown file links to."""
     async def write(self, *, path: str, content: str, base: str | None) -> Any:
         """Save a text file, only if it still has the hash ``base``; a null base creates it and refuses a file that exists."""
+
+class _gc:
+    async def decide(
+        self,
+        *,
+        log_id: str | None = ...,
+        id: str,
+        approve: bool,
+        paths: builtins.list[str] = ...,
+    ) -> Any:
+        """gc.decide"""
+    async def propose(
+        self, *, log_id: str | None = ..., path: str | None = ..., days: int = ...
+    ) -> Any:
+        """Inspect rebuildable files in inactive repositories and show a selection card in your transcript. This deletes nothing. Only the person's click can approve the displayed selection; you cannot approve it through MCP. Return includes the inventory and exclusions. End your turn; approval or cancellation wakes you with > from gc:<id>."""
+    async def read(self, *, log_id: str | None = ..., id: str) -> Any:
+        """Read your cleanup proposal, its inventory and the person's outcome. Does not change the selection or approve deletion."""
 
 class _group:
     async def rename(self, *, group: str, name: str) -> Any:

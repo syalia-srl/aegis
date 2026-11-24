@@ -420,20 +420,98 @@ def gc(
     root: Path | None = typer.Option(
         None, help="Config root; default: the nearest ancestor holding .aegis.yaml."
     ),
-    days: int = typer.Option(
-        7, min=1, help="Reclaim sessions archived longer ago than this."
+    days: int | None = typer.Option(
+        None,
+        min=1,
+        help="Minimum inactivity: 7 days for archived sessions, 30 for repositories.",
     ),
     apply: bool = typer.Option(
-        False, "--apply", help="Delete and pack; without it, only list."
+        False,
+        "--apply",
+        help="Apply session gc, or ask for an interactive repository selection and confirmation.",
+    ),
+    repos: bool = typer.Option(
+        False,
+        "--repos",
+        help="Inspect rebuildable repository artifacts instead of archived session data.",
+    ),
+    path: Path | None = typer.Option(
+        None, help="Repository or directory of repositories; requires --repos."
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Read-only structured repository inventory; requires --repos.",
     ),
 ) -> None:
-    """Pack old sessions' transcripts and delete their files, uploads and browsers."""
+    """Inspect session data or repository artifacts; repository deletion needs user approval."""
     from .gc import run
     from .roots import make_roots
 
     roots = make_roots(start=Path.cwd(), root=root)
-    for line in run(roots.state_root, days=days, apply=apply).lines():
-        typer.echo(line)
+    if not repos:
+        if path is not None or json_output:
+            raise typer.BadParameter("--path and --json require --repos")
+        for line in run(roots.state_root, days=days or 7, apply=apply).lines():
+            typer.echo(line)
+        return
+    import json
+    import sys
+
+    from . import repo_gc
+
+    if apply and (json_output or not sys.stdin.isatty()):
+        raise typer.BadParameter(
+            "repository deletion requires an interactive user selection and confirmation; use /gc in the UI for agent proposals"
+        )
+    scan_root = (path or roots.config_root).resolve()
+    if not scan_root.is_relative_to(roots.config_root):
+        raise typer.BadParameter("--path must be under the config root")
+    try:
+        inventory = repo_gc.scan(scan_root, days=days or 30)
+    except (OSError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    if json_output:
+        typer.echo(json.dumps(inventory))
+        return
+    eligible = [x for x in inventory["rows"] if not x.get("reason")]
+    typer.echo("Repository artifacts (read-only proposal):")
+    for i, row in enumerate(eligible, 1):
+        typer.echo(
+            f"{i}. {row['path']}  {row['bytes']} allocated bytes; estimated reclaim {row['reclaimable_bytes']} bytes"
+        )
+        typer.echo(f"   {row['rebuild']}")
+    for row in inventory["rows"]:
+        if row.get("reason"):
+            typer.echo(f"Excluded: {row['path']}: {row['reason']}")
+    typer.echo(
+        f"{len(eligible)} eligible directories, {inventory['free_bytes']} bytes free"
+    )
+    if not apply or not eligible:
+        return
+    answer = typer.prompt(
+        "Select candidate numbers separated by spaces (empty cancels)", default=""
+    )
+    if not answer.strip():
+        return
+    try:
+        indices = [int(x) for x in answer.split()]
+        if len(indices) != len(set(indices)) or any(
+            x < 1 or x > len(eligible) for x in indices
+        ):
+            raise ValueError("invalid candidate selection")
+        selected = [eligible[x - 1]["path"] for x in indices]
+    except ValueError as exc:
+        raise typer.BadParameter(
+            "select candidate numbers from the displayed proposal"
+        ) from exc
+    for name in selected:
+        typer.echo(name)
+    if typer.confirm("Delete exactly these rebuildable directories?", default=False):
+        result = repo_gc.execute(inventory, selected)
+        typer.echo(json.dumps(result, indent=2))
+        if result["errors"]:
+            raise typer.Exit(1)
 
 
 @app.command("import-legacy")

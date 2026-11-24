@@ -15,6 +15,11 @@ commands, such as its /compact, still work. Where both have a command of the
 same name, aegis's takes its place: aegis's /loop runs on the server and
 survives a restart, where the harness's would end with its process.
 
+Repository cleanup: `/gc` (or `/gc 60`) shows a selection and approval card.
+Agents use `gc_propose` and `gc_read`; see [repository cleanup](gc). The CLI's
+`aegis gc --repos` scans the same artifacts; deletion requires an interactive
+selection and confirmation. Existing session gc keeps its separate scope.
+
 ## Slash commands
 
 Type / in a session's box to open the menu of every command, aegis's first;

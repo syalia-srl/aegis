@@ -1198,6 +1198,25 @@ class Fold:
             return self._upsert(
                 {**e, "status": "renewed", "summary": "renewed", "detail": det}
             )
+        if kind == "gc":
+            cid = str(rec["card_id"])
+            prev = self._entries.get(cid)
+            detail = {
+                k: v for k, v in rec.items() if k not in ("kind", "ts", "src", "i")
+            }
+            status = str(rec["status"])
+            return self._upsert(
+                _entry(
+                    cid,
+                    "gc",
+                    status,
+                    prev["ts"] if prev else ts,
+                    d.SYSTEM_GLYPH,
+                    title="Repository cleanup",
+                    summary=status,
+                    detail=detail,
+                )
+            )
         if kind == "sign_in":
             # A harness sign-in card (signin/core.py): each record is the whole
             # card at its current step, upserted by its id.
