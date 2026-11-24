@@ -65,6 +65,12 @@ estimated.
 
 ## Local commands
 
+Web agents answer messages without operational notices, automatic knowledge
+hints or reminders about CPU, memory, disk, plans and idle time. This also applies
+to resumed sessions. A normal final reply ends the turn automatically: no
+`turn_end` call is needed. Explicit Aegis calls, including queues and their
+result messages, remain available.
+
 Web sessions receive a compact dedicated bridge brief: working directory,
 permissions, Bash execution and tool discovery. The task is sent separately.
 The normal coding-agent primer and ancestor AGENTS.md and CLAUDE.md files are

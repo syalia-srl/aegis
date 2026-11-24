@@ -561,6 +561,11 @@ permission. It omits the normal coding-agent system prompt and automatic
 ancestor instruction loading; the task arrives separately and context is
 discovered on demand.
 
+Web sessions always disable automatic notices and knowledge hints, including
+when restoring older sessions. They receive no CPU, memory, disk, plan or idle
+reminders. A final response completes the turn without a `turn_end` call;
+explicit Bash, Aegis tools and queue/monitor replies remain available.
+
 Only one completed top-level Bash fence with the exact first nonblank line
 `# aegis: execute` requests local execution. The primer acknowledgement never
 executes. Read/write and disabled harness tools refuse Bash; auto/full allow it.
