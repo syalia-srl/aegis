@@ -780,13 +780,31 @@ def test_vertical_pointer_drags_keep_group_actions_and_cancel_on_layout_change(
     page.wait_for_function(
         "!document.querySelector('#tablist .tab use[href=\"#g-work\"]')"
     )
+    page.wait_for_function(BAR_JS, arg=[[key, [a, b, c]], [d, []]])
 
     def row(sid):
         return page.locator(f'#tablist [data-id="{sid}"]')
 
     def over(src, target, side):
+        # A session patch can redraw the list between finding a node and
+        # measuring it. Start the native gesture after the rows have settled.
+        page.evaluate("window.dragRows = null")
+        page.wait_for_function("""() => {
+          const rows = [...document.querySelectorAll('#tablist .tab')];
+          const sample = window.dragRows;
+          const now = performance.now();
+          if (!sample || rows.length !== sample.rows.length ||
+              rows.some((row, i) => row !== sample.rows[i])) {
+            window.dragRows = {rows, since: now};
+            return false;
+          }
+          return now - sample.since >= 350;
+        }""")
+        src.wait_for()
+        target.wait_for()
         source_box = src.bounding_box()
         dest = target.bounding_box()
+        assert source_box and dest, "drag source and target must both have a box"
         page.mouse.move(
             source_box["x"] + 15, source_box["y"] + source_box["height"] / 2
         )
