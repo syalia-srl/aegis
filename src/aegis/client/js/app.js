@@ -1875,8 +1875,11 @@ function renderMeta(s) {
   drawReplies(s);
   drawCold(s);
   drawClosing(s);
-  $("chip-model").replaceChildren(factIcon("h", s.harness), s.model);
-  $("chip-model").title = s.model_id || "";
+  const web = s.harness?.startsWith("web-");
+  $("chip-model").replaceChildren(factIcon("h", s.harness), web ? s.harness_label : s.model);
+  $("chip-model").title = web ? app.t("composer.webModel") : s.model_id || "";
+  $("chip-model").classList.toggle("click", !web);
+  $("chip-effort").hidden = web;
   $("chip-effort").replaceChildren(factIcon("e", s.effort), `${s.effort} effort`);
   $("chip-perm").replaceChildren(factIcon("p", s.permission), s.permission);
   const working = s.state === "working";
@@ -2983,6 +2986,7 @@ for (const [id, cmd] of [
 ]) {
   $(id).classList.add("click");
   $(id).addEventListener("click", () => {
+    if (cmd !== "permission" && focused()?.harness?.startsWith("web-")) return;
     // Over a draft, the menu's own filter line, as Alt+/ does, so the draft stays.
     if (input.value && !input.value.startsWith("/")) return menu.openOverlay(`/${cmd} `);
     input.value = `/${cmd} `;

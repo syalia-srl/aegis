@@ -242,6 +242,8 @@ export default {
   "composer.interruptTitle": "Interrumpir (Esc Esc)",
   "composer.send": "Enviar",
   "composer.sendTitle": "Enviar (Enter)",
+  "settings.chromeDriver": "Controlador de Chrome integrado",
+  "composer.webModel": "El modelo y los modos se eligen en Chrome",
   "composer.effort": "esfuerzo {effort}",
   "composer.sending": "enviando cuando terminen los adjuntos…",
   "composer.notConfirmed": "Sin respuesta en 5 s. Envía de nuevo: no llegará dos veces.",
@@ -769,6 +771,7 @@ export default {
 
   "entries.secret.title": "secreto",
   "entries.chrome.title": "Pestaña de tu navegador",
+  "entries.web.open": "Abrir en Chrome",
   "entries.chrome.tab": "pide una pestaña: {match}",
   "entries.chrome.open": "pide abrir {url} en tu navegador",
   "entries.chrome.why": "Por qué: {why}",

@@ -304,7 +304,10 @@ export class ComposerPart {
       n.title = title;
       n.classList.toggle("click", !!this.menu);
     };
-    chip("chip-model", "h", s?.harness, s?.model || "", s?.model_id || "");
+    const web = s?.harness?.startsWith("web-");
+    chip("chip-model", "h", s?.harness, (web ? s.harness_label : s?.model) || "", web ? this.t("composer.webModel") : s?.model_id || "");
+    byId(this.el, "chip-model").classList.toggle("click", !!this.menu && !web);
+    byId(this.el, "chip-effort").hidden = !this.controls || web;
     chip("chip-effort", "e", s?.effort, s ? this.t("composer.effort", { effort: s.effort }) : "");
     chip("chip-perm", "p", s?.permission, s?.permission || "");
   }

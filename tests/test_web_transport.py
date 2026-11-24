@@ -124,3 +124,32 @@ async def test_the_host_binds_web_consent_without_delivering_it_as_a_model_task(
         e["kind"] == "chrome_request" and e["status"] == "granted"
         for e in session.entries()
     )
+
+
+async def test_the_person_can_focus_a_backing_tab_while_holding_it(world):
+    session = await world.spawn()
+    ext = Driven(world.app.chrome, lambda _: {"focused": True})
+    await ext.say(
+        t="grant",
+        log_id=session.log_id,
+        tab={"name": "qwen", "url": "https://chat.qwen.ai/", "title": "Qwen"},
+    )
+    world.app.chrome.tabs["qwen"]["holder"] = "person"
+    result = await world.app.registry.call(
+        "chrome.focus", {"tab": "qwen", "log_id": session.log_id}
+    )
+    assert result == {"focused": True}
+    assert ext.calls[-1]["op"] == "focus"
+    assert ext.calls[-1]["log_id"] == session.log_id
+
+
+async def test_agents_cannot_use_the_persons_focus_action(world):
+    from aegis.ops import Caller, OpError
+
+    session = await world.spawn()
+    with pytest.raises(OpError, match="not_for_agents"):
+        await world.app.registry.call(
+            "chrome.focus",
+            {"tab": "qwen", "log_id": session.log_id},
+            Caller("agent", session.log_id),
+        )

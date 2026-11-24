@@ -44,6 +44,10 @@ class ChromeTab(BaseModel):
     tab: str
 
 
+class ChromeFocus(ChromeTab):
+    log_id: str
+
+
 class ChromeScripts(BaseModel):
     tab: str
     on: bool
@@ -299,6 +303,16 @@ def register_chrome_ops(app: App) -> Chrome:
         if caller.is_agent:
             raise OpError("people_only", "only the person gives a tab back")
         await chrome.hold(p.tab, "agent")
+
+    @r.op("chrome.focus", ChromeFocus, names=(("log_id", "session"),), access="read")
+    async def focus(p: ChromeFocus, caller):
+        """Show a session's granted tab in the person's Chrome window."""
+        if caller.is_agent:
+            raise OpError("people_only", "only the person brings a Chrome tab forward")
+        try:
+            return await chrome.call(p.log_id, p.tab, "focus", {})
+        except CallError as error:
+            raise OpError(error.code, error.message) from error
 
     @r.op("chrome.scripts", ChromeScripts)
     async def scripts(p: ChromeScripts, caller):

@@ -403,7 +403,7 @@ export class SpawnPart {
     const before = Object.fromEntries(PICKS.map((k) => [k, this[k].value]));
     this.harness.options = this.roster.harnesses.map((h) => ({
       value: h.name,
-      label: h.supported ? h.name : `${h.name} (not supported yet)`,
+      label: h.supported ? HARNESS_LABEL[h.name] || h.name : `${h.name} (not supported yet)`,
       disabled: !h.supported,
     }));
     this.agentPick.options = this.roster.agents.map((a) => {
@@ -449,6 +449,11 @@ export class SpawnPart {
   }
 
   fillModels(harness) {
+    const web = harness?.startsWith("web-");
+    this.model.hidden = web;
+    this.effort.hidden = web;
+    if (web) this.model.value = "web";
+    else if (this.model.value === "web") this.model.value = this.current()?.model || "";
     const selector = this.current()?.models;
     const dynamic = selector && !Array.isArray(selector);
     const available = this.spModels.server === this.spServer ? this.spModels.by[harness] || [] : [];
@@ -470,6 +475,7 @@ export class SpawnPart {
     this.agentPick.dataset.picked = a.name;
     this.fillModels(a.harness);
     for (const k of PICKS) this[k].value = a[k];
+    this.fillModels(a.harness);
     this.markDiffs();
   }
 
@@ -887,5 +893,5 @@ export class SpawnPart {
 }
 
 const TIP_MS = 8000;
-const HARNESS_LABEL = { "claude-code": "Claude Code", opencode: "OpenCode", codex: "Codex", cursor: "Cursor Agent" };
+const HARNESS_LABEL = { "claude-code": "Claude Code", opencode: "OpenCode", codex: "Codex", cursor: "Cursor Agent", "web-gemini": "Gemini web", "web-deepseek": "DeepSeek web", "web-qwen": "Qwen web", "web-chatgpt": "ChatGPT web" };
 

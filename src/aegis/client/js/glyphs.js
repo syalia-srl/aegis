@@ -182,6 +182,7 @@ export function iconText(name, text) {
 // (h-claude-code, e-high, p-full); nothing for a value with no symbol, such
 // as a harness a newer linked server knows.
 export function factIcon(family, value) {
+  if (family === "h" && value?.startsWith("web-")) return icon("globe");
   const name = `${family}-${value}`;
   return document.getElementById(`g-${name}`) ? icon(name) : document.createTextNode("");
 }

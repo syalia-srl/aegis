@@ -1975,6 +1975,17 @@ function argsView(text, lang, t = en) {
 }
 
 const RENDERERS = {
+  web_connection(e, opts = {}) {
+    const t = opts.t || en;
+    const body = el("div", "body");
+    body.append(el("span", null, e.summary));
+    if (e.detail?.tab) {
+      const button = withIcon(el("button", "btn"), "open", t("entries.web.open"));
+      button.dataset.webFocus = e.detail.tab;
+      body.append(button);
+    }
+    return row(e, `sys web-connection ${e.status}`, body);
+  },
   user(e, opts = {}) {
     const t = opts.t || en;
     const body = el("div", "body");

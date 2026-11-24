@@ -227,6 +227,8 @@ class Verdict:
         return self.state in OUTSIDE
 
     def headline(self) -> str:
+        if self.state == "builtin":
+            return f"{self.label} uses the browser driver bundled with aegis {self.version}."
         r = self.range.text()
         if self.state in ("newer", "older"):
             text = (
@@ -316,5 +318,18 @@ def judge(
 
 
 async def check(harness: Harness, accepted: dict[str, list[str]]) -> Verdict:
+    if harness.src == "web":
+        from importlib.metadata import version
+
+        current = version("aegis-harness")
+        r = Range(
+            harness.name,
+            "aegis-harness",
+            _ints(current),
+            _ints(current),
+            current,
+            current,
+        )
+        return Verdict(harness.name, harness.label, "builtin", current, None, r, "", ())
     raw, path = await read_version(harness.bin)
     return judge(harness.name, harness.label, raw, path, accepted)

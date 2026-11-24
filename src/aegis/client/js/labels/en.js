@@ -241,6 +241,8 @@ export default {
   "composer.interruptTitle": "Interrupt (Esc Esc)",
   "composer.send": "Send",
   "composer.sendTitle": "Send (Enter)",
+  "settings.chromeDriver": "Built-in Chrome driver",
+  "composer.webModel": "Model and modes are selected in Chrome",
   "composer.effort": "{effort} effort",
   "composer.sending": "sending when the attachments finish…",
   "composer.notConfirmed": "No answer in 5 s. Send again: it will not arrive twice.",
@@ -768,6 +770,7 @@ export default {
 
   "entries.secret.title": "secret",
   "entries.chrome.title": "Tab of your browser",
+  "entries.web.open": "Open in Chrome",
   "entries.chrome.tab": "asks for a tab: {match}",
   "entries.chrome.open": "asks to open {url} in your browser",
   "entries.chrome.why": "Why: {why}",
