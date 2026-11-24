@@ -156,6 +156,13 @@ export class HeaderPart {
       meta: (key) => this.mount.state.sessions.get(key),
       card: (m) => this.act.card?.(m),
       items: (key) => this.act.menu?.(key),
+      place: (box, row) => {
+        // In the left list, a card below its row would cover the next rows.
+        const left = this.vertical ? this.list.getBoundingClientRect().right + 6 : row.left;
+        const top = this.vertical ? Math.max(8, Math.min(row.top, innerHeight - box.offsetHeight - 8)) : row.bottom + 6;
+        box.style.left = `${Math.max(8, Math.min(left, innerWidth - box.offsetWidth - 8))}px`;
+        box.style.top = `${top}px`;
+      },
     });
     attachMenu(
       this.list,

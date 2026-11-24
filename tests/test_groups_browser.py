@@ -785,6 +785,12 @@ def test_vertical_pointer_drags_keep_group_actions_and_cancel_on_layout_change(
     def row(sid):
         return page.locator(f'#tablist [data-id="{sid}"]')
 
+    row(a).hover()
+    hover_card = page.locator(".tabcard:not([hidden])")
+    hover_card.wait_for()
+    tablist_box = page.locator("#tablist").bounding_box()
+    assert hover_card.bounding_box()["x"] >= tablist_box["x"] + tablist_box["width"]
+
     def over(src, target, side):
         # A session patch can redraw the list between finding a node and
         # measuring it. Start the native gesture after the rows have settled.
