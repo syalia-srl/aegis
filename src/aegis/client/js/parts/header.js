@@ -38,7 +38,7 @@ const HEADER_HTML = `
 <div class="servers"><span class="dot ghost" id="conn-dot"></span><span id="conn-text" data-t="header.connecting"></span><span class="ver-top" id="ver-top" hidden></span></div>
 <button class="menu-fleet" id="menu-fleet" data-t-title="header.fleetTitle" data-t-aria="header.fleet"></button>
 <button class="keys-btn set-btn sch-btn" id="schedules-btn" data-t-title="header.schedulesTitle" data-t-aria="header.schedules"><span class="lbl" data-t="header.schedules"></span><span class="n" id="schedules-n"></span></button>
-<button class="keys-btn set-btn" id="models-btn" title="Models" aria-label="Models">Models</button>
+<button class="keys-btn set-btn" id="models-btn" title="Models" aria-label="Models"><span class="lbl">Models</span></button>
 <button class="keys-btn set-btn" id="settings-btn" data-t-title="header.settingsTitle" data-t-aria="header.settings"><span class="lbl" data-t="header.settings"></span></button>
 <button class="jr-btn" id="files-btn" data-t-title="header.filesTitle" data-t-aria="header.files"></button>
 <button class="jr-btn" id="journal-btn" data-t-title="header.journalTitle" data-t-aria="header.journal"></button>
@@ -86,6 +86,7 @@ export class HeaderPart {
     this.connText = n("conn-text");
     this.menuFleet = n("menu-fleet");
     this.schedulesBtn = n("schedules-btn");
+    this.modelsBtn = n("models-btn");
     this.schedulesN = n("schedules-n");
     this.settingsBtn = n("settings-btn");
     this.filesBtn = n("files-btn");
@@ -202,6 +203,7 @@ export class HeaderPart {
     this.menuFleet.append(icon("fleet"));
     this.bell.append(icon("bell"));
     this.settingsBtn.prepend(icon("gear"));
+    this.modelsBtn.prepend(icon("models"));
     this.journalBtn.append(icon("book"));
     this.knowledgeBtn.append(icon("knowledge"));
     this.usageBtn.append(icon("usage"));
