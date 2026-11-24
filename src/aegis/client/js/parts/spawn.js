@@ -376,6 +376,10 @@ export class SpawnPart {
   }
 
   async fetchAgents() {
+    const generation = this.rosterGeneration = (this.rosterGeneration || 0) + 1;
+    this.rosterLoading = true;
+    this.go.disabled = true;
+    const server = this.spServer;
     this.mount.call("term.profiles", {}, this.spServer).then(
       (list) => this.drawProfiles(list, this.spServer),
       () => this.drawProfiles([], this.spServer), // a server without terminals
@@ -387,7 +391,9 @@ export class SpawnPart {
     // overrides from values an edit to .aegis.yaml has since changed.
     const was = this.current();
     try {
-      this.roster = await this.mount.call("agents.list", {}, this.spServer);
+      const roster = await this.mount.call("agents.list", {}, server);
+      if (generation !== this.rosterGeneration || server !== this.spServer) return;
+      this.roster = roster;
     } catch (e) {
       toast(e.message, { kind: "error", root: this.mount.root });
       return;
@@ -420,6 +426,8 @@ export class SpawnPart {
       this.fillModels(this.harness.value);
       this.markDiffs();
     } else if (start) this.pickAgent(start);
+    this.rosterLoading = false;
+    this.go.disabled = !!this.submitting;
     this.loadSpModels();
   }
 
@@ -441,9 +449,14 @@ export class SpawnPart {
   }
 
   fillModels(harness) {
-    const listed = this.spModels.server === this.spServer ? this.spModels.by[harness] || [] : [];
+    const selector = this.current()?.models;
+    const dynamic = selector && !Array.isArray(selector);
+    const available = this.spModels.server === this.spServer ? this.spModels.by[harness] || [] : [];
+    const listed = dynamic ? available.filter((m) => m.free && selector.providers.includes(m.value.split("/")[0])) : available;
+    this.model.setAttribute("placeholder", dynamic ? "Automatic · free providers" : "Model");
+    if (this.model.input) this.model.input.placeholder = this.model.getAttribute("placeholder");
     const have = new Set(listed.map((m) => m.value));
-    const named = (this.roster.models[harness] || []).filter((m) => !have.has(m));
+    const named = dynamic ? [] : (this.roster.models[harness] || []).filter((m) => !have.has(m));
     this.model.options = [
       ...listed.map((m) => ({ value: m.value, label: m.value, meta: modelMeta(m) })),
       ...named,
@@ -481,8 +494,10 @@ export class SpawnPart {
   }
 
   async submit() {
+    await this.agentsLoading;
     const a = this.current();
     if (!a || this.go.disabled || offline()) return;
+    this.submitting = true;
     this.go.disabled = true;
     this.error.textContent = "";
     await this.act.dictation?.finish(this.text);
@@ -523,7 +538,8 @@ export class SpawnPart {
     } catch (e) {
       toast(e.message, { kind: "error", root: this.mount.root });
     } finally {
-      this.go.disabled = false;
+      this.submitting = false;
+      this.go.disabled = !!this.rosterLoading;
     }
   }
 

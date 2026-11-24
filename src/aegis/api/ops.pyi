@@ -620,6 +620,18 @@ class _mention:
         """Skip a committee's merge before it goes out; its answers stay."""
 
 class _models:
+    async def browse(
+        self,
+        *,
+        harness: str = ...,
+        providers: builtins.list[str] = ...,
+        price: Literal["all", "free", "paid", "unknown"] = ...,
+        usable: bool = ...,
+        search: str = ...,
+        offset: int = ...,
+        limit: int = ...,
+    ) -> Any:
+        """Public provider offers joined with this harness's local usability, with server-side filters, stable paging and exclusion reasons."""
     async def catalog(
         self,
         *,
@@ -631,6 +643,14 @@ class _models:
         """Public provider offers, scores and free status from the shared catalogue. These are advertised offers, not a claim that this machine has credentials or quota. Filter by provider or free status; paginate with offset and limit. Unknown free status is null."""
     async def list(self) -> Any:
         """Every model the installed harnesses can run, with its rank among its harness's models, Artificial Analysis's Coding and Intelligence Indexes, its price in and out per million tokens, the agents that name it (at: its index in the agent's models, 0 first) and the epoch it stops cooling, or null. Models in use come first, then by Intelligence Index, the Coding Index breaking ties; those with no Intelligence Index last."""
+    async def preview(
+        self, *, harness: str = ..., models: builtins.list[str] | dict[str, Any] = ...
+    ) -> Any:
+        """Resolve a fixed model list or a free-provider rule against local availability, prices and host policy, without saving or launching."""
+    async def save(
+        self, *, agent: dict[str, Any], stamp: str | None = ..., replace: bool = ...
+    ) -> Any:
+        """Create or edit one agent after validating its model selection; save through the existing configuration writer and stale-write check."""
 
 class _monitor:
     async def cancel(self, *, monitor_id: str) -> Any:

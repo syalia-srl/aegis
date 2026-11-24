@@ -92,6 +92,7 @@ from .channels import Channels, Throttle
 from .claude.process import PERMISSION_MODE, ControlError
 from .config import CONTEXT_DEFAULTS, Config, Snapshot, accept_version, write_host
 from .harness import harness_for
+from .model_catalog import ModelCatalog
 from .config_ops import register_config_ops
 from .doctor_watch import DoctorWatch
 from .confirm import Confirmations
@@ -722,6 +723,7 @@ class App:
         # Models that fell, and the one timer that releases held work when the
         # first of them is free again (cascade.py).
         self.cooling = Cooling()
+        self.model_catalog = reg.model_catalog = ModelCatalog(self)
         self._cool_timer: asyncio.TimerHandle | None = None
         self._cool_at: float | None = None
         reg.start_spec = self.start_spec
@@ -1306,6 +1308,32 @@ class App:
         and its turns meet the agent's on_closed (guard_turn)."""
         if self.paused is not None:
             return spec, Gate("stopped", pause.WHY)
+        if spec.model_selector:
+            catalog = self.model_catalog
+            candidates = [
+                m
+                for m in catalog.candidates(spec.model_selector)
+                if catalog.permits(spec, m)
+            ]
+            if not candidates:
+                return spec, Gate(
+                    "closed",
+                    catalog.error
+                    or "No eligible free models match the selected providers",
+                )
+            if not spec.cascade:
+                if spec.model and spec.model not in candidates:
+                    return spec, Gate(
+                        "closed",
+                        catalog.reason(spec.model_selector, spec.model)
+                        or "Model is outside the free-only rule",
+                    )
+                spec = dataclasses.replace(
+                    spec,
+                    model=spec.model or candidates[0],
+                    cascade=tuple(candidates) if not spec.model else (spec.model,),
+                    models_observed_at=catalog.observed_at,
+                )
         if guarded:
             # A budget holds every model alike: read once, before the pick;
             # only a stop line on the spec's model outranks it (guard).
@@ -1315,6 +1343,8 @@ class App:
                 return spec, q if q.state == "stopped" else b
 
         def gate(m: str) -> Gate:
+            if spec.model_selector and (why := self.model_catalog.restriction(spec, m)):
+                return Gate("closed", why)
             return self.quota_guard(spec, queue, m) if guarded else Gate("open")
 
         if spec.model not in spec.cascade:
@@ -1338,7 +1368,12 @@ class App:
             spec.cascade,
             spec.cascade.index(spec.model),
             spec.harness,
-            lambda m: self.gate(spec.owner, spec.harness, m),
+            lambda m: (
+                Gate("closed", why)
+                if spec.model_selector
+                and (why := self.model_catalog.restriction(spec, m))
+                else self.gate(spec.owner, spec.harness, m)
+            ),
             self.cooling,
             time.time(),
         )
@@ -1895,6 +1930,7 @@ class App:
         # Before any session starts its own: the OpenCode servers a server or
         # test that is gone left behind (#620).
         opencode_sweep.sweep()
+        self.model_catalog.start()
         self._config_task = asyncio.create_task(self.config.watch())
         # Before any session starts, so every harness child gets its cgroup.
         self.sessions.cgroups = SessionCgroups.setup(
@@ -2000,6 +2036,7 @@ class App:
                 )
 
     async def shutdown(self) -> None:
+        await self.model_catalog.stop()
         stopping_at = restarts.stopping(self.roots.state_root)
         await self.events.close()
         await self.push.sender.stop()
@@ -3020,7 +3057,7 @@ class App:
                     caller,
                     agent=a.name,
                     harness=a.harness,
-                    model=a.model,
+                    **({} if a.model_selector else {"model": a.model}),
                     effort=a.effort,
                     permission=a.permission,
                 )
