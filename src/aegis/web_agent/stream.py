@@ -6,6 +6,7 @@ import json
 
 from ..claude.stream import (
     Echo,
+    ExternalUser,
     Garbled,
     Ignored,
     Init,
@@ -48,6 +49,8 @@ class Parser:
                     cwd=self.cwd,
                 )
             ]
+        if kind == "manual":
+            return [ExternalUser(str(obj["id"]), str(obj["text"]), "Chrome")]
         if kind == "echo":
             return [Echo(text=str(obj.get("text") or ""))]
         if kind == "text":

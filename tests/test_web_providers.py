@@ -107,3 +107,16 @@ def test_a_previous_answers_copy_control_does_not_complete_a_new_answer(page):
     got = page.evaluate(provider("web-chatgpt").observe_script)
     assert got["messages"][0]["complete"] is True
     assert got["messages"][1]["complete"] is False
+
+
+def test_executable_multiline_strings_preserve_every_newline(page):
+    code = "# aegis: execute\nprintf '%s' 'first\n\n\nlast'"
+    page.set_content(
+        PAGES["web-qwen"].replace(
+            "CONTENT", f'<pre><code class="language-bash">{code}</code></pre>'
+        )
+    )
+    got = page.evaluate(provider("web-qwen").observe_script)
+    from aegis.web_agent.protocol import request
+
+    assert request(got["messages"][-1]["markdown"]).code == code + "\n"

@@ -164,7 +164,7 @@ _OBSERVER = r"""(() => {
       if(['p','div','section','ul','ol'].includes(tag))return '\n'+inside+'\n';
       return inside;
     }
-    return {text:walk(root).replace(/\n{3,}/g,'\n\n').trim(),valid};
+    return {text:walk(root).trim(),valid};
   }
   const messages=roots.map((root,index)=>{
     const content=cfg.content?root.querySelector(cfg.content):root;

@@ -197,8 +197,13 @@ class BrowserBridge:
                 },
             )
             if self.provider.name == "web-deepseek":
-                await self.chrome.call(
+                submitted = await self.chrome.call(
                     self.session.log_id, self.tab, "eval", {"expression": DEEPSEEK_SEND}
                 )
+                if submitted.get("submitted") is not True:
+                    raise CallError(
+                        "submission_refused",
+                        "DeepSeek did not enable its Send button; check the draft in Chrome",
+                    )
             self.chrome.acted(self.tab, self.session.handle, "web harness submit")
             return {"submitted": True}

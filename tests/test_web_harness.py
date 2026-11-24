@@ -151,3 +151,37 @@ def test_connection_changes_update_one_native_transcript_row():
     assert entries[0]["kind"] == "web_connection"
     assert entries[0]["summary"] == "Qwen web · Chrome connected"
     assert entries[0]["detail"]["tab"] == "qwen"
+
+
+def test_manual_source_messages_preserve_pending_composer_input():
+    import json
+
+    records = [
+        {
+            "i": 0,
+            "ts": 1000,
+            "src": "aegis",
+            "kind": "send",
+            "text": "Use the proposal",
+        },
+        {
+            "i": 1,
+            "ts": 1001,
+            "src": "web",
+            "line": json.dumps(
+                {"type": "manual", "id": "chrome-user", "text": "Make a proposal"}
+            ),
+        },
+        {
+            "i": 2,
+            "ts": 1002,
+            "src": "web",
+            "line": json.dumps({"type": "echo", "text": "Use the proposal"}),
+        },
+    ]
+    entries = fold_records(records).entries()
+    users = [e for e in entries if e["kind"] == "user"]
+    assert len(users) == 2
+    assert users[0]["md"] == "From Chrome:\n\nMake a proposal"
+    assert users[0]["detail"]["message_id"] == "chrome-user"
+    assert users[1]["md"] == "Use the proposal"

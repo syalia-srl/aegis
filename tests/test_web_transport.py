@@ -153,3 +153,24 @@ async def test_agents_cannot_use_the_persons_focus_action(world):
             {"tab": "qwen", "log_id": session.log_id},
             Caller("agent", session.log_id),
         )
+
+
+async def test_deepseek_cannot_report_submitted_when_its_send_button_is_disabled(
+    tmp_path,
+):
+    manager_type = importlib.import_module("aegis.web_agent.transport").WebBridges
+    chrome = Chrome(tmp_path, lambda *_: None)
+    session = SimpleNamespace(
+        log_id="web-one",
+        handle="research",
+        spec=SimpleNamespace(harness="web-deepseek"),
+        record_card=lambda _: None,
+    )
+    manager = manager_type(chrome)
+    chrome.on_answer = manager.answered
+    bridge = manager.for_session(session)
+    ext = Driven(chrome, lambda _: {"submitted": False})
+    await (await grant(chrome, ext, bridge, url="https://chat.deepseek.com/"))
+    chrome.tabs["qwen"]["eval"] = True
+    with pytest.raises(CallError, match="submission_refused"):
+        await bridge("send", {"text": "A task that did not get submitted"})
