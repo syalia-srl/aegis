@@ -78,6 +78,15 @@ class WebHost(Host):
     def web_bridge(self, session):
         return self.browser
 
+    async def know_how_ready(self, session):
+        raise AssertionError("Web prompts must not wait for automatic knowledge")
+
+    def knowledge_hint(self, session, text):
+        raise AssertionError("Web prompts must not include automatic knowledge")
+
+    def notice_blocks(self, session, at):
+        raise AssertionError("Web prompts must not include operational notices")
+
 
 async def test_a_real_session_uses_the_web_driver_and_refolds_to_native_entries(
     tmp_path,
@@ -96,6 +105,9 @@ async def test_a_real_session_uses_the_web_driver_and_refolds_to_native_entries(
         host=host,
     )
     try:
+        assert session.spec.notices is False
+        await session.deliver("> from aegis:nudge · idle", "Call turn_end now")
+        assert host.browser.sent == []
         await session.send("Check the real session integration")
         await until(
             lambda: (
@@ -119,8 +131,34 @@ async def test_a_real_session_uses_the_web_driver_and_refolds_to_native_entries(
         assert fold_records(records).entries() == session.entries()
         assert session.resume_id.startswith("web-qwen:")
         assert session.cost_usd is None
+        assert host.browser.sent[1] == "Check the real session integration"
     finally:
         await session.stop()
+
+
+@pytest.mark.parametrize("name", NAMES)
+async def test_restored_web_sessions_disable_old_notice_settings(tmp_path, name):
+    from aegis.nudges import Nudges
+
+    spec = SpawnSpec.from_record(
+        {"agent": "research", "model": "web", "harness": name, "notices": True},
+        tmp_path,
+    )
+    session = Session(
+        log_id="restored-web",
+        handle="research",
+        spec=spec,
+        store=Store(tmp_path / "transcript.jsonl"),
+        stderr_path=tmp_path / "stderr.log",
+        claude_bin="unused",
+        publish=lambda *_: None,
+        metas=MetaStore(tmp_path / "sessions"),
+        host=WebHost(),
+    )
+    assert session.spec.notices is False
+    assert session.spec.record()["notices"] is False
+    # An idle check must return before reading any scheduler/config state.
+    await Nudges(None, None).check(session)
 
 
 def test_connection_changes_update_one_native_transcript_row():

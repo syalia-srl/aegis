@@ -495,6 +495,8 @@ class Session:
         self.harness = harness_for(
             spec.harness, claude_bin, opencode_bin, codex_bin, cursor_bin
         )
+        if self.harness.src == "web":
+            self.spec = dataclasses.replace(spec, notices=False)
         self._publish = publish
         self._metas = metas
         self._interrupt_timeout = interrupt_timeout
