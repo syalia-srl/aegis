@@ -536,7 +536,11 @@ native transcript records connection status as one updating row.
 `web_agent/transport.py` binds each session to one exclusive, explicitly granted
 tab in the person's Chrome extension. Selecting the harness authorizes opening
 and assigning its own new provider tab with Scripts enabled through the
-existing extension protocol. Generic agent requests still need consent. It
+existing extension protocol. Generic agent requests still need consent. Native submissions share an input
+lock, use trusted Chrome clicks after composer readiness, and separate Gemini
+Enter from settled insertion. Extension 0.5.3 activates the page through CDP
+focus emulation without switching the visible tab; pause and Scripts disabling
+remove that emulation. It
 retains subsequent grant revocation, Scripts disabling and manual
 ownership checks before observations and actions, pins the conversation URL and
 never accepts model-supplied JavaScript. New sessions require empty chats;
@@ -544,7 +548,9 @@ resume requires the same conversation. A consent answer belongs to the bridge,
 not the model's inbox. Manual source messages have independent identities and
 fold as ExternalUser events without consuming pending composer input. Before
 a new task is submitted, the driver reconciles completed manual responses and
-their marked commands. Changed or missing observed history stops execution. The composer chooses the provider; actual models and
+their marked commands. Changed visible answers or a missing executable source stop execution. DeepSeek uses stable virtual-item keys; DeepSeek and ChatGPT
+declare partial rendered history, so eviction
+of older messages does not imply a changed conversation. The composer chooses the provider; actual models and
 modes stay in Chrome. The driver reports no guessed model identity, usage or cost.
 
 Web priming contains only the dedicated bridge brief, working directory and

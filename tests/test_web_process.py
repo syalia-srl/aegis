@@ -689,3 +689,52 @@ async def test_chatgpt_pins_the_canonical_chat_after_its_provisional_route(tmp_p
         )
     finally:
         await process.terminate()
+
+
+async def test_partial_history_allows_eviction_but_refuses_changed_visible_answers(
+    tmp_path,
+):
+    class VirtualBrowser(Browser):
+        async def __call__(self, op, args):
+            result = await super().__call__(op, args)
+            if op == "observe":
+                result["partial_history"] = True
+            return result
+
+    browser = VirtualBrowser()
+    process, events = make(tmp_path, browser)
+    await process.start()
+    try:
+        await process.send("Verify virtual history")
+        await until(lambda: bool(done(events)), timeout=5)
+        browser.messages = browser.messages[-1:]
+        page = await process._observe()
+        assert page["messages"][0]["markdown"] == browser.final
+        browser.messages[0]["markdown"] = "A replacement answer"
+        with pytest.raises(RuntimeError, match="already observed answer changed"):
+            await process._observe()
+    finally:
+        await process.terminate()
+
+
+async def test_initial_blank_document_waits_before_priming(tmp_path):
+    class LoadingBrowser(Browser):
+        blank = True
+
+        async def __call__(self, op, args):
+            result = await super().__call__(op, args)
+            if op == "observe" and self.blank:
+                self.blank = False
+                result["url"] = "about:blank"
+            return result
+
+    browser = LoadingBrowser()
+    process, events = make(tmp_path, browser)
+    await process.start()
+    try:
+        await process.send("Wait for this provider to load")
+        await until(lambda: bool(done(events)), timeout=5)
+        assert done(events)[-1]["error"] is False
+        assert "AEGIS_READY" in browser.sent[0]
+    finally:
+        await process.terminate()

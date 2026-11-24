@@ -44,9 +44,11 @@ class Provider:
         return None
 
     @property
-    def send_script(self) -> str | None:
+    def send_ready_script(self) -> str | None:
         return (
-            _SEND.replace("__SELECTOR__", json.dumps(self.send)) if self.send else None
+            _SEND_READY.replace("__SELECTOR__", json.dumps(self.send))
+            if self.send
+            else None
         )
 
     @property
@@ -117,10 +119,10 @@ STOP_SCRIPT = r"""(() => {
   if (!b) return {stopped:false}; b.click(); return {stopped:true};
 })()"""
 
-_SEND = """(() => {
+_SEND_READY = """(() => {
   const b=document.querySelector(__SELECTOR__);
-  if(!b || !b.getClientRects().length || b.disabled || b.getAttribute('aria-disabled')==='true' || b.classList.contains('ds-button--disabled') || b.classList.contains('disabled')) return {submitted:false};
-  b.click(); return {submitted:true};
+  if(!b || !b.getClientRects().length || b.disabled || b.getAttribute('aria-disabled')==='true' || b.classList.contains('ds-button--disabled') || b.classList.contains('disabled')) return {ready:false};
+  return {ready:true};
 })()"""
 
 _OBSERVER = r"""(() => {
@@ -152,7 +154,7 @@ _OBSERVER = r"""(() => {
   }
   function identity(root,index){
     for(let e=root;e&&e!==document.body;e=e.parentElement){
-      const id=e.getAttribute('data-message-id')||e.getAttribute('data-dil-message-id')||e.getAttribute('data-message-uuid');
+      const id=e.getAttribute('data-message-id')||e.getAttribute('data-dil-message-id')||e.getAttribute('data-message-uuid')||(cfg.provider==='web-deepseek'?e.getAttribute('data-virtual-list-item-key'):null);
       if(id) return id;
       if(e===root&&e.id) return e.id;
       if(e!==root && roots.filter(r=>e.contains(r)).length>1) break;
@@ -204,5 +206,5 @@ _OBSERVER = r"""(() => {
   });
   const users=Array.from(document.querySelectorAll(cfg.users)).map((e,i)=>({id:e.getAttribute('data-message-id')||e.id||(cfg.users==='user-query .query-text'?'query-':'user-')+i,text:e.innerText.trim()}));
   const dialog=Array.from(document.querySelectorAll('[role=dialog],dialog')).find(e=>visible(e)&&/confirm your age|sign in|log in|verify|captcha/i.test(e.innerText));
-  return {url:location.href,title:document.title,messages,users,busy,intervention:dialog?dialog.innerText.slice(0,300):null};
+  return {url:location.href,title:document.title,messages,users,busy,partial_history:['web-deepseek','web-chatgpt'].includes(cfg.provider),intervention:dialog?dialog.innerText.slice(0,300):null};
 })()"""
