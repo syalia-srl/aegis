@@ -24,6 +24,7 @@ class Provider:
     done: str
     conversation_prefix: str
     send: str | None = None
+    send_key: str | None = None
 
     def accepts(self, url: str) -> bool:
         target, base = urlsplit(url), urlsplit(self.url)
@@ -98,6 +99,7 @@ PROVIDERS = {
         'button[aria-label="Regenerate"]',
         "/c/",
         send='button[aria-label="Send"]',
+        send_key="Enter",
     ),
     "web-chatgpt": Provider(
         "web-chatgpt",
