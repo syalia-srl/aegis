@@ -631,6 +631,11 @@ class Queues:
     async def _complete(self, t: Task, s: Session) -> None:
         if t.status != "running" or not self.finished(s):
             return
+        if s.turn_failed:
+            # The harness gave up, the worker did not answer (#1099): the task
+            # fails and its worker stays open, so task_resume continues it.
+            self._fail(t, f"its worker {s.handle} stopped on an error: {s.turn_failed}")
+            return
         prose = [e["md"] for e in s.entries() if e["kind"] == "prose" and e.get("md")]
         t.status, t.result, t.finished_at = (
             "completed",
