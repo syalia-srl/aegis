@@ -190,7 +190,7 @@ async def test_provider_reports_the_actual_send_button_result(
     manager = manager_type(chrome)
     chrome.on_answer = manager.answered
     bridge = manager.for_session(session)
-    ext = Driven(chrome, lambda _: {"value": {"ready": submitted}})
+    ext = Driven(chrome, lambda _: {"value": {"ready": submitted}, "web_ready": True})
     await (await grant(chrome, ext, bridge, url=url))
     chrome.tabs["qwen"]["eval"] = True
     if submitted:
@@ -210,7 +210,9 @@ async def test_observer_unwraps_the_actual_extension_eval_envelope(tmp_path):
         "users": [],
         "busy": False,
     }
-    chrome, _, bridge, ext, _ = setup_bridge(tmp_path, lambda _: {"value": page})
+    chrome, _, bridge, ext, _ = setup_bridge(
+        tmp_path, lambda _: {"value": page, "web_ready": True}
+    )
     await (await grant(chrome, ext, bridge))
     chrome.tabs["qwen"]["eval"] = True
     assert await bridge("observe", {}) == page
@@ -264,21 +266,20 @@ async def test_native_submission_focuses_once_and_waits_without_retyping(tmp_pat
     def answer(message):
         if message["op"] == "eval":
             attempts.append(message)
-            return {"value": {"ready": len(attempts) == 3}}
+            return {"value": {"ready": len(attempts) == 3}, "web_ready": True}
         return {}
 
     chrome, _, bridge, ext, _ = setup_bridge(tmp_path, answer)
     await (await grant(chrome, ext, bridge))
     assert await bridge("send", {"text": "A single draft"}) == {"submitted": True}
     assert [call["op"] for call in ext.calls] == [
-        "focus",
         "type",
         "eval",
         "eval",
         "eval",
         "click",
     ]
-    assert ext.calls[1]["args"]["submit"] is False
+    assert ext.calls[0]["args"]["submit"] is False
 
 
 async def test_gemini_press_follows_settled_text_insertion(tmp_path):
@@ -288,6 +289,6 @@ async def test_gemini_press_follows_settled_text_insertion(tmp_path):
     manager.bridges["web-one"].provider = PROVIDERS["web-gemini"]
     await (await grant(chrome, ext, bridge, url="https://gemini.google.com/app"))
     await bridge("send", {"text": "A focused draft"})
-    assert [call["op"] for call in ext.calls] == ["focus", "type", "press"]
-    assert ext.calls[1]["args"]["submit"] is False
-    assert ext.calls[2]["args"]["key"] == "Enter"
+    assert [call["op"] for call in ext.calls] == ["type", "press"]
+    assert ext.calls[0]["args"]["submit"] is False
+    assert ext.calls[1]["args"]["key"] == "Enter"

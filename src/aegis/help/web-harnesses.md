@@ -20,15 +20,16 @@ chip. The agent preset still supplies its permissions, working directory
 and instructions. The model and effort chips are hidden: choose the actual
 model, research mode and other provider options in Chrome.
 
-Automatic launch requires extension 0.5.2 or newer. Download and reload it
+Automatic launch requires extension 0.5.3 or newer. Download and reload it
 from Settings → Chrome after updating.
 
 Send a task. The harness automatically opens and assigns a new provider tab
 in the paired Chrome browser with Scripts enabled. Sign in if needed. New sessions require an empty conversation;
 existing chats cannot be adopted. Resuming a session returns to its saved
-conversation. Each backing tab belongs to one web session at a time. Submissions bring that
-tab forward and use trusted Chrome input; simultaneous web sessions serialize
-this short focus-and-submit step.
+conversation. Each backing tab belongs to one web session at a time. The extension emulates an active page for the web runtime without bringing
+the tab forward. Submissions use trusted Chrome input; simultaneous web
+sessions serialize this short input step. Pause and disabling Scripts also
+disable the background activation.
 
 The transcript uses the usual prose, Bash and result rows. Its connection row
 says when Chrome is disconnected, Scripts is off or the person must intervene.

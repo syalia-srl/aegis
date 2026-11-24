@@ -206,5 +206,5 @@ _OBSERVER = r"""(() => {
   });
   const users=Array.from(document.querySelectorAll(cfg.users)).map((e,i)=>({id:e.getAttribute('data-message-id')||e.id||(cfg.users==='user-query .query-text'?'query-':'user-')+i,text:e.innerText.trim()}));
   const dialog=Array.from(document.querySelectorAll('[role=dialog],dialog')).find(e=>visible(e)&&/confirm your age|sign in|log in|verify|captcha/i.test(e.innerText));
-  return {url:location.href,title:document.title,messages,users,busy,partial_history:cfg.provider==='web-deepseek',intervention:dialog?dialog.innerText.slice(0,300):null};
+  return {url:location.href,title:document.title,messages,users,busy,partial_history:['web-deepseek','web-chatgpt'].includes(cfg.provider),intervention:dialog?dialog.innerText.slice(0,300):null};
 })()"""
