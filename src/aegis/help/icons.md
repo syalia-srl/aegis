@@ -106,6 +106,7 @@ The buttons of the session panel and the menus of a tab or a card.
 | `g-fleet` | Fleet | the menu on a phone |
 | `g-bell` | Notifications | the top bar |
 | `g-gear` | Settings | the top bar |
+| `g-models` | Models: browse models and build agents | the top bar and the menu on a phone |
 | `g-clock` | Schedules; a step's deadline | the top bar, workflows |
 | `g-knowledge` | Knowledge: your skills and memories | the top bar |
 | `g-usage` | Usage: what the work cost | the top bar |
