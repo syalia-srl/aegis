@@ -14,7 +14,7 @@ from .test_chrome_driving import Driven
 from .test_agents import world  # noqa: F401
 
 
-def setup_bridge(tmp_path):
+def setup_bridge(tmp_path, answer=None):
     manager_type = importlib.import_module("aegis.web_agent.transport").WebBridges
     chrome = Chrome(tmp_path, lambda *_: None)
     records = []
@@ -28,11 +28,14 @@ def setup_bridge(tmp_path):
     chrome.on_answer = manager.answered
     ext = Driven(
         chrome,
-        lambda message: {
-            "url": "https://chat.qwen.ai/c/test",
-            "messages": [],
-            "busy": False,
-        },
+        answer
+        or (
+            lambda message: {
+                "url": "https://chat.qwen.ai/c/test",
+                "messages": [],
+                "busy": False,
+            }
+        ),
     )
     return chrome, manager, manager.for_session(session), ext, records
 
@@ -155,9 +158,8 @@ async def test_agents_cannot_use_the_persons_focus_action(world):
         )
 
 
-async def test_deepseek_cannot_report_submitted_when_its_send_button_is_disabled(
-    tmp_path,
-):
+@pytest.mark.parametrize("submitted", [False, True])
+async def test_deepseek_reports_the_actual_send_button_result(tmp_path, submitted):
     manager_type = importlib.import_module("aegis.web_agent.transport").WebBridges
     chrome = Chrome(tmp_path, lambda *_: None)
     session = SimpleNamespace(
@@ -169,8 +171,24 @@ async def test_deepseek_cannot_report_submitted_when_its_send_button_is_disabled
     manager = manager_type(chrome)
     chrome.on_answer = manager.answered
     bridge = manager.for_session(session)
-    ext = Driven(chrome, lambda _: {"submitted": False})
+    ext = Driven(chrome, lambda _: {"value": {"submitted": submitted}})
     await (await grant(chrome, ext, bridge, url="https://chat.deepseek.com/"))
     chrome.tabs["qwen"]["eval"] = True
-    with pytest.raises(CallError, match="submission_refused"):
-        await bridge("send", {"text": "A task that did not get submitted"})
+    if submitted:
+        assert await bridge("send", {"text": "A task"}) == {"submitted": True}
+    else:
+        with pytest.raises(CallError, match="submission_refused"):
+            await bridge("send", {"text": "A task that did not get submitted"})
+
+
+async def test_observer_unwraps_the_actual_extension_eval_envelope(tmp_path):
+    page = {
+        "url": "https://chat.qwen.ai/c/test",
+        "messages": [],
+        "users": [],
+        "busy": False,
+    }
+    chrome, _, bridge, ext, _ = setup_bridge(tmp_path, lambda _: {"value": page})
+    await (await grant(chrome, ext, bridge))
+    chrome.tabs["qwen"]["eval"] = True
+    assert await bridge("observe", {}) == page

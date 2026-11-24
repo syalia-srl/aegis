@@ -552,7 +552,10 @@ controller's credentials. Results carry stdout/stderr/exit code, with 64 KiB
 previews per stream and full private local output files; timeout is 120 seconds.
 `web_agent/ledger.py` atomically persists command and outbound-message phases.
 An uncertain command or submission stops for reconciliation, never blind replay.
-Interrupt kills the Bash process group and asks the provider to stop. Extra MCP
+Interrupt kills the Bash process group and asks the provider to stop. Remaining
+group members are also stopped at normal command completion; the group identity
+outlives its Bash leader and output draining. Session updates follow pending
+manual results and precede the next composer task. Extra MCP
 transports, automatic web artifact import and provider-specific research events
 remain outside this first implementation.
 
