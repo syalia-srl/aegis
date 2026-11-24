@@ -2667,6 +2667,12 @@
 .a2 .visual-annotations .mark{position:absolute;inset:0;width:100%;height:100%;overflow:visible;color:var(--accent);pointer-events:none}
 .a2 .visual-annotations .vpin::before{position:absolute;left:-9px;top:-9px}
 .a2 .visual-annotations .vpin.draw::before,.a2 .visual-annotations .vpin.arrow::before{left:var(--nx);top:var(--ny);transform:translate(-110%,-20%)}
+
+/* Routing guidance is edited separately from the worker's system prompt. */
+.a2 .set-description{width:100%;min-width:0;box-sizing:border-box;resize:vertical;background:var(--bg);border:1px solid var(--rule);border-radius:var(--r);padding:7px 9px;font-family:var(--font-ui);font-size:13px;line-height:1.5;color:var(--ink)}
+.a2 .set-description:focus{outline:none;border-color:var(--accent)}
+.a2 .set-agent > .set-description{grid-column:2}
+@media(max-width:640px){.a2 .set-agent > .set-description{grid-column:1/-1}}
 /* Aizome: indigo-dyed cloth; cotton-white sashiko stitches for the thread and rules, seigaiha waves in the panel. */
 .a2[data-theme=aizome]{
   --bg:#15213f;--chrome:#0f1832;--side:#121d39;--surface:#1b2a4f;--raised:#22335d;--rule:#33477a;
