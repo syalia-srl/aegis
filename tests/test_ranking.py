@@ -195,3 +195,154 @@ def test_model_ranking_config_key():
     assert Snapshot.parse(Path("x"), None, {}).model_ranking is True
     off = Snapshot.parse(Path("x"), None, {"model_ranking": False})
     assert off.model_ranking is False
+
+
+def test_public_offers_keep_unknown_prices_distinct_from_free():
+    s = refresh_script()
+    offers = s.offers_from(
+        {
+            "zen": {
+                "name": "Zen",
+                "models": {
+                    "free": {"cost": {"input": 0, "output": 0}, "tool_call": True},
+                    "unknown": {},
+                    "partial": {"cost": {"input": 0}},
+                    "paid": {"cost": {"input": 1, "output": 2}},
+                    "old": {"status": "deprecated"},
+                },
+            }
+        }
+    )
+    assert set(offers) == {"zen/free", "zen/unknown", "zen/partial", "zen/paid"}
+    assert offers["zen/free"]["free"] is True
+    assert offers["zen/unknown"]["free"] is None
+    assert offers["zen/partial"]["free"] is None
+    assert offers["zen/paid"]["free"] is False
+
+
+def test_catalog_only_refresh_preserves_benchmark_date_and_maps_new_providers(
+    tmp_path, monkeypatch
+):
+    import json
+    import sys
+
+    s = refresh_script()
+    base = tmp_path / "base.json"
+    base.write_text(
+        json.dumps(
+            {
+                "refreshed": "2026-01-01",
+                "models": {
+                    "old/model": {"aa": "model", "intelligence": 50.0},
+                },
+            }
+        )
+    )
+    out = tmp_path / "out.json"
+
+    class Response:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"new": {"models": {"model": {"cost": {"input": 0, "output": 0}}}}}
+
+    monkeypatch.setattr(s.httpx, "get", lambda *a, **kw: Response())
+    monkeypatch.setattr(
+        s,
+        "fetch",
+        lambda *_: (_ for _ in ()).throw(AssertionError("benchmark API called")),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["refresh", "--catalog-only", "--base", str(base), "--out", str(out)],
+    )
+    assert s.main() == 0
+    data = json.loads(out.read_text())
+    assert data["refreshed"] == "2026-01-01"
+    assert data["catalog_refreshed"].endswith("+00:00")
+    assert data["models"]["new/model"]["intelligence"] == 50.0
+    assert data["offers"]["new/model"]["free"] is True
+
+
+def test_empty_provider_refresh_does_not_overwrite_output(tmp_path, monkeypatch):
+    import sys
+
+    s = refresh_script()
+
+    class Response:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {}
+
+    out = tmp_path / "out.json"
+    out.write_text("last good snapshot")
+    monkeypatch.setattr(s.httpx, "get", lambda *a, **kw: Response())
+    monkeypatch.setenv("AA_API_KEY", "test")
+    monkeypatch.setattr(sys, "argv", ["refresh", "--out", str(out)])
+    assert s.main() == 1
+    assert out.read_text() == "last good snapshot"
+
+
+def test_download_rejects_malformed_scores_and_older_offer_timestamp(tmp_path):
+    import json
+    from aegis import ranking as rk
+
+    got = _file(tmp_path / "models.json", "2999-01-01")
+    data = json.loads(got.read_text())
+    data["catalog_refreshed"] = "2999-01-01T12:00:00+00:00"
+    got.write_text(json.dumps(data))
+    feed = tmp_path / "feed.json"
+    data["catalog_refreshed"] = "2999-01-01T11:00:00+00:00"
+    feed.write_text(json.dumps(data))
+    assert not rk.download(got, feed.as_uri())
+    data["catalog_refreshed"] = "2999-01-01T13:00:00+00:00"
+    data["models"]["bad"] = []
+    feed.write_text(json.dumps(data))
+    assert not rk.download(got, feed.as_uri())
+    del data["models"]["bad"]
+    data["models"]["opus"]["intelligence"] = "fast"
+    feed.write_text(json.dumps(data))
+    assert not rk.download(got, feed.as_uri())
+    assert "12:00:00" in got.read_text()
+
+
+def test_full_refresh_keeps_benchmarks_without_runner_logins(tmp_path, monkeypatch):
+    import json
+    import sys
+
+    s = refresh_script()
+
+    class Response:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"provider": {"models": {"fresh-model": {"name": "Fresh Model"}}}}
+
+    async def no_harnesses(*args):
+        return []
+
+    monkeypatch.setattr(s.httpx, "get", lambda *a, **kw: Response())
+    monkeypatch.setattr(s, "detect", no_harnesses)
+    monkeypatch.setattr(
+        s,
+        "fetch",
+        lambda _: {
+            "fresh-model": {
+                "slug": "fresh-model",
+                "evaluations": {"artificial_analysis_intelligence_index": 77},
+            }
+        },
+    )
+    monkeypatch.setenv("AA_API_KEY", "test")
+    out = tmp_path / "out.json"
+    monkeypatch.setattr(sys, "argv", ["refresh", "--out", str(out)])
+    assert s.main() == 0
+    data = json.loads(out.read_text())
+    assert data["models"]["fresh-model"]["intelligence"] == 77
+    assert data["models"]["provider/fresh-model"]["intelligence"] == 77
+    assert data["offers"]["provider/fresh-model"]["free"] is None

@@ -601,6 +601,15 @@ class _mention:
         """Skip a committee's merge before it goes out; its answers stay."""
 
 class _models:
+    async def catalog(
+        self,
+        *,
+        provider: str | None = ...,
+        free: bool | None = ...,
+        offset: int = ...,
+        limit: int = ...,
+    ) -> Any:
+        """Public provider offers, scores and free status from the shared catalogue. These are advertised offers, not a claim that this machine has credentials or quota. Filter by provider or free status; paginate with offset and limit. Unknown free status is null."""
     async def list(self) -> Any:
         """Every model the installed harnesses can run, with its rank among its harness's models, Artificial Analysis's Coding and Intelligence Indexes, its price in and out per million tokens, the agents that name it (at: its index in the agent's models, 0 first) and the epoch it stops cooling, or null. Models in use come first, then by Intelligence Index, the Coding Index breaking ties; those with no Intelligence Index last."""
 

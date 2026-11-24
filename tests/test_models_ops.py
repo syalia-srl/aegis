@@ -123,3 +123,32 @@ async def test_models_list_reports_cooling(app):
     assert rows["zen/glm-free"]["cooling_until"] is None
     # Claude Code's limit cools the whole account: every Claude model.
     assert rows["sonnet"]["cooling_until"] == pytest.approx(now + 600)
+
+
+async def test_public_catalog_filters_pages_and_keeps_unknown_status(app, monkeypatch):
+    from dataclasses import replace
+
+    rk = replace(
+        RANKING,
+        catalog_refreshed="2026-11-24T12:00:00+00:00",
+        offers={
+            "one/a": {"provider": "one", "free": True, "aa": "o"},
+            "two/a": {"provider": "two", "free": False, "aa": "o"},
+            "one/b": {"provider": "one", "free": None, "aa": None},
+        },
+    )
+    monkeypatch.setattr(config_ops, "ranking", lambda: rk)
+    out = await app.registry.call(
+        "models.catalog", {"limit": 1}, Caller("agent", log_id="x")
+    )
+    assert out["total"] == 3
+    assert out["next_offset"] == 1
+    assert out["models"][0]["value"] == "one/a"
+    assert out["catalog_refreshed"] == rk.catalog_refreshed
+    second = await app.registry.call("models.catalog", {"offset": 1, "limit": 1})
+    assert second["models"][0]["rank"] == out["models"][0]["rank"]
+    free = await app.registry.call("models.catalog", {"provider": "one", "free": True})
+    assert [m["value"] for m in free["models"]] == ["one/a"]
+    paid = await app.registry.call("models.catalog", {"free": False})
+    assert [m["value"] for m in paid["models"]] == ["two/a"]
+    assert "models.catalog" in [op.name for op in app.registry.agent_ops()]

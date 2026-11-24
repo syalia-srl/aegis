@@ -1964,7 +1964,7 @@ class App:
         self._versions_task = asyncio.create_task(self._startup_versions())
         # The knowledge flags, at boot and then daily, off the loop.
         self._knowledge_task = asyncio.create_task(self._knowledge_checks())
-        # The nightly model ranking, at boot and then daily (ranking.py).
+        # The shared model catalogue, at boot and every 15 minutes (ranking.py).
         self._ranking_task = asyncio.create_task(self._ranking_downloads())
         # In the background too, for the new tab's doctor row (doctor_watch.py).
         self.doctor_watch.start()
@@ -2124,8 +2124,8 @@ class App:
             await asyncio.sleep(KNOWLEDGE_CHECK_S)
 
     async def _ranking_downloads(self) -> None:
-        """Download the nightly model ranking at boot and then daily, an hour
-        later after a failure, while ``model_ranking`` is on. Never fails
+        """Download the shared model catalogue at boot and every 15 minutes,
+        retrying after a failure, while ``model_ranking`` is on. Never fails
         the server."""
         path = self.roots.state_root / "models.json"
         while True:

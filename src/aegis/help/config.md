@@ -166,14 +166,29 @@ the agent's models, 0 first) and the epoch it stops cooling, or
 answer carries the ranking's date and its source,
 [Artificial Analysis](https://artificialanalysis.ai).
 
-The ranking is rebuilt from Artificial Analysis every night and published on
-the aegis repository's `model-ranking` branch. aegis downloads it when it
-starts and then once a day (an hour later after a failure) into
-`models.json` in its state directory, and reads it while it is newer than
-the ranking packaged with the installed version, so new models are ranked
-without a release. A download that fails, or does not parse as a ranking,
-leaves the last good one in place; an offline server reads the packaged
-ranking. The date under the Models list is the date of whichever it reads.
+The shared catalogue is published on the aegis repository's `model-ranking`
+branch: Artificial Analysis scores refresh daily, while provider offers,
+prices and free status from [models.dev](https://models.dev) refresh hourly.
+Every aegis downloads the snapshot at startup and every 15 minutes, retrying
+at the same interval on failure, into `models.json` in its state directory.
+GitHub's scheduled jobs may start late; the timestamps describe the data's
+age, not a guarantee that the provider still offers it at that price.
+
+Agents can call `models_catalog` without any provider login. It returns public
+advertised offers, not the models this machine has credentials or quota to run.
+Use `provider` to filter a provider ID, `free: true` for zero input and output
+token prices, and `offset`/`limit` (default 50, maximum 200) to paginate using
+`next_offset: null`. Unknown prices give `free: null`; free token pricing does not
+promise unlimited quota. `tool_call: true` says whether the model supports tools.
+`rank` orders unique scored models by Intelligence Index, then Coding Index;
+the same model offered by two providers has the same rank. Unmatched models
+stay unranked. The answer includes `refreshed` for benchmarks and
+`catalog_refreshed: timestamp` for provider offers, plus both source URLs. The existing
+`models_list` and Settings pickers continue to show local harness catalogues
+and their prices, because advertised availability does not grant local access.
+
+A failed or invalid download keeps the last good snapshot. Offline instances
+use their last good download or the ranking packaged with the installed version.
 To read only the packaged ranking, and make no request, set:
 
 ```yaml

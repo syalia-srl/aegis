@@ -2,14 +2,11 @@
 
 The scores are Artificial Analysis's Coding and Intelligence Indexes, and the
 price is its list price in USD per million tokens. ``scripts/refresh-model-ranking``
-rebuilds the packaged file before a release, and the ``model-ranking`` workflow
-runs it every night and publishes the result on the ``model-ranking`` branch.
-aegis never calls Artificial Analysis itself: a server downloads that nightly
-file once a day into its state directory (``download``) and reads it in place
-of the packaged one while it is valid and not older, so a new model is ranked
-the day after Artificial Analysis scores it, with no release. A failed or
-refused download keeps the last good one; an offline server reads the packaged
-file. ``model_ranking: false`` in .aegis.yaml turns the download off.
+rebuilds the packaged file before a release. The ``model-ranking`` workflow
+publishes benchmark scores daily and models.dev provider offers hourly.
+Instances download that snapshot every 15 minutes into their state directory.
+A failed download keeps the last good snapshot; offline instances fall back to
+the packaged scores. ``model_ranking: false`` disables downloads.
 
 The file is keyed by the model id an agent names (the catalog's ``value``).
 A model is ranked when it has an Intelligence Index. Ranked models order by
@@ -27,10 +24,12 @@ from __future__ import annotations
 
 import json
 import os
+import math
+from datetime import date, datetime
 import urllib.request
 from collections.abc import Sequence
 from typing import Any
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from functools import cache
 from importlib import resources
 from pathlib import Path
@@ -53,10 +52,15 @@ class Ranking:
     models: dict[str, Score]
     url: str = "https://artificialanalysis.ai"  # the attribution's link
 
+    offers: dict[str, dict] = field(default_factory=dict)
+    catalog_refreshed: str = ""
+
     @classmethod
     def from_dict(cls, data: dict) -> Ranking:
         return cls(
             refreshed=data.get("refreshed") or "",
+            offers=data.get("offers") or {},
+            catalog_refreshed=data.get("catalog_refreshed") or "",
             url=data.get("url") or "https://artificialanalysis.ai",
             models={
                 k: Score(
@@ -98,8 +102,8 @@ NIGHTLY_URL = (
     "https://raw.githubusercontent.com/syalia-srl/aegis/model-ranking/models.json"
 )
 FETCH_TIMEOUT_S = 30.0
-REFRESH_S = 86400.0
-RETRY_S = 3600.0
+REFRESH_S = 900.0
+RETRY_S = 900.0
 
 # The downloaded file, set by the server (``use``); None reads only the
 # packaged one.
@@ -110,11 +114,41 @@ def valid(data: Any) -> bool:
     """A ranking file aegis can read: a date and at least one scored model."""
     if not isinstance(data, dict) or not isinstance(data.get("refreshed"), str):
         return False
+    try:
+        date.fromisoformat(data["refreshed"])
+        if "catalog_refreshed" in data:
+            datetime.fromisoformat(data["catalog_refreshed"])
+    except (ValueError, TypeError):
+        return False
     models = data.get("models")
-    return isinstance(models, dict) and any(
-        isinstance(v, dict) and v.get("intelligence") is not None
-        for v in models.values()
-    )
+    if not isinstance(models, dict) or not models:
+        return False
+    for model in models.values():
+        if not isinstance(model, dict) or not isinstance(model.get("aa", ""), str):
+            return False
+        for key in ("intelligence", "coding", "price_in", "price_out"):
+            value = model.get(key)
+            if value is not None and (
+                isinstance(value, bool)
+                or not isinstance(value, int | float)
+                or not math.isfinite(value)
+            ):
+                return False
+    offers = data.get("offers", {})
+    if not isinstance(offers, dict):
+        return False
+    for offer in offers.values():
+        if (
+            not isinstance(offer, dict)
+            or not isinstance(offer.get("provider"), str)
+            or "free" not in offer
+        ):
+            return False
+        if offer.get("free") is not None and not isinstance(offer["free"], bool):
+            return False
+        if offer.get("aa") is not None and not isinstance(offer["aa"], str):
+            return False
+    return any(m.get("intelligence") is not None for m in models.values())
 
 
 def _read(path: Path) -> dict | None:
@@ -149,7 +183,10 @@ def download(path: Path, url: str | None = None) -> bool:
     if not valid(data):
         return False
     have = _read(path)
-    if have is not None and data["refreshed"] < have["refreshed"]:
+    if have is not None and (data["refreshed"], data.get("catalog_refreshed", "")) < (
+        have["refreshed"],
+        have.get("catalog_refreshed", ""),
+    ):
         return False
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
