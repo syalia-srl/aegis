@@ -126,6 +126,10 @@ def test_model_suggestions_are_the_models_agents_name_without_duplicates(tmp_pat
         "codex": [],
         "cursor": [],
         "pi": [],
+        "web-gemini": [],
+        "web-deepseek": [],
+        "web-qwen": [],
+        "web-chatgpt": [],
     }
 
 

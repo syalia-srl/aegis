@@ -237,6 +237,10 @@ def test_agents_list(project, fake_claude):
         {"name": "codex", "supported": True},
         {"name": "cursor", "supported": True},
         {"name": "pi", "supported": True},
+        {"name": "web-gemini", "supported": True},
+        {"name": "web-deepseek", "supported": True},
+        {"name": "web-qwen", "supported": True},
+        {"name": "web-chatgpt", "supported": True},
     ]
     assert r["models"] == {
         "claude-code": ["opus", "claude-sonnet-5"],
@@ -244,6 +248,10 @@ def test_agents_list(project, fake_claude):
         "codex": [],
         "cursor": [],
         "pi": [],
+        "web-gemini": [],
+        "web-deepseek": [],
+        "web-qwen": [],
+        "web-chatgpt": [],
     }
     assert r["cwd"] == str(project)
 
