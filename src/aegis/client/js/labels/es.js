@@ -9,6 +9,21 @@
 // quien traduce puede mover la variable dentro de la frase. El plural de un
 // conteo se elige en el código y aquí solo vive el sustantivo.
 export default {
+  "entries.gc.title": "Limpieza de repositorios",
+  "entries.gc.pending": "Revisa la selección antes de aprobar el borrado.",
+  "entries.gc.running": "Comprobando la selección y borrando las carpetas que siguen siendo elegibles…",
+  "entries.gc.finished": "Limpieza terminada.",
+  "entries.gc.cancelled": "Cancelado; no se borró nada.",
+  "entries.gc.about": "Al menos {days} días sin cambios en fuentes ni artefactos. Libre: {free}. Los enlaces compartidos pueden reducir el espacio recuperado.",
+  "entries.gc.approve": "Borrar las carpetas seleccionadas",
+  "entries.gc.cancel": "Cancelar",
+  "entries.gc.selection": "{n} carpetas seleccionadas; espacio recuperable estimado: {size}.",
+  "entries.gc.candidate": "{kind} · ocupa {size} · recuperable estimado {reclaim}",
+  "entries.gc.ages": "Último cambio en fuentes: {source}. Último cambio en artefactos: {artifact}.",
+  "entries.gc.excluded": "{n} rutas excluidas y sus motivos",
+  "entries.gc.result": "{removed} borradas, {skipped} omitidas, {errors} errores. Recuperado: {recovered}. Libre: {free}.",
+  "entries.gc.report": "Informe completo de la limpieza",
+
   "sidebar.feeds": "Feeds",
   "sidebar.chrome": "Tu navegador",
   "sidebar.chromeDisconnect": "Desconectar",

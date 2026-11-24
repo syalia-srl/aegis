@@ -8,6 +8,21 @@
 // can move the variable within the sentence. A count's plural is chosen in
 // code and only its noun comes from here.
 export default {
+  "entries.gc.title": "Repository cleanup",
+  "entries.gc.pending": "Review the selection before approving deletion.",
+  "entries.gc.running": "Revalidating the selection and deleting eligible directories…",
+  "entries.gc.finished": "Cleanup finished.",
+  "entries.gc.cancelled": "Cancelled; nothing deleted.",
+  "entries.gc.about": "At least {days} days without source or artifact activity. Free: {free}. Shared links can reduce actual savings.",
+  "entries.gc.approve": "Delete selected directories",
+  "entries.gc.cancel": "Cancel",
+  "entries.gc.selection": "{n} selected directories; estimated reclaim: {size}.",
+  "entries.gc.candidate": "{kind} · allocated {size} · estimated reclaim {reclaim}",
+  "entries.gc.ages": "Last source write: {source}. Last artifact write: {artifact}.",
+  "entries.gc.excluded": "{n} excluded paths and their reasons",
+  "entries.gc.result": "{removed} removed, {skipped} skipped, {errors} errors. Recovered: {recovered}. Free: {free}.",
+  "entries.gc.report": "Full cleanup report",
+
   "sidebar.feeds": "Feeds",
   "sidebar.chrome": "Your browser",
   "sidebar.chromeDisconnect": "Disconnect",

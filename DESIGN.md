@@ -307,6 +307,20 @@ relative, which is what made taking over the `aegis` name one directory move, an
 module imports `legacy/`, which is not packaged. `tests/test_imports.py` enforces
 both by AST.
 
+**Repository cleanup is a proposal until the person selects and approves.**
+`repo_gc.py` inventories recognized, Git-ignored rebuildable artifacts and records
+source and artifact metadata, exclusions, allocated bytes and a conservative
+hard-link estimate. `gc_ops.py` exposes proposal and read operations to agents;
+only the person's operation executes a fixed subset of the inventory. The `/gc`
+command calls the same proposal operation. Cards are full snapshots in transcript
+records, so their selection controls survive a restart; the running state is
+recorded before execution, preventing a second click or restart from replaying
+approval. Execution rescans current references and source and artifact metadata,
+skips changed candidates, refuses symlinked parent components, and reports disk
+space and tracked-file state. The explicit repository CLI scope uses the same
+scanner and executor with terminal selection and confirmation. Existing archived
+session collection keeps its scope (`gc.py`).
+
 ## Rules that span modules
 
 **The tabs are the server's; their order is the browser's.** The tab bar is the
