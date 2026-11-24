@@ -281,6 +281,7 @@ def test_the_more_button_opens_the_switcher_and_a_row_scrolls_its_tab_into_view(
     pg.wait_for_function(
         f"""() => {{ const t = document.querySelector("#tablist .tab[data-id='{keys[-1]}']").getBoundingClientRect();
               const l = document.getElementById('tablist').getBoundingClientRect();
+              if (t.width > l.width) return t.left <= l.left + 1 && t.right >= l.right - 1;
               return t.left >= l.left - 1 && t.right <= l.right + 1; }}""",
         timeout=5000,
     )
