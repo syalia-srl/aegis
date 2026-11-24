@@ -557,3 +557,57 @@ async def test_unrequested_regeneration_is_not_a_new_manual_command(tmp_path):
         assert not (tmp_path / "forbidden-regeneration").exists()
     finally:
         await process.terminate()
+
+
+async def test_redirected_background_children_end_with_the_command(tmp_path):
+    import asyncio
+
+    browser = Browser(
+        "(sleep 0.3; touch redirected-descendant-survived) >/dev/null 2>&1 &"
+    )
+    process, events = make(tmp_path, browser)
+    await process.start()
+    try:
+        await process.send("Start a redirected descendant")
+        await until(lambda: bool(done(events)), timeout=5)
+        await process.set("permission", "read")
+        await asyncio.sleep(0.4)
+        assert not (tmp_path / "redirected-descendant-survived").exists()
+    finally:
+        await process.terminate()
+
+
+async def test_permission_update_follows_the_pending_manual_command_result(tmp_path):
+    browser = Browser()
+    process, events = make(tmp_path, browser)
+    await process.start()
+    try:
+        await process.send("First task")
+        await until(lambda: len(done(events)) == 1, timeout=5)
+        browser.users.append({"id": "manual-user", "text": "Write the manual proof"})
+        browser.messages.append(
+            {
+                "id": "manual-answer",
+                "markdown": "```bash\n# aegis: execute\ntouch forbidden-manual-proof\n```",
+                "complete": True,
+            }
+        )
+        await process.set("permission", "read")
+        await process.send("The queued task")
+        await until(lambda: len(done(events)) == 2, timeout=5)
+        assert done(events)[-1]["error"] is False
+        assert not (tmp_path / "forbidden-manual-proof").exists()
+        result = next(
+            i
+            for i, text in enumerate(browser.sent)
+            if "execution manual-answer/0" in text
+        )
+        update = next(
+            i
+            for i, text in enumerate(browser.sent)
+            if text.startswith("Aegis session update")
+        )
+        assert result < update < browser.sent.index("The queued task")
+        assert process.ledger.get("manual-answer/0")["phase"] == "delivered"
+    finally:
+        await process.terminate()

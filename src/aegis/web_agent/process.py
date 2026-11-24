@@ -38,6 +38,7 @@ Use your provider's own research capabilities when appropriate.
 For local execution, return exactly one top-level fenced code block labeled bash.
 Its first nonblank line must be exactly: # aegis: execute
 Start the command with a descriptive comment and wait for the actual result.
+All children in its process group end when the command returns; do not leave background jobs.
 Other code blocks are examples. Do not simulate tool output or execution.
 Discover a tool with `aegis tools TOOL`; invoke it with `aegis call TOOL key=value`.
 Arguments follow normal Bash quoting. Keep credentials out of commands and output.
@@ -281,11 +282,12 @@ class WebProcess:
                 prime_version=1,
                 context=self._session_context(),
             )
+
+    async def _update_context(self) -> None:
         current = self._session_context()
-        if (
-            current != self.ledger.data.get("context", current)
-            and not self.ledger.data.get("active")
-            and not self.ledger.data.get("outbound")
+        outbound = self.ledger.data.get("outbound")
+        if current != self.ledger.data.get("context", current) and (
+            not outbound or outbound["kind"] == "update"
         ):
             update = (
                 f"Aegis session update\nWorking directory: {self.context.cwd}\n"
@@ -417,6 +419,7 @@ class WebProcess:
                     active = {"prompt": text, "message": None}
                     self.ledger.update(active=active)
                     self._emit("echo", text=text)
+                await self._update_context()
                 message = await self._exchange(active["prompt"], "task")
             while self._active:
                 self.ledger.update(active={**active, "message": message})
@@ -439,6 +442,7 @@ class WebProcess:
                         active = {"prompt": active["prompt"], "message": None}
                         self.ledger.update(active=active)
                         self._emit("echo", text=active["prompt"])
+                        await self._update_context()
                         message = await self._exchange(active["prompt"], "task")
                         continue
                     self.ledger.update(active=None)
@@ -574,8 +578,8 @@ class WebProcess:
                 error=code_number != 0,
             )
         finally:
+            await self._kill()
             if not completion.done():
-                await self._kill()
                 completion.cancel()
                 await asyncio.gather(completion, return_exceptions=True)
             self._pgid = None

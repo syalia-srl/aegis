@@ -78,7 +78,9 @@ with `aegis call <tool> key=value`. The read and write permission levels refuse
 all free-form Bash; auto and full allow it. Disabling the agent's harness tools
 also refuses Bash. These levels are a dispatch policy, not an OS sandbox.
 
-A command times out after 120 seconds. Interrupt stops its process group and
+A command times out after 120 seconds. Remaining children in its process group
+are stopped when the command returns, even if they redirected their output.
+Keep required work in the foreground. Interrupt stops its process group and
 asks the provider to stop generating. Each output stream sent to the provider
 is capped at 64 KiB; the result names the full local output files when truncated.
 Execution and message delivery are recorded durably. If a restart leaves a

@@ -176,16 +176,9 @@ class BrowserBridge:
             if op == "check":
                 return {}
             if op == "observe":
-                return await self.chrome.call(
-                    self.session.log_id,
-                    self.tab,
-                    "eval",
-                    {"expression": self.provider.observe_script},
-                )
+                return await self._eval(self.provider.observe_script)
             if op == "stop":
-                return await self.chrome.call(
-                    self.session.log_id, self.tab, "eval", {"expression": STOP_SCRIPT}
-                )
+                return await self._eval(STOP_SCRIPT)
             await self.chrome.call(
                 self.session.log_id,
                 self.tab,
@@ -197,9 +190,7 @@ class BrowserBridge:
                 },
             )
             if self.provider.name == "web-deepseek":
-                submitted = await self.chrome.call(
-                    self.session.log_id, self.tab, "eval", {"expression": DEEPSEEK_SEND}
-                )
+                submitted = await self._eval(DEEPSEEK_SEND)
                 if submitted.get("submitted") is not True:
                     raise CallError(
                         "submission_refused",
@@ -207,3 +198,16 @@ class BrowserBridge:
                     )
             self.chrome.acted(self.tab, self.session.handle, "web harness submit")
             return {"submitted": True}
+
+    async def _eval(self, expression: str) -> dict:
+        assert self.tab is not None
+        reply = await self.chrome.call(
+            self.session.log_id, self.tab, "eval", {"expression": expression}
+        )
+        value = reply.get("value") if isinstance(reply, dict) else None
+        if not isinstance(value, dict):
+            raise CallError(
+                "unsupported_layout",
+                "The Chrome observer returned an unsupported result",
+            )
+        return value
