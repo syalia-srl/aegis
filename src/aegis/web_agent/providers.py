@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 
 @dataclass(frozen=True)
@@ -33,6 +33,12 @@ class Provider:
         p = urlsplit(url)
         if self.accepts(url) and p.path.startswith(self.conversation_prefix):
             tail = p.path.removeprefix(self.conversation_prefix)
+            # ChatGPT replaces this provisional browser-local route with the
+            # persisted conversation id after accepting the first submission.
+            if self.name == "web-chatgpt" and unquote(tail).startswith(
+                "local-chatgpt:"
+            ):
+                return None
             if tail and tail != "new-chat":
                 return f"https://{p.netloc}{p.path}"
         return None

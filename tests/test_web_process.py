@@ -649,3 +649,43 @@ async def test_web_priming_is_compact_and_loads_workspace_context_only_on_demand
         assert "stdout:\ncompact works" in browser.results[0]
     finally:
         await process.terminate()
+
+
+async def test_chatgpt_pins_the_canonical_chat_after_its_provisional_route(tmp_path):
+    class ChatGPT(Browser):
+        provisional_observed = False
+
+        async def __call__(self, op, args):
+            page = await super().__call__(op, args)
+            if op == "start":
+                page["url"] = "https://chatgpt.com/"
+            if op == "observe":
+                if len(self.sent) == 1 and not self.provisional_observed:
+                    self.provisional_observed = True
+                    page["url"] = "https://chatgpt.com/c/local-chatgpt%3Atest"
+                else:
+                    page["url"] = (
+                        "https://chatgpt.com/c/canonical-chat"
+                        if self.sent
+                        else "https://chatgpt.com/"
+                    )
+            return page
+
+    browser = ChatGPT("printf 'verified' > canonical-proof")
+    process, events = make(tmp_path, browser)
+    process.provider = importlib.import_module("aegis.web_agent.providers").PROVIDERS[
+        "web-chatgpt"
+    ]
+    await process.start()
+    try:
+        await process.send("Verify this conversation")
+        await until(lambda: bool(done(events)), timeout=5)
+        assert done(events)[-1]["error"] is False
+        assert browser.provisional_observed is True
+        assert (tmp_path / "canonical-proof").read_text() == "verified"
+        assert (
+            process.ledger.data["conversation"]["url"]
+            == "https://chatgpt.com/c/canonical-chat"
+        )
+    finally:
+        await process.terminate()
