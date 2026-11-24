@@ -201,12 +201,23 @@ class BrowserBridge:
                             and rect is not None
                             and rect == last_rect
                         ):
-                            await self.chrome.call(
-                                self.session.log_id,
-                                self.tab,
-                                "click",
-                                {"target": self.provider.send},
-                            )
+                            if self.provider.send_key:
+                                await self.chrome.call(
+                                    self.session.log_id,
+                                    self.tab,
+                                    "press",
+                                    {
+                                        "target": self.provider.input,
+                                        "key": self.provider.send_key,
+                                    },
+                                )
+                            else:
+                                await self.chrome.call(
+                                    self.session.log_id,
+                                    self.tab,
+                                    "click",
+                                    {"target": self.provider.send},
+                                )
                             break
                         last_rect = rect if submitted.get("ready") is True else None
                         if attempt == 20:

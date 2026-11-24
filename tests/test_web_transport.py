@@ -203,7 +203,7 @@ async def test_provider_reports_the_actual_send_button_result(
         assert await bridge("send", {"text": "A task"}) == {"submitted": True}
         typed = [call for call in ext.calls if call["op"] == "type"]
         assert len(typed) == 1 and typed[0]["args"]["submit"] is False
-        assert ext.calls[-1]["op"] == "click"
+        assert ext.calls[-1]["op"] == ("press" if name == "web-qwen" else "click")
     else:
         with pytest.raises(CallError, match="submission_refused"):
             await bridge("send", {"text": "A task that did not get submitted"})
@@ -289,7 +289,7 @@ async def test_native_submission_waits_for_stable_ready_button_without_retyping(
         "eval",
         "eval",
         "eval",
-        "click",
+        "press",
     ]
     assert ext.calls[0]["args"]["submit"] is False
 
