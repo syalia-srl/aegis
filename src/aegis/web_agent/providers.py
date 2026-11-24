@@ -137,12 +137,12 @@ _OBSERVER = r"""(() => {
   const controls=Array.from(document.querySelectorAll('button,[role=button]'));
   const busy=controls.some(e=>visible(e)&&/^stop(?: response| generating| streaming)?$/i.test(e.getAttribute('aria-label')||e.innerText.trim()))
     || !!document.querySelector('.qwen-chat-status-card-title-animate');
-  function qwenMessage(root){
+  function qwenMessage(root,role='assistant'){
     if(cfg.provider!=='web-qwen')return null;
     const key=Object.keys(root).find(k=>k.startsWith('__reactFiber'));
     for(let f=key&&root[key],depth=0;f&&depth<10;f=f.return,depth++){
       const m=f.memoizedProps?.message;
-      if(m?.role==='assistant' && 'chat-response-message-'+m.id===root.id)return m;
+      if(m?.role===role && (role==='user' || 'chat-response-message-'+m.id===root.id))return m;
     }
     return null;
   }
@@ -212,7 +212,11 @@ _OBSERVER = r"""(() => {
     const parsed=typeof source==='string'?{text:source,valid:true}:answer?markdown(answer):{text:'',valid:false};
     return {id:identity(root,index),markdown:parsed.text,complete:!!answer&&parsed.valid&&completed(root)&&(!busy||index<roots.length-1)};
   });
-  const users=Array.from(document.querySelectorAll(cfg.users)).map((e,i)=>({id:e.getAttribute('data-message-id')||e.id||(cfg.users==='user-query .query-text'?'query-':'user-')+i,text:e.innerText.trim()}));
+  const users=Array.from(document.querySelectorAll(cfg.users)).map((e,i)=>{
+    const source=qwenMessage(e,'user');
+    if(typeof source?.id==='string' && typeof source?.content==='string')return {id:source.id,text:source.content};
+    return {id:e.getAttribute('data-message-id')||e.id||(cfg.users==='user-query .query-text'?'query-':'user-')+i,text:e.innerText.trim()};
+  });
   const dialog=Array.from(document.querySelectorAll('[role=dialog],dialog')).find(e=>visible(e)&&/confirm your age|sign in|log in|verify|captcha/i.test(e.innerText));
   const signIn=cfg.provider==='web-deepseek' && location.pathname==='/sign_in';
   return {url:location.href,title:document.title,messages,users,busy,partial_history:['web-deepseek','web-chatgpt'].includes(cfg.provider),intervention:signIn?"Sign in to DeepSeek in the backing Chrome tab":dialog?dialog.innerText.slice(0,300):null};
