@@ -125,6 +125,13 @@ front. Do what it asks, then press Done in the ribbon, or Done on the tab
 in the session's side panel. The agent is woken with what the page did
 meanwhile.
 
+## Web agent sessions
+
+The web-harnesses page explains how to run Gemini, DeepSeek, Qwen or ChatGPT
+as a normal aegis session. These sessions require Scripts on their backing
+tab. Their transcript has Open in Chrome to focus that tab; update the extension
+to 0.5.1 or newer for this action.
+
 ## For agents
 
 `browser_list` returns every browser you may use: the server's, kind
