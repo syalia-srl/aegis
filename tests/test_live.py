@@ -2579,3 +2579,77 @@ async def test_real_claude_calls_a_tool_of_its_agents_mcp_server(tmp_path: Path)
     finally:
         server.should_exit = True
         await asyncio.wait_for(task, 30)
+
+
+async def test_a_real_codex_shell_call(tmp_path: Path):
+    """Codex's real shell policy must preserve the private CLI auth path.
+    Uses the signed-in ChatGPT plan and one small Luna turn."""
+    import asyncio
+    import os
+    import shlex
+    import sys
+    import uvicorn
+    from aegis.app import App
+    from aegis.roots import make_roots
+    from aegis.web import build_web
+    from .test_agents import _free_port
+
+    codex = shutil.which("codex")
+    home = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex")))
+    if not codex or not (home / "auth.json").exists():
+        pytest.skip("needs Codex signed in with ChatGPT")
+    (tmp_path / ".aegis.yaml").write_text(
+        "agents:\n  cx: {harness: codex, model: openai/gpt-6-luna, effort: low, permission: full}\n"
+    )
+    port = _free_port()
+    app = App(
+        make_roots(tmp_path, None), codex_bin=codex, base_url=f"http://127.0.0.1:{port}"
+    )
+    server = uvicorn.Server(
+        uvicorn.Config(
+            build_web(app, "test", {f"127.0.0.1:{port}"}),
+            port=port,
+            log_level="warning",
+        )
+    )
+    task = asyncio.create_task(server.serve())
+    await until(lambda: server.started, timeout=10, what="uvicorn")
+    try:
+        r = await app.registry.call("session.spawn", {"agent": "cx"})
+        s = app.sessions.sessions[r["log_id"]]
+        output = tmp_path / "cli.json"
+        command = f'test -z "$AEGIS_SESSION_TOKEN" && {shlex.quote(sys.executable)} -m aegis call session_list > {shlex.quote(str(output))}'
+        await s.send(
+            "Use your shell tool to execute exactly this command, then reply OK. Do not inspect or print credentials. Command: "
+            + command
+        )
+        await until(
+            lambda: output.exists() and output.stat().st_size > 0,
+            timeout=180,
+            what="Codex shell CLI result",
+        )
+        rows = json.loads(output.read_text())
+        assert [row["handle"] for row in rows if row.get("you")] == [s.handle]
+        await until(lambda: s.status == "idle", timeout=60, what="Codex idle")
+        auth = s._proc._call_auth.path
+        assert auth.stat().st_mode & 0o777 == 0o600
+        await s.stop()
+        assert not auth.exists()
+    finally:
+        server.should_exit = True
+        await asyncio.wait_for(task, 30)
+        await app.shutdown()
+
+
+async def test_real_codex_subscription_quota(monkeypatch):
+    """Read the real plan allowance without a thread or model inference."""
+    import asyncio
+    from aegis.quota.codex import read_token, fetch_usage
+
+    monkeypatch.delenv("CODEX_AUTH", raising=False)
+    binary = read_token()
+    if binary is None:
+        pytest.skip("needs Codex signed in with ChatGPT")
+    snapshot = await asyncio.to_thread(fetch_usage, binary)
+    assert snapshot.windows
+    assert all(w.span_s and w.resets_at for w in snapshot.windows)
