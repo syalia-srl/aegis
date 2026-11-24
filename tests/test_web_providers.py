@@ -163,7 +163,7 @@ def test_provider_send_uses_the_enabled_button(page, name, disabled):
     page.evaluate(
         "document.querySelector('button,[role=button]').addEventListener('click',()=>document.body.dataset.sent='yes')"
     )
-    assert page.evaluate(provider(name).send_ready_script) == {"ready": not disabled}
+    assert page.evaluate(provider(name).send_ready_script)["ready"] is not disabled
     assert page.get_attribute("body", "data-sent") is None
 
 
@@ -213,3 +213,58 @@ def test_deepseek_virtual_items_keep_identity_when_older_answers_unmount(page):
     after = page.evaluate(provider("web-deepseek").observe_script)
     assert before["messages"][1]["id"] == after["messages"][0]["id"] == "4"
     assert after["partial_history"] is True
+
+
+def test_qwen_reads_original_markdown_instead_of_monaco_visual_text(page):
+    from aegis.web_agent.protocol import request
+
+    code = "# aegis: execute\nprintf '%s' 'first\n\n\nlast'\n"
+    source = "```bash\n" + code + "```"
+    page.set_content(
+        '<div class="chat-response-message" id="chat-response-message-original"><div class="phase-answer"><pre class="qwen-markdown-code"><div>bash</div><div class="monaco-editor">1 2 3 #&nbsp;aegis:&nbsp;execute</div></pre></div></div>'
+    )
+    page.evaluate(
+        """source=>document.querySelector('.chat-response-message').__reactFiber$test={memoizedProps:{message:{id:'original',role:'assistant',done:true,content_list:[{phase:'answer',status:'finished',content:source}]}}}""",
+        source,
+    )
+    answer = page.evaluate(provider("web-qwen").observe_script)["messages"][0]
+    assert answer["complete"] is True
+    assert answer["markdown"] == source
+    assert request(answer["markdown"]).code == code
+
+
+def test_visual_monaco_code_without_original_source_is_not_executable(page):
+    page.set_content(
+        PAGES["web-qwen"].replace(
+            "CONTENT",
+            '<pre><div class="monaco-editor"># aegis: execute\necho 3</div></pre>',
+        )
+    )
+    answer = page.evaluate(provider("web-qwen").observe_script)["messages"][0]
+    assert answer["complete"] is False
+
+
+def test_send_preparation_scrolls_instantly_before_coordinates_are_used(page):
+    page.set_content(
+        '<html style="scroll-behavior:smooth"><body><div style="height:2500px"></div><button aria-label="Send">Send</button></body></html>'
+    )
+    ready = page.evaluate(provider("web-qwen").send_ready_script)
+    assert ready["ready"] is True
+    assert 0 <= ready["rect"][1] < page.evaluate("innerHeight")
+
+
+def test_deepseek_sign_in_page_requests_person_intervention(page):
+    url = "https://chat.deepseek.com/sign_in"
+    page.route(
+        url,
+        lambda route: route.fulfill(
+            body='<input type="password"><button>Log in</button>'
+        ),
+    )
+    try:
+        page.goto(url)
+        got = page.evaluate(provider("web-deepseek").observe_script)
+        assert got["intervention"] == "Sign in to DeepSeek in the backing Chrome tab"
+    finally:
+        page.goto("about:blank")
+        page.unroute(url)

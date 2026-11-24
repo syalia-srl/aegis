@@ -190,7 +190,13 @@ async def test_provider_reports_the_actual_send_button_result(
     manager = manager_type(chrome)
     chrome.on_answer = manager.answered
     bridge = manager.for_session(session)
-    ext = Driven(chrome, lambda _: {"value": {"ready": submitted}, "web_ready": True})
+    ext = Driven(
+        chrome,
+        lambda _: {
+            "value": {"ready": submitted, "rect": [0, 0, 20, 20]},
+            "web_ready": True,
+        },
+    )
     await (await grant(chrome, ext, bridge, url=url))
     chrome.tabs["qwen"]["eval"] = True
     if submitted:
@@ -260,13 +266,18 @@ async def test_native_web_bash_calls_the_real_mcp_as_its_own_session(world):
     assert not auth_path.exists()
 
 
-async def test_native_submission_focuses_once_and_waits_without_retyping(tmp_path):
+async def test_native_submission_waits_for_stable_ready_button_without_retyping(
+    tmp_path,
+):
     attempts = []
 
     def answer(message):
         if message["op"] == "eval":
             attempts.append(message)
-            return {"value": {"ready": len(attempts) == 3}, "web_ready": True}
+            return {
+                "value": {"ready": len(attempts) >= 3, "rect": [0, 0, 20, 20]},
+                "web_ready": True,
+            }
         return {}
 
     chrome, _, bridge, ext, _ = setup_bridge(tmp_path, answer)
@@ -274,6 +285,7 @@ async def test_native_submission_focuses_once_and_waits_without_retyping(tmp_pat
     assert await bridge("send", {"text": "A single draft"}) == {"submitted": True}
     assert [call["op"] for call in ext.calls] == [
         "type",
+        "eval",
         "eval",
         "eval",
         "eval",
