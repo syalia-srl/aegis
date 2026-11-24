@@ -22,7 +22,13 @@ from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 from .context import BANDS, reread_cost, summary
-from .subscription import WEEK, WEEKLY, Reading, split as split_fee, weekly_fee
+from .subscription import (
+    WEEK,
+    WINDOWS,
+    Reading,
+    period_fee,
+    split as split_fee,
+)
 
 BYS = ("hour", "day", "week", "month", "dow", "dow_hour")
 MEASURES = (
@@ -348,11 +354,17 @@ def _sub_hours(con, q: UsageQuery, cte: str, cte_args: list, offsets: str) -> di
     return out
 
 
+def _window(billing: str) -> tuple[str, int] | None:
+    """The quota window and period length for a billing id, or None."""
+    return WINDOWS.get(billing.split(":", 1)[0])
+
+
 def _readings(con, billing: str, since: float, until: float) -> list[Reading]:
-    """The weekly window's readings in the window, and the one before it."""
-    window = WEEKLY.get(billing.split(":", 1)[0])
-    if window is None:
+    """The fee window's readings in the span, and the one before it."""
+    meta = _window(billing)
+    if meta is None:
         return []
+    window, _ = meta
     rows = con.execute(
         "SELECT ts, percent, resets_at FROM usage_quota WHERE billing = ? AND window = ?"
         " AND ts >= (SELECT COALESCE(MAX(ts), ?) FROM usage_quota"
@@ -411,23 +423,33 @@ def _subscriptions(con, q: UsageQuery, hours: dict, by_key: dict, conf: dict) ->
         hourly = hours.get(billing, {})
         first = min((h for h, _ in hourly), default=q.since)
         span = (max(q.since, first), min(q.until, time.time()))
-        s = split_fee(_readings(con, billing, q.since, q.until), hourly, fee, span)
+        meta = _window(billing)
+        period_s = float(meta[1] if meta else WEEK)
+        s = split_fee(
+            _readings(con, billing, q.since, q.until),
+            hourly,
+            fee,
+            span,
+            period_s=period_s,
+        )
         for key, points in s.limit.items():
             if key in by_key:
                 by_key[key]["limit"] += points
         for key, dollars in s.dollars.items():
             if key in by_key:
                 by_key[key]["sub"] += float(dollars)
-        week = weekly_fee(fee) if fee is not None else Decimal(0)
+        unit = period_fee(fee, period_s) if fee is not None else Decimal(0)
         out[billing] = {
             "name": c.get("name") or billing,
-            "fee": float(week * Decimal(str(max(span[1] - span[0], 0))) / WEEK),
+            "fee": float(
+                unit * Decimal(str(max(span[1] - span[0], 0))) / Decimal(period_s)
+            ),
             "kind": s.kind,
             "sub": float(sum(s.dollars.values(), Decimal(0))),
             "elsewhere": s.elsewhere,
             "unused": s.unused,
-            "elsewhere_usd": float(week * Decimal(str(s.elsewhere)) / 100),
-            "unused_usd": float(week * Decimal(str(s.unused)) / 100),
+            "elsewhere_usd": float(unit * Decimal(str(s.elsewhere)) / 100),
+            "unused_usd": float(unit * Decimal(str(s.unused)) / 100),
             "apportioned": float(s.apportioned),
             "value": round(float(sum(hourly.values(), Decimal(0))), 9),
         }

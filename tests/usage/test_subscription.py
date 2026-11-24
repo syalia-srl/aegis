@@ -1,11 +1,12 @@
-"""Splitting a subscription's fee and weekly limit over hourly costs (spec 08)."""
+"""Splitting a subscription's fee and window limit over hourly costs (spec 08)."""
 
 from decimal import Decimal
 
-from aegis.usage.subscription import Reading, split
+from aegis.usage.subscription import MONTH, Reading, split
 
 W = 7 * 86400  # the window resets a week on
 WEEK_FEE = Decimal(200) * 12 / 52
+MONTH_FEE = Decimal(200)
 
 
 def close(a, b) -> bool:
@@ -71,3 +72,18 @@ def test_hours_before_the_first_reading_are_apportioned_for_that_stretch():
 def test_a_subscription_without_a_fee_has_limit_only():
     s = split([], {(0, ("atlas",)): Decimal(1)}, None)
     assert (s.limit, s.dollars, s.apportioned) == ({}, {}, Decimal(0))
+
+
+def test_a_monthly_window_buys_the_full_fee_with_100_points():
+    """Cursor's Auto pool (#1134): 100 points ↔ the monthly fee, not a week of it."""
+    r = [Reading(0, 10, MONTH), Reading(3600, 14, MONTH)]  # +4
+    s = split(
+        r,
+        {(0, ("atlas",)): Decimal(3), (0, ("notes",)): Decimal(1)},
+        Decimal(200),
+        period_s=MONTH,
+    )
+    assert s.limit == {("atlas",): 3.0, ("notes",): 1.0}
+    assert close(s.dollars[("atlas",)], MONTH_FEE * 3 / 100)
+    assert close(s.dollars[("notes",)], MONTH_FEE / 100)
+    assert close(sum(s.dollars.values()), MONTH_FEE * 4 / 100)

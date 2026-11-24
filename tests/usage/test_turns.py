@@ -464,6 +464,35 @@ def test_a_cursor_turn_with_an_unknown_model_stays_unpriced():
     assert (t.cost_kind, t.cost, t.tok_in + t.tok_out) == ("unpriced", Decimal(0), 1100)
 
 
+def test_a_cursor_turn_bills_the_cursor_account():
+    from aegis.claude.stream import Step, Usage
+
+    info = SessionInfo(
+        harness="cursor",
+        account=lambda h: "cursor:c0ffee" if h == "cursor" else None,
+    )
+    d = _feed(
+        "cursor",
+        "cursor",
+        [
+            (
+                None,
+                [
+                    Step(
+                        usage=Usage(
+                            input=1000, cache_creation=0, cache_read=0, output=50
+                        )
+                    ),
+                    *_result(),
+                ],
+            ),
+        ],
+        info=info,
+        model="claude-sonnet-5",
+    )
+    assert d.turns[0].billing == "cursor:c0ffee"
+
+
 def test_a_resume_after_an_exit_that_carries_the_total_on_counts_the_rise():
     """Seen on real stores: after an exit or a server stop, the resumed Claude's
     total_cost_usd goes on from where it was."""

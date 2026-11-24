@@ -522,12 +522,14 @@ usage:
 ```
 
 `subscriptions` names a subscription by its account's hash, the part after the
-colon in `aegis usage --split billing` (`claude:a1b2` is `a1b2`; Codex's plan is
-`codex`), and gives it a `name` and a monthly `fee` in USD. With a fee,
-`aegis usage --measure subscription` and the usage page share it over the work
-that ran on it; without one, only the weekly limit used is shared. `renews`,
-the billing day, is optional and kept for the record; the split does not use
-it.
+colon in `aegis usage --split billing` (`claude:a1b2` is `a1b2`; `cursor:…`
+the same way for Cursor's plan; Codex's plan is `codex`), and gives it a
+`name` and a monthly `fee` in USD. With a fee, `aegis usage --measure
+subscription` and the usage page share it over the work that ran on it;
+without one, only the window's limit used is shared. Cursor meters the
+monthly Auto pool; Claude and OpenCode Go meter their weekly windows.
+`renews`, the billing day, is optional and kept for the record; the split
+does not use it.
 
 A repo's owner is read once and read again when its `.git/config` changes. A
 `usage:` block with a wrong key or value leaves every default in force, and

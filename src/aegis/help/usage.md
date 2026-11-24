@@ -63,18 +63,21 @@ aegis usage --since 4w --split context --whatif 200k
 A turn run on a subscription (Claude Code signed in, OpenCode Go, Cursor's
 plan, Codex's plan) bills it; a turn on an API key bills `api`. `--split
 billing` names each subscription, as `claude:<hash>` for Claude Code's
-account. Name it and give
+account and `cursor:<hash>` for Cursor. Name it and give
 it a fee in the config's `usage.subscriptions` ([config](config.md)), and two
 measures appear:
 
-- **subscription** (`sub`): the fee's share. A week of the fee is the monthly
-  fee times 12 / 52, and each rise of the weekly limit between two quota
-  readings goes to what ran on the subscription in those hours, by its cost at
-  API prices. A rise with nothing behind it is *elsewhere* (the provider's own
-  apps, a machine aegis does not run on); what a week left at its reset is
-  *unused*. The slices, elsewhere and unused add up to the fee. Before the
-  earliest reading, or with no quota provider, the fee is *apportioned* by cost.
-- **limit**: the points of the weekly limit used.
+- **subscription** (`sub`): the fee's share. For Claude and OpenCode Go, a
+  week of the fee is the monthly fee times 12 / 52, and each rise of the
+  *weekly* limit between two quota readings goes to what ran on the
+  subscription in those hours, by its cost at API prices. For Cursor, the
+  meter is the monthly **Auto** pool: 100 points buy the full monthly fee
+  (API-pool-only rises with no Auto move stay *elsewhere* for now). A rise
+  with nothing behind it is *elsewhere* (the provider's own apps, a machine
+  aegis does not run on); what a window left at its reset is *unused*. The
+  slices, elsewhere and unused add up to the fee. Before the earliest
+  reading, or with no quota provider, the fee is *apportioned* by cost.
+- **limit**: the points of that window used.
 
 `--split context` groups by the context a turn peaked at, in bands of 0, 50k,
 100k, 200k, 300k, 400k and 600k tokens. `--whatif` (100k, 150k, 200k, 300k or
