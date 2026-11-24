@@ -105,7 +105,9 @@ weekly window: some plans return the week as the primary window. Other
 lengths keep the primary or secondary label and their own reset and span.
 With multiple buckets, aegis shows the `codex` bucket rather than combining
 separate model allowances. A failed fetch shows an explicit failure note or
-marks the last reading stale, like the other quota providers.
+marks the last reading stale, like the other quota providers. The `codex`
+pool can also take quota lines for schedules, agents, queues and token
+policies; the five-hour and weekly windows offer pace lines.
 
 ## Where a quota gauge says it will land
 

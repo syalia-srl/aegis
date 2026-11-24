@@ -160,9 +160,9 @@ def test_rows_join_a_fire_with_its_end_and_leave_out_its_tick():
                 "clock": {"every": "5m"},
                 "fire": FIRE,
                 "prompt": "x",
-                "quota": {"codex": {}},
+                "quota": {"pi": {}},
             },
-            "aegis reads no quota for 'codex'",
+            "aegis reads no quota for 'pi'",
         ),
         (
             {
