@@ -1391,6 +1391,11 @@ view.** Two markdown-it renderers, configured alike, draw every Markdown body:
 one for agents' text, and one for the person's messages that keeps a typed line
 break. A table never breaks a word: it scrolls inside its row with its first
 column pinned, and under 600 px of width it draws as one card per table row.
+Live reply patches fade their new graphemes through `js/streaming.js`: absolute
+start times follow a replaced row, with at most 120 animated graphemes and
+300 ms of added delay. Snapshots, resumed history, hidden pages and reduced
+motion skip the fade. The entry data and Markdown remain whole for copying
+and searching; closing Markdown that changes earlier text is drawn immediately.
 The container query that decides this sits on the transcript's scroller `#tr`,
 the viewer's `.vbody` and the Help tab's page `.hpage`, never on a row: a size
 container inside the
