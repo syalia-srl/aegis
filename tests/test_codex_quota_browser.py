@@ -68,7 +68,9 @@ def test_codex_weekly_quota_is_visible_at_both_widths(
         assert page.evaluate("document.documentElement.scrollWidth") <= width
         if width == 390:
             page.click("#nav-side")
-            page.locator("#s-tiles").wait_for()
+            page.wait_for_function(
+                "document.getElementById('side').getBoundingClientRect().right <= innerWidth + 1"
+            )
         if folder := os.environ.get("AEGIS_PR_SHOTS"):
             target = Path(folder)
             target.mkdir(parents=True, exist_ok=True)
