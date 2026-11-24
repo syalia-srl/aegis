@@ -1756,3 +1756,13 @@ and `queues.list` expose them before delegation; queue discovery respects the
 caller's queue scope and omits the internal mention queue. Agent pickers show
 the descriptions, and the primer points to discovery only when the session
 has both the discovery and delegation tools.
+
+## Shared model catalogue
+
+The `model-ranking` workflow publishes one public snapshot: daily Artificial
+Analysis scores and hourly models.dev provider offers. Each instance downloads
+it every 15 minutes, validates before atomic replacement and retains its last
+good file offline. Benchmark and provider refresh timestamps are independent.
+`models.catalog` reads advertised provider offers without logins; `models.list`
+continues to probe installed harnesses for locally usable models and prices.
+Catalogue data never grants credentials, quota or launch permission.
