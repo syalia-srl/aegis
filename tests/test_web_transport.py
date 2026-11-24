@@ -192,3 +192,45 @@ async def test_observer_unwraps_the_actual_extension_eval_envelope(tmp_path):
     await (await grant(chrome, ext, bridge))
     chrome.tabs["qwen"]["eval"] = True
     assert await bridge("observe", {}) == page
+
+
+@pytest.mark.slow
+async def test_native_web_bash_calls_the_real_mcp_as_its_own_session(world):
+    from .test_web_process import Browser
+
+    other = await world.spawn()
+    original_handle = other.handle
+    browser = Browser(
+        "aegis call help_search query=Chrome limit=1 && "
+        "aegis call session_rename handle=web-bound-test title='Web tool authority'",
+        final="The local tools completed with the web session identity.",
+    )
+    world.app.sessions.web_for = lambda session: browser
+    spawned = await world.app.registry.call(
+        "session.spawn", {"agent": "opus", "harness": "web-qwen", "model": "web"}
+    )
+    session = world.app.sessions.sessions[spawned["log_id"]]
+    try:
+        await session.send("Use the local Aegis tools")
+        await until(
+            lambda: session.status == "idle" and bool(browser.results),
+            timeout=20,
+            what="real web-session Bash and MCP calls",
+        )
+        assert session.handle == "web-bound-test"
+        assert other.handle == original_handle
+        assert '"hits"' in browser.results[0]
+        assert "exit_code: 0" in browser.results[0]
+        assert "Chrome" in browser.results[0]
+        assert any(
+            e["kind"] == "tool" and e["title"] == "Bash" and e["status"] == "ok"
+            for e in session.entries()
+        )
+        assert not any(
+            e["kind"] == "tool" and e["title"] == "help_search" for e in other.entries()
+        )
+        auth_path = session._proc._auth.path
+        assert auth_path.exists()
+    finally:
+        await session.stop()
+    assert not auth_path.exists()
