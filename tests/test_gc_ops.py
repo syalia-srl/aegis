@@ -19,6 +19,7 @@ async def proposal(s):
     return json.loads(said.removeprefix("mcp ok: "))
 
 
+@pytest.mark.slow
 async def test_mcp_only_proposes_and_reads_and_user_selection_executes(world):
     repo = repository(world.root)
     s = await world.spawn()

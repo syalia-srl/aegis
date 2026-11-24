@@ -383,6 +383,22 @@ def execute(
             continue
         path, repo = Path(name), Path(row["repo"])
         try:
+            # A full inventory may take time. Check writes and references
+            # again at the selected path, immediately before deletion.
+            refs, launchers = users()
+            if (
+                tree(path)[0] != original["stamp"]
+                or tree(repo, source=True)[0] != original["source_stamp"]
+                or any(ref == repo or ref.is_relative_to(repo) for ref in refs)
+                or any(name.encode() in body for body in launchers)
+            ):
+                skipped.append(
+                    {
+                        "path": name,
+                        "reason": "changed or started being used during execution",
+                    }
+                )
+                continue
             before_status = git(
                 repo, "status", "--porcelain=v1", "--untracked-files=no"
             )

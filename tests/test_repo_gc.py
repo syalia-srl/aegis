@@ -14,6 +14,14 @@ from aegis import repo_gc
 from aegis.cli import app
 
 
+@pytest.fixture(autouse=True)
+def isolated_users(monkeypatch):
+    """Unit tests use explicit references; the real inspection has its own test."""
+    inspect = repo_gc.users
+    monkeypatch.setattr(repo_gc, "users", lambda: (set(), []))
+    return inspect
+
+
 def command(repo, *args):
     return subprocess.run(
         ["git", "-C", str(repo), *args], check=True, capture_output=True
@@ -178,6 +186,24 @@ def test_shared_hardlinks_reduce_estimated_reclaimed_bytes(tmp_path):
     assert result["removed"] and external.read_bytes() == b"a" * 8192
 
 
+def test_a_write_after_the_rescan_is_checked_again_before_deletion(
+    tmp_path, monkeypatch
+):
+    repo = repository(tmp_path)
+    inventory = repo_gc.scan(tmp_path)
+    scan = repo_gc.scan
+
+    def then_write(*args, **kwargs):
+        current = scan(*args, **kwargs)
+        (repo / "target/app").write_text("a concurrent build")
+        return current
+
+    monkeypatch.setattr(repo_gc, "scan", then_write)
+    result = repo_gc.execute(inventory, [str(repo / "target")])
+    assert not result["removed"] and result["skipped"]
+    assert (repo / "target/app").read_text() == "a concurrent build"
+
+
 def test_cli_json_is_read_only_and_apply_cannot_bypass_interactive_approval(tmp_path):
     repo = repository(tmp_path)
     (tmp_path / ".aegis.yaml").write_text("{}")
@@ -192,7 +218,7 @@ def test_cli_json_is_read_only_and_apply_cannot_bypass_interactive_approval(tmp_
     assert (repo / "target").is_dir()
 
 
-def test_real_process_and_launcher_inspection(tmp_path, monkeypatch):
+def test_real_process_and_launcher_inspection(tmp_path, monkeypatch, isolated_users):
     repo = repository(tmp_path)
     bins = tmp_path / "bin"
     bins.mkdir()
@@ -208,7 +234,7 @@ def test_real_process_and_launcher_inspection(tmp_path, monkeypatch):
     )
     try:
         assert process.stdout.readline().strip() == "ready"
-        paths, scripts = repo_gc.users()
+        paths, scripts = isolated_users()
         assert repo / "target" in paths
         assert repo / "target/app" in paths
         assert any(str(repo / ".venv/bin/python").encode() in body for body in scripts)
