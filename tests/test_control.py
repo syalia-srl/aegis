@@ -164,3 +164,15 @@ def test_every_permission_lets_aegis_tools_through_a_hook():
         (rule,) = json.loads(argv[argv.index("--settings") + 1])["hooks"]["PreToolUse"]
         assert rule["matcher"] == "mcp__aegis__.*"
         assert '"permissionDecision": "allow"' in rule["hooks"][0]["command"]
+
+
+async def test_context_usage_reads_the_total_from_a_summary_request(
+    tmp_path, fake_claude
+):
+    from aegis.claude import control
+
+    p = await start(fake_claude, tmp_path, [])
+    try:
+        assert await control.context_usage(p) == 12687
+    finally:
+        await p.terminate()

@@ -156,3 +156,38 @@ def test_a_delta_between_two_moments_of_a_stream_rebuilds_the_later_one(name):
         for held, rev in seen[-40:]:
             assert rebuild(held, f.snapshot(rev)) == copy
         seen.append((copy, now["rev"]))
+
+
+# A message_delta as the OpenCode Go gateway sends it (measured 2026-11-24):
+# its assistant lines say 0 everywhere, the delta alone carries the real usage.
+GO_DELTA = {
+    "type": "message_delta",
+    "delta": {"stop_reason": "end_turn", "stop_sequence": None},
+    "usage": {
+        "input_tokens": 563,
+        "output_tokens": 3,
+        "cache_read_input_tokens": 11520,
+        "cache_creation_input_tokens": 0,
+        "cost": 0,
+        "opencode": {"billing_source": "go", "list_cost": 0.00012081},
+    },
+}
+
+
+def test_a_message_delta_carries_the_context_when_it_has_the_input_side():
+    p = Parser()
+    line = json.dumps({"type": "stream_event", "event": GO_DELTA})
+    assert p.feed(line) == [Delta(key="", kind="", text="", output=3, context=12086)]
+
+
+def test_a_message_delta_with_only_output_carries_no_context():
+    p = Parser()
+    ev = {"type": "message_delta", "delta": {}, "usage": {"output_tokens": 84}}
+    line = json.dumps({"type": "stream_event", "event": ev})
+    assert p.feed(line) == [Delta(key="", kind="", text="", output=84, context=0)]
+
+
+def test_a_subagents_message_delta_carries_nothing():
+    p = Parser()
+    sub = {"type": "stream_event", "event": GO_DELTA, "parent_tool_use_id": "toolu_x"}
+    assert p.feed(json.dumps(sub)) == [Delta(key="", kind="", text="")]

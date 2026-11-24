@@ -1519,6 +1519,8 @@ class Session:
                 inp, done = self.turn_tokens
                 more["turn_tokens"] = [inp, done + out - self._last_out]
                 self._last_out = out
+            if ctx := max(ev.context for ev in events if isinstance(ev, Delta)):
+                more["context_tokens"] = ctx
             self._set(
                 activity=fold.activity(),
                 **({"status": "working"} if self.status == "idle" else {}),
@@ -1540,7 +1542,8 @@ class Session:
                 changes["status"] = "working"
             usage = getattr(ev, "usage", None)
             if usage is not None and getattr(ev, "parent", None) is None:
-                changes["context_tokens"] = usage.context
+                if usage.context:  # a gateway that reports none leaves the last
+                    changes["context_tokens"] = usage.context
                 starting = changes.get("status") == "working"
                 if usage != self._last_usage or starting:
                     self._last_usage = usage
@@ -1603,7 +1606,23 @@ class Session:
             self._publish_now()  # waiting on a background task shows on the card
             self._host.status_changed(self)
         if any(isinstance(ev, Result) for ev in events) and not falling:
+            if not self.context_tokens:
+                asyncio.get_running_loop().create_task(self._ask_context())
             self._turn_over()
+
+    async def _ask_context(self) -> None:
+        """A turn ended with no context on the card: the endpoint reported no
+        usage the stream carries. Ask the harness for its own count, once per
+        turn, and keep it only while nothing better arrived meanwhile."""
+        ask = getattr(self._proc, "context_usage", None)
+        if ask is None or not self.running:
+            return
+        try:
+            total = await ask()
+        except (ControlError, TimeoutError, BrokenPipeError, OSError):
+            return
+        if total and not self.context_tokens:
+            self._set(context_tokens=total)
 
     def _steer_owed(self) -> None:
         """What the session is owed goes into the running turn: this tool

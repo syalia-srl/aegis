@@ -130,6 +130,9 @@ class ClaudeSession:
     async def catalog(self) -> Catalog:
         return await control.catalog(self._proc)
 
+    async def context_usage(self) -> int | None:
+        return await control.context_usage(self._proc)
+
     async def terminate(self) -> None:
         await self._proc.terminate()
 
