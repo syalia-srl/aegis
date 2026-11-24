@@ -24,6 +24,7 @@ class Provider:
     done: str
     conversation_prefix: str
     send: str | None = None
+    send_key: str | None = None
 
     def accepts(self, url: str) -> bool:
         target, base = urlsplit(url), urlsplit(self.url)
@@ -44,9 +45,11 @@ class Provider:
         return None
 
     @property
-    def send_script(self) -> str | None:
+    def send_ready_script(self) -> str | None:
         return (
-            _SEND.replace("__SELECTOR__", json.dumps(self.send)) if self.send else None
+            _SEND_READY.replace("__SELECTOR__", json.dumps(self.send))
+            if self.send
+            else None
         )
 
     @property
@@ -96,6 +99,7 @@ PROVIDERS = {
         'button[aria-label="Regenerate"]',
         "/c/",
         send='button[aria-label="Send"]',
+        send_key="Enter",
     ),
     "web-chatgpt": Provider(
         "web-chatgpt",
@@ -117,10 +121,12 @@ STOP_SCRIPT = r"""(() => {
   if (!b) return {stopped:false}; b.click(); return {stopped:true};
 })()"""
 
-_SEND = """(() => {
+_SEND_READY = """(() => {
   const b=document.querySelector(__SELECTOR__);
-  if(!b || !b.getClientRects().length || b.disabled || b.getAttribute('aria-disabled')==='true' || b.classList.contains('ds-button--disabled') || b.classList.contains('disabled')) return {submitted:false};
-  b.click(); return {submitted:true};
+  if(!b || !b.getClientRects().length || b.disabled || b.getAttribute('aria-disabled')==='true' || b.classList.contains('ds-button--disabled') || b.classList.contains('disabled')) return {ready:false};
+  b.scrollIntoView({behavior:'instant',block:'center',inline:'center'});
+  const r=b.getBoundingClientRect();
+  return {ready:true,rect:[r.x,r.y,r.width,r.height]};
 })()"""
 
 _OBSERVER = r"""(() => {
@@ -131,19 +137,19 @@ _OBSERVER = r"""(() => {
   const controls=Array.from(document.querySelectorAll('button,[role=button]'));
   const busy=controls.some(e=>visible(e)&&/^stop(?: response| generating| streaming)?$/i.test(e.getAttribute('aria-label')||e.innerText.trim()))
     || !!document.querySelector('.qwen-chat-status-card-title-animate');
-  function completed(root){
-    // Qwen can omit the answer toolbar. Its rendered message still carries
-    // explicit completion and phase state. Bind that state to this exact
-    // answer; a finished thinking phase alone never permits execution.
-    if(cfg.provider==='web-qwen'){
-      const key=Object.keys(root).find(k=>k.startsWith('__reactFiber'));
-      for(let f=key&&root[key],depth=0;f&&depth<10;f=f.return,depth++){
-        const m=f.memoizedProps?.message;
-        if(m?.role==='assistant' && 'chat-response-message-'+m.id===root.id
-          && m.done===true && Array.isArray(m.content_list)
-          && m.content_list.some(p=>p.phase==='answer'&&p.status==='finished'))return true;
-      }
+  function qwenMessage(root,role='assistant'){
+    if(cfg.provider!=='web-qwen')return null;
+    const key=Object.keys(root).find(k=>k.startsWith('__reactFiber'));
+    for(let f=key&&root[key],depth=0;f&&depth<10;f=f.return,depth++){
+      const m=f.memoizedProps?.message;
+      if(m?.role===role && (role==='user' || 'chat-response-message-'+m.id===root.id))return m;
     }
+    return null;
+  }
+  function completed(root){
+    const m=qwenMessage(root);
+    if(m?.done===true && Array.isArray(m.content_list)
+      && m.content_list.some(p=>p.phase==='answer'&&p.status==='finished'))return true;
     for(let e=root;e&&e!==document.body;e=e.parentElement){
       if(e!==root && roots.filter(r=>e.contains(r)).length>1) break;
       if(Array.from(e.querySelectorAll(cfg.done)).some(visible)) return true;
@@ -152,7 +158,7 @@ _OBSERVER = r"""(() => {
   }
   function identity(root,index){
     for(let e=root;e&&e!==document.body;e=e.parentElement){
-      const id=e.getAttribute('data-message-id')||e.getAttribute('data-dil-message-id')||e.getAttribute('data-message-uuid');
+      const id=e.getAttribute('data-message-id')||e.getAttribute('data-dil-message-id')||e.getAttribute('data-message-uuid')||(cfg.provider==='web-deepseek'?e.getAttribute('data-virtual-list-item-key'):null);
       if(id) return id;
       if(e===root&&e.id) return e.id;
       if(e!==root && roots.filter(r=>e.contains(r)).length>1) break;
@@ -168,6 +174,7 @@ _OBSERVER = r"""(() => {
       if(['button','svg','script','style'].includes(tag)||node.getAttribute('aria-hidden')==='true')return '';
       if(/^Gemini said$/i.test(node.innerText.trim()) && /^h[1-6]$/.test(tag))return '';
       if(tag==='pre'){
+        if(node.querySelector('.monaco-editor')){valid=false;return '';}
         const code=node.querySelector('code')||node;
         let language=(code.className.match(/(?:^|\s)language-([\w+-]+)/)||[])[1]||node.dataset.language||node.dataset.lang||'';
         if(!language){
@@ -199,10 +206,18 @@ _OBSERVER = r"""(() => {
     const content=cfg.content?root.querySelector(cfg.content):root;
     // Gemini's variants may put the content directly on model-response.
     const answer=content || (cfg.answers==='model-response'?root:null);
-    const parsed=answer?markdown(answer):{text:'',valid:false};
+    const source=qwenMessage(root)?.content_list?.find(p=>p.phase==='answer')?.content;
+    // Monaco's rendered text adds headers, line numbers and NBSPs. Use the
+    // provider's exact Markdown source instead of reconstructing that view.
+    const parsed=typeof source==='string'?{text:source,valid:true}:answer?markdown(answer):{text:'',valid:false};
     return {id:identity(root,index),markdown:parsed.text,complete:!!answer&&parsed.valid&&completed(root)&&(!busy||index<roots.length-1)};
   });
-  const users=Array.from(document.querySelectorAll(cfg.users)).map((e,i)=>({id:e.getAttribute('data-message-id')||e.id||(cfg.users==='user-query .query-text'?'query-':'user-')+i,text:e.innerText.trim()}));
+  const users=Array.from(document.querySelectorAll(cfg.users)).map((e,i)=>{
+    const source=qwenMessage(e,'user');
+    if(typeof source?.id==='string' && typeof source?.content==='string')return {id:source.id,text:source.content};
+    return {id:e.getAttribute('data-message-id')||e.id||(cfg.users==='user-query .query-text'?'query-':'user-')+i,text:e.innerText.trim()};
+  });
   const dialog=Array.from(document.querySelectorAll('[role=dialog],dialog')).find(e=>visible(e)&&/confirm your age|sign in|log in|verify|captcha/i.test(e.innerText));
-  return {url:location.href,title:document.title,messages,users,busy,intervention:dialog?dialog.innerText.slice(0,300):null};
+  const signIn=cfg.provider==='web-deepseek' && location.pathname==='/sign_in';
+  return {url:location.href,title:document.title,messages,users,busy,partial_history:['web-deepseek','web-chatgpt'].includes(cfg.provider),intervention:signIn?"Sign in to DeepSeek in the backing Chrome tab":dialog?dialog.innerText.slice(0,300):null};
 })()"""
