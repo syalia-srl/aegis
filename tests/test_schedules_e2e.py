@@ -420,16 +420,13 @@ async def test_a_machine_that_slept_eight_hours_fires_once(world):
 
 async def test_a_live_run_and_a_held_tick_survive_a_restart(world):
     t = frozen(world)
-    create(
-        world, "long-run", "/sh while [ ! -e release-long-run ]; do sleep 0.01; done"
-    )
+    create(world, "long-run", "/busy 3")
     await tick(world, t)
     await tick(world, t)
     await world.restart()
     frozen(world)
     st = world.app.schedules.state["long-run"]
     assert list(st.live) == [1] and st.held == "overlap"
-    (world.root / "release-long-run").touch()
     await until(lambda: len(runs(world, "long-run", "fired")) == 2, 15, "the held tick")
 
 

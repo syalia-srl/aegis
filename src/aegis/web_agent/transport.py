@@ -14,7 +14,6 @@ class WebBridges:
         self.chrome = chrome
         self.bridges: dict[str, BrowserBridge] = {}
         self.leases: dict[str, str] = {}
-        self.submissions = asyncio.Lock()
 
     def for_session(self, session: Any):
         provider = PROVIDERS.get(session.spec.harness)
@@ -176,63 +175,32 @@ class BrowserBridge:
                 return await self._eval(self.provider.observe_script)
             if op == "stop":
                 return await self._eval(STOP_SCRIPT)
-            # The observer has prepared the page for background execution.
-            # Keep each short input transaction ordered across web sessions.
-            async with self.manager.submissions:
-                self._check(args)
-                await self.chrome.call(
-                    self.session.log_id,
-                    self.tab,
-                    "type",
-                    {
-                        "target": self.provider.input,
-                        "text": args["text"],
-                        "submit": False,
-                    },
-                )
-                if script := self.provider.send_ready_script:
-                    for attempt in range(21):
-                        self._check(args)
-                        submitted = await self._eval(script)
-                        if submitted.get("ready") is True:
-                            await self.chrome.call(
-                                self.session.log_id,
-                                self.tab,
-                                "click",
-                                {"target": self.provider.send},
-                            )
-                            break
-                        if attempt == 20:
-                            raise CallError(
-                                "submission_refused",
-                                f"{self.provider.label} did not enable its Send button; check the draft in Chrome",
-                            )
-                        await asyncio.sleep(0.1)
-                else:
-                    self._check(args)
-                    await self.chrome.call(
-                        self.session.log_id,
-                        self.tab,
-                        "press",
-                        {"target": self.provider.input, "key": "Enter"},
+            await self.chrome.call(
+                self.session.log_id,
+                self.tab,
+                "type",
+                {
+                    "target": self.provider.input,
+                    "text": args["text"],
+                    "submit": self.provider.send is None,
+                },
+            )
+            if script := self.provider.send_script:
+                submitted = await self._eval(script)
+                if submitted.get("submitted") is not True:
+                    raise CallError(
+                        "submission_refused",
+                        f"{self.provider.label} did not enable its Send button; check the draft in Chrome",
                     )
-                self.chrome.acted(self.tab, self.session.handle, "web harness submit")
-                return {"submitted": True}
+            self.chrome.acted(self.tab, self.session.handle, "web harness submit")
+            return {"submitted": True}
 
     async def _eval(self, expression: str) -> dict:
         assert self.tab is not None
         reply = await self.chrome.call(
-            self.session.log_id,
-            self.tab,
-            "eval",
-            {"expression": expression, "web": True},
+            self.session.log_id, self.tab, "eval", {"expression": expression}
         )
-        if not isinstance(reply, dict) or reply.get("web_ready") is not True:
-            raise CallError(
-                "extension_update_required",
-                "Update and reload Chrome extension 0.5.3 to run web sessions in background tabs",
-            )
-        value = reply.get("value")
+        value = reply.get("value") if isinstance(reply, dict) else None
         if not isinstance(value, dict):
             raise CallError(
                 "unsupported_layout",
