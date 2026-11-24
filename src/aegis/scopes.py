@@ -27,7 +27,7 @@ TOOLS = frozenset(
     browser_goto browser_handover browser_list browser_open browser_press
     browser_request browser_resize browser_screenshot browser_snapshot
     browser_type config_doctor config_suggest feed_cancel feed_list feed_pause
-    feed_resume feed_start file_send help_read help_search journal_note
+    feed_resume feed_start file_send gc_propose gc_read help_read help_search journal_note
     journal_search knowledge_import knowledge_stats layout_read layout_set
     memory_delete memory_read memory_save memory_search mention_reply meta
     models_list

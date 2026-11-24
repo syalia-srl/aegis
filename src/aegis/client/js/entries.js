@@ -757,6 +757,80 @@ function fileSize(n) {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
+// A gc inventory is immutable; only a person's selected paths go to gc.decide.
+function fillGc(card, e, t) {
+  const d = e.detail, inv = d.inventory, pending = e.status === "pending";
+  card.append(el("div", "fbar", t("entries.gc.title")), el("div", "sbody", t(`entries.gc.${e.status}`)));
+  const size = (n) => n >= 1024 ** 3 ? `${(n / 1024 ** 3).toFixed(2)} GiB` : fileSize(n);
+  card.append(el("div", "sbody dim", t("entries.gc.about", { days: inv.days, free: size(inv.free_bytes) })));
+  const eligible = inv.rows.filter((r) => !r.reason), excluded = inv.rows.filter((r) => r.reason);
+  const choices = [];
+  const total = el("div", "sbody");
+  const hint = el("div", "sbody hint");
+  const approve = el("button", "btn primary", t("entries.gc.approve"));
+  const cancel = el("button", "btn", t("entries.gc.cancel"));
+  const updateTotal = () => {
+    const chosen = choices.filter(([box]) => box.checked).map(([, r]) => r);
+    total.textContent = t("entries.gc.selection", { n: chosen.length, size: size(chosen.reduce((n, r) => n + r.reclaimable_bytes, 0)) });
+    approve.disabled = !chosen.length;
+  };
+  for (const r of eligible) {
+    const label = el("label", "sbody");
+    label.style.display = "block";
+    label.style.overflowWrap = "anywhere";
+    if (pending) {
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.checked = true;
+      box.onchange = updateTotal;
+      label.append(box, document.createTextNode(" "));
+      choices.push([box, r]);
+    }
+    label.append(Object.assign(el("code", null, r.path.slice(inv.root.length + 1) || r.path), { title: r.path }), el("div", "dim", t("entries.gc.candidate", { kind: r.kind, size: size(r.bytes), reclaim: size(r.reclaimable_bytes) })), el("div", "dim", t("entries.gc.ages", { source: new Date(r.source_at * 1000).toLocaleString(), artifact: new Date(r.artifact_at * 1000).toLocaleString() })), el("div", "dim", r.rebuild.replaceAll(inv.root + "/", "")));
+    card.append(label);
+  }
+  if (excluded.length) {
+    const details = el("details", "sbody");
+    details.append(el("summary", null, t("entries.gc.excluded", { n: excluded.length })));
+    for (const r of excluded) {
+      const line = el("div", null, `${r.path.slice(inv.root.length + 1) || r.path}: ${r.reason}`);
+      line.style.overflowWrap = "anywhere";
+      details.append(line);
+    }
+    card.append(details);
+  }
+  if (pending) {
+    const press = async (yes) => {
+      approve.disabled = cancel.disabled = true;
+      for (const [box] of choices) box.disabled = true;
+      try {
+        await secretCall("gc.decide", { id: e.id, approve: yes, paths: yes ? choices.filter(([box]) => box.checked).map(([, r]) => r.path) : [] });
+      } catch (err) {
+        hint.textContent = String(err?.message || err);
+        cancel.disabled = false;
+        for (const [box] of choices) box.disabled = false;
+        updateTotal();
+      }
+    };
+    approve.onclick = () => press(true);
+    cancel.onclick = () => press(false);
+    const acts = el("div", "sbody");
+    acts.style.display = "flex";
+    acts.style.flexWrap = "wrap";
+    acts.style.gap = "10px";
+    acts.append(approve, cancel);
+    card.append(total, acts, hint);
+    updateTotal();
+  }
+  if (d.result) {
+    const r = d.result;
+    card.append(el("div", "sbody", t("entries.gc.result", { removed: r.removed.length, skipped: (r.skipped || []).length, errors: r.errors.length, free: size(r.free_after || 0), recovered: size(r.recovered_bytes || 0) })));
+    const details = el("details", "sbody");
+    details.append(el("summary", null, t("entries.gc.report")), el("pre", "cdiff", JSON.stringify(r, null, 2)));
+    card.append(details);
+  }
+}
+
 // What /setup moved into aegis (knowledge.import): a row per item, each with
 // its own Undo, which reverts that item's import commit.
 const IMPORT_DONE = { undone: "entries.knowledge.importUndone", conflict: "entries.knowledge.importConflict" };
@@ -2134,6 +2208,13 @@ const RENDERERS = {
     fillConfig(card, e, t);
     body.append(card);
     return row(e, "config", body);
+  },
+
+  gc(e, opts = {}) {
+    const body = el("div", "body"), card = el("div", "fcard scard gccard");
+    fillGc(card, e, opts.t || en);
+    body.append(card);
+    return row(e, "gc", body);
   },
 
   sign_in(e, opts = {}) {

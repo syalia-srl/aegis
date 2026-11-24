@@ -71,6 +71,7 @@ from .agent_ops import (
     spawn_opening,
     spawn_tail,
 )
+from .gc_ops import register_gc_ops
 from .artifact_ops import register_artifact_ops
 from .config_suggest import register_config_suggest
 from .secret_ops import register_secret_ops
@@ -753,6 +754,7 @@ class App:
         register_config_suggest(self)
         self.setup_records = setup.register_setup(self)
         register_artifact_ops(self)
+        register_gc_ops(self)
         self.secrets = self.sessions.secrets = register_secret_ops(self)
         register_layout_ops(self)
         self.fs_index, self.fs_tickets = register_fs_ops(self)
@@ -2416,6 +2418,14 @@ class App:
             return reg.rename(s.log_id, arg, None)
         if name == "title":
             return reg.rename(s.log_id, None, arg)
+        if name == "gc":
+            if arg and (not arg.isdigit() or int(arg) < 1):
+                raise OpError("bad_params", "usage: /gc [days], with days >= 1")
+            return await self.registry.call(
+                "gc.propose",
+                {"log_id": s.log_id, "days": int(arg) if arg else 30},
+                caller,
+            )
         if name == "btw":
             return self.side_notes.ask(s, arg)
         if name == "help":
