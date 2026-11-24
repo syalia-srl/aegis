@@ -185,6 +185,7 @@ PROVIDER = QuotaProvider(
     fetch=fetch_usage,
     read_token=read_token,
     account=account_id,
+    window_spans={"session": 18000, "weekly_all": 604800},
     poll_s=60,
     turn_floor_s=30,
 )
