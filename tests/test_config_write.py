@@ -436,3 +436,31 @@ def test_an_agent_without_budget_writes_none(tmp_path):
     assert doc.agents[0].budget is None
     assert write(p, doc, stamp_of(p)) == []
     assert "budget" not in safe(p)["agents"]["opus"]
+
+
+def test_descriptions_round_trip_edit_clear_and_overlay(tmp_path):
+    from aegis.agents import agents_from
+    from aegis.config import overlay
+
+    p, doc = setup(
+        tmp_path,
+        WORKSPACE
+        + "hosts:\n  other:\n    agents:\n      opus: {description: Remote review.}\n    queues:\n      general: {description: Remote work.}\n",
+    )
+    doc.agents[0].description = "Review difficult changes."
+    doc.queues[0].description = "Implementation and debugging."
+    assert write(p, doc, stamp_of(p)) == []
+    saved = safe(p)
+    reread = doc_from(saved)
+    assert reread.agents[0].description == "Review difficult changes."
+    assert reread.queues[0].description == "Implementation and debugging."
+    assert agents_from(saved)[0].as_dict()["description"] == "Review difficult changes."
+    remote = doc_from(overlay(saved, "other"))
+    assert remote.agents[0].description == "Remote review."
+    assert remote.queues[0].description == "Remote work."
+    reread.agents[0].description = " "
+    reread.queues[0].description = ""
+    assert write(p, reread, stamp_of(p)) == []
+    cleared = safe(p)
+    assert "description" not in cleared["agents"]["opus"]
+    assert "description" not in cleared["queues"]["general"]

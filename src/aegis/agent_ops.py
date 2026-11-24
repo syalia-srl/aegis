@@ -1073,6 +1073,26 @@ def register_agent_ops(app: App) -> None:
         f = feed_of(p, caller)
         return {"did": app.feeds.send_now(f), **feed_row(f)}
 
+    @r.op("queues.list", NoArgs, agent=True, read=True, access="read")
+    async def queues_list(_, caller):
+        """The configured queues, their descriptions, worker agents and priorities.
+        Read this before queue_enqueue to choose where a task belongs. Only
+        queues within your session's scope are listed."""
+        session = reg.sessions.get(caller.log_id) if caller.is_agent else None
+        allowed = session.spec.scope.queues if session else None
+        return [
+            {
+                "name": name,
+                **{
+                    k: v
+                    for k, v in queue.items()
+                    if k in {"agent", "description", "priority", "error"}
+                },
+            }
+            for name, queue in app.config.current().queues.items()
+            if allowed is None or name in allowed
+        ]
+
     @r.op("queue.enqueue", Enqueue, agent=True, work=True)
     async def queue_enqueue(p: Enqueue, caller):
         """Hand a self-contained task to a fresh worker on a queue. Returns at once

@@ -13,6 +13,16 @@ task with a self-contained prompt and keep working; a worker session starts
 from the queue's agent, does the task, and its final message comes back to
 your inbox. Queues are defined in `.aegis.yaml` (see the config page).
 
+## Choose a queue
+
+Call `queues_list` before enqueueing. It returns the configured queue names,
+worker agents, priorities and optional descriptions, restricted to queues in
+your scope. Descriptions explain which tasks belong where; they do not change
+permissions, scheduling or quotas. Add `description:` under a queue in
+`.aegis.yaml`, or edit its description in Settings.
+
+Use `agents_list` to read agent descriptions before choosing a peer instead.
+
 ## Enqueue a task
 
 Call `queue_enqueue` with:
