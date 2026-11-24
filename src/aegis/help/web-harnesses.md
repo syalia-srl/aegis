@@ -20,6 +20,9 @@ chip. The agent preset still supplies its permissions, working directory
 and instructions. The model and effort chips are hidden: choose the actual
 model, research mode and other provider options in Chrome.
 
+Automatic launch requires extension 0.5.2 or newer. Download and reload it
+from Settings → Chrome after updating.
+
 Send a task. The harness automatically opens and assigns a new provider tab
 in the paired Chrome browser with Scripts enabled. Sign in if needed. New sessions require an empty conversation;
 existing chats cannot be adopted. Resuming a session returns to its saved
