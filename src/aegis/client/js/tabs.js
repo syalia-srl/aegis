@@ -312,7 +312,10 @@ function wireDrag(list, actions) {
 
   list.ondragleave = (ev) => {
     const drag = tabDrags.get(list);
-    if (!drag || list.contains(ev.relatedTarget)) return;
+    if (!drag) return;
+    // Chromium can omit relatedTarget as a drag crosses a row's children.
+    const next = ev.relatedTarget || document.elementFromPoint(ev.clientX, ev.clientY);
+    if (list.contains(next)) return;
     clearFeedback(list, drag);
     stopScrolling(drag);
   };

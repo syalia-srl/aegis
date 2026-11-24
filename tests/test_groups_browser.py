@@ -824,10 +824,8 @@ def test_vertical_pointer_drags_keep_group_actions_and_cancel_on_layout_change(
 
     def move(src, target, side, expected):
         over(src, target, side)
-        target.and_(page.locator(".drop")).wait_for(timeout=3000)
-        assert ("drop-after" in target.get_attribute("class").split()) == (
-            side == "below"
-        )
+        indicator = ".drop.drop-after" if side == "below" else ".drop:not(.drop-after)"
+        target.and_(page.locator(indicator)).wait_for(timeout=3000)
         page.mouse.up()
         page.wait_for_function(BAR_JS, arg=expected)
 
