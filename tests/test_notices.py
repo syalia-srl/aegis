@@ -174,6 +174,26 @@ def test_each_session_gets_a_notice_once_and_a_clear_once(stub):
     assert n.pending(stub.w) == ""  # never told, so owed no clear
 
 
+def test_a_worker_is_told_no_host_notice_and_owed_no_clear(stub):
+    """A host notice is an order for whoever runs the work: a queue worker,
+    a schedule's run or a workflow's node read it as its task (#1098)."""
+    n = stub.notices
+    stub.quota = Quota("critical")
+    stub.reading = stub.reading | {"cpu": {"pct": 70.0}}
+    stub.reading = stub.reading | {
+        "memory": {"pct": 99, "avail_gb": 0.2, "total_gb": 16, "psi_full": 30}
+    }
+    stub.disk(98)
+    assert {"disk", "memory", "cpu", "quota:claude"} <= set(n.levels())
+    assert n.pending(stub.w) == "" and stub.w.notices_sent == {}
+    sched = session("s")
+    sched.schedule = "nightly"
+    stub.sessions.sessions["s"] = sched
+    assert n.pending(sched) == ""
+    stub.disk(80)
+    assert n.pending(stub.w) == ""
+
+
 def test_an_escalation_is_sent_again(stub):
     n = stub.notices
     stub.disk(94)
@@ -191,8 +211,7 @@ def test_one_asker_per_episode_and_owner(stub):
     stub.disk(94)
     assert "ask the person what to do" in n.pending(stub.a)
     assert "Another session is asking the person" in n.pending(stub.b)
-    w = n.pending(stub.w)
-    assert "Do not ask anyone" in w and "ask the person" not in w
+    assert n.pending(stub.w) == ""  # a worker is told no host notice (#1098)
     other = session("c", owner="someone-else")
     stub.sessions.sessions["c"] = other
     assert "ask the person what to do" in n.pending(other)
@@ -652,14 +671,13 @@ async def test_a_slash_command_goes_unchanged_and_the_next_prompt_carries_it(
     assert prompt.startswith("hello\n\n" + DISK_WARN)
 
 
-async def test_a_worker_gets_no_asker_line(noticed):
+async def test_a_worker_gets_its_task_alone(noticed):
     a = await noticed.spawn()
     said = await turn(a, mcp("queue_enqueue", queue="general", payload="summarize"))
     task_id = json.loads(said.removeprefix("mcp ok: ").split("\n\n")[0])["task_id"]
     await until(lambda: inbox(a), timeout=12, what="the callback")
     first = sent(noticed.app, noticed.app.queues.tasks[task_id].worker)[0]
-    assert first.startswith("summarize\n\n" + DISK_WARN)
-    assert "Do not ask anyone" in first and "ask the person" not in first
+    assert first == "summarize"  # no disk notice to follow instead (#1098)
 
 
 async def test_a_restart_does_not_repeat_a_notice(noticed):
