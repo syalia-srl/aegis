@@ -323,6 +323,8 @@ def register_config_ops(app: App) -> None:
                 if m
                 else offer.get("free")
             )
+            if m is not None and m.price_source == "Artificial Analysis list price":
+                free = None
             why = (
                 app.model_catalog.reason({"providers": [provider], "free": True}, value)
                 if p.harness == "opencode"
@@ -351,7 +353,9 @@ def register_config_ops(app: App) -> None:
                     or ("Connect this provider to use it" if m is None else ""),
                     "window": m.window if m else None,
                     "source_url": offer.get("source_url", rk.url),
-                    "price_source": "local harness" if m else "models.dev",
+                    "price_source": (m.price_source or "local harness")
+                    if m
+                    else "models.dev",
                 }
             )
         query = p.search.strip().lower()

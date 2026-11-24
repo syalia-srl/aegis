@@ -197,13 +197,17 @@ model_ranking: false
 
 or turn off "model_ranking" under Model ranking in Settings.
 
-### The Models page
+## The Models page
 
 Open **Models** from the header (the phone's menu) or the command palette.
 It is a separate page from Settings. Browse provider offers with search,
-provider, price and local-usability filters. Dates distinguish the benchmark,
-provider snapshot and local discovery. A public listing that is unavailable
-here cannot be selected; connect its provider through the harness first.
+provider, price and local-listing filters. Dates distinguish the benchmark,
+provider snapshot and local discovery. Public offers can be selected for comparison. Creating an agent from a
+fixed selection requires every offer to be listed locally and support agent
+tools; connect an absent provider through its harness first. A local
+listing is discovery metadata, not a successful inference check: the provider
+can still require sign-in or reject a request. Authentication errors retain
+the existing stop-and-sign-in behavior, rather than trying paid models.
 Select rows across pages, compare them, and reorder the selection in the agent
 builder. Creating an agent does not launch a session or change the default.
 

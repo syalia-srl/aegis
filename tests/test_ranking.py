@@ -99,6 +99,8 @@ def test_annotate_prefers_the_harness_price():
     opus, mine = annotate(
         [bare("opus"), bare("sonnet", price_in=2.0, price_out=9.0)], priced()
     )
+    assert opus.price_source == "Artificial Analysis list price"
+    assert mine.price_source == "local harness"
     assert (opus.price_in, opus.price_out) == (15.0, 75.0)  # the file's
     assert (mine.price_in, mine.price_out) == (2.0, 9.0)  # the harness's
     assert (opus.coding, opus.intelligence) == (72.0, 75.3)

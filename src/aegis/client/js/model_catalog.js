@@ -71,7 +71,7 @@ export class Models {
     this.usable = input();
     this.usable.type = "checkbox";
     const filters = el("div", "mdl-filters");
-    filters.append(this.search, this.price, field("Run with", this.harness), providerBox, field("Usable here only", this.usable));
+    filters.append(this.search, this.price, field("Run with", this.harness), providerBox, field("Listed locally only", this.usable));
     this.count = el("span", "mdl-muted");
     const tools = el("div", "mdl-toolbar");
     tools.append(this.count, button("Select usable shown", () => {
@@ -167,11 +167,11 @@ export class Models {
     for (const m of this.rows) {
       const row = el("label", "mdl-row");
       row.dataset.model = m.value;
-      const check = input(); check.type = "checkbox"; check.checked = this.selected.has(m.value); check.disabled = !m.available;
+      const check = input(); check.type = "checkbox"; check.checked = this.selected.has(m.value);
       check.setAttribute("aria-label", `Select ${m.value}`);
       check.onchange = () => { if (check.checked) this.selected.set(m.value, m); else this.selected.delete(m.value); this.drawSelection(); };
       const name = el("span", "mdl-model");
-      name.append(el("strong", "", m.label), el("code", "", m.value), el("small", m.available ? "" : "mdl-warning", m.available ? "Usable here" : m.reason));
+      name.append(el("strong", "", m.label), el("code", "", m.value), el("small", m.available ? "" : "mdl-warning", m.available ? "Listed by local harness" : m.reason));
       const scores = el("span", "mdl-score", m.rank == null ? "unranked" : `#${m.rank} · ${m.intelligence}`);
       scores.title = `Coding Index: ${m.coding ?? "unranked"}`;
       row.append(check, name, scores, el("span", m.free === true ? "mdl-free" : "mdl-price", cost(m)));
@@ -186,7 +186,7 @@ export class Models {
     this.mode.options = this.mode.options.map((o) => ({ ...o, disabled: o.value === "dynamic" && this.harness.value !== "opencode" }));
     if (dynamic) {
       this.selection.textContent = `Providers: ${this.providerIds().join(", ") || "select providers in the filter"}`;
-      this.note.textContent = "Free, locally usable tool models, ranked at each new session. Search is not saved in the rule.";
+      this.note.textContent = "Free tool models listed by the harness, ranked at each new session. A provider can still require sign-in. Search is not saved in the rule.";
     } else {
       for (const [value] of this.selected) {
         const row = el("div", "mdl-choice");
@@ -197,7 +197,8 @@ export class Models {
       }
       this.note.textContent = "These exact IDs, in this order. Selection is kept across filters and pages.";
     }
-    this.reviewBtn.disabled = dynamic ? !this.providerIds().length || this.price.value !== "free" || this.harness.value !== "opencode" : !this.selected.size;
+    this.reviewBtn.disabled = dynamic ? !this.providerIds().length || this.price.value !== "free" || this.harness.value !== "opencode" : !this.selected.size || [...this.selected.values()].some((m) => m.available === false);
+    if (!dynamic && [...this.selected.values()].some((m) => m.available === false)) this.note.textContent = "You can compare these offers. To create an agent, remove offers not listed locally or without agent tools.";
     if (dynamic && this.price.value !== "free") this.note.textContent = "Choose Free only before reviewing a provider rule.";
   }
 
@@ -284,7 +285,7 @@ export class Models {
     for (const m of this.selected.values()) {
       const card = el("section", "mdl-compare-card");
       card.append(el("h3", "", m.label || m.value), el("code", "", m.value));
-      for (const [label, value] of [["Token price / million", cost(m)], ["Price source", m.price_source || "unknown"], ["Intelligence", m.intelligence ?? "unranked"], ["Coding", m.coding ?? "unranked"], ["Context", m.window ?? "unknown"], ["Agent tools and text", m.can_agent == null ? "unknown" : m.can_agent ? "yes" : "no"], ["Usable here", m.available == null ? "refresh selection" : m.available ? "yes" : "no"]]) card.append(el("p", "", `${label}: ${value}`));
+      for (const [label, value] of [["Token price / million", cost(m)], ["Price source", m.price_source || "unknown"], ["Intelligence", m.intelligence ?? "unranked"], ["Coding", m.coding ?? "unranked"], ["Context", m.window ?? "unknown"], ["Agent tools and text", m.can_agent == null ? "unknown" : m.can_agent ? "yes" : "no"], ["Listed by local harness", m.available == null ? "refresh selection" : m.available ? "yes" : "no"]]) card.append(el("p", "", `${label}: ${value}`));
       if (m.source_url) { const link = el("a", "", "Source"); link.href = m.source_url; link.target = "_blank"; link.rel = "noopener noreferrer"; card.append(link); }
       grid.append(card);
     }

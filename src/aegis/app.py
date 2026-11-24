@@ -1310,7 +1310,11 @@ class App:
             return spec, Gate("stopped", pause.WHY)
         if spec.model_selector:
             catalog = self.model_catalog
-            candidates = catalog.candidates(spec.model_selector)
+            candidates = [
+                m
+                for m in catalog.candidates(spec.model_selector)
+                if catalog.permits(spec, m)
+            ]
             if not candidates:
                 return spec, Gate(
                     "closed",
@@ -1339,9 +1343,7 @@ class App:
                 return spec, q if q.state == "stopped" else b
 
         def gate(m: str) -> Gate:
-            if spec.model_selector and (
-                why := self.model_catalog.reason(spec.model_selector, m)
-            ):
+            if spec.model_selector and (why := self.model_catalog.restriction(spec, m)):
                 return Gate("closed", why)
             return self.quota_guard(spec, queue, m) if guarded else Gate("open")
 
@@ -1369,7 +1371,7 @@ class App:
             lambda m: (
                 Gate("closed", why)
                 if spec.model_selector
-                and (why := self.model_catalog.reason(spec.model_selector, m))
+                and (why := self.model_catalog.restriction(spec, m))
                 else self.gate(spec.owner, spec.harness, m)
             ),
             self.cooling,
@@ -3055,7 +3057,7 @@ class App:
                     caller,
                     agent=a.name,
                     harness=a.harness,
-                    model=a.model,
+                    **({} if a.model_selector else {"model": a.model}),
                     effort=a.effort,
                     permission=a.permission,
                 )
