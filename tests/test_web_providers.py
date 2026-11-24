@@ -268,3 +268,23 @@ def test_deepseek_sign_in_page_requests_person_intervention(page):
     finally:
         page.goto("about:blank")
         page.unroute(url)
+
+
+def test_qwen_user_identity_and_source_survive_visual_changes(page):
+    original = 'Run this exact command:\n```bash\n# aegis: execute\necho "unchanged source"\n```'
+    page.set_content('<div class="chat-user-message">A collapsed preview</div>')
+    page.evaluate(
+        """content=>document.querySelector('.chat-user-message').__reactFiber$test={memoizedProps:{message:{role:'user',id:'user-stable',content}}}""",
+        original,
+    )
+    before = page.evaluate(provider("web-qwen").observe_script)["users"]
+    page.locator(".chat-user-message").evaluate(
+        "e=>e.innerHTML='<span>Expanded preview with line numbers 1 2 3</span>'"
+    )
+    after = page.evaluate(provider("web-qwen").observe_script)["users"]
+    assert before == after == [{"id": "user-stable", "text": original}]
+    page.evaluate(
+        "document.querySelector('.chat-user-message').__reactFiber$test.memoizedProps.message.content='An actual edited prompt'"
+    )
+    edited = page.evaluate(provider("web-qwen").observe_script)["users"]
+    assert edited == [{"id": "user-stable", "text": "An actual edited prompt"}]
