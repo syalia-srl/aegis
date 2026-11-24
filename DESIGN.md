@@ -1766,3 +1766,13 @@ good file offline. Benchmark and provider refresh timestamps are independent.
 `models.catalog` reads advertised provider offers without logins; `models.list`
 continues to probe installed harnesses for locally usable models and prices.
 Catalogue data never grants credentials, quota or launch permission.
+
+The dedicated Models page joins the shared snapshot with local harness models
+through paginated `models.browse`, previews selections through `models.preview`,
+and writes one agent through the person-only `models.save` and the existing
+configuration writer. An agent's models can be a fixed list or a free-provider
+selector. `ModelCatalog` shares bounded-age local discovery between the page,
+launch gates and session turns. Selectors resolve before launch into a frozen
+cascade; the selector and observation time persist with the session. Every
+turn and model change revalidates free eligibility, without adding new models
+to an existing cascade. Failed refreshes do not renew metadata age.

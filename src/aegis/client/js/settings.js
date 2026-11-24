@@ -921,6 +921,12 @@ export class Settings {
   // at spawn, the next when one runs out of quota or its provider fails.
   // One model is written model:, two or more models: (config.py).
   cascade(a) {
+    if (a.models && !Array.isArray(a.models)) {
+      const link = document.createElement("a");
+      link.href = "#models";
+      link.textContent = `Free providers: ${a.models.providers.join(", ")} · edit in Models`;
+      return link;
+    }
     let list = a.models?.length ? [...a.models] : a.model ? [a.model] : [];
     const box = h("div", { className: "set-casc" });
     const rows = h("ul");

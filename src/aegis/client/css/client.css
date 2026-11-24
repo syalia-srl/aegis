@@ -1,3 +1,4 @@
+@import url("./models.css");
 /* The client, scoped to the root a mount builds: every selector starts at
    .aegis, so mounting the client into a host page restyles nothing of the
    host's. The variables come from a theme (themes/*.css) or, for a host page
