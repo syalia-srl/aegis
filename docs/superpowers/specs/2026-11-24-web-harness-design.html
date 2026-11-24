@@ -2722,7 +2722,7 @@
 </section>
 
 <section id="protocol"><h2><span class="n">05</span>Marked Bash and reliable delivery</h2>
-<p>A request is a completed Markdown fence whose language is exactly <code>bash</code> and whose first nonblank body line is exactly <code># aegis: execute</code>. Text surrounding it remains prose. Unmarked Bash, other fence languages, quoted examples and incomplete or still-streaming fences never run. The primer asks for at most one executable block per response; multiple marked blocks are refused together with an explanatory tool result rather than partially executed.</p>
+<p>A request is a completed Markdown fence whose language is exactly <code>bash</code> and whose first nonblank body line is exactly <code># aegis: execute</code>. Parse the observed Markdown into blocks and accept only a top-level fenced-code node, outside quotes and lists; do not search rendered text with a global regular expression. Text surrounding it remains prose. Unmarked Bash, other fence languages, quoted examples and incomplete or still-streaming fences never run. The primer asks for at most one executable block per response; multiple marked blocks are refused together with an explanatory tool result rather than partially executed.</p>
 <pre><code>```bash
 # aegis: execute
 # Search the Aegis help
