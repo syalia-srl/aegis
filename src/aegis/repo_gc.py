@@ -16,6 +16,8 @@ import subprocess
 import time
 from pathlib import Path
 
+from . import launch
+
 DAY = 86400
 ARTIFACTS = frozenset(
     {
@@ -43,13 +45,13 @@ def unreadable(error: OSError) -> None:
 
 def git(repo: Path, *args: str) -> bytes:
     # Inventory must not refresh the index or run optional Git helpers.
-    return subprocess.run(
+    result = launch.run(
         ["git", "-c", "core.fsmonitor=false", "-C", str(repo), *args],
-        check=True,
-        capture_output=True,
         env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"},
         timeout=30,
-    ).stdout
+    )
+    result.check_returncode()
+    return result.stdout
 
 
 def repositories(root: Path) -> list[Path]:
@@ -284,7 +286,7 @@ def scan(
                         ):
                             row["reason"] = "contains Git-tracked files"
                         elif (
-                            subprocess.run(
+                            launch.run(
                                 [
                                     "git",
                                     "-C",
@@ -294,7 +296,6 @@ def scan(
                                     "--",
                                     relative,
                                 ],
-                                capture_output=True,
                                 timeout=30,
                             ).returncode
                             != 0
