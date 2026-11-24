@@ -28,6 +28,7 @@ from .providers import Provider
 POLL_S = 1.0
 COMMAND_TIMEOUT_S = 120.0
 OUTPUT_BYTES = 64 * 1024
+OUTPUT_DRAIN_S = 1.0
 TRANSIENT = frozenset(
     {"chrome_unavailable", "person_has_control", "scripts_off", "intervention_required"}
 )
@@ -68,14 +69,13 @@ class WebProcess:
         self._runner: asyncio.Task | None = None
         self._turn: asyncio.Task | None = None
         self._child: asyncio.subprocess.Process | None = None
+        self._pgid: int | None = None
         self._auth: CallAuth | None = None
         self._state_text: tuple[str, str] | None = None
 
     @property
     def pid(self) -> int | None:
-        return (
-            self._child.pid if self._child and self._child.returncode is None else None
-        )
+        return self._pgid
 
     @property
     def running(self) -> bool:
@@ -194,6 +194,10 @@ class WebProcess:
             self.ledger.update(conversation={**expected, "url": conversation})
         known = self.ledger.data.get("observed", {})
         ids = [m["id"] for m in page["messages"]]
+        if set(known) - set(ids):
+            raise RecoveryError(
+                "Previously observed answers disappeared; reconcile the source conversation before continuing"
+            )
         if len(ids) != len(set(ids)):
             raise RecoveryError(
                 "Provider message identity is ambiguous; no command ran"
@@ -204,6 +208,26 @@ class WebProcess:
                     raise RecoveryError(
                         "An already observed answer changed; reconcile the source conversation"
                     )
+        users = dict(self.ledger.data.get("users", {}))
+        own = set(self.ledger.data.get("submitted", []))
+        manual = list(self.ledger.data.get("manual_pending", []))
+        for user in page["users"]:
+            digest = _user_hash(user["text"])
+            previous = users.get(user["id"])
+            if previous is not None and previous != digest:
+                raise RecoveryError(
+                    "A source user message changed; reconcile the Chrome conversation"
+                )
+            if (
+                previous is None
+                and digest not in own
+                and self.ledger.data.get("primed")
+            ):
+                self._emit("manual", id=user["id"], text=user["text"])
+                manual.append(user["id"])
+            users[user["id"]] = digest
+        if users != self.ledger.data.get("users", {}):
+            self.ledger.update(users=users, manual_pending=manual)
         await self._state("connected", f"{self.provider.label} · Chrome connected")
         return page
 
@@ -255,7 +279,30 @@ class WebProcess:
                 prime_message=acknowledgement["id"],
                 prime_hash=_hash(prime),
                 prime_version=1,
+                context=self._session_context(),
             )
+        current = self._session_context()
+        if (
+            current != self.ledger.data.get("context", current)
+            and not self.ledger.data.get("active")
+            and not self.ledger.data.get("outbound")
+        ):
+            update = (
+                f"Aegis session update\nWorking directory: {self.context.cwd}\n"
+                f"Permission: {self.permission}\n"
+                f"Current role instructions:\n{self.context.system_prompt or ''}\n"
+                "Acknowledge with AEGIS_READY. Do not request a command in this acknowledgement."
+            )
+            acknowledgement = await self._exchange(update, "update")
+            self._remember(acknowledgement)
+            self.ledger.update(context=current)
+
+    def _session_context(self) -> dict:
+        return {
+            "cwd": str(self.context.cwd),
+            "permission": self.permission,
+            "role": _hash(self.context.system_prompt or ""),
+        }
 
     async def _exchange(
         self, text: str, kind: str, execution: str | None = None
@@ -277,7 +324,9 @@ class WebProcess:
                 "check", {"url": self.ledger.data["conversation"].get("url")}
             )
             outbound["phase"] = "started"
-            self.ledger.update(outbound=outbound)
+            submitted = list(self.ledger.data.get("submitted", []))
+            submitted.append(_user_hash(outbound["text"]))
+            self.ledger.update(outbound=outbound, submitted=submitted)
             assert self.context.web is not None
             # A send can fail after the provider accepted it. Never retry it blindly.
             await self.context.web(
@@ -339,6 +388,24 @@ class WebProcess:
         try:
             await self._prepare()
             active: dict | None = self.ledger.data.get("active")
+            if active is None and not self.ledger.data.get("outbound"):
+                page = await self._observe()
+                unseen = [
+                    m
+                    for m in page["messages"]
+                    if m["id"] not in self.ledger.data.get("observed", {})
+                ]
+                if len(unseen) > 1 or any(not m["complete"] for m in unseen):
+                    raise RecoveryError(
+                        "Manual Chrome responses are incomplete or ambiguous; reconcile them before sending another task"
+                    )
+                if unseen:
+                    if not self.ledger.data.get("manual_pending"):
+                        raise RecoveryError(
+                            "An unrequested answer appeared; reconcile regeneration in Chrome before continuing"
+                        )
+                    active = {"prompt": text, "message": unseen[0], "manual": True}
+                    self.ledger.update(active=active, manual_pending=[])
             if (
                 active
                 and active.get("message")
@@ -356,14 +423,24 @@ class WebProcess:
                 try:
                     block = request(message["markdown"])
                 except ProtocolError as error:
-                    block = None
+                    self._remember(message)
                     self._emit("text", id=message["id"], text=str(error))
-                    raise RecoveryError(str(error)) from error
+                    message = await self._exchange(
+                        f"Aegis protocol refusal: {error}. No command ran. Request exactly one marked Bash block.",
+                        "refusal",
+                    )
+                    continue
                 self._remember(message)
                 prose = block.prose if block else message["markdown"]
                 if prose:
                     self._emit("text", id=message["id"], text=prose)
                 if block is None:
+                    if active.get("manual"):
+                        active = {"prompt": active["prompt"], "message": None}
+                        self.ledger.update(active=active)
+                        self._emit("echo", text=active["prompt"])
+                        message = await self._exchange(active["prompt"], "task")
+                        continue
                     self.ledger.update(active=None)
                     self._emit(
                         "result",
@@ -414,6 +491,20 @@ class WebProcess:
         await self._bridge(
             "check", {"url": self.ledger.data["conversation"].get("url")}
         )
+        page = await self._observe()
+        source_id = key.rsplit("/", 1)[0]
+        latest = page["messages"][-1] if page["messages"] else None
+        original = self.ledger.data.get("messages", {}).get(source_id)
+        if (
+            latest is None
+            or original is None
+            or latest["id"] != source_id
+            or not latest["complete"]
+            or latest["markdown"] != original["markdown"]
+        ):
+            raise RecoveryError(
+                "The captured command is no longer the current completed answer; no command ran"
+            )
         self.ledger.start(key)
         self._emit("tool_call", id=key, code=code)
         if self.permission in ("read", "write") or not self.context.harness_tools:
@@ -445,6 +536,7 @@ class WebProcess:
             oom=True,
             via=self.context.via,
         )
+        self._pgid = self._child.pid
         prefix = self._root / _hash(key)
         stdout = asyncio.create_task(
             self._capture(self._child.stdout, prefix.with_suffix(".stdout"))
@@ -452,20 +544,27 @@ class WebProcess:
         stderr = asyncio.create_task(
             self._capture(self._child.stderr, prefix.with_suffix(".stderr"))
         )
+        completion = asyncio.gather(self._child.wait(), stdout, stderr)
         interrupted = False
         try:
             try:
-                code_number = await asyncio.wait_for(
-                    self._child.wait(), COMMAND_TIMEOUT_S
+                code_number, out, err = await asyncio.wait_for(
+                    asyncio.shield(completion), COMMAND_TIMEOUT_S
                 )
-            except TimeoutError:
+            except (TimeoutError, asyncio.CancelledError) as error:
+                interrupted = isinstance(error, asyncio.CancelledError)
                 await self._kill()
-                code_number = 124
-            except asyncio.CancelledError:
-                interrupted = True
-                await self._kill()
-                code_number = 130
-            out, err = await asyncio.gather(stdout, stderr)
+                code_number = 130 if interrupted else 124
+                try:
+                    _, out, err = await asyncio.wait_for(
+                        asyncio.shield(completion), OUTPUT_DRAIN_S
+                    )
+                except TimeoutError:
+                    completion.cancel()
+                    await asyncio.gather(completion, return_exceptions=True)
+                    out = self._saved_output(prefix.with_suffix(".stdout"))
+                    err = self._saved_output(prefix.with_suffix(".stderr"))
+                    err += "\n[Output drain stopped after the command deadline]"
             result = {"stdout": out, "stderr": err, "code": code_number}
             self.ledger.complete(key, result)
             self._emit(
@@ -475,6 +574,11 @@ class WebProcess:
                 error=code_number != 0,
             )
         finally:
+            if not completion.done():
+                await self._kill()
+                completion.cancel()
+                await asyncio.gather(completion, return_exceptions=True)
+            self._pgid = None
             self._child = None
         if interrupted:
             # The result is known, but a stopped turn must not resume its delivery loop.
@@ -525,12 +629,17 @@ class WebProcess:
     def _result_text(key: str, result: dict) -> str:
         return f"Aegis Bash result · execution {key}\nexit_code: {result['code']}\nstdout:\n{result['stdout']}\nstderr:\n{result['stderr']}\n"
 
+    @staticmethod
+    def _saved_output(path: Path) -> str:
+        with path.open("rb") as output:
+            text = output.read(OUTPUT_BYTES).decode("utf-8", errors="replace")
+        if path.stat().st_size > OUTPUT_BYTES:
+            text += f"\n[Truncated at {OUTPUT_BYTES} bytes; full output: {path}]"
+        return text
+
     async def _kill(self) -> None:
-        if self._child and self._child.returncode is None:
-            await launch.signal_process_async(
-                self._child.pid, signal.SIGKILL, group=True
-            )
-            await self._child.wait()
+        if self._pgid is not None:
+            await launch.signal_process_async(self._pgid, signal.SIGKILL, group=True)
 
     async def interrupt(self) -> None:
         if self._turn and not self._turn.done():
@@ -559,3 +668,7 @@ class WebProcess:
 
 def _hash(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
+
+
+def _user_hash(text: str) -> str:
+    return _hash(" ".join(text.split()))

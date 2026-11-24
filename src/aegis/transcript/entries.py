@@ -34,6 +34,7 @@ from ..claude.stream import (
     Compact,
     Delta,
     Echo,
+    ExternalUser,
     Event,
     Garbled,
     Init,
@@ -1481,6 +1482,18 @@ class Fold:
 
     # -- what Claude said ----------------------------------------------
     def _event(self, id: str, ts: float | None, ev: Event) -> list[dict]:
+        if isinstance(ev, ExternalUser):
+            return self._upsert(
+                _entry(
+                    f"external:{ev.source}:{ev.id}",
+                    "user",
+                    "ok",
+                    ts,
+                    d.USER_GLYPH,
+                    md=f"From {ev.source}:\n\n{ev.text}",
+                    detail={"source": ev.source, "message_id": ev.id},
+                )
+            )
         if isinstance(ev, Echo):
             ops: list[dict] = []
             typed = None

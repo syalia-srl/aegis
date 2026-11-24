@@ -330,3 +330,230 @@ async def test_large_output_is_saved_but_the_provider_receives_a_capped_preview(
         assert len(browser.results[0]) < 67000
     finally:
         await process.terminate()
+
+
+async def test_multiple_marked_commands_are_refused_to_the_model_without_execution(
+    tmp_path,
+):
+    class AmbiguousBrowser(Browser):
+        async def __call__(self, op, args):
+            result = await super().__call__(op, args)
+            if op == "send" and args["text"] == "Request two commands":
+                self.messages[-1]["markdown"] += (
+                    "\n```bash\n# aegis: execute\ntouch forbidden-two\n```"
+                )
+            if op == "send" and args["text"].startswith("Aegis protocol refusal"):
+                self.messages[-1]["markdown"] = "I will request one command at a time."
+            return result
+
+    browser = AmbiguousBrowser("touch forbidden-one")
+    process, events = make(tmp_path, browser)
+    await process.start()
+    try:
+        await process.send("Request two commands")
+        await until(lambda: bool(done(events)), timeout=5)
+        assert not (tmp_path / "forbidden-one").exists()
+        assert not (tmp_path / "forbidden-two").exists()
+        assert any(text.startswith("Aegis protocol refusal") for text in browser.sent)
+        assert done(events)[-1]["error"] is False
+    finally:
+        await process.terminate()
+
+
+async def test_manual_chrome_conversation_is_imported_before_the_next_aegis_task(
+    tmp_path,
+):
+    browser = Browser("printf 'first\\n'")
+    process, events = make(tmp_path, browser)
+    await process.start()
+    try:
+        await process.send("First Aegis task")
+        await until(lambda: len(done(events)) == 1, timeout=5)
+        browser.users.append(
+            {"id": "manual-user", "text": "Research the alternative in Chrome"}
+        )
+        browser.messages.append(
+            {
+                "id": "manual-answer",
+                "markdown": "A manually requested proposal",
+                "complete": True,
+            }
+        )
+        await process.send("Use that proposal")
+        await until(lambda: len(done(events)) == 2, timeout=5)
+        manuals = [e for e in events if e["type"] == "manual"]
+        assert [(e["id"], e["text"]) for e in manuals] == [
+            ("manual-user", "Research the alternative in Chrome")
+        ]
+        assert (
+            sum(e.get("text") == "A manually requested proposal" for e in events) == 1
+        )
+        assert process.ledger.data["observed"]["manual-answer"]
+        assert browser.sent.count("Use that proposal") == 1
+    finally:
+        await process.terminate()
+
+
+async def test_manual_marked_request_completes_before_queued_aegis_input(tmp_path):
+    browser = Browser("printf 'ordinary\\n'")
+    process, events = make(tmp_path, browser)
+    await process.start()
+    try:
+        await process.send("First task")
+        await until(lambda: len(done(events)) == 1, timeout=5)
+        browser.users.append({"id": "manual-user", "text": "Write the manual proof"})
+        browser.messages.append(
+            {
+                "id": "manual-answer",
+                "markdown": "```bash\n# aegis: execute\ntouch manual-proof\n```",
+                "complete": True,
+            }
+        )
+        await process.send("The queued task")
+        await until(lambda: len(done(events)) == 2, timeout=5)
+        assert (tmp_path / "manual-proof").exists()
+        assert browser.sent.count("The queued task") == 1
+        assert browser.sent.index("The queued task") > next(
+            i
+            for i, text in enumerate(browser.sent)
+            if "execution manual-answer/0" in text
+        )
+        assert len([e for e in events if e["type"] == "tool_call"]) == 3
+    finally:
+        await process.terminate()
+
+
+async def test_replaced_source_history_stops_before_another_submission(tmp_path):
+    browser = Browser()
+    process, events = make(tmp_path, browser)
+    await process.start()
+    try:
+        await process.send("First task")
+        await until(lambda: len(done(events)) == 1, timeout=5)
+        before = list(browser.sent)
+        browser.messages = [
+            {
+                "id": "branched-answer",
+                "markdown": "```bash\n# aegis: execute\ntouch forbidden-branch\n```",
+                "complete": True,
+            }
+        ]
+        await process.send("Continue the same conversation")
+        await until(lambda: len(done(events)) == 2, timeout=5)
+        assert done(events)[-1]["error"] is True
+        assert browser.sent == before
+        assert not (tmp_path / "forbidden-branch").exists()
+    finally:
+        await process.terminate()
+
+
+async def test_changed_permissions_are_conveyed_without_repriming(tmp_path):
+    browser = Browser("printf 'allowed\\n'")
+    process, events = make(tmp_path, browser)
+    await process.start()
+    try:
+        await process.send("First task")
+        await until(lambda: len(done(events)) == 1, timeout=5)
+        await process.set("permission", "read")
+        await process.send("Second task")
+        await until(lambda: len(done(events)) == 2, timeout=5)
+        updates = [
+            text for text in browser.sent if text.startswith("Aegis session update")
+        ]
+        assert len(updates) == 1 and "Permission: read" in updates[0]
+        assert (
+            sum(
+                text.startswith("You are a research sidekick.") for text in browser.sent
+            )
+            == 1
+        )
+        assert browser.sent.index(updates[0]) < browser.sent.index("Second task")
+    finally:
+        await process.terminate()
+
+
+@pytest.mark.parametrize("stop", ["deadline", "permission"])
+async def test_background_descendant_cannot_outlive_the_command_boundary(
+    tmp_path, monkeypatch, stop
+):
+    import asyncio
+
+    module = importlib.import_module("aegis.web_agent.process")
+    monkeypatch.setattr(module, "COMMAND_TIMEOUT_S", 0.03 if stop == "deadline" else 5)
+    browser = Browser("(sleep 0.2; touch descendant-survived) &")
+    process, events = make(tmp_path, browser)
+    await process.start()
+    try:
+        await process.send("Start a background descendant")
+        if stop == "permission":
+            await until(
+                lambda: (
+                    process._child is not None and process._child.returncode is not None
+                ),
+                timeout=5,
+            )
+            await process.set("permission", "read")
+        await until(lambda: bool(done(events)), timeout=5)
+        await asyncio.sleep(0.25)
+        assert not (tmp_path / "descendant-survived").exists()
+    finally:
+        await process.terminate()
+
+
+async def test_return_from_manual_control_revalidates_the_captured_command(
+    tmp_path, monkeypatch
+):
+    from aegis.chrome import CallError
+
+    module = importlib.import_module("aegis.web_agent.process")
+    monkeypatch.setattr(module, "POLL_S", 0.01)
+
+    class ChangedBrowser(Browser):
+        changed = False
+
+        async def __call__(self, op, args):
+            if (
+                op == "check"
+                and not self.changed
+                and self.messages
+                and "# aegis: execute" in self.messages[-1]["markdown"]
+            ):
+                self.changed = True
+                self.messages[-1]["markdown"] = (
+                    "The person cancelled that command in Chrome."
+                )
+                raise CallError("person_has_control", "Paused for the person")
+            return await super().__call__(op, args)
+
+    browser = ChangedBrowser("touch stale-command-ran")
+    process, events = make(tmp_path, browser)
+    await process.start()
+    try:
+        await process.send("A command that is cancelled during handover")
+        await until(lambda: bool(done(events)), timeout=5)
+        assert not (tmp_path / "stale-command-ran").exists()
+        assert done(events)[-1]["error"] is True
+    finally:
+        await process.terminate()
+
+
+async def test_unrequested_regeneration_is_not_a_new_manual_command(tmp_path):
+    browser = Browser()
+    process, events = make(tmp_path, browser)
+    await process.start()
+    try:
+        await process.send("First task")
+        await until(lambda: len(done(events)) == 1, timeout=5)
+        browser.messages.append(
+            {
+                "id": "regenerated",
+                "markdown": "```bash\n# aegis: execute\ntouch forbidden-regeneration\n```",
+                "complete": True,
+            }
+        )
+        await process.send("Continue")
+        await until(lambda: len(done(events)) == 2, timeout=5)
+        assert done(events)[-1]["error"] is True
+        assert not (tmp_path / "forbidden-regeneration").exists()
+    finally:
+        await process.terminate()
