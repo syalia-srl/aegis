@@ -441,9 +441,14 @@ export class SpawnPart {
   }
 
   fillModels(harness) {
-    const listed = this.spModels.server === this.spServer ? this.spModels.by[harness] || [] : [];
+    const selector = this.current()?.models;
+    const dynamic = selector && !Array.isArray(selector);
+    const available = this.spModels.server === this.spServer ? this.spModels.by[harness] || [] : [];
+    const listed = dynamic ? available.filter((m) => m.free && selector.providers.includes(m.value.split("/")[0])) : available;
+    this.model.setAttribute("placeholder", dynamic ? "Automatic · free providers" : "Model");
+    if (this.model.input) this.model.input.placeholder = this.model.getAttribute("placeholder");
     const have = new Set(listed.map((m) => m.value));
-    const named = (this.roster.models[harness] || []).filter((m) => !have.has(m));
+    const named = dynamic ? [] : (this.roster.models[harness] || []).filter((m) => !have.has(m));
     this.model.options = [
       ...listed.map((m) => ({ value: m.value, label: m.value, meta: modelMeta(m) })),
       ...named,

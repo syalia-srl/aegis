@@ -204,6 +204,14 @@ export class SidebarPart {
     this.cardSub = n("c-sub");
     this.harness = n("s-harness");
     this.model = n("s-model");
+    this.modelRule = document.createElement("details");
+    this.modelRule.className = "mdl-session-rule";
+    this.modelRule.hidden = true;
+    const ruleSummary = document.createElement("summary");
+    ruleSummary.textContent = "Free-provider rule";
+    this.modelRuleBody = document.createElement("div");
+    this.modelRule.append(ruleSummary, this.modelRuleBody);
+    this.model.parentElement.after(this.modelRule);
     this.effort = n("s-effort");
     this.perm = n("s-perm");
     this.cwd = n("s-cwd");
@@ -509,6 +517,12 @@ export class SidebarPart {
     this.harness.classList.toggle("warn", !!u);
     this.harness.title = u ? this.t("sidebar.untestedTitle", { state: this.t(`sidebar.untested.${u.state in { newer: 1, older: 1 } ? u.state : "unknown"}`), range: u.range }) : "";
     this.model.textContent = s.model_id && s.model_id !== s.model ? `${modelLine(s)} → ${s.model_id}` : modelLine(s);
+    this.modelRule.hidden = !s.model_selector;
+    if (s.model_selector) {
+      const providers = s.model_selector.providers.join(", ");
+      const observed = s.models_observed_at ? new Date(s.models_observed_at * 1000).toLocaleString() : "unknown";
+      this.modelRuleBody.textContent = `Providers: ${providers}. Free only. Resolved: ${observed}. Cascade: ${(s.cascade?.models || [s.model]).join(", ")}`;
+    }
     this.effort.replaceChildren(factIcon("e", s.effort), s.effort || "");
     this.perm.replaceChildren(factIcon("p", s.permission), s.permission || "");
     this.server.textContent = s.server || this.mount.conn.server || this.t("sidebar.thisServer");
