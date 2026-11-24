@@ -55,7 +55,7 @@ PROVIDERS = {
         'role=textbox[name="Enter a prompt for Gemini"]',
         "model-response",
         ".response-content, .markdown",
-        "user-query .query-text, .user-query-container",
+        "user-query .query-text",
         'button[aria-label="Good response"], button[aria-label="Copy"]',
         "/app/",
     ),
@@ -173,7 +173,7 @@ _OBSERVER = r"""(() => {
     const parsed=answer?markdown(answer):{text:'',valid:false};
     return {id:identity(root,index),markdown:parsed.text,complete:!!answer&&parsed.valid&&completed(root)&&(!busy||index<roots.length-1)};
   });
-  const users=Array.from(document.querySelectorAll(cfg.users)).map((e,i)=>({id:e.getAttribute('data-message-id')||e.id||'user-'+i,text:e.innerText.trim()}));
+  const users=Array.from(document.querySelectorAll(cfg.users)).map((e,i)=>({id:e.getAttribute('data-message-id')||e.id||(cfg.users==='user-query .query-text'?'query-':'user-')+i,text:e.innerText.trim()}));
   const dialog=Array.from(document.querySelectorAll('[role=dialog],dialog')).find(e=>visible(e)&&/confirm your age|sign in|log in|verify|captcha/i.test(e.innerText));
   return {url:location.href,title:document.title,messages,users,busy,intervention:dialog?dialog.innerText.slice(0,300):null};
 })()"""
