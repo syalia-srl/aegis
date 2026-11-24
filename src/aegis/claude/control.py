@@ -19,7 +19,15 @@ from pathlib import Path
 
 from .process import PERMISSION_MODE, ClaudeProcess, ControlError, build_argv
 
-__all__ = ["Catalog", "ControlError", "Model", "catalog", "from_initialize", "probe"]
+__all__ = [
+    "Catalog",
+    "ControlError",
+    "Model",
+    "catalog",
+    "context_usage",
+    "from_initialize",
+    "probe",
+]
 
 DESC_MAX = 140
 _SOURCE = re.compile(r"\s*\(([^()]+)\)\s*$")
@@ -165,4 +173,18 @@ async def set_effort(proc: ClaudeProcess, level: str) -> None:
 async def set_permission(proc: ClaudeProcess, permission: str) -> None:
     await proc.request(
         "set_permission_mode", mode=PERMISSION_MODE.get(permission, permission)
+    )
+
+
+async def context_usage(proc: ClaudeProcess) -> int | None:
+    """The tokens in the context window now, from Claude Code's own count.
+    ``summary`` answers from the last response's usage and local estimates, in
+    a few milliseconds and with no call to the API (measured on 2.1.330 against
+    OpenCode Go: about 5% over the real count). None when it names no total."""
+    body = await proc.request("get_context_usage", detail="summary")
+    total = body.get("totalTokens")
+    return (
+        total
+        if isinstance(total, int) and not isinstance(total, bool) and total > 0
+        else None
     )

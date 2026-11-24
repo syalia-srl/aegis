@@ -448,6 +448,15 @@ def control(msg: dict) -> None:
         body = {"applied": {"model": state["model"], "effort": state["effort"]}}
     elif sub == "set_permission_mode":
         body = {"mode": req.get("mode")}
+    elif sub == "get_context_usage":
+        # The shape Claude Code 2.1.330 answers with (measured, trimmed).
+        body = {
+            "categories": [{"id": "free_space", "tokens": 954313, "kind": "free"}],
+            "totalTokens": 12687,
+            "maxTokens": 1000000,
+            "rawMaxTokens": 1000000,
+            "apiUsage": None,
+        }
     resp = (
         {"request_id": rid, "subtype": "error", "error": error}
         if error

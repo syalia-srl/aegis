@@ -577,3 +577,62 @@ async def test_turn_output_takes_the_final_count_from_message_delta(h):
     assert s.turn_tokens == [52, 84]
     s._on_line(json.dumps({"type": "stream_event", "event": delta}))
     assert s.turn_tokens == [52, 84]
+
+
+async def test_context_comes_from_message_delta_when_assistant_lines_say_zero(h):
+    """An endpoint such as OpenCode Go prints every assistant line with usage 0
+    and the real counts only in the message_delta: the card keeps them."""
+    zero = {"input_tokens": 0, "output_tokens": 0}
+    msg = {
+        "id": "m1",
+        "role": "assistant",
+        "content": [{"type": "text", "text": "x"}],
+        "usage": zero,
+    }
+    delta = {
+        "type": "message_delta",
+        "delta": {},
+        "usage": {
+            "input_tokens": 563,
+            "output_tokens": 3,
+            "cache_read_input_tokens": 11520,
+        },
+    }
+    s = h.session
+    s._on_line(json.dumps({"type": "stream_event", "event": delta}))
+    assert s.context_tokens == 12086
+    s._on_line(json.dumps({"type": "assistant", "message": msg}))
+    assert s.context_tokens == 12086  # the zero line does not wipe it
+
+
+class _Counting:
+    """A process stand-in that answers context_usage."""
+
+    running = True
+
+    def __init__(self, total):
+        self.total = total
+
+    async def context_usage(self):
+        return self.total
+
+
+async def test_a_turn_ending_with_no_context_asks_the_harness_for_its_count(h):
+    s = h.session
+    s._proc = _Counting(12687)
+    try:
+        await s._ask_context()
+        assert s.context_tokens == 12687
+    finally:
+        s._proc = None
+
+
+async def test_the_harness_count_never_replaces_a_context_already_known(h):
+    s = h.session
+    s._set(context_tokens=40000)
+    s._proc = _Counting(12687)
+    try:
+        await s._ask_context()
+        assert s.context_tokens == 40000
+    finally:
+        s._proc = None

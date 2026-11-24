@@ -1,0 +1,2 @@
+- **A Claude Code session on another endpoint shows its context.** A gateway such as OpenCode Go prints every assistant line with usage 0 and puts the real counts only in the `message_delta` that ends the message, so the card read 0 tokens for the whole session. The delta's input, cache and output counts now set the context, and an assistant line that says 0 no longer wipes it.
+  When even that carries nothing, a turn that ends with no context asks Claude Code for its own count (`get_context_usage`, no API call).
