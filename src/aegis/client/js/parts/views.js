@@ -34,6 +34,7 @@ const OVERLAYS_HTML = `
 <div class="palette fpick" id="fpick" hidden></div>`;
 
 const VIEWS = [
+  ["models", "v-models", "models", "models"],
   ["settings", "v-settings", "settings", "settings"],
   ["journal", "v-journal", "journal", "journal"],
   ["usage", "v-usage", "usage", "usage"],

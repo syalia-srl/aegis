@@ -201,6 +201,8 @@ def catalog_from(commands: list, skills: list, models: list) -> Catalog:
                 window=window if isinstance(window, int) else None,
                 price_in=_price(cost.get("input")),
                 price_out=_price(cost.get("output")),
+                can_agent=caps.get("tools") is True
+                and "text" in (caps.get("output") or []),
                 free=cost.get("input") == 0
                 and cost.get("output") == 0
                 and caps.get("tools") is True

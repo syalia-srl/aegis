@@ -37,6 +37,7 @@ import { clampToRow, insertIntoComposer, quoted, rangeText } from "./quote.js";
 import { closeMonitorCard, tickMonitors } from "./monitors.js";
 import { CallTitle } from "./toolverb.js";
 import { closeFeedCard, tickFeeds } from "./feeds.js";
+import { Models } from "./model_catalog.js";
 import { Settings } from "./settings.js";
 import { Journal } from "./journal.js";
 import { Usage } from "./usage.js";
@@ -586,6 +587,7 @@ function route(hash = hashNow()) {
   // "new?" is read once by render, which drops it from the URL.
   if (h === "new") return { view: "spawn" };
   if (h.startsWith("new?")) return { view: "spawn", fill: new URLSearchParams(h.slice(4)) };
+  if (h === "models") return { view: "models" };
   if (h === "settings") return { view: "settings" };
   if (h === "journal") return { view: "journal" };
   if (h === "usage") return { view: "usage" };
@@ -805,6 +807,8 @@ listen(document, "visibilitychange", () => {
   app.conn.retryNow();
   if (app.conn.open) checkPush(); // otherwise the connect does
 });
+const modelsView = new Models(app.conn, views.models);
+teardown.push(() => modelsView.destroy());
 const settings = new Settings(app.conn, views.settings, {
   themes: THEMES,
   setTheme,
@@ -1479,6 +1483,12 @@ function render() {
     if (newView) spawn.loadHints();
     spawn.focus();
     setTitle("New session · aegis");
+  } else if (r.view === "models") {
+    watchHost(null);
+    follow(null);
+    show("models");
+    if (newView) modelsView.open();
+    setTitle("Models · aegis");
   } else if (r.view === "settings") {
     watchHost(null);
     follow(null);
@@ -2289,6 +2299,7 @@ const offKeys = installKeys(
       else if (v === "fleet") cmenu.openFor(fleet.selected());
     },
     spawn: () => spawn.open(),
+    models: () => go("#models"),
     settings: () => go("#settings"),
     journal: () => go("#journal"),
     usage: () => go("#usage"),

@@ -197,6 +197,57 @@ model_ranking: false
 
 or turn off "model_ranking" under Model ranking in Settings.
 
+## The Models page
+
+Open **Models** from the header (the phone's menu) or the command palette.
+It is a separate page from Settings. Browse provider offers with search,
+provider, price and local-listing filters. Dates distinguish the benchmark,
+provider snapshot and local discovery. Public offers can be selected for comparison. Creating an agent from a
+fixed selection requires every offer to be listed locally and support agent
+tools; connect an absent provider through its harness first. A local
+listing is discovery metadata, not a successful inference check: the provider
+can still require sign-in or reject a request. Authentication errors retain
+the existing stop-and-sign-in behavior, rather than trying paid models.
+Select rows across pages, compare them, and reorder the selection in the agent
+builder. Creating an agent does not launch a session or change the default.
+
+The builder supports a fixed selection or **Follow free providers**. The latter
+requires OpenCode, the Free only filter, and at least one selected provider:
+
+```yaml
+agents:
+  free-helper:
+    harness: opencode
+    models:
+      providers: [opencode, openrouter]
+      free: true
+    effort: high
+    permission: read
+```
+
+The rule uses providers and free status, never the search text. Each new
+session resolves the rule to locally available tool-capable text models with
+explicit zero input/output prices, ordered by Intelligence Index, then Coding
+Index, then model ID. Unranked models come last. Provider order is not priority.
+A public positive price conflicting with a local zero price excludes the offer.
+Models not yet scored can still be eligible. Unknown prices are not free.
+
+The concrete cascade and rule are kept with the session across restarts.
+New offers join future sessions, without reshuffling a running conversation.
+Before a turn, process start or model change, local metadata must be younger
+than 60 seconds. An unsuccessful refresh does not extend that age. An offer
+that became paid or unavailable is skipped in the existing cascade, or the
+turn stops if none remains. Manual overrides must still satisfy the rule;
+there is no automatic paid fallback. Provider billing can change after any
+metadata check, so this is not a guarantee about a provider's billing system.
+
+`models_preview` resolves a fixed selection or provider rule without saving
+or starting anything and reports exclusions. The Models builder shows the
+same review before saving. Saving is person-only, uses the existing
+configuration writer and refuses stale edits. Choose an existing agent in
+Models to edit its selection; its other fields are preserved. Settings links
+a dynamic selection back to Models and retains the rule when saving.
+
 ## Claude Code tools aegis replaces
 
 A Claude Code session starts without the Claude Code tools aegis has its own

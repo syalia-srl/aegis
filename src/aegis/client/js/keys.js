@@ -62,6 +62,7 @@ export const ACTIONS = [
   { id: "needs", title: "Next session that needs you, longest waiting first", nav: true, keys: [on("global", "Alt+J", alt("KeyJ"))] },
   { id: "sessions", title: "Switch to a session", nav: true, keys: [on("global", "Alt+P", alt("KeyP"))] },
   { id: "spawn", title: "New session", nav: true, keys: [on("global", "Alt+N", alt("KeyN")), on("browse", "n", key("n"))] },
+  { id: "models", title: "Models: browse providers and build agents", nav: true, keys: [] },
   { id: "settings", title: "Settings: .aegis.yaml", nav: true, keys: [on("global", "Alt+S", alt("KeyS"))] },
   { id: "journal", title: "Journal: what was done", nav: true, keys: [on("global", "Alt+L", alt("KeyL"))] },
   { id: "usage", title: "Usage: what work cost", nav: true, keys: [] },
