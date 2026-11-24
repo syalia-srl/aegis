@@ -1,15 +1,19 @@
-# The nightly model ranking (#1031): rebuild models.json from Artificial
-# Analysis and publish it on the model-ranking branch, which every aegis
-# downloads once a day (src/aegis/ranking.py). The refresh re-scores every
-# model the packaged file maps and adds what this runner's catalogs list; it
-# writes nothing when it scores fewer than half of them, so a broken night
-# keeps the last good file. One request of the free API's daily allowance.
 name: model-ranking
 
 on:
   schedule:
-    - cron: "17 4 * * *"
+    - cron: "17 4 * * *" # Benchmark API: once per day.
+    - cron: "17 0-3,5-23 * * *" # Public provider prices and free offers: hourly.
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the refreshed snapshot
+        type: boolean
+        default: true
+      catalog_only:
+        description: Refresh offers without calling the benchmark API
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -24,11 +28,10 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: main
-      - run: pip install uv
+      - uses: astral-sh/setup-uv@v6
       - run: uv sync --locked
       - name: harnesses
+        if: github.event.schedule != '17 0-3,5-23 * * *' && !inputs.catalog_only
         run: |
           npm install --prefix "$RUNNER_TEMP/npm" --no-fund --no-audit --silent \
             @anthropic-ai/claude-code@latest @opencode/cli@latest
@@ -36,10 +39,26 @@ jobs:
       - name: refresh
         env:
           AA_API_KEY: ${{ secrets.AA_API_KEY }}
+          CATALOG_ONLY: ${{ github.event.schedule == '17 0-3,5-23 * * *' || inputs.catalog_only }}
         run: |
-          uv run scripts/refresh-model-ranking \
-            --base src/aegis/data/models.json --out "$RUNNER_TEMP/models.json"
+          base=src/aegis/data/models.json
+          if git fetch --depth 1 origin model-ranking; then
+            git show FETCH_HEAD:models.json > "$RUNNER_TEMP/base-models.json"
+            base="$RUNNER_TEMP/base-models.json"
+          fi
+          args=()
+          if [ "$CATALOG_ONLY" = true ]; then
+            args+=(--catalog-only)
+          fi
+          uv run scripts/refresh-model-ranking "${args[@]}" \
+            --base "$base" --out "$RUNNER_TEMP/models.json"
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch' && !inputs.publish
+        with:
+          name: model-catalog-preview
+          path: ${{ runner.temp }}/models.json
       - name: publish
+        if: github.event_name != 'workflow_dispatch' || inputs.publish
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -55,7 +74,7 @@ jobs:
           if git diff --cached --quiet; then
             echo "unchanged"
           else
-            git commit -qm "chore(ranking): nightly refresh $(date -u +%F)"
+            git commit -qm "chore(ranking): refresh $(date -u +%FT%TZ)"
             git push origin model-ranking
           fi
-          echo "$(jq '[.models[] | select(.intelligence != null)] | length' models.json) models scored"
+          echo "$(jq '(.offers // {}) | length' models.json) provider offers, $(jq '[.models[] | select(.intelligence != null)] | length' models.json) models scored"

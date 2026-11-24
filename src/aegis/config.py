@@ -587,7 +587,7 @@ SECTIONS = {
     ),
     "ranking": (
         "Model ranking",
-        "Download the nightly Artificial Analysis ranking once a day, so new"
+        "Download shared model scores and provider offers every 15 minutes, so new"
         " models are ranked without a release. Off reads only the ranking"
         " packaged with this version.",
     ),
