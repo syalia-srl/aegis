@@ -28,7 +28,9 @@ def text(scope: Scope, browsers: bool = True) -> str:
 
 @pytest.mark.parametrize("browsers", [False, True])
 def test_the_unscoped_primer_is_byte_identical_to_before(browsers):
-    got = hashlib.sha256(text(ANY, browsers).encode()).hexdigest()
+    got = hashlib.sha256(
+        text(ANY, browsers).split("\n\nDelegation discovery:")[0].encode()
+    ).hexdigest()
     assert got == BEFORE[browsers]
 
 
@@ -47,3 +49,10 @@ def test_a_narrow_primer_keeps_only_the_parts_about_its_tools():
     assert "turn_end" in t and "plan_update" in t and "toast" in t
     assert "a live background task, which will" in t
     assert " \n" not in t and "\n\n\n" not in t
+
+
+def test_discovery_guidance_only_names_available_delegation_tools():
+    assert "Read queues_list" in text(ANY)
+    assert "Read agents_list" in text(ANY)
+    narrow = text(Scope(frozenset({"turn_end", "queue_enqueue"})))
+    assert "queues_list" not in narrow and "agents_list" not in narrow

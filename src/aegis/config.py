@@ -76,11 +76,11 @@ TOP_KEYS = (
 # block cannot set them.
 NOT_PER_HOST = ("hosts",)
 AGENT_KEYS = (
-    "harness", "provider", "model", "models", "effort", "permission", "priming",
+    "harness", "provider", "model", "models", "effort", "permission", "priming", "description",
     "keep_harness_tools", "exit", "mcp",
     "harness_tools", "isolated", "primer", "notices", "tools", "quota", "budget",
 )  # fmt: skip
-QUEUE_KEYS = ("agent", "priority", "quiet", "quota", "max_pending")
+QUEUE_KEYS = ("agent", "priority", "quiet", "quota", "max_pending", "description")
 
 Stamp = tuple[int, int, int]
 
@@ -777,6 +777,7 @@ class AgentDoc(BaseModel):
     effort: str = ""
     permission: str = ""
     priming: str | None = None
+    description: str = ""
     keep_harness_tools: list[str] = Field(default_factory=list)
     # A linked server to exit through, or "off"; blank: the server's exit_via.
     exit: str = ""
@@ -799,6 +800,7 @@ class AgentDoc(BaseModel):
 class QueueDoc(BaseModel):
     model_config = {"extra": "forbid"}
     name: str
+    description: str = ""
     agent: str = ""
     # None: the file leaves it out, which reads as 1.
     priority: int | None = None
@@ -888,6 +890,7 @@ def doc_from(data: dict) -> ConfigDoc:
             effort=a.effort,
             permission=a.permission,
             priming=a.priming,
+            description=a.description,
             keep_harness_tools=_keep_raw(data, a.name),
             exit=a.exit,
             mcp=_mcp_raw(data, a.name),
@@ -908,6 +911,7 @@ def doc_from(data: dict) -> ConfigDoc:
             QueueDoc(
                 name=str(name),
                 agent=str(q.get("agent") or ""),
+                description=str(q.get("description") or "").strip(),
                 priority=priority if ok else None,
                 quiet=q["quiet"] if isinstance(q.get("quiet"), bool) else None,
                 quota=_quota_raw(q),
@@ -1445,6 +1449,10 @@ def _set_agent(node: CommentedMap, a: AgentDoc) -> None:
     else:
         holder.pop("models", None)
         _put(holder, "model", a.model)
+    if a.description.strip():
+        _put(node, "description", a.description.strip())
+    else:
+        node.pop("description", None)
     if a.priming:
         if node.get("priming") != a.priming:
             node["priming"] = (
@@ -1507,6 +1515,10 @@ def _apply(data: CommentedMap, doc: ConfigDoc) -> None:
         queues = _entries(data, "queues", [q.name for q in doc.queues])
         for q in doc.queues:
             _put(queues[q.name], "agent", q.agent)
+            if q.description.strip():
+                _put(queues[q.name], "description", q.description.strip())
+            else:
+                queues[q.name].pop("description", None)
             if q.priority is None:
                 queues[q.name].pop("priority", None)
             else:

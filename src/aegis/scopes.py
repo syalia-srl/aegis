@@ -32,7 +32,7 @@ TOOLS = frozenset(
     memory_delete memory_read memory_save memory_search mention_reply meta
     models_list
     monitor_cancel monitor_list monitor_sessions monitor_start notice_announce
-    peer_handoff peer_read plan_update queue_enqueue quota_read schedule_create
+    peer_handoff peer_read plan_update queue_enqueue queues_list quota_read schedule_create
     schedule_delete schedule_fire schedule_list schedule_pause schedule_resume
     schedule_runs schedule_test schedule_update secret_request secret_send
     session_close session_group session_handoff session_list session_quiet
@@ -54,7 +54,9 @@ GROUPS: dict[str, frozenset[str]] = {
     "spawn": frozenset(
         {"session_spawn", "session_handoff", "peer_handoff", "session_close"}
     ),
-    "queues": frozenset({"queue_enqueue", "task_status", "task_cancel", "task_resume"}),
+    "queues": frozenset(
+        {"queues_list", "queue_enqueue", "task_status", "task_cancel", "task_resume"}
+    ),
     "workflows": _prefixed("workflow_"),
     "schedules": _prefixed("schedule_"),
     "browser": _prefixed("browser_") | {"signin_open"},

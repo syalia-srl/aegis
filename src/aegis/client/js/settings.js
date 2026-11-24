@@ -1113,6 +1113,8 @@ export class Settings {
     const casc = this.cascade(a);
     const effort = select("effort", ["", ...v.efforts], a.effort, (x) => (x ? `effort ${x}` : "effort?"));
     const permission = select("permission", ["", ...v.permissions], a.permission, (x) => (x ? `perm ${x}` : "perm?"));
+    const description = h("textarea", { name: "description", className: "set-description", value: a.description || "", rows: 2, placeholder: "When to choose this agent." });
+    description.dataset.key = "agents.*.description";
     const priming = h("textarea", { name: "priming", value: a.priming || "", rows: 4, placeholder: "A system prompt every session of this agent starts with." });
     // The key each control edits, which the coverage test looks for (#527).
     harness.dataset.key = "agents.*.harness";
@@ -1120,7 +1122,7 @@ export class Settings {
     effort.dataset.key = "agents.*.effort";
     permission.dataset.key = "agents.*.permission";
     priming.dataset.key = "agents.*.priming";
-    for (const el of [name, harness, effort, permission, priming]) {
+    for (const el of [name, harness, effort, permission, priming, description]) {
       el.setAttribute("aria-label", `Agent ${el.name}`);
       el.addEventListener("input", () => {
         const was = a.name;
@@ -1173,7 +1175,7 @@ export class Settings {
       this.draw();
     }, "link danger");
     const fold = h("details", { className: "set-priming", open: !!a.priming }, h("summary", { textContent: a.priming ? "Priming" : "Add a priming" }), priming);
-    card.append(name, h("div", { className: "picks" }, harness, effort, permission), casc, h("div", { className: "set-card-foot" }, fold, this.keepFold(a), this.mcpFold(a), this.scopeFold(a), this.quotaFold(a.quota, "agents.*.quota"), this.budgetFold(a), this.productFold(a), this.exitFold(a), star, del));
+    card.append(name, h("div", { className: "picks" }, harness, effort, permission), casc, description, h("div", { className: "set-card-foot" }, fold, this.keepFold(a), this.mcpFold(a), this.scopeFold(a), this.quotaFold(a.quota, "agents.*.quota"), this.budgetFold(a), this.productFold(a), this.exitFold(a), star, del));
     if (isDefault) card.classList.add("is-default");
     return card;
   }
@@ -1337,6 +1339,9 @@ export class Settings {
       const row = h("div", { className: "set-queue" });
       row.dataset.row = `queues.${q.name}`;
       const name = h("input", { name: "name", value: q.name, spellcheck: false, placeholder: "queue", className: "set-name" });
+      const description = h("textarea", { name: "description", className: "set-description", value: q.description || "", rows: 2, placeholder: "Which tasks belong on this queue.", "aria-label": "Queue description" });
+      description.dataset.key = "queues.*.description";
+      description.addEventListener("input", () => { q.description = description.value; this.touch(); });
       const agent = select("agent", names, q.agent);
       // Blank: left out, which reads as 1. Priority 0 pauses the queue.
       const priority = h("input", { name: "priority", type: "number", min: 0, value: q.priority ?? "", placeholder: "1", className: "pick set-limit" });
@@ -1364,6 +1369,7 @@ export class Settings {
         this.draw();
       }, "link danger");
       row.append(h("div", { className: "set-queue-line" }, name, h("span", { textContent: "runs" }), agent, h("span", { textContent: "at priority" }), priority, quiet, del));
+      row.append(description);
       const guard = this.quotaFold(q.quota, "queues.*.quota queues.*.max_pending", q.max_pending);
       if (guard) row.append(guard);
       return row;

@@ -3000,7 +3000,8 @@ class App:
         @r.op("agents.list", agent=True, read=True, access="read")
         async def agents_list(_, caller):
             """The agents you can spawn, each a preset of harness, model, effort
-            and permission. session_spawn starts one and can override those."""
+            and permission, with descriptions explaining when to choose each.
+            session_spawn starts one and can override those."""
             agents, default = self._agents()
             agents = [
                 a

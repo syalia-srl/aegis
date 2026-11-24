@@ -78,6 +78,8 @@ class Ops:
     @property
     def queue(self) -> _queue: ...
     @property
+    def queues(self) -> _queues: ...
+    @property
     def quota(self) -> _quota: ...
     @property
     def recap(self) -> _recap: ...
@@ -118,7 +120,7 @@ class Ops:
 
 class _agents:
     async def list(self) -> Any:
-        """The agents you can spawn, each a preset of harness, model, effort and permission. session_spawn starts one and can override those."""
+        """The agents you can spawn, each a preset of harness, model, effort and permission, with descriptions explaining when to choose each. session_spawn starts one and can override those."""
 
 class _archive:
     async def list(
@@ -718,6 +720,10 @@ class _queue:
         """A task's result from a linked server, for the agent here that enqueued it. Only that link may call it; the header is composed here from values checked here."""
     async def enqueue(self, *, queue: str, payload: str, callback: bool = ...) -> Any:
         """Hand a self-contained task to a fresh worker on a queue. Returns at once with the task id; the worker's final message reaches your inbox when it finishes (with callback). Keep working meanwhile. `queue@server` enqueues on a linked server; the result still reaches your inbox, and the task id comes back as `task-id@server`. A queue past its max_pending refuses with queue_full; one whose quota guard is closed refuses with queue_closed, or takes the task with a warning that it waits."""
+
+class _queues:
+    async def list(self) -> Any:
+        """The configured queues, their descriptions, worker agents and priorities. Read this before queue_enqueue to choose where a task belongs. Only queues within your session's scope are listed."""
 
 class _quota:
     async def read(self) -> Any:

@@ -2941,7 +2941,7 @@ async function spawnAgents(server) {
     return r.agents
       .filter((a) => a.enabled)
       .sort((a, b) => (b.name === r.default) - (a.name === r.default))
-      .map((a) => ({ v: far ? `${a.name}@${srv}` : a.name, model: a.model, doc: `${a.harness} · ${a.model}${on}`, source: "" }));
+      .map((a) => ({ v: far ? `${a.name}@${srv}` : a.name, model: a.model, doc: [a.description, `${a.harness} · ${a.model}${on}`].filter(Boolean).join(" · "), source: "" }));
   };
   const far = server ? [] : app.state.links.filter((l) => l.state === "linked").map((l) => roster(l.name, true));
   return (await Promise.all([roster(server, false), ...far])).flat();

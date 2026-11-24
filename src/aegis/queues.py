@@ -153,6 +153,11 @@ def queues_from(raw: Any) -> dict[str, dict]:
             # A worker starts with no tab: its result goes to its enqueuer (#386).
             out[str(name)] = {
                 "agent": str(agent),
+                **(
+                    {"description": str(q["description"]).strip()}
+                    if str(q.get("description") or "").strip()
+                    else {}
+                ),
                 "priority": priority,
                 "quiet": q.get("quiet", True),
                 "legacy": [k for k in LEGACY_QUEUE_KEYS if k in q],

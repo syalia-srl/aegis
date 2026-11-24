@@ -2635,3 +2635,9 @@
 .aegis .visual-annotations .mark{position:absolute;inset:0;width:100%;height:100%;overflow:visible;color:var(--accent);pointer-events:none}
 .aegis .visual-annotations .vpin::before{position:absolute;left:-9px;top:-9px}
 .aegis .visual-annotations .vpin.draw::before,.aegis .visual-annotations .vpin.arrow::before{left:var(--nx);top:var(--ny);transform:translate(-110%,-20%)}
+
+/* Routing guidance is edited separately from the worker's system prompt. */
+.aegis .set-description{width:100%;min-width:0;box-sizing:border-box;resize:vertical;background:var(--bg);border:1px solid var(--rule);border-radius:var(--r);padding:7px 9px;font-family:var(--font-ui);font-size:13px;line-height:1.5;color:var(--ink)}
+.aegis .set-description:focus{outline:none;border-color:var(--accent)}
+.aegis .set-agent > .set-description{grid-column:2}
+@media(max-width:640px){.aegis .set-agent > .set-description{grid-column:1/-1}}
