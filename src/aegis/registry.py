@@ -235,6 +235,9 @@ class Registry(Host):
     def mcp_servers(self, session: Session) -> tuple[McpServer, ...]:
         return self.mcp_for(session)
 
+    def web_bridge(self, session: Session):
+        return self.web_for(session)
+
     def cgroup(self, session: Session) -> Path | None:
         return self.cgroups.create(session.log_id) if self.cgroups else None
 

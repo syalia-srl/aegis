@@ -9,12 +9,13 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from typing import Any
 
 
 class Ledger:
     def __init__(self, path: Path) -> None:
         self.path = path
-        self.data = (
+        self.data: dict[str, Any] = (
             json.loads(path.read_text())
             if path.exists()
             else {"version": 1, "executions": {}}

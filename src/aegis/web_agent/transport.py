@@ -140,6 +140,17 @@ class BrowserBridge:
         return tab
 
     async def call(self, op: str, args: dict) -> dict:
+        if op == "state":
+            self.session.record_card(
+                {
+                    "kind": "web_connection",
+                    "state": args["state"],
+                    "text": args["text"],
+                    "url": args.get("url", ""),
+                    "tab": self.tab,
+                }
+            )
+            return {}
         if op == "start":
             return await self._start(args)
         if op == "release":
