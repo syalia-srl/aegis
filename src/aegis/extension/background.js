@@ -557,46 +557,56 @@ async function connect() {
     await set({ shared: all });
     sock.send(JSON.stringify({ t: "hello", token, version: chrome.runtime.getManifest().version, tabs }));
   };
-  sock.onmessage = async (ev) => {
+  let controls = Promise.resolve();
+  sock.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
-    if (msg.t === "welcome") {
-      await set({ serverName: msg.server, deviceName: msg.name, ...(msg.theme && Object.keys(msg.theme).length ? { theme: msg.theme } : {}) });
-      await setRequests(msg.requests || []);
-      clearInterval(pinger);
-      pinger = setInterval(() => send({ t: "ping" }), PING_MS);
-      setState("connected");
-      drawIcon();
-    } else if (msg.t === "theme") {
-      await set({ theme: msg.vars });
-      drawIcon();
-    } else if (msg.t === "unpaired") {
-      await forget("Unpaired from aegis.");
-    } else if (msg.t === "sessions") {
-      waiting.get(msg.id)?.(msg.sessions);
-      waiting.delete(msg.id);
-    } else if (msg.t === "request") {
-      await setRequests([...(await requests()).filter((r) => r.id !== msg.request.id), msg.request]);
-    } else if (msg.t === "cancel") {
-      await dropRequest(msg.request);
-    } else if (msg.t === "answer") {
-      if (msg.give) await give(msg.request);
-      else await dropRequest(msg.request);
-    } else if (msg.t === "hold") {
-      const all = await shared();
-      const id = Object.keys(all).find((k) => all[k].name === msg.tab);
-      if (id) await hold(id, msg.holder, { ask: msg.ask, by: msg.by, tell: false });
-    } else if (msg.t === "eval") {
-      const all = await shared();
-      const id = Object.keys(all).find((k) => all[k].name === msg.tab);
-      if (id) await scripts(id, !!msg.on, false);
-    } else if (msg.t === "call") {
-      return onCall(msg);
-    } else if (msg.t === "revoke") {
-      const all = await shared();
-      const id = Object.keys(all).find((k) => all[k].name === msg.tab);
-      if (id) await unshare(id, msg.log_id, false);
+    const apply = async () => {
+      if (msg.t === "welcome") {
+        await set({ serverName: msg.server, deviceName: msg.name, ...(msg.theme && Object.keys(msg.theme).length ? { theme: msg.theme } : {}) });
+        await setRequests(msg.requests || []);
+        clearInterval(pinger);
+        pinger = setInterval(() => send({ t: "ping" }), PING_MS);
+        setState("connected");
+        drawIcon();
+      } else if (msg.t === "theme") {
+        await set({ theme: msg.vars });
+        drawIcon();
+      } else if (msg.t === "unpaired") {
+        await forget("Unpaired from aegis.");
+      } else if (msg.t === "sessions") {
+        waiting.get(msg.id)?.(msg.sessions);
+        waiting.delete(msg.id);
+      } else if (msg.t === "request") {
+        await setRequests([...(await requests()).filter((r) => r.id !== msg.request.id), msg.request]);
+      } else if (msg.t === "cancel") {
+        await dropRequest(msg.request);
+      } else if (msg.t === "answer") {
+        if (msg.give) await give(msg.request);
+        else await dropRequest(msg.request);
+      } else if (msg.t === "hold") {
+        const all = await shared();
+        const id = Object.keys(all).find((k) => all[k].name === msg.tab);
+        if (id) await hold(id, msg.holder, { ask: msg.ask, by: msg.by, tell: false });
+      } else if (msg.t === "eval") {
+        const all = await shared();
+        const id = Object.keys(all).find((k) => all[k].name === msg.tab);
+        if (id) await scripts(id, !!msg.on, false);
+      } else if (msg.t === "call") {
+        return onCall(msg);
+      } else if (msg.t === "revoke") {
+        const all = await shared();
+        const id = Object.keys(all).find((k) => all[k].name === msg.tab);
+        if (id) await unshare(id, msg.log_id, false);
+      }
+      if (!["pong", "sessions"].includes(msg.t)) chrome.runtime.sendMessage({ t: "changed" }).catch(() => {});
+    };
+    // Storage-backed control updates must preserve socket order. Calls and
+    // session-list replies remain independent of slow page operations.
+    if (["welcome", "request", "answer", "cancel", "hold", "eval", "revoke"].includes(msg.t)) {
+      controls = controls.then(apply, apply);
+      return controls;
     }
-    if (!["pong", "sessions"].includes(msg.t)) chrome.runtime.sendMessage({ t: "changed" }).catch(() => {});
+    return apply();
   };
   sock.onclose = async (ev) => {
     if (ws !== sock) return;

@@ -1,0 +1,1 @@
+- Chrome extension 0.5.2 processes storage-backed control messages in order, so automatic web-session launch cannot accept a request before it is saved. Browser calls remain concurrent.

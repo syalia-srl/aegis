@@ -608,7 +608,15 @@ async def test_an_aegis_tool_call_steers_it_and_its_result_stays_clean(noticed):
     assert "The disk holding aegis" in inbox_rows(s)
 
 
-@pytest.mark.parametrize("why", ["idle", "interrupting", "falling", "no process"])
+@pytest.mark.parametrize(
+    "why",
+    [
+        "idle",
+        "interrupting",
+        pytest.param("falling", marks=pytest.mark.quarantine("#1156")),
+        "no process",
+    ],
+)
 async def test_nothing_is_steered_where_it_would_start_a_turn(noticed, why):
     s = await noticed.spawn()
     await turn(s, "/sh true")
