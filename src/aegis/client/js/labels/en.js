@@ -460,6 +460,8 @@ export default {
   "sidebar.othersDirtNote": "{files} this session never wrote",
 
   "tabs.said": "{handle}: {title} ({state})",
+  "tabs.said.term": "Terminal: {name} ({state})",
+  "tabs.said.browser": "Browser: {name} ({state})",
   "tabs.fold": "Fold the group",
   "tabs.unfold": "Unfold the group",
   "tabs.groupTitle": "Group {name}",

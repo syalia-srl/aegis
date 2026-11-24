@@ -20,7 +20,7 @@ import { attach as attachMenu } from "../menu.js";
 import { installBell } from "../ping.js";
 import { pushSupported } from "../pushpanel.js";
 import { attachTabCard } from "../tabcard.js";
-import { patchTab, renderTabs, stepMove } from "../tabs.js";
+import { cancelTabDrag, patchTab, renderTabs, stepMove } from "../tabs.js";
 import { Switcher } from "../switcher.js";
 
 // The markup this part owns. The ids stay as they are: they are the browser
@@ -259,14 +259,17 @@ export class HeaderPart {
       return;
     }
     const phone = this.phone.matches;
-    const vertical = !phone && this.root.dataset.view !== "window" && prefs.orientation === "vertical";
+    const hasHeader = prefs.hasHeader;
+    const vertical = !phone && hasHeader && prefs.orientation === "vertical";
     const collapsed = vertical && prefs.collapsed;
     // Update these controls in JS so media-query CSS cannot blur them first.
     const active = document.activeElement;
     const inList = this.list.contains(active);
     const moving = vertical !== this.vertical;
+    const changed = moving || collapsed !== this.collapsed;
+    if (changed || String(phone) !== this.el.dataset.phone) cancelTabDrag(this.list);
     this.el.dataset.phone = String(phone);
-    if (moving || collapsed !== this.collapsed) {
+    if (changed) {
       this.tabCard.hide();
       this.vertical = vertical;
       this.collapsed = collapsed;
@@ -283,7 +286,7 @@ export class HeaderPart {
       this.focus(true);
     }
     this.size();
-    if (this.root.dataset.view === "window") return;
+    if (!hasHeader) return;
     const fallback = phone ? this.burger : vertical ? this.sessionsToggle : this.fleetTab;
     if ((inList && collapsed) || (active === this.sessionsToggle && !vertical) ||
         (active === this.burger && !phone) || (active === this.fleetTab && phone)) {
@@ -465,6 +468,7 @@ export class HeaderPart {
     this.mutationObserver.disconnect();
     this.phone.removeEventListener("change", this.onPhone);
     window.removeEventListener("hashchange", this.onHideMenu);
+    cancelTabDrag(this.list);
     this.tabCard.hide();
     this.switcher.close();
     this.list.remove();

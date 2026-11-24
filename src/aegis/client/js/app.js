@@ -136,6 +136,7 @@ const saveTabPreference = (key, value) => {
   }
 };
 const sessionTabs = page ? {
+  get hasHeader() { return route().view !== "window"; },
   get orientation() { return orientation; },
   set orientation(value) {
     orientation = value;
@@ -598,13 +599,13 @@ const isTool = (m) => m.kind === "term" || m.kind === "browser";
 
 // -- routing: #fleet, #new[?<fill>], #settings, #journal, #usage, #knowledge[=<name>], #files[=<path>[:line]], #schedules, #help[=<page>], #s=<key>, #t=<key>, #read=<key>, #w=<n>:<key>, #g=<group key> --
 // A help ref is URI-encoded; a hand-typed malformed one is a page name nobody has.
-const unhash = (s) => {
+function unhash(s) {
   try {
     return decodeURIComponent(s);
   } catch {
     return s;
   }
-};
+}
 function route(hash = hashNow()) {
   const h = hash.slice(1);
   // A row's link (its menu's Copy link) names the entry to reveal after "&at=".

@@ -3,6 +3,7 @@ transcript's navigation pill, two-line tabs that keep the whole handle, a
 strip that scrolls, and the menu at its end."""
 
 import json
+import re
 
 import pytest
 
@@ -10,11 +11,14 @@ from .conftest import browser_slot
 from .test_browser import (  # noqa: F401
     browser,
     linked,
+    pick,
     playwright,
     server,
     spawn,
     turns_done,
 )
+from .test_browsers import site  # noqa: F401
+from .test_terminal_browser import CONFIG, TermServer
 
 pytestmark = [pytest.mark.browser, pytest.mark.slow]
 
@@ -662,3 +666,138 @@ def test_session_tab_focus_follows_chromium_page_zoom(server, tmp_path):  # noqa
             )
         finally:
             context.close()
+
+
+@pytest.fixture
+def row_server(tmp_path, fake_claude, fake_opencode):
+    profile = "terminal-profile-with-a-name-too-wide-to-fit-in-the-session-list"
+    (tmp_path / ".aegis.yaml").write_text(
+        CONFIG + f"terminals:\n  {profile}: {{cmd: sh, cwd: .}}\n"
+    )
+    served = TermServer(tmp_path, fake_claude, fake_opencode).start()
+    yield served, profile
+    served.stop()
+
+
+def test_session_tab_names_themes_and_touch(row_server, site, browser):  # noqa: F811
+    served, profile = row_server
+    tab = browser.new_page(
+        viewport={"width": 1280, "height": 800}, has_touch=True, reduced_motion="reduce"
+    )
+    errors = []
+    asset_errors = []
+    tab.on("pageerror", lambda err: errors.append(str(err)))
+    tab.on(
+        "requestfailed",
+        lambda r: asset_errors.append(r.url) if "/static/" in r.url else None,
+    )
+    tab.on(
+        "response",
+        lambda r: (
+            asset_errors.append(r.url)
+            if "/static/" in r.url and r.status >= 400
+            else None
+        ),
+    )
+    tab.goto(served.url)
+    tab.wait_for_selector("#a2[data-view=fleet]")
+    session_tabs(tab, "Vertical")
+    assert tab.locator("#tablist .tab").count() == 0
+    handle = "extraordinary-longnavigation-accessibility"
+    title = "A long session title that stays available as an accessible name"
+    key = spawn(
+        tab, "/mcp session_rename " + json.dumps({"handle": handle, "title": title})
+    )
+    terminal = served.call("term.spawn", {"profile": profile})
+    web = served.call("browser.spawn", {"url": site})
+    session = tab.locator(f'#tablist [data-id="{key}"]')
+    term = tab.locator(f'#tablist [data-id="{terminal["id"]}"]')
+    web_row = tab.locator(f'#tablist [data-id="{web["id"]}"]')
+    playwright.expect(session).to_have_accessible_name(
+        re.compile(re.escape(f"{handle}: {title} ("))
+    )
+    assert term.get_attribute("aria-label") == f"Terminal: {terminal['name']} (running)"
+    assert (
+        web_row.get_attribute("aria-label") == f"Browser: {web['name']} (you hold it)"
+    )
+    assert session.locator(".hn").evaluate("n => n.scrollWidth > n.clientWidth")
+    assert term.locator(".tname").evaluate("n => n.scrollWidth > n.clientWidth")
+    assert term.locator("use[href='#g-terminal']").count() == 1
+    for orientation in ("Horizontal", "Vertical"):
+        session_tabs(tab, orientation)
+        term.press("Enter")
+        tab.wait_for_selector("#a2[data-view=term] .xterm-rows")
+        assert tab.evaluate("location.hash") == f"#t={terminal['id']}"
+        web_row.press("Space")
+        tab.wait_for_selector("#a2[data-view=browser] .br-screen")
+        tab.wait_for_selector(
+            "#a2[data-view=browser] .br-wait", state="hidden", timeout=15_000
+        )
+        assert tab.evaluate("location.hash") == f"#b={web['id']}"
+    tab.click("#settings-btn")
+    themes = tab.locator("#set-theme").evaluate(
+        "chip => chip.options.map(option => option.label)"
+    )
+    assert len(themes) == 10
+    for theme in themes:
+        pick(tab, "#set-theme", theme)
+        assert tab.locator("#a2").get_attribute("data-theme") == theme.lower()
+        assert tab.locator("#sessions-toggle use[href='#g-panel']").count() == 1
+        assert tab.locator("#tablist").bounding_box()["width"] == 232
+    origin = tab.evaluate("location.origin")
+    tab.goto(f"{origin}/?lang=es#s={key}")
+    tab.get_by_role("button", name="Contraer sesiones").wait_for()
+    assert session.get_attribute("aria-label").startswith(f"{handle}: {title} (")
+    assert (
+        term.get_attribute("aria-label") == f"Terminal: {terminal['name']} (corriendo)"
+    )
+    assert (
+        web_row.get_attribute("aria-label")
+        == f"Navegador: {web['name']} (la tienes tú)"
+    )
+
+    # A focused row follows the list into the phone strip, then yields focus
+    # to Sessions when the desktop list is still folded.
+    term.focus()
+    tab.locator("#sessions-toggle").evaluate("b => b.click()")
+    assert tab.evaluate("document.activeElement.id") == "sessions-toggle"
+    assert (
+        tab.get_by_role(
+            "button", name=f"Terminal: {terminal['name']} (corriendo)"
+        ).count()
+        == 0
+    )
+    tab.set_viewport_size({"width": 760, "height": 800})
+    tab.wait_for_function("document.activeElement.id === 'hdr-burger'")
+    term.focus()
+    tab.set_viewport_size({"width": 761, "height": 800})
+    tab.wait_for_function("document.activeElement.id === 'sessions-toggle'")
+    tab.locator("#sessions-toggle").press("Enter")
+    term.focus()
+    tab.set_viewport_size({"width": 760, "height": 800})
+    assert term.evaluate("row => row === document.activeElement")
+    tab.locator("#input").focus()
+    tab.set_viewport_size({"width": 390, "height": 800})
+    assert tab.evaluate("document.activeElement.id") == "input"
+    assert tab.evaluate("document.documentElement.scrollWidth === innerWidth")
+    assert tab.locator("#input").evaluate("""el => {
+        const box = el.getBoundingClientRect();
+        return document.elementFromPoint(box.x + 5, box.y + 5) === el;
+    }""")
+    tab.set_viewport_size({"width": 1280, "height": 800})
+    session.scroll_into_view_if_needed()
+    box = session.bounding_box()
+    touch = tab.context.new_cdp_session(tab)
+    touch.send(
+        "Input.dispatchTouchEvent",
+        {
+            "type": "touchStart",
+            "touchPoints": [{"x": box["x"] + 20, "y": box["y"] + 15}],
+        },
+    )
+    tab.locator(".tabcard.tabsheet").wait_for()
+    touch.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+    assert tab.locator(".tabcard.tabsheet .acts button").count() > 0
+    assert tab.evaluate("matchMedia('(prefers-reduced-motion: reduce)').matches")
+    assert errors == [] and asset_errors == []
+    tab.close()

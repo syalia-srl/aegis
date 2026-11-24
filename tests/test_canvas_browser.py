@@ -103,6 +103,9 @@ def test_session_list_fold_preserves_canvas_composer_and_details(server, page): 
     page.frame_locator(frame).locator("#st").filter(has_text="{}").wait_for()
     frame_state = page.frame_locator(frame).locator("#st")
     frame_state.evaluate("() => window.foldTest = 'still running'")
+    page.fill("#input", "/many 45")
+    page.press("#input", "Enter")
+    turns_done(page, 4)
     page.fill("#input", "unsent message")
     page.evaluate("""() => {
       const send = WebSocket.prototype.send;
@@ -118,6 +121,19 @@ def test_session_list_fold_preserves_canvas_composer_and_details(server, page): 
     )
     page.wait_for_function("typeof window.releaseUpload === 'function'")
     page.locator("#atts .att.uploading").wait_for()
+    page.evaluate("""() => {
+        const transcript = document.querySelector('#tr');
+        const rows = document.querySelectorAll('#entries .row');
+        window.keptAnchor = rows[Math.floor(rows.length / 2)];
+        const top = transcript.getBoundingClientRect().top;
+        transcript.scrollTop += window.keptAnchor.getBoundingClientRect().top - top - 8;
+    }""")
+    anchor_visible = """() => {
+      const tr = document.querySelector('#tr').getBoundingClientRect();
+      const row = window.keptAnchor.getBoundingClientRect();
+      return window.keptAnchor.isConnected && row.top >= tr.top - 1 && row.top < tr.top + 70;
+    }"""
+    page.wait_for_function(anchor_visible)
     page.evaluate(
         """sel => {
       window.kept = [document.querySelector(sel), document.querySelector('#input')];
@@ -140,6 +156,7 @@ def test_session_list_fold_preserves_canvas_composer_and_details(server, page): 
         assert toggle.evaluate("b => b === document.activeElement")
         assert page.locator("#a2").get_attribute("data-side") == panel
         assert page.locator("#input").input_value() == "unsent message"
+        page.wait_for_function(anchor_visible)
         assert frame_state.evaluate("() => window.foldTest") == "still running"
         assert page.locator("#atts .att.uploading").get_attribute("title") == "keep.txt"
         assert page.evaluate(
