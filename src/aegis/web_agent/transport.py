@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any
 
 from ..chrome import CallError, Chrome
@@ -191,10 +192,11 @@ class BrowserBridge:
                     },
                 )
                 if script := self.provider.send_ready_script:
-                    if self.provider.name == "web-qwen":
-                        # Qwen suppresses Enter after compositionend. Background
-                        # tabs can defer its 100 ms release timer to one second.
-                        await asyncio.sleep(1.1)
+                    initial = (
+                        await self._eval(self.provider.observe_script)
+                        if self.provider.name == "web-qwen"
+                        else None
+                    )
                     last_rect = None
                     for attempt in range(21):
                         self._check(args)
@@ -215,6 +217,30 @@ class BrowserBridge:
                                         "key": self.provider.send_key,
                                     },
                                 )
+                                if initial is not None:
+                                    page = await self._eval(
+                                        self.provider.observe_script
+                                    )
+                                    unchanged = all(
+                                        page.get(key) == initial.get(key)
+                                        for key in ("url", "users", "messages")
+                                    )
+                                    draft = await self._eval(
+                                        "({unchanged:document.querySelector('textarea')?.value==="
+                                        + json.dumps(args["text"])
+                                        + "})"
+                                    )
+                                    if unchanged and draft.get("unchanged") is True:
+                                        self._check(args)
+                                        await self.chrome.call(
+                                            self.session.log_id,
+                                            self.tab,
+                                            "press",
+                                            {
+                                                "target": self.provider.input,
+                                                "key": self.provider.send_key,
+                                            },
+                                        )
                             else:
                                 await self.chrome.call(
                                     self.session.log_id,
