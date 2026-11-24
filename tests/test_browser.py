@@ -356,6 +356,8 @@ def test_spawn_web_provider_uses_chrome_model_and_native_connection(server, page
     page.wait_for_selector("#a2[data-view=session]")
     page.wait_for_selector(".row.web-connection")
     assert "Qwen" in page.inner_text("#chip-model")
+    assert page.get_attribute("#chip-model use", "href") == "#g-h-web-qwen"
+    assert page.eval_on_selector("#chip-model svg", "el => el.getBBox().width > 0")
     assert page.is_hidden("#chip-effort")
     assert not page.errors
 
