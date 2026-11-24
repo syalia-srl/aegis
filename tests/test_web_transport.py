@@ -203,9 +203,7 @@ async def test_provider_reports_the_actual_send_button_result(
         assert await bridge("send", {"text": "A task"}) == {"submitted": True}
         typed = [call for call in ext.calls if call["op"] == "type"]
         assert len(typed) == 1 and typed[0]["args"]["submit"] is False
-        assert [c["op"] for c in ext.calls if c["op"] in ("press", "click")][-1] == (
-            "press" if name == "web-qwen" else "click"
-        )
+        assert ext.calls[-1]["op"] == ("press" if name == "web-qwen" else "click")
     else:
         with pytest.raises(CallError, match="submission_refused"):
             await bridge("send", {"text": "A task that did not get submitted"})
@@ -274,18 +272,12 @@ async def test_native_submission_waits_for_stable_ready_button_without_retyping(
     attempts = []
 
     def answer(message):
-        if (
-            message["op"] == "eval"
-            and "const cfg=" not in message["args"]["expression"]
-            and "unchanged:" not in message["args"]["expression"]
-        ):
+        if message["op"] == "eval":
             attempts.append(message)
             return {
                 "value": {"ready": len(attempts) >= 3, "rect": [0, 0, 20, 20]},
                 "web_ready": True,
             }
-        if message["op"] == "eval":
-            return {"value": {}, "web_ready": True}
         return {}
 
     chrome, _, bridge, ext, _ = setup_bridge(tmp_path, answer)
@@ -297,10 +289,7 @@ async def test_native_submission_waits_for_stable_ready_button_without_retyping(
         "eval",
         "eval",
         "eval",
-        "eval",
         "press",
-        "eval",
-        "eval",
     ]
     assert ext.calls[0]["args"]["submit"] is False
 
@@ -315,36 +304,3 @@ async def test_gemini_press_follows_settled_text_insertion(tmp_path):
     assert [call["op"] for call in ext.calls] == ["type", "press"]
     assert ext.calls[0]["args"]["submit"] is False
     assert ext.calls[1]["args"]["key"] == "Enter"
-
-
-@pytest.mark.parametrize(
-    "changed,draft,expected", [(False, True, 2), (True, True, 1), (False, False, 1)]
-)
-async def test_qwen_repeats_enter_only_for_an_unchanged_unsent_draft(
-    tmp_path, changed, draft, expected
-):
-    observations = 0
-
-    def answer(message):
-        nonlocal observations
-        if message["op"] != "eval":
-            return {}
-        expression = message["args"]["expression"]
-        if "const cfg=" in expression:
-            observations += 1
-            value = {
-                "url": "https://chat.qwen.ai/",
-                "users": ["accepted"] if changed and observations > 1 else [],
-                "messages": [],
-            }
-        elif "unchanged:" in expression:
-            value = {"unchanged": draft}
-        else:
-            value = {"ready": True, "rect": [0, 0, 20, 20]}
-        return {"value": value, "web_ready": True}
-
-    chrome, _, bridge, ext, _ = setup_bridge(tmp_path, answer)
-    await (await grant(chrome, ext, bridge))
-    await bridge("send", {"text": "The exact pending draft"})
-    assert sum(call["op"] == "press" for call in ext.calls) == expected
-    assert sum(call["op"] == "type" for call in ext.calls) == 1
