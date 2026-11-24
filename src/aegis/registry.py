@@ -525,7 +525,10 @@ class Registry(Host):
     async def check_model(self, session: Session, model: str) -> None:
         if self.model_catalog is not None:
             await self.model_catalog.refresh()
-            why = self.model_catalog.reason(session.spec.model_selector, model)
+            await self.model_catalog.app.who_of_key(
+                session.spec.owner or self.model_catalog.app.user
+            )
+            why = self.model_catalog.restriction(session.spec, model)
             if why:
                 raise OpError("model_ineligible", why)
 

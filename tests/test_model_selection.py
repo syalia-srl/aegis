@@ -234,3 +234,18 @@ async def test_public_positive_price_excludes_a_locally_free_offer(app, monkeypa
     assert "conflict" in app.model_catalog.reason(RULE, "one/a")
     result = await app.registry.call("models.preview", {"models": RULE})
     assert [m["value"] for m in result["models"]] == ["two/b"]
+
+
+async def test_host_model_restrictions_apply_to_resolution_and_revalidation(app):
+    from aegis.policy import HostPolicy, Catalog
+
+    class Restricted(HostPolicy):
+        def catalog(self, who):
+            return Catalog(models=("one/a",))
+
+    app.policy = Restricted()
+    (a,) = app.config.current().agents
+    spec = resolve([a], a.name, None, {}, app.roots.config_root)
+    selected, gate = app.start_spec(spec)
+    assert gate.may_start and selected.cascade == ("one/a",)
+    assert "host policy" in app.model_catalog.restriction(selected, "two/b")

@@ -80,12 +80,32 @@ class ModelCatalog:
         m = self.models.get(value)
         if m is None:
             return f"{value}: not available through local OpenCode; connect the provider first"
-        if not m.free or m.price_in != 0 or m.price_out != 0:
+        if (
+            not m.free
+            or m.price_in != 0
+            or m.price_out != 0
+            or m.price_source == "Artificial Analysis list price"
+        ):
             return f"{value}: zero input/output prices and tool support are required"
         offer = ranking().offers.get(value)
         if offer and any((offer.get(k) or 0) > 0 for k in ("price_in", "price_out")):
             return f"{value}: public and local prices conflict"
         return None
+
+    def permits(self, spec, model: str) -> bool:
+        who = self.app.whos.get(spec.owner or self.app.user)
+        models = self.app.policy.catalog(who).models
+        return models is None or model in models
+
+    def restriction(self, spec, model: str) -> str | None:
+        why = self.reason(spec.model_selector, model)
+        if why:
+            return why
+        return (
+            None
+            if self.permits(spec, model)
+            else "Model is not offered by the host policy"
+        )
 
     def candidates(self, selector: dict) -> list[str]:
         if not self.fresh:
@@ -98,21 +118,21 @@ class ModelCatalog:
     async def prepare_turn(self, session) -> None:
         await self.refresh()
         spec = session.spec
+        await self.app.who_of_key(spec.owner or self.app.user)
         if not spec.model_selector:
             return
-        if not self.reason(spec.model_selector, spec.model):
+        if not self.restriction(spec, spec.model):
             return
         if not self.fresh:
             raise OpError(
                 "model_ineligible",
-                self.reason(spec.model_selector, spec.model)
-                or "Model metadata is stale",
+                self.restriction(spec, spec.model) or "Model metadata is stale",
             )
         cascade = spec.cascade
         at = cascade.index(spec.model) if spec.model in cascade else -1
         for model in cascade[at + 1 :]:
             if (
-                self.reason(spec.model_selector, model) is None
+                self.restriction(spec, model) is None
                 and self.app.gate(spec.owner, spec.harness, model).may_start
                 and self.app.cooling.until(spec.harness, model, time.time()) is None
             ):

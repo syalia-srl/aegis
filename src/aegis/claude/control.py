@@ -47,6 +47,7 @@ class Model:
     coding: float | None = None
     intelligence: float | None = None
     can_agent: bool = True
+    price_source: str | None = None
 
     def wire(self) -> dict:
         return {
@@ -57,6 +58,7 @@ class Model:
             "efforts": list(self.efforts),
             "free": self.free,
             "can_agent": self.can_agent,
+            "price_source": self.price_source,
             "price_in": self.price_in,
             "price_out": self.price_out,
             "rank": self.rank,

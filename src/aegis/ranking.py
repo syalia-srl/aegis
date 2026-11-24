@@ -227,6 +227,9 @@ def annotate(models: Sequence[Model], r: Ranking | None = None) -> tuple[Model, 
                 rank=r.rank(m.value, among),
                 coding=s.coding,
                 intelligence=s.intelligence,
+                price_source=(m.price_source or "local harness")
+                if own
+                else "Artificial Analysis list price",
                 price_in=m.price_in if own else s.price_in,
                 price_out=m.price_out if own else s.price_out,
             )
