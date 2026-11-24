@@ -1,0 +1,1 @@
+- **Models has a navigation icon.** The top bar now shows a model chip symbol, with the Models label beside it in the phone menu.
