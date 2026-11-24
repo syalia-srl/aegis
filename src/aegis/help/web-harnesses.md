@@ -20,8 +20,8 @@ chip. The agent preset still supplies its permissions, working directory
 and instructions. The model and effort chips are hidden: choose the actual
 model, research mode and other provider options in Chrome.
 
-Send a task. The harness automatically opens and assigns a new provider tab
-in the paired Chrome browser with Scripts enabled. Sign in if needed. New sessions require an empty conversation;
+Send a task. Grant the request to open a new provider tab, sign in if needed,
+and turn on Scripts for that tab. New sessions require an empty conversation;
 existing chats cannot be adopted. Resuming a session returns to its saved
 conversation. Each backing tab belongs to one web session at a time.
 
@@ -46,9 +46,8 @@ agents:
 
 The internal model value is web; the required effort field is ignored by this
 driver. Use the agent with `session_spawn` or as a queue's configured worker,
-like any other agent. Starting the harness authorizes its own new provider tab;
-generic browser requests by other agents still require consent. The paired
-Chrome browser must be connected, and sign-in may require the person.
+like any other agent. The browser consent is still required for each new session.
+Do not put a web session in an unattended queue unless someone can grant its tab.
 Extra MCP servers are unsupported; the local aegis command provides aegis tools.
 Actual provider model identity, token usage and cost are unavailable and are not
 estimated.

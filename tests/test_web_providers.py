@@ -120,15 +120,3 @@ def test_executable_multiline_strings_preserve_every_newline(page):
     from aegis.web_agent.protocol import request
 
     assert request(got["messages"][-1]["markdown"]).code == code + "\n"
-
-
-def test_gemini_user_messages_exclude_accessibility_previews_and_nested_wrappers(page):
-    page.set_content(
-        '<user-query><div class="user-query-container">'
-        "<h2>You said Search Chrome help…</h2>"
-        '<div class="user-query-container"><div class="query-text">'
-        "Search Chrome help</div></div></div></user-query>"
-    )
-    users = page.evaluate(provider("web-gemini").observe_script)["users"]
-    assert len(users) == 1
-    assert users[0]["text"] == "Search Chrome help"

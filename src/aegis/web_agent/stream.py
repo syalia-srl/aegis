@@ -22,8 +22,6 @@ class Parser:
         self.session_id: str | None = None
         self.model: str | None = None
         self.cwd: str | None = None
-        self._submitted: dict[str, str | None] = {}
-        self._bridge_notices: set[str] = set()
 
     def end_turn(self) -> None:
         pass
@@ -52,28 +50,9 @@ class Parser:
                 )
             ]
         if kind == "manual":
-            text = str(obj["text"])
-            # Older Gemini stores include the accessibility preview and nested
-            # copies of prompts we submitted. Repair their presentation when
-            # replaying history, without treating arbitrary Chrome text as ours.
-            body = text.split("\n", 1)[-1] if text.startswith("You said ") else text
-            key = " ".join(body.split())
-            if text.startswith("You said ") and key in self._submitted:
-                result = self._submitted[key]
-                if result is None or key in self._bridge_notices:
-                    return [Ignored(type="bridge_echo")]
-                self._bridge_notices.add(key)
-                return [
-                    Echo(
-                        text="> from aegis:notice · web-bridge · Bash result\n\n"
-                        + result
-                    )
-                ]
-            return [ExternalUser(str(obj["id"]), text, "Chrome")]
+            return [ExternalUser(str(obj["id"]), str(obj["text"]), "Chrome")]
         if kind == "echo":
-            text = str(obj.get("text") or "")
-            self._submitted[" ".join(text.split())] = None
-            return [Echo(text=text)]
+            return [Echo(text=str(obj.get("text") or ""))]
         if kind == "text":
             return [
                 Text(
@@ -94,7 +73,6 @@ class Parser:
                 )
             ]
         if kind == "tool_output":
-            self._submitted[" ".join(obj["text"].split())] = obj["text"]
             return [
                 ToolOutput(
                     id=obj["id"],

@@ -77,20 +77,24 @@ class BrowserBridge:
             "open",
             "",
             url,
-            f"Start this session's {self.provider.label} conversation.",
+            f"Open this session's {self.provider.label} conversation. Enable Scripts for the shared tab.",
         )
         self.request_id = req["id"]
+        self.session.record_card(
+            {
+                "kind": "chrome_request",
+                "request_id": req["id"],
+                "req_kind": "open",
+                "match": "",
+                "url": url,
+                "why": req["why"],
+            }
+        )
         try:
-            # Selecting this harness authorizes its own new provider tab.
-            # Use the existing extension protocol so the grant remains owned
-            # by Chrome and can still be paused or revoked by the person.
-            await self.chrome.answer(req["id"], True)
             tab = await self.waiting
-            claimed = self._claim(tab)
-            await self.chrome.scripts(claimed["tab"], True)
-            return claimed
         finally:
             self.waiting = None
+        return self._claim(tab)
 
     def _claim(self, tab: dict) -> dict:
         name = tab["name"]

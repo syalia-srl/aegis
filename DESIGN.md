@@ -534,10 +534,7 @@ state machine; `web_agent/stream.py` emits its existing typed events and the
 native transcript records connection status as one updating row.
 
 `web_agent/transport.py` binds each session to one exclusive, explicitly granted
-tab in the person's Chrome extension. Selecting the harness authorizes opening
-and assigning its own new provider tab with Scripts enabled through the
-existing extension protocol. Generic agent requests still need consent. It
-retains subsequent grant revocation, Scripts disabling and manual
+tab in the person's Chrome extension. It retains grant, Scripts and manual
 ownership checks before observations and actions, pins the conversation URL and
 never accepts model-supplied JavaScript. New sessions require empty chats;
 resume requires the same conversation. A consent answer belongs to the bridge,
