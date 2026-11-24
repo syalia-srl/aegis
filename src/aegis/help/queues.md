@@ -99,6 +99,9 @@ result, the worker is archived, and, with a callback, you are woken with:
 
 A worker whose process exits on its own fails its task and gets its tab, and
 the wake says `error` with the exit code and the last ten lines of its stderr.
+So does a worker whose harness ends its turn on an error, such as `API Error:`
+when the model's API cannot be reached: the wake says `error` with that line,
+and `task_resume` puts the worker back to work with its conversation.
 
 ## While you wait
 
