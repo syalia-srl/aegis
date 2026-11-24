@@ -1,0 +1,1 @@
+- Chrome extension 0.5.3 activates native web pages in the background without switching the visible tab. Native input waits for composer readiness and uses trusted clicks. DeepSeek and ChatGPT accept virtualized older history while exact executable sources remain validated; newly opened blank documents wait for navigation.
