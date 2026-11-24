@@ -1,0 +1,1 @@
+- Web sessions focus and serialize provider submissions, wait for Send readiness, and send Gemini Enter after insertion has settled. DeepSeek retains stable virtual item identities and accepts partial rendered history while still validating the exact executable source.

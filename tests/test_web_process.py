@@ -689,3 +689,29 @@ async def test_chatgpt_pins_the_canonical_chat_after_its_provisional_route(tmp_p
         )
     finally:
         await process.terminate()
+
+
+async def test_partial_history_allows_eviction_but_refuses_changed_visible_answers(
+    tmp_path,
+):
+    class VirtualBrowser(Browser):
+        async def __call__(self, op, args):
+            result = await super().__call__(op, args)
+            if op == "observe":
+                result["partial_history"] = True
+            return result
+
+    browser = VirtualBrowser()
+    process, events = make(tmp_path, browser)
+    await process.start()
+    try:
+        await process.send("Verify virtual history")
+        await until(lambda: bool(done(events)), timeout=5)
+        browser.messages = browser.messages[-1:]
+        page = await process._observe()
+        assert page["messages"][0]["markdown"] == browser.final
+        browser.messages[0]["markdown"] = "A replacement answer"
+        with pytest.raises(RuntimeError, match="already observed answer changed"):
+            await process._observe()
+    finally:
+        await process.terminate()

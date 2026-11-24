@@ -26,7 +26,9 @@ from Settings → Chrome after updating.
 Send a task. The harness automatically opens and assigns a new provider tab
 in the paired Chrome browser with Scripts enabled. Sign in if needed. New sessions require an empty conversation;
 existing chats cannot be adopted. Resuming a session returns to its saved
-conversation. Each backing tab belongs to one web session at a time.
+conversation. Each backing tab belongs to one web session at a time. Submissions bring that
+tab forward and use trusted Chrome input; simultaneous web sessions serialize
+this short focus-and-submit step.
 
 The transcript uses the usual prose, Bash and result rows. Its connection row
 says when Chrome is disconnected, Scripts is off or the person must intervene.
