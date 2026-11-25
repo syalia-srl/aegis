@@ -12,11 +12,15 @@ def screen_of(name: str, upto: str | None = None) -> str:
     return s.text()
 
 
-def test_the_paste_prompt_matches_link_with_the_url():
+@pytest.mark.parametrize("url_prefix", ["https://claude.com/cai", "https://claude.ai"])
+def test_the_paste_prompt_matches_link_with_the_url(url_prefix):
     rule, found = load_recipes()["claude-code"].match(
-        screen_of("claude/setup-token.jsonl", "Paste")
+        screen_of("claude/setup-token.jsonl", "Paste").replace(
+            "https://claude.com/cai", url_prefix
+        )
     )
     assert (rule.name, rule.step) == ("link", "paste")
+    assert found["url"].startswith(url_prefix + "/oauth/authorize?")
     assert found["url"].endswith("state=" + RECORDED_STATE)
 
 

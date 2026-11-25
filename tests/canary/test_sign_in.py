@@ -106,7 +106,12 @@ def login(tmp_path):
 
 def test_sign_in_claude_reaches_the_paste_prompt(login):
     found = login("claude-code").until("paste")
-    assert found["url"].startswith("https://claude.com/cai/oauth/authorize?")
+    assert found["url"].startswith(
+        (
+            "https://claude.com/cai/oauth/authorize?",
+            "https://claude.ai/oauth/authorize?",
+        )
+    )
 
 
 def test_sign_in_opencode_reaches_the_go_key_prompt(login):

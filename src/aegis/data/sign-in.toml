@@ -22,8 +22,8 @@ capture = { token = '(sk-ant-oat01-[A-Za-z0-9_-]{20,400})' }
 [[claude-code.rules]]
 name = "link"
 step = "paste"
-all = ['https://claude\.com/cai/oauth/authorize\?', 'Paste code here if prompted']
-capture = { url = '(https://claude\.com/cai/oauth/authorize\?\S+)' }
+all = ['https://claude(?:\.com/cai|\.ai)/oauth/authorize\?', 'Paste code here if prompted']
+capture = { url = '(https://claude(?:\.com/cai|\.ai)/oauth/authorize\?\S+)' }
 
 # opencode 2.1.2's auth login: a searchable menu of integrations, then for
 # OpenCode Go a key prompt (stored without a check; the check runs a turn) and
