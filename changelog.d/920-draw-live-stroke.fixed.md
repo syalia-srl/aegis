@@ -1,1 +1,0 @@
-- **A stroke shows while you draw it.** The draft had no width, so the line was drawn in a box of zero and appeared only when you let go.

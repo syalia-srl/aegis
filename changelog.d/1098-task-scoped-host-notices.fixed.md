@@ -1,1 +1,0 @@
-- **Host notices wait until after the first turn.** New sessions and workers start their task without automatic disk, memory, CPU or quota notices. Later turns get active resource readings in a short form they can use to adapt their work.

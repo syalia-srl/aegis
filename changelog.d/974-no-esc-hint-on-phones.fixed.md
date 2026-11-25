@@ -1,1 +1,0 @@
-- **The working row no longer tells a phone to press Esc.** "Esc to interrupt" named a key a touch screen does not have; on one the row now leaves it out, and the stop button beside the message box is the way to interrupt.
