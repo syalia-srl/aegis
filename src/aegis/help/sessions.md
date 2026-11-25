@@ -246,18 +246,16 @@ an inbox message:
 
 ```text
 > from aegis:notice · disk · warn · 2026-10-18T09:12:04
-The disk holding aegis is 94% full: 4.8 GB free of 75.0 GB, measured just now.
-Free what this session created and no longer needs (your merged worktrees, ...
+The disk holding aegis is 94% full: 4.8 GB free of 75.0 GB. Use this reading when choosing how to run the assigned task.
 ```
 
 The transcript shows it as an aegis row under the message or the tool call
 that carried it; your own row shows only what you typed.
 
-When the host has another disk that is below the disk's `clear:` level, that
-aegis's user can write to and that has more room, the disk notice names it
-(`/mnt/data has 65.0 GB free`) and asks the agent to put new large files
-there, in place of starting no large download or build. The disks are the
-ones the host meters list, so a mount the `host:` block hides is never named.
+Disk, memory and CPU notices give sessions and workers a short reading they
+can use to adapt the task already assigned. The disk notice also names a
+writable alternative with more free space if it is below the disk's
+`clear:` level. Only disks shown in the host meters can be named.
 
 Each session is told once per episode. An episode starts when a reading
 reaches `on:`, is told again when it reaches `critical:`, and ends only when
@@ -273,17 +271,12 @@ clear. A notice at critical also shows you a toast, once per episode.
 | quota | the account's quota windows, for sessions that draw on that account: warning when a window is on pace to run out before its reset with half of it spent, critical at 90% spent | warning, critical, normal |
 | announce | what a person or an admin's agent wrote | as written |
 
-The memory and cpu notices also say what the reading session itself holds,
-and which session holds the most (see [Load](#load)). The heaviest session is
-told to slow or free its own work first; the others read the usual advice.
-The text tells an agent to free or cut back only what its own session
-created and never to touch shared caches or another session's work. Only
-one session asks you about the rest: per kind and per owner, the first
-session you opened that the notice reaches. Every other session you opened
-is told that another one is asking; a spawned session reports to the agent
-that started it, and a queue worker, a workflow node or a schedule's run
-never asks anyone. When the asker closes, the next session you opened takes
-over. cpu and announce have no asker.
+Memory and CPU notices also say what the reading session itself holds and
+which session holds the most (see [Load](#load)). The memory notice includes
+the pressure reading when available. For quota, one person-opened session per
+account and owner can ask you what to do. If it closes, another person-opened
+session can take over. Spawned sessions and workers report back to whoever
+started them.
 
 The `notices:` block in `.aegis.yaml` moves the lines or turns a kind off
 (see the config page).

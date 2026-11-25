@@ -718,9 +718,11 @@ call`, whose output is parsed. A notice never goes into the system prompt: a
 changed `--append-system-prompt` would invalidate a resumed session's prompt
 cache.
 What each session was told is `notices_sent` in its meta, so a restart
-neither repeats a notice nor forgets its clear; the episodes and the one
-asker per kind and owner live in memory. A 30 s loop turns the episodes so a
-notice at critical toasts while nobody is talking to anyone.
+neither repeats a notice nor forgets its clear. Disk, memory and CPU notices
+give every session, including workers, readings for the assigned task.
+Episodes and the quota asker per account and owner live in memory.
+A 30 s loop turns the episodes so a critical notice toasts even when no
+session is active.
 
 **A repository's know-how stays in its tree and is told once per session.**
 `knowledge/know_how.py` lists `know-how/*.md` at the git root a session first
