@@ -272,7 +272,7 @@ pre{font-family:var(--font-mono);font-size:12px;line-height:1.55;background:var(
 <table class="tbl">
 <thead><tr><th>session</th><th>how aegis knows</th><th>its text says</th></tr></thead>
 <tbody>
-<tr><td>queue worker</td><td><code>session.worker</code> is set</td><td>Told no host notice, only announcements: it read the advice as its task and ran it instead (#1098). The sessions that coordinate it are told.</td></tr>
+<tr><td>queue worker</td><td><code>session.worker</code> is set</td><td>Adapt, free your own. Never ask: your result goes back to whoever enqueued you.</td></tr>
 <tr><td>workflow node</td><td><code>registry.workflow_lock(session)</code></td><td>The same as a worker.</td></tr>
 <tr><td>started by a schedule</td><td><code>session.schedule</code> is set</td><td>The same as a worker.</td></tr>
 <tr><td>spawned by another agent</td><td><code>spec.spawned_by</code> is set</td><td>Adapt, free your own. Tell the agent that started you in your result, not the person.</td></tr>
@@ -353,7 +353,7 @@ The disk holding aegis is back to 82% full. Work as usual.</pre>
 <h2 id="testing"><span class="n">12</span>Testing</h2>
 <ul>
   <li>Level logic: on, critical, the clear gap, an escalation re-sent, a clear owed only to sessions that got the notice, the asker chosen once, a slash command skipped. The readings are injected and the tests read no host.</li>
-  <li>End to end with the fake claude: <code>.aegis.yaml</code> sets <code>disk.on: 1</code> so the notice fires on any host. The first send carries the block and the second does not. A tool result carries the block when no send came first. A worker's first send is its task alone. After a server restart the block is not repeated.</li>
+  <li>End to end with the fake claude: <code>.aegis.yaml</code> sets <code>disk.on: 1</code> so the notice fires on any host. The first send carries the block and the second does not. A tool result carries the block when no send came first. A worker's block has no asker line. After a server restart the block is not repeated.</li>
   <li>Shell form: an <code>aegis call session_list</code> made while a notice is pending prints JSON that <code>jq</code> parses, and the block reaches the next MCP tool result instead.</li>
   <li>Browser: the transcript draws the row under the person's message, and the person's row shows only what they typed.</li>
   <li>Live (<code>make test-live</code>): a real Claude Code session in a scratch directory holds a 50 MB file it created and a 50 MB file in a fake shared cache. A disk notice with <code>on: 1</code> reaches it. Passing means it deletes its own file, leaves the shared one, and does not ask.</li>

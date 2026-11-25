@@ -1,0 +1,1 @@
+- **Host notices let agents continue their task.** Sessions and workers still see disk, memory and CPU pressure, with short readings they can use to adapt their work.

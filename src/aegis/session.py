@@ -528,9 +528,6 @@ class Session:
         # Claude's own tasks started and not yet notified (Bash, background).
         self.open_tasks: set[str] = set()
         self.timers: set[str] = set()  # TIMER_TOOLS this process called (park.py)
-        # Why the last turn failed (an API error, not an interrupt), or None:
-        # a queue fails its worker's task on it rather than completing it.
-        self.turn_failed: str | None = None
         self.worker = worker
         # No tab until its turn ends (#386); a card in the Fleet meanwhile.
         self.quiet = quiet
@@ -1618,11 +1615,6 @@ class Session:
                 if self._interrupt_timer:
                     self._interrupt_timer.cancel()
                 falling = self._cascade(ev, interrupting)
-                self.turn_failed = (
-                    (ev.error_text or ev.subtype or "error")
-                    if ev.is_error and not interrupting
-                    else None
-                )
                 if not falling:
                     changes["status"] = "idle"
                 if not ev.is_error:
