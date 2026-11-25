@@ -792,10 +792,17 @@ class Notices:
             "top": f"{top:.1f}",
         }
 
-    def pending(self, s: Session, at: Literal["send", "tool"] = "send") -> str:
+    def pending(
+        self,
+        s: Session,
+        at: Literal["send", "tool"] = "send",
+        *,
+        include_host: bool = True,
+    ) -> str:
         """The blocks ``s`` has not been told yet, and the clears it is owed,
         joined by a blank line; "" when there are none. Marks them sent
-        before it returns, so each block reaches one result.
+        before it returns, so each block reaches one result. During startup,
+        host notices wait without being marked as sent.
 
         It runs only on the event loop, as levels() does, and never awaits:
         two calls cannot interleave, so it needs no lock. Do not call it from
@@ -812,6 +819,8 @@ class Notices:
         guarded = any(k.startswith(f"{GUARD}:") for k in self._items.get(s.log_id, {}))
         blocks = []
         for key, (level, reading) in active.items():
+            if not include_host and not key.startswith("announce:"):
+                continue
             if guarded and key.startswith("quota:"):
                 continue
             # A level kept from before a restart has no reading to print yet.
@@ -827,7 +836,9 @@ class Notices:
         for key in [
             k
             for k in s.notices_sent
-            if k not in active and not (guarded and k.startswith("quota:"))
+            if (include_host or k.startswith("announce:"))
+            and k not in active
+            and not (guarded and k.startswith("quota:"))
         ]:
             blocks.append(self._clear(key))
             del s.notices_sent[key]

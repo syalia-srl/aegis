@@ -544,15 +544,32 @@ def sent(app, log_id) -> list[str]:
     return [r["text"] for r in records if r.get("kind") == "send"]
 
 
-async def test_the_first_send_carries_the_notice_and_the_second_does_not(noticed):
+async def test_the_first_turn_defers_host_notices_until_the_next_prompt(noticed):
     s = await noticed.spawn()
     await turn(s, "add the retry")
     await turn(s, "and a test")
-    first, second = sent(noticed.app, s.log_id)
-    assert first.startswith("add the retry\n\n" + DISK_WARN)
-    assert "GB free" in first and "assigned task" in first
-    assert "aegis gc" not in first and "ask the person" not in first
-    assert second == "and a test"
+    await turn(s, "finish the task")
+    first, second, third = sent(noticed.app, s.log_id)
+    assert first == "add the retry"
+    assert second.startswith("and a test\n\n" + DISK_WARN)
+    assert "GB free" in second and "assigned task" in second
+    assert "aegis gc" not in second and "ask the person" not in second
+    assert third == "finish the task"
+
+
+@pytest.mark.parametrize("steers", [True, False])
+async def test_tools_do_not_deliver_host_notices_in_the_first_turn(
+    noticed, monkeypatch, steers
+):
+    s = await noticed.spawn()
+    monkeypatch.setattr(s.harness, "steers_notices", steers)
+    result = await turn(s, mcp("session_list"))
+    assert DISK_WARN not in result
+    assert "The disk holding aegis" not in inbox_rows(s)
+    assert "disk" not in s.notices_sent
+    result = await turn(s, mcp("session_list"))
+    assert DISK_WARN in result or "The disk holding aegis" in inbox_rows(s)
+    assert s.notices_sent["disk"] == "warn"
 
 
 def inbox_rows(s) -> str:
@@ -561,17 +578,22 @@ def inbox_rows(s) -> str:
 
 async def test_a_tool_call_steers_the_notice_into_its_turn(noticed):
     s = await noticed.spawn()
+    await turn(s, "start the task")
     said = await turn(s, "/sh true")
     assert said == "Executed command."
     assert "The disk holding aegis" in inbox_rows(s)
     assert s.notices_sent.get("disk") == "warn"
-    assert sent(noticed.app, s.log_id) == ["/sh true"]  # no send of its own
+    assert sent(noticed.app, s.log_id) == [
+        "start the task",
+        "/sh true",
+    ]  # no send of its own
     await turn(s, "hello")
     assert sent(noticed.app, s.log_id)[-1] == "hello"  # and told once
 
 
 async def test_an_aegis_tool_call_steers_it_and_its_result_stays_clean(noticed):
     s = await noticed.spawn()
+    await turn(s, "start the task")
     said = await turn(s, mcp("plan_update", items=[{"text": "a", "state": "doing"}]))
     assert said.startswith("mcp ok: plan saved") and DISK_WARN not in said
     assert "The disk holding aegis" in inbox_rows(s)
@@ -629,11 +651,12 @@ async def test_a_tool_result_carries_the_notice_when_no_send_came_first(
 ):
     s = await noticed.spawn()
     monkeypatch.setattr(s.harness, "steers_notices", False)
+    await turn(s, "start the task")
     said = await turn(s, mcp("plan_update", items=[{"text": "a", "state": "doing"}]))
     assert said.startswith("mcp ok: plan saved")
     assert DISK_WARN in said
     assert DISK_WARN not in await turn(s, mcp("session_list"))
-    assert sent(noticed.app, s.log_id)[0].startswith("/mcp plan_update")
+    assert sent(noticed.app, s.log_id)[-2].startswith("/mcp plan_update")
 
 
 async def test_a_slash_command_goes_unchanged_and_the_next_prompt_carries_it(
@@ -648,15 +671,28 @@ async def test_a_slash_command_goes_unchanged_and_the_next_prompt_carries_it(
     assert prompt.startswith("hello\n\n" + DISK_WARN)
 
 
-async def test_a_worker_gets_host_context_without_a_cleanup_assignment(noticed):
+async def test_a_worker_starts_its_task_without_host_notices(noticed):
     a = await noticed.spawn()
     said = await turn(a, mcp("queue_enqueue", queue="general", payload="summarize"))
     task_id = json.loads(said.removeprefix("mcp ok: ").split("\n\n")[0])["task_id"]
     await until(lambda: inbox(a), timeout=12, what="the callback")
-    first = sent(noticed.app, noticed.app.queues.tasks[task_id].worker)[0]
-    assert first.startswith("summarize\n\n" + DISK_WARN)
-    assert "GB free" in first and "assigned task" in first
-    assert "aegis gc" not in first and "ask the person" not in first
+    task = noticed.app.queues.tasks[task_id]
+    assert sent(noticed.app, task.worker)[0] == "summarize"
+    assert task.status == "completed" and "summarize" in task.result
+
+
+async def test_a_resumed_worker_gets_the_active_host_reading(noticed):
+    a = await noticed.spawn()
+    said = await turn(a, mcp("queue_enqueue", queue="general", payload="/apierror"))
+    task_id = json.loads(said.removeprefix("mcp ok: "))["task_id"]
+    task = noticed.app.queues.tasks[task_id]
+    await until(lambda: task.status == "failed", what="the API error")
+    worker = noticed.app.sessions.sessions[task.worker]
+    assert "disk" not in worker.notices_sent
+
+    await turn(a, mcp("task_resume", task_id=task_id))
+    await until(lambda: task.status == "completed", what="the resumed task")
+    assert DISK_WARN in sent(noticed.app, task.worker)[-1]
 
 
 async def test_a_restart_does_not_repeat_a_notice(noticed):
@@ -665,7 +701,11 @@ async def test_a_restart_does_not_repeat_a_notice(noticed):
     await noticed.restart()
     s = noticed.session(s.log_id)
     await turn(s, "carry on")
-    assert sent(noticed.app, s.log_id)[-1] == "carry on"
+    assert DISK_WARN in sent(noticed.app, s.log_id)[-1]
+    await noticed.restart()
+    s = noticed.session(s.log_id)
+    await turn(s, "finish")
+    assert sent(noticed.app, s.log_id)[-1] == "finish"
 
 
 # -- the transcript ---------------------------------------------------------------
@@ -739,16 +779,16 @@ def test_every_session_gets_an_announcement_once_and_its_clear(stub):
     a = n.announcements.add("aegis restarts at 14:00", "warn", "ops-agent", None)
     key = f"announce:{a['id']}"
     for s in (stub.a, stub.b, stub.w):
-        got = n.pending(s)
+        got = n.pending(s, include_host=False)
         assert got.startswith(f"{NOTICE_HEADER}{key} · warn · ")
         assert "aegis restarts at 14:00\n" in got
         assert "This was written by ops-agent, not measured by aegis." in got
         assert "ask" not in got.split("\n", 1)[1]  # no asker, no tail
-        assert n.pending(s) == ""
+        assert n.pending(s, include_host=False) == ""
     n.announcements.clear(a["id"])
     for s in (stub.a, stub.w):
-        assert n.pending(s).endswith(f"The announcement {a['id']} has ended.")
-        assert n.pending(s) == ""
+        assert n.pending(s, include_host=False).endswith(f"The announcement {a['id']} has ended.")
+        assert n.pending(s, include_host=False) == ""
 
 
 def test_an_announcement_clears_when_it_expires(stub):

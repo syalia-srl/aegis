@@ -520,6 +520,7 @@ class Session:
         # delivery: memory_save honours asked only then (knowledge_ops.py).
         # In memory only; a restart starts with it off.
         self.person_turn = False
+        self._finished_first_turn: bool | None = None
         # One start at a time: an OpenCode start takes seconds, and two sends
         # in that window must not start two children.
         self._starting = asyncio.Lock()
@@ -528,6 +529,9 @@ class Session:
         # Claude's own tasks started and not yet notified (Bash, background).
         self.open_tasks: set[str] = set()
         self.timers: set[str] = set()  # TIMER_TOOLS this process called (park.py)
+        # Why the last turn failed (an API error, not an interrupt), or None:
+        # a queue fails its worker's task on it rather than completing it.
+        self.turn_failed: str | None = None
         self.worker = worker
         # No tab until its turn ends (#386); a card in the Fleet meanwhile.
         self.quiet = quiet
@@ -773,6 +777,13 @@ class Session:
     def in_turn(self) -> bool:
         """Mid-turn, or starting one to deliver held messages."""
         return self.status == "working" or self._flushing
+
+    @property
+    def has_finished_turn(self) -> bool:
+        """Whether the session is past its first turn, including after resume."""
+        if self._finished_first_turn is None:
+            self._finished_first_turn = self.fold().standing["ended"] is not None
+        return self._finished_first_turn
 
     @property
     def state_root(self) -> Path:
@@ -1615,6 +1626,11 @@ class Session:
                 if self._interrupt_timer:
                     self._interrupt_timer.cancel()
                 falling = self._cascade(ev, interrupting)
+                self.turn_failed = (
+                    (ev.error_text or ev.subtype or "error")
+                    if ev.is_error and not interrupting
+                    else None
+                )
                 if not falling:
                     changes["status"] = "idle"
                 if not ev.is_error:
@@ -1661,6 +1677,7 @@ class Session:
         """A turn ended: send what it held, unless the gate says no new turn.
         A guard that refuses wakes lets a person's messages go alone: the
         rest wait, in their order, for it to open."""
+        self._finished_first_turn = True
         refused = bool(self.held) and self._host.refuse_hold(self) is not None
         person = [m for m in self.held if m.get("by_person")]
         if self.held and self._host.quota_hold(self) is None and refused and person:
