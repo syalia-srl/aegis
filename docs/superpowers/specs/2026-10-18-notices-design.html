@@ -145,8 +145,10 @@ pre{font-family:var(--font-mono);font-size:12px;line-height:1.55;background:var(
 
 <main>
 <h1>Notices: agents learn the host's state without a turn of their own</h1>
-<div class="meta"><span>docs/superpowers/specs/2026-10-18-notices-design.html</span><span>·</span><span>designed, not started</span><span>·</span><span>issue #469</span></div>
+<div class="meta"><span>docs/superpowers/specs/2026-10-18-notices-design.html</span><span>·</span><span>implemented · historical design</span><span>·</span><span>issue #469</span></div>
 <p class="lede">aegis knows when the disk is filling, memory is short, the CPU is saturated, or the quota is running ahead of pace, and the agents in it do not. This spec adds notices. A notice rides on the next message a session receives or on the result of its next aegis tool call, so it never starts a turn. Each agent then adapts on its own: it frees what it created, runs lighter, or spends less. Only one session the person opened, and only one with no task in progress, asks the person about anything beyond that.</p>
+
+<p><strong>Current delivery after #1098.</strong> New sessions and workers receive automatic disk, memory, CPU and quota notices after their first turn finishes. The next eligible prompt or tool result carries any still-active notice. Disk, memory and CPU use short readings for the assigned task. Announcements, session-specific notices and critical browser alerts use their existing delivery. The original design and examples below predate this change.</p>
 
 <h2 id="delivers"><span class="n">01</span>What this delivers</h2>
 <p>Measured on a 4-CPU host with 7 GB of RAM and a 75 GB disk, running nine live sessions, on the day of this design:</p>

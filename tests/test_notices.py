@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from aegis import notice_sources, notices
+from aegis import notice_sources
 from aegis.commands import parse_announce
 from aegis.config import NOTICES_DEFAULTS, notices_from
 from aegis.notice_ops import until_ts
@@ -163,7 +163,7 @@ def test_each_session_gets_a_notice_once_and_a_clear_once(stub):
     got = n.pending(stub.a)
     assert "> from aegis:notice · disk · warn · " in got
     assert "The disk holding aegis is 94% full: 4.8 GB free of 75.0 GB" in got
-    assert got.endswith("aegis tells you once, and again when it clears.")
+    assert got.endswith("Use this reading when choosing how to run the assigned task.")
     assert n.pending(stub.a) == ""
     assert stub.a.notices_sent == {"disk": "warn"}
     stub.disk(80)
@@ -180,15 +180,15 @@ def test_an_escalation_is_sent_again(stub):
     assert "disk · warn" in n.pending(stub.a)
     stub.disk(98)
     got = n.pending(stub.a)
-    assert "disk · critical" in got and "This is critical." in got
+    assert "disk · critical" in got and "4.8 GB free" in got
     assert n.pending(stub.a) == ""
     stub.disk(92)  # never steps down to warn
     assert n.pending(stub.a) == ""
 
 
-def test_one_asker_per_episode_and_owner(stub):
+def test_one_quota_asker_per_episode_and_owner(stub):
     n = stub.notices
-    stub.disk(94)
+    stub.quota = Quota("warning")
     assert "ask the person what to do" in n.pending(stub.a)
     assert "Another session is asking the person" in n.pending(stub.b)
     w = n.pending(stub.w)
@@ -198,9 +198,9 @@ def test_one_asker_per_episode_and_owner(stub):
     assert "ask the person what to do" in n.pending(other)
 
 
-def test_a_closed_asker_hands_over(stub):
+def test_a_closed_quota_asker_hands_over(stub):
     n = stub.notices
-    stub.disk(94)
+    stub.quota = Quota("warning")
     assert "ask the person what to do" in n.pending(stub.a)
     stub.a.archived = True
     assert "ask the person what to do" in n.pending(stub.b)
@@ -209,40 +209,29 @@ def test_a_closed_asker_hands_over(stub):
     assert "Another session is asking the person" in n.pending(c)
 
 
-def test_an_ended_episode_drops_its_asker(stub):
+def test_an_ended_quota_episode_drops_its_asker(stub):
     n = stub.notices
-    stub.disk(94)
+    stub.quota = Quota("warning")
     n.pending(stub.a)
-    stub.disk(80)
+    stub.quota.severity = "normal"
     n.levels()
-    stub.disk(94)
+    stub.quota.severity = "warning"
     assert "ask the person what to do" in n.pending(stub.b)
 
 
-def test_spawned_and_cpu_never_ask(stub):
+def test_spawned_sessions_and_workers_get_the_same_resource_context(stub):
     n = stub.notices
     child = session("k", spawned_by="a")
     far = session("f", spawned_from="person@elsewhere")
     stub.sessions.sessions |= {"k": child, "f": far}
-    stub.reading = stub.reading | {"cpu": {"pct": 70.0}}
+    stub.reading = stub.reading | MEMORY_60 | {"cpu": {"pct": 70.0}}
     stub.disk(94)
-    assert "say so in your result to the agent that started you" in n.pending(child)
-    assert "say so in your result to the agent that started you" in n.pending(far)
-    got = n.pending(stub.a)
-    assert "disk · warn" in got and "cpu · warn" in got
-    cpu = got[got.index("cpu · warn") :]
-    assert "Another session is asking the person" in cpu
-
-
-async def test_pending_from_tasks_on_the_loop_gives_each_block_once(stub):
-    stub.disk(94)
-
-    async def call():
-        await asyncio.sleep(0)
-        return stub.notices.pending(stub.a)
-
-    got = await asyncio.gather(*(call() for _ in range(5)))
-    assert len([g for g in got if g]) == 1
+    for s in (stub.a, stub.b, child, far, stub.w):
+        got = n.pending(s)
+        for kind in ("disk", "memory", "cpu"):
+            assert f"{kind} · warn" in got
+        assert "assigned task" in got
+        assert "ask the person" not in got and "aegis gc" not in got
 
 
 def test_a_failed_meta_write_still_delivers(stub):
@@ -299,10 +288,10 @@ def test_memory_turns_on_under_pressure_and_names_the_sessions_own(stub):
     got = stub.notices.pending(stub.a)
     assert "Memory is 60% used: 3.0 GB available of 7.6 GB" in got
     assert "Your session's processes hold 2.0 GB, the most of any session here." in got
-    assert notices.ACT_TOP["memory"] in got
+    assert "Memory pressure (PSI full avg60) is 8%" in got
 
 
-def test_the_heaviest_session_is_told_to_slow_its_own_work_first(stub):
+def test_cpu_notice_identifies_the_heaviest_session(stub):
     stub.load = FakeLoad(
         {
             stub.a.log_id: {"cpu": 3.1, "rss_gb": 1.0},
@@ -315,13 +304,11 @@ def test_the_heaviest_session_is_told_to_slow_its_own_work_first(stub):
         "Your session's processes used 3.1 cores over the last minute, "
         "the most of any session here." in top
     )
-    assert notices.ACT_TOP["cpu"] in top and notices.ACT["cpu"] not in top
     other = stub.notices.pending(stub.b)
     assert (
         "Your session's processes used 0.2 cores over the last minute; "
         f"{stub.a.handle} uses the most, 3.1 cores." in other
     )
-    assert notices.ACT["cpu"] in other
 
 
 def test_on_a_quiet_host_nobody_is_named_the_heaviest(stub):
@@ -335,14 +322,14 @@ def test_on_a_quiet_host_nobody_is_named_the_heaviest(stub):
     got = stub.notices.pending(stub.b)
     assert "Your session's processes used 0.2 cores over the last minute." in got
     assert "Your session's processes hold 0.2 GB." in got
-    assert "the most" not in got and notices.ACT["cpu"] in got
+    assert "the most" not in got and "assigned task" in got
 
 
 def test_a_session_without_a_reading_reads_the_host_figure_alone(stub):
     stub.load = FakeLoad({})
     stub.reading = stub.reading | {"cpu": {"pct": 70.0}}
     got = stub.notices.pending(stub.a)
-    assert "Your session" not in got and notices.ACT["cpu"] in got
+    assert "Your session" not in got and "assigned task" in got
 
 
 class Quota:
@@ -393,9 +380,9 @@ async def test_a_spawn_through_a_link_is_never_the_asker(world):  # noqa: F811
     )
     s = world.app.sessions.sessions[r["log_id"]]
     assert s.spec.spawned_from == "person@elsewhere"
-    assert world.app.notices.role(s, "disk") == "spawned"
+    assert world.app.notices.role(s, "quota:claude") == "spawned"
     here = await world.spawn()
-    assert world.app.notices.role(here, "disk") == "asker"
+    assert world.app.notices.role(here, "quota:claude") == "asker"
 
 
 def test_a_kinds_on_alone_derives_clear_and_critical():
@@ -497,15 +484,15 @@ def test_a_failed_read_keeps_the_episode(stub):
     assert "The disk holding aegis is 94% full" in n.pending(stub.b)
 
 
-def test_a_closed_asker_hands_over_to_a_session_already_told(stub):
+def test_a_closed_quota_asker_hands_over_to_a_session_already_told(stub):
     n = stub.notices
-    stub.disk(94)
+    stub.quota = Quota("warning")
     n.pending(stub.a)
     assert "Another session is asking the person" in n.pending(stub.b)
     n.pending(stub.w)
     stub.a.archived = True
     got = n.pending(stub.b)
-    assert "disk · warn" in got and "ask the person what to do" in got
+    assert "quota:claude · warn" in got and "ask the person what to do" in got
     assert n.pending(stub.w) == ""  # a worker never becomes the asker
     assert n.pending(stub.b) == ""
 
@@ -557,14 +544,32 @@ def sent(app, log_id) -> list[str]:
     return [r["text"] for r in records if r.get("kind") == "send"]
 
 
-async def test_the_first_send_carries_the_notice_and_the_second_does_not(noticed):
+async def test_the_first_turn_defers_host_notices_until_the_next_prompt(noticed):
     s = await noticed.spawn()
     await turn(s, "add the retry")
     await turn(s, "and a test")
-    first, second = sent(noticed.app, s.log_id)
-    assert first.startswith("add the retry\n\n" + DISK_WARN)
-    assert "ask the person what to do" in first  # the first person-opened asks
-    assert second == "and a test"
+    await turn(s, "finish the task")
+    first, second, third = sent(noticed.app, s.log_id)
+    assert first == "add the retry"
+    assert second.startswith("and a test\n\n" + DISK_WARN)
+    assert "GB free" in second and "assigned task" in second
+    assert "aegis gc" not in second and "ask the person" not in second
+    assert third == "finish the task"
+
+
+@pytest.mark.parametrize("steers", [True, False])
+async def test_tools_do_not_deliver_host_notices_in_the_first_turn(
+    noticed, monkeypatch, steers
+):
+    s = await noticed.spawn()
+    monkeypatch.setattr(s.harness, "steers_notices", steers)
+    result = await turn(s, mcp("session_list"))
+    assert DISK_WARN not in result
+    assert "The disk holding aegis" not in inbox_rows(s)
+    assert "disk" not in s.notices_sent
+    result = await turn(s, mcp("session_list"))
+    assert DISK_WARN in result or "The disk holding aegis" in inbox_rows(s)
+    assert s.notices_sent["disk"] == "warn"
 
 
 def inbox_rows(s) -> str:
@@ -573,17 +578,22 @@ def inbox_rows(s) -> str:
 
 async def test_a_tool_call_steers_the_notice_into_its_turn(noticed):
     s = await noticed.spawn()
+    await turn(s, "start the task")
     said = await turn(s, "/sh true")
     assert said == "Executed command."
     assert "The disk holding aegis" in inbox_rows(s)
     assert s.notices_sent.get("disk") == "warn"
-    assert sent(noticed.app, s.log_id) == ["/sh true"]  # no send of its own
+    assert sent(noticed.app, s.log_id) == [
+        "start the task",
+        "/sh true",
+    ]  # no send of its own
     await turn(s, "hello")
     assert sent(noticed.app, s.log_id)[-1] == "hello"  # and told once
 
 
 async def test_an_aegis_tool_call_steers_it_and_its_result_stays_clean(noticed):
     s = await noticed.spawn()
+    await turn(s, "start the task")
     said = await turn(s, mcp("plan_update", items=[{"text": "a", "state": "doing"}]))
     assert said.startswith("mcp ok: plan saved") and DISK_WARN not in said
     assert "The disk holding aegis" in inbox_rows(s)
@@ -641,11 +651,12 @@ async def test_a_tool_result_carries_the_notice_when_no_send_came_first(
 ):
     s = await noticed.spawn()
     monkeypatch.setattr(s.harness, "steers_notices", False)
+    await turn(s, "start the task")
     said = await turn(s, mcp("plan_update", items=[{"text": "a", "state": "doing"}]))
     assert said.startswith("mcp ok: plan saved")
     assert DISK_WARN in said
     assert DISK_WARN not in await turn(s, mcp("session_list"))
-    assert sent(noticed.app, s.log_id)[0].startswith("/mcp plan_update")
+    assert sent(noticed.app, s.log_id)[-2].startswith("/mcp plan_update")
 
 
 async def test_a_slash_command_goes_unchanged_and_the_next_prompt_carries_it(
@@ -660,14 +671,28 @@ async def test_a_slash_command_goes_unchanged_and_the_next_prompt_carries_it(
     assert prompt.startswith("hello\n\n" + DISK_WARN)
 
 
-async def test_a_worker_gets_no_asker_line(noticed):
+async def test_a_worker_starts_its_task_without_host_notices(noticed):
     a = await noticed.spawn()
     said = await turn(a, mcp("queue_enqueue", queue="general", payload="summarize"))
     task_id = json.loads(said.removeprefix("mcp ok: ").split("\n\n")[0])["task_id"]
     await until(lambda: inbox(a), timeout=12, what="the callback")
-    first = sent(noticed.app, noticed.app.queues.tasks[task_id].worker)[0]
-    assert first.startswith("summarize\n\n" + DISK_WARN)
-    assert "Do not ask anyone" in first and "ask the person" not in first
+    task = noticed.app.queues.tasks[task_id]
+    assert sent(noticed.app, task.worker)[0] == "summarize"
+    assert task.status == "completed" and "summarize" in task.result
+
+
+async def test_a_resumed_worker_gets_the_active_host_reading(noticed):
+    a = await noticed.spawn()
+    said = await turn(a, mcp("queue_enqueue", queue="general", payload="/apierror"))
+    task_id = json.loads(said.removeprefix("mcp ok: "))["task_id"]
+    task = noticed.app.queues.tasks[task_id]
+    await until(lambda: task.status == "failed", what="the API error")
+    worker = noticed.app.sessions.sessions[task.worker]
+    assert "disk" not in worker.notices_sent
+
+    await turn(a, mcp("task_resume", task_id=task_id))
+    await until(lambda: task.status == "completed", what="the resumed task")
+    assert DISK_WARN in sent(noticed.app, task.worker)[-1]
 
 
 async def test_a_restart_does_not_repeat_a_notice(noticed):
@@ -676,7 +701,11 @@ async def test_a_restart_does_not_repeat_a_notice(noticed):
     await noticed.restart()
     s = noticed.session(s.log_id)
     await turn(s, "carry on")
-    assert sent(noticed.app, s.log_id)[-1] == "carry on"
+    assert DISK_WARN in sent(noticed.app, s.log_id)[-1]
+    await noticed.restart()
+    s = noticed.session(s.log_id)
+    await turn(s, "finish")
+    assert sent(noticed.app, s.log_id)[-1] == "finish"
 
 
 # -- the transcript ---------------------------------------------------------------
@@ -750,16 +779,18 @@ def test_every_session_gets_an_announcement_once_and_its_clear(stub):
     a = n.announcements.add("aegis restarts at 14:00", "warn", "ops-agent", None)
     key = f"announce:{a['id']}"
     for s in (stub.a, stub.b, stub.w):
-        got = n.pending(s)
+        got = n.pending(s, include_host=False)
         assert got.startswith(f"{NOTICE_HEADER}{key} · warn · ")
         assert "aegis restarts at 14:00\n" in got
         assert "This was written by ops-agent, not measured by aegis." in got
         assert "ask" not in got.split("\n", 1)[1]  # no asker, no tail
-        assert n.pending(s) == ""
+        assert n.pending(s, include_host=False) == ""
     n.announcements.clear(a["id"])
     for s in (stub.a, stub.w):
-        assert n.pending(s).endswith(f"The announcement {a['id']} has ended.")
-        assert n.pending(s) == ""
+        assert n.pending(s, include_host=False).endswith(
+            f"The announcement {a['id']} has ended."
+        )
+        assert n.pending(s, include_host=False) == ""
 
 
 def test_an_announcement_clears_when_it_expires(stub):
@@ -936,9 +967,8 @@ def test_a_disk_notice_points_to_another_disk_with_room(stub):
     }
     got = n.pending(stub.a)
     assert "/mnt/data has 65.0 GB free" in got
-    assert "Start no large download or build." not in got
-    stub.disk(98)  # the plain reading keeps the plain advice
-    assert "Start no large download or build." in n.pending(stub.a)
+    stub.disk(98)
+    assert "/mnt/data" not in n.pending(stub.a)
 
 
 def test_the_reading_asks_the_host_for_another_disk(stub, tmp_path):
