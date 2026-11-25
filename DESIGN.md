@@ -720,6 +720,9 @@ cache.
 What each session was told is `notices_sent` in its meta, so a restart
 neither repeats a notice nor forgets its clear. Disk, memory and CPU notices
 give every session, including workers, readings for the assigned task.
+The session's first turn defers disk, memory, CPU and quota at both delivery
+points. The transcript's last completed result restores startup state on
+resume. Announcements and notices about the session itself can still ride.
 Episodes and the quota asker per account and owner live in memory.
 A 30 s loop turns the episodes so a critical notice toasts even when no
 session is active.

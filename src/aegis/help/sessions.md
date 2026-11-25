@@ -236,8 +236,11 @@ them too.
 ## Notices
 
 aegis tells every live session when the host runs short: the disk is full,
-memory is short, the CPU is saturated or the quota runs ahead of pace. A
-notice never starts a turn, and never goes into the system prompt. It rides
+memory is short, the CPU is saturated or the quota runs ahead of pace.
+These four kinds wait until the session finishes its first turn, including
+for workers. If still active, they ride on the next eligible message or tool
+result. Announcements and notices about the session itself can arrive during
+the first turn. A notice never starts a turn or goes into the system prompt. It rides
 on the session's next message. During a turn, Claude Code reads it right after
 the agent's next tool call of any kind. Codex, OpenCode, Cursor and pi read it on
 the result of their next aegis tool call, and a call made with `aegis call`
