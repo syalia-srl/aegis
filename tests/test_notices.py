@@ -787,7 +787,9 @@ def test_every_session_gets_an_announcement_once_and_its_clear(stub):
         assert n.pending(s, include_host=False) == ""
     n.announcements.clear(a["id"])
     for s in (stub.a, stub.w):
-        assert n.pending(s, include_host=False).endswith(f"The announcement {a['id']} has ended.")
+        assert n.pending(s, include_host=False).endswith(
+            f"The announcement {a['id']} has ended."
+        )
         assert n.pending(s, include_host=False) == ""
 
 
