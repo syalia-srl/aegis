@@ -549,7 +549,13 @@ class Registry(Host):
             # A turn starts: its guard's notice is as of now, not as of the
             # last reading's on_quota (a session spawned since has none).
             self.guard_items(session)
-        blocks = "" if self.notices is None else self.notices.pending(session, at)
+        blocks = (
+            ""
+            if self.notices is None
+            else self.notices.pending(
+                session, at, include_host=session.has_finished_turn
+            )
+        )
         menus = "" if self.know_how is None else self.know_how.pending(session)
         return "\n\n".join(b for b in (blocks, menus) if b)
 

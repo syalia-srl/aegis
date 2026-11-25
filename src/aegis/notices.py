@@ -12,7 +12,7 @@ the level it last got, so a block is pending when the level differs and a
 clear is owed when the kind is no longer active. That record is in the meta;
 the episodes and their askers live here, in memory, and are re-read from the
 signals after a restart. One session the person opened is the asker per kind
-and owner, so nine agents do not ask about the same disk.
+and owner for quota. Resource notices give every session task context.
 
 An announcement is a notice a person or an admin's agent writes
 (``notice_ops.py``). It is kept in ``<state>/announcements.json``, since no
@@ -198,19 +198,15 @@ def read_signals(paths: list[Path], proc: Path = Path("/proc")) -> dict:
 
 
 LEAD = {
-    "disk": "The disk holding aegis is {pct}% full: {free_gb} GB free of {total_gb} GB, measured just now.",
-    "memory": "Memory is {pct}% used: {avail_gb} GB available of {total_gb} GB, measured just now.",
+    "disk": "The disk holding aegis is {pct}% full: {free_gb} GB free of {total_gb} GB.",
+    "memory": "Memory is {pct}% used: {avail_gb} GB available of {total_gb} GB.",
     "cpu": "The CPU is saturated: tasks waited for a CPU {pct}% of the last minute.",
     "quota": "The {label} quota is at {percent}% of its {window} window, on pace for {projected}%.",
 }
 CRITICAL = " This is critical."
-ACT = {
-    "disk": "Free what this session created and no longer needs (your merged worktrees, build output, temporary files), re-measuring with df before you delete. Do not touch shared caches, another session's work or anything tracked by git. Run `aegis gc` to see what the sessions archived over a week ago still hold (their uploads, sent files, browsers and the harness's copy of their transcripts), and `aegis gc --apply` to free it: their history stays readable with peer_read. Start no large download or build.",
-    "memory": "Stop the servers and watchers you started and no longer use. Run no parallel test lane or build, and enqueue no more workers.",
-    "cpu": "Run tests with fewer workers. Re-run a timing failure or a make bench number before you trust it, and say the host was loaded when you report one.",
-    "quota": "Use the cheapest queue for workers, spawn no new session, and finish what you started before you start more.",
-}
-DISK_OTHER = "Free what this session created and no longer needs (your merged worktrees, build output, temporary files), re-measuring with df before you delete. Do not touch shared caches, another session's work or anything tracked by git. {mount} has {free_gb} GB free: as far as you can, put new large files there (clones, build output, caches, downloads) instead of on this disk, and move nothing another session or git owns. Run `aegis gc` to see what the sessions archived over a week ago still hold (their uploads, sent files, browsers and the harness's copy of their transcripts), and `aegis gc --apply` to free it: their history stays readable with peer_read."
+RESOURCE_KINDS = {"disk", "memory", "cpu"}
+TASK_CONTEXT = "Use this reading when choosing how to run the assigned task."
+QUOTA_ACT = "Use the cheapest queue for workers, spawn no new session, and finish what you started before you start more."
 QUOTA_CRITICAL = " Tell the person before you enqueue anything."
 # The session's own share (load.py, #762), and who holds the most. The
 # heaviest is named only above a floor: on a quiet host the top session may
@@ -223,10 +219,6 @@ TOP_SELF = ", the most of any session here."
 TOP_OTHER = {
     "cpu": "; {top_handle} uses the most, {top} cores.",
     "memory": "; {top_handle} holds the most, {top} GB.",
-}
-ACT_TOP = {
-    "cpu": "Slow your own work first: stop a parallel test run or build you started, or run it with fewer workers. Re-run a timing failure or a make bench number before you trust it, and say the host was loaded when you report one.",
-    "memory": "Free your own first: stop the servers, watchers, test runs and builds you started and no longer use. Run no parallel test lane or build, and enqueue no more workers.",
 }
 FLOOR_CORES = 1.0
 FLOOR_RAM_SHARE = 0.1
@@ -253,7 +245,6 @@ WATCHED = {
     "quota": "the {label} quota",
 }
 ANNOUNCED = "{text}\nThis was written by {author}, not measured by aegis."
-NO_ASKER = ("cpu", "announce")  # nothing of the person's to decide
 
 
 def _shown(reading: dict) -> dict:
@@ -278,24 +269,24 @@ def body(kind: str, level: str, reading: dict, role: Role) -> str:
     if kind == "announce":
         return f"{ANNOUNCED.format(**r)}\n{ONCE}"
     lead = LEAD[kind].format(**r)
-    act = ACT[kind]
     if kind in OWN and reading.get("own") is not None:
         lead += OWN[kind].format(**r)
         if reading.get("is_top"):
             lead += TOP_SELF
-            act = ACT_TOP[kind]
         elif reading.get("top_handle"):
             lead += TOP_OTHER[kind].format(**r)
         else:
             lead += "."
-    if kind == "disk" and reading.get("other"):
-        act = DISK_OTHER.format(**_shown(reading["other"]))
+    if kind in RESOURCE_KINDS:
+        if kind == "disk" and (other := reading.get("other")):
+            lead += " {mount} has {free_gb} GB free.".format(**_shown(other))
+        if kind == "memory" and (pressure := reading.get("psi_full")):
+            lead += f" Memory pressure (PSI full avg60) is {pressure:g}%."
+        return f"{lead} {TASK_CONTEXT}"
+    act = QUOTA_ACT
     if level == "critical":
         lead += CRITICAL
-        if kind == "quota":
-            act += QUOTA_CRITICAL
-    if kind == "cpu" and role == "asker":
-        role = "person"
+        act += QUOTA_CRITICAL
     return "\n".join((lead, act, TAIL[role], ONCE))
 
 
@@ -764,13 +755,12 @@ class Notices:
         return None
 
     def role(self, s: Session, kind: str) -> Role:
-        """What the text for ``kind`` asks of ``s``: a worker and a spawned
-        session never ask the person, and only one person-opened session per
-        kind and owner does."""
+        """Only quota assigns an asker, one person-opened session per pool
+        and owner. Workers and spawned sessions do not ask the person."""
+        if not kind.startswith("quota:"):
+            return "person"
         if opener := self._opener(s):
             return opener
-        if kind.partition(":")[0] in NO_ASKER:
-            return "person"
         asker = self._askers.get((kind, s.spec.owner))
         if asker is None or asker == s.log_id or not self._live(asker):
             return "asker"
@@ -802,10 +792,17 @@ class Notices:
             "top": f"{top:.1f}",
         }
 
-    def pending(self, s: Session, at: Literal["send", "tool"] = "send") -> str:
+    def pending(
+        self,
+        s: Session,
+        at: Literal["send", "tool"] = "send",
+        *,
+        include_host: bool = True,
+    ) -> str:
         """The blocks ``s`` has not been told yet, and the clears it is owed,
         joined by a blank line; "" when there are none. Marks them sent
-        before it returns, so each block reaches one result.
+        before it returns, so each block reaches one result. During startup,
+        host notices wait without being marked as sent.
 
         It runs only on the event loop, as levels() does, and never awaits:
         two calls cannot interleave, so it needs no lock. Do not call it from
@@ -822,6 +819,8 @@ class Notices:
         guarded = any(k.startswith(f"{GUARD}:") for k in self._items.get(s.log_id, {}))
         blocks = []
         for key, (level, reading) in active.items():
+            if not include_host and not key.startswith("announce:"):
+                continue
             if guarded and key.startswith("quota:"):
                 continue
             # A level kept from before a restart has no reading to print yet.
@@ -837,7 +836,9 @@ class Notices:
         for key in [
             k
             for k in s.notices_sent
-            if k not in active and not (guarded and k.startswith("quota:"))
+            if (include_host or k.startswith("announce:"))
+            and k not in active
+            and not (guarded and k.startswith("quota:"))
         ]:
             blocks.append(self._clear(key))
             del s.notices_sent[key]
