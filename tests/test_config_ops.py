@@ -76,7 +76,12 @@ async def test_doctor_detect_and_propose(app, monkeypatch):
         "codex",
         "cursor",
         "pi",
+        "web-gemini",
+        "web-deepseek",
+        "web-qwen",
+        "web-chatgpt",
     ]
+    assert all(row["bin"] is None and row["models"] for row in found[-4:])
     doc = await app.registry.call("config.propose", {})
     assert doc["default_agent"] == "opus"
     assert len(calls) == 1, "detect and propose share one probe within DETECT_TTL_S"

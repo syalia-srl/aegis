@@ -773,9 +773,9 @@ def build_web(
             await websocket.close(code=BAD_PROTO)
             return
         if isinstance(via, str):
-            # A link goes both ways from 3.0 (links.py); one per pair of servers.
+            # A link goes both ways from 2.23 (links.py); one per pair of servers.
             code, why = (
-                ("too_old", f"{via} runs an aegis from before 3.0; a link needs "
+                ("too_old", f"{via} runs an aegis from before 2.23; a link needs "
                  f"aegis {BOTH_WAYS_SINCE} or newer on both servers")
                 if not isinstance(link, dict) or link.get("both_ways") is not True
                 else ("refused", app.link_refusal(via))

@@ -212,7 +212,7 @@ async def test_a_hello_without_both_ways_is_named_too_old(pair):
     # A near server from 2.x: its hello carries link but not both_ways.
     frame = await raw_hello(beta, {"server": "old", "user": "u"})
     assert frame["t"] == "error" and frame.get("code") == "too_old"
-    assert "3.0.0 or newer" in frame["message"]
+    assert "2.23.0 or newer" in frame["message"]
 
 
 async def test_the_first_link_keeps_working_after_a_second_is_refused(pair):
@@ -265,7 +265,7 @@ async def test_two_servers_linking_each_other_at_start_keep_one_link(
 
 def test_a_welcome_without_both_ways_is_named_too_old():
     why = links.too_old({"server": "old", "build": {"version": "2.17.0"}})
-    assert "old runs aegis 2.17.0" in why and "3.0.0 or newer" in why
+    assert "old runs aegis 2.17.0" in why and "2.23.0 or newer" in why
 
 
 async def test_a_browser_on_alpha_calls_and_subscribes_on_beta(pair):

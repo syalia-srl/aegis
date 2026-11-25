@@ -176,7 +176,7 @@ export class ComposerPart {
       this.attachBtn.setAttribute("aria-label", this.t("composer.attach"));
       this.attachBtn.append(icon("clip"));
     }
-    this.interruptBtn.title = this.t("composer.interruptTitle");
+    this.interruptBtn.title = this.t("composer.interrupt");
     this.interruptBtn.setAttribute("aria-label", this.t("composer.interrupt"));
     this.sendBtn.title = this.t("composer.sendTitle");
     this.sendBtn.setAttribute("aria-label", this.t("composer.send"));
@@ -335,7 +335,7 @@ export class ComposerPart {
               ? this.t("composer.placeholder.asleep")
               : touch.matches
                 ? ""
-                : this.t("composer.placeholder.default");
+                : this.t("composer.placeholder.embedded");
     if (this.input.placeholder !== placeholder) {
       this.input.placeholder = placeholder;
       this.autosize();

@@ -238,6 +238,7 @@ export default {
   "composer.placeholder.default": "Message the agent. Enter sends, Shift+Enter adds a line, / for commands, Esc Esc interrupts.",
   "composer.attach": "Attach files",
   "composer.interrupt": "Interrupt",
+  "composer.placeholder.embedded": "Message the agent. Enter sends, Shift+Enter adds a line.",
   "composer.interruptTitle": "Interrupt (Esc Esc)",
   "composer.send": "Send",
   "composer.sendTitle": "Send (Enter)",

@@ -258,7 +258,8 @@ def test_the_more_button_opens_the_switcher_and_a_row_scrolls_its_tab_into_view(
     browser,  # noqa: F811
 ):
     # #781: the button opens the session switcher in place of its menu.
-    pg = browser.new_page(viewport={"width": 900, "height": 700})
+    # This strip fits the widest generated handle, but six tabs still overflow.
+    pg = browser.new_page(viewport={"width": 1050, "height": 700})
     pg.goto(server.url)
     pg.wait_for_selector("#a2[data-view=fleet]")
     keys = [spawn(pg) for _ in range(6)]
@@ -269,6 +270,13 @@ def test_the_more_button_opens_the_switcher_and_a_row_scrolls_its_tab_into_view(
         "#switcher .sw-row", "els => els.map(e => e.dataset.id)"
     )
     assert sorted(rows) == sorted(keys)
+    strip = pg.locator("#tablist")
+    tab = strip.locator(f".tab[data-id='{keys[-1]}']")
+    strip.evaluate("el => { el.scrollLeft = 0; }")
+    strip_box = strip.bounding_box()
+    tab_box = tab.bounding_box()
+    assert tab_box["width"] <= strip_box["width"]
+    assert tab_box["x"] >= strip_box["x"] + strip_box["width"]
     pg.click(f"#switcher .sw-row[data-id='{keys[-1]}']")
     pg.wait_for_function(f"location.hash === '#s={keys[-1]}'")
     # The list scrolls the tab in after the hash changes: wait for it.
