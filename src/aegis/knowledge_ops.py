@@ -98,6 +98,12 @@ class ReadMemories(_Strict):
 
 
 class SaveMemory(_Strict):
+    asked: bool = Field(
+        False,
+        description="Set true explicitly for a person's direct request, including "
+        "'please save a reminder', 'remind me', and /remember. Leave false only "
+        "for your own initiative. The original turn must be the person's.",
+    )
     expected_revision: str | None = Field(
         None,
         description="Always include this field when choosing where to save a memory. "
@@ -135,12 +141,6 @@ class SaveMemory(_Strict):
         default_factory=list,
         description="Directory globs where the memory matters most; its hint "
         "ranks higher in sessions working there.",
-    )
-    asked: bool = Field(
-        False,
-        description="Set true explicitly for a person's direct request, including "
-        "'please save a reminder', 'remind me', and /remember. Leave false only "
-        "for your own initiative. The original turn must be the person's.",
     )
 
 
