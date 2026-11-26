@@ -100,7 +100,9 @@ class ReadMemories(_Strict):
 class SaveMemory(_Strict):
     expected_revision: str | None = Field(
         None,
-        description="The personal memory revision from knowledge_catalog, or null to create.",
+        description="Always include this field when choosing where to save a memory. "
+        "Pass an explicit JSON null for a new memory, or its current revision "
+        "from knowledge_catalog for an existing one. This also returns the saved path.",
     )
     name: str = Field(
         description="Lowercase letters, digits, - and _, such as 'deploy-host'. "
@@ -123,7 +125,8 @@ class SaveMemory(_Strict):
         "work; project: ongoing work or a constraint; reference: a pointer.",
     )
     lifetime: Literal["permanent", "temporary"] = Field(
-        "permanent", description="temporary needs expires."
+        "permanent",
+        description="Use temporary when a request gives an end date. Set expires to that date.",
     )
     expires: date | None = Field(
         None, description="The day a temporary memory stops being true."
@@ -135,9 +138,9 @@ class SaveMemory(_Strict):
     )
     asked: bool = Field(
         False,
-        description="true when the person asked you to remember this "
-        "(/remember, 'remember that ...'). It counts only in a turn that began "
-        "with the person's own message.",
+        description="Set true explicitly for a person's direct request, including "
+        "'please save a reminder', 'remind me', and /remember. Leave false only "
+        "for your own initiative. The original turn must be the person's.",
     )
 
 
