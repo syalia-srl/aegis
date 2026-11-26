@@ -15,9 +15,11 @@ host policy and embed the client.
 
 - Claude Code 2.1.332 and Codex 0.172.0 are the new upper tested bounds. The
   Claude Code sign-in card recognizes both setup-token authorization URLs.
-- OpenCode's upper tested bound remains 2.1.2. In 2.4.1, a fresh login no
-  longer shows the direct OpenCode Go entry the sign-in card expects (#1118).
-  The OpenCode first-prompt tool startup race is tracked in #540.
+- OpenCode 2.1.2 is the tested minimum and maximum for this release. The
+  2.0.31 minimum failed the first-prompt handoff canary. The underlying tool
+  startup race has also occurred intermittently in 2.1.2 (#540). In 2.4.1,
+  a fresh login no longer shows the direct OpenCode Go entry the sign-in
+  card expects (#1118).
 
 ### Performance
 

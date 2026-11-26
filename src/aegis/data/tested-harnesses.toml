@@ -13,7 +13,7 @@ max = "0.172.0"
 
 [opencode]
 package = "@opencode/cli"
-min = "2.0.31"
+min = "2.1.2"
 max = "2.1.2"
 hint = "aegis drives OpenCode 2, published as @opencode/cli."
 
