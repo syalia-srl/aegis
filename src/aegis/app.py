@@ -646,7 +646,21 @@ class App:
         reg.knowledge = self.knowledge
         # knowledge.know_how too.
         if self.config.current().knowledge["know_how"]:
-            reg.know_how = KnowHow()
+            private = roots.state_root.resolve()
+
+            def notice_source(session, root: Path) -> bool:
+                view = self.view_of(session.log_id)
+                key = session.spec.owner or self.user
+                if root.is_relative_to(private):
+                    return False
+                if view is None or (key != self.user and key not in self.whos):
+                    return False
+                who = self.whos.get(key)
+                return self.policy.can(
+                    who, "read", view
+                ) and self.policy.knowledge_source(who, view, root)
+
+            reg.know_how = KnowHow(notice_source)
         self.skill_servers = SkillServers()
         reg.skill_servers = self.skill_servers
         reg.principal_of = lambda s: s.spec.owner or self.user
@@ -2193,6 +2207,7 @@ class App:
                 setting.exclude,
                 private=private,
                 optional=setting in DEFAULT_KNOWLEDGE_SOURCES,
+                writable=setting.writable,
             )
             for setting in self.config.current().knowledge["sources"]
         ]
@@ -2215,7 +2230,13 @@ class App:
         private, configured = await self.knowledge_source_settings()
         sources = set(configured) | self.knowledge.sources.worktrees()
         sources.update(
-            Source(top / "know-how", "know-how", worktree=top, private=private)
+            Source(
+                top / "know-how",
+                "know-how",
+                worktree=top,
+                private=private,
+                writable=True,
+            )
             for top in tops
             if not (top / "know-how").is_relative_to(private)
         )

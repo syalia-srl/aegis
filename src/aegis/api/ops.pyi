@@ -577,6 +577,8 @@ class _knowledge:
         relative_path: str | None = ...,
     ) -> Any:
         """Read a know-how document in a session's Git worktree, by ID or path."""
+    async def write(self, *, entry_id: str, expected_revision: str, text: str) -> Any:
+        """Edit an existing workspace page chosen by its catalog ID. Follow the person's destination, or infer it from their conversation, audience, existing entries and repo conventions. Ask when the choice changes who can use the entry and both destinations remain plausible. Pass the revision you read and report the returned path. Use memory_save for personal reminders. Follow the repo's review flow for its files."""
 
 class _layout:
     async def dock(self, *, log_id: str, pane: str, where: str) -> Any:
@@ -618,19 +620,30 @@ class _memory:
         """Delete a memory that is no longer true. The deletion is kept in the store's history: deleting an approved memory puts a card in your transcript that lets the person undo it, and the Knowledge view restores it from its history."""
     async def read(self, *, names: builtins.list[str]) -> Any:
         """Read one or more memories in full, by name: the ones the hint on your message names, or memory_search's hits."""
+    async def remind(
+        self,
+        *,
+        name: str,
+        description: str,
+        body: str,
+        expires: str,
+        expected_revision: str | None = ...,
+    ) -> Any:
+        """Save a private expiring reminder when the person says "remind me" or asks you to keep something for them through a date. Use the date as expires. Report the saved path. A request in the person's turn saves with Undo. A new reminder from a worker or wake stays proposed."""
     async def save(
         self,
         *,
         name: str,
         description: str,
         body: str,
+        expected_revision: str | None = ...,
         type: Literal["user", "feedback", "project", "reference"] = ...,
         lifetime: Literal["permanent", "temporary"] = ...,
         expires: str | None = ...,
         paths: builtins.list[str] = ...,
         asked: bool = ...,
     ) -> Any:
-        """Save a memory: one fact that later sessions should know, such as who the person is, how they want you to work, or where something runs. Saving an existing name replaces that memory. Set asked: true when the person's message that began this turn asked you to remember it; it is then saved at once, with a card that lets them undo it. Otherwise a new memory is proposed: a card in your transcript asks the person to approve it, and it is not hinted until then; a change to an approved one applies at once, and its card lets the person undo it."""
+        """Save a personal memory. Use memory_remind for a reminder the person directly requests through a date. For a revision-checked memory save, use null for a new memory or the current catalog revision for an update. Report the returned path."""
     async def search(self, *, query: str, limit: int = ...) -> Any:
         """Search your memories (facts about the person, their projects and how they want you to work) with your own words. Returns the best names with their description, score, status and flags; read one with memory_read. Proposed and expired memories are included and marked."""
 

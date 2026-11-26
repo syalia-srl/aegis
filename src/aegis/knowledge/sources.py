@@ -1,10 +1,17 @@
-"""Read-only sources scanned in a worker thread and published one root at a time."""
+"""File sources scanned in a worker thread and published one root at a time."""
 
 from __future__ import annotations
 
 import asyncio
+import ctypes
+import errno
+import fcntl
+import hashlib
 import os
+import secrets
+import signal
 import stat
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Literal
@@ -16,6 +23,9 @@ from .know_how import DOC_NAME, parse_doc
 
 Format = Literal["markdown", "skill", "know-how"]
 DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+WRITE_TEMP = ".aegis-write-"
+RENAME_EXCHANGE = 2
+_renameat2 = getattr(ctypes.CDLL(None, use_errno=True), "renameat2", None)
 
 
 @dataclass(frozen=True)
@@ -28,6 +38,7 @@ class Source:
     worktree: Path | None = None
     private: Path | None = None
     optional: bool = False
+    writable: bool = False
 
 
 @dataclass(frozen=True)
@@ -60,7 +71,11 @@ def scan(source: Source, previous: Snapshot | None) -> Snapshot:
 
     def visit(fd: int, relative: PurePosixPath) -> None:
         name = relative.name
-        if name in SKIP_DIRS or any(relative.full_match(p) for p in source.exclude):
+        if (
+            name.startswith(WRITE_TEMP)
+            or name in SKIP_DIRS
+            or any(relative.full_match(p) for p in source.exclude)
+        ):
             return
         key = str(relative)
         path = source.root / key
@@ -112,20 +127,14 @@ def scan(source: Source, previous: Snapshot | None) -> Snapshot:
             errors[key] = str(exc)
 
     # Open each component so a replaced ancestor cannot redirect a scan.
-    fd = os.open("/", DIR_FLAGS)
     try:
-        for part in source.root.parts[1:]:
-            sub = os.open(part, DIR_FLAGS, dir_fd=fd)
-            os.close(fd)
-            fd = sub
-        walk(fd, PurePosixPath())
+        with open_directory(source.root) as fd:
+            walk(fd, PurePosixPath())
     except FileNotFoundError as exc:
         if source.format != "know-how" and not source.optional:
             errors["."] = exc.strerror or str(exc)
     except OSError as exc:
         errors["."] = exc.strerror or str(exc)
-    finally:
-        os.close(fd)
 
     if source.format == "skill":
         bundles: dict[PurePosixPath, list[str]] = {
@@ -148,6 +157,152 @@ def scan(source: Source, previous: Snapshot | None) -> Snapshot:
     return Snapshot(entries, errors)
 
 
+@contextmanager
+def open_directory(path: Path):
+    fd = os.open("/", DIR_FLAGS)
+    try:
+        for part in path.parts[1:]:
+            child = os.open(part, DIR_FLAGS, dir_fd=fd)
+            os.close(fd)
+            fd = child
+        yield fd
+    finally:
+        os.close(fd)
+
+
+def stale(revision: str | None) -> OpError:
+    return OpError(
+        "stale",
+        f"entry changed; current revision is {revision or 'absent'}. Read it again before saving.",
+        {"revision": revision},
+    )
+
+
+def _exchange(fd: int, first: str, second: str) -> None:
+    """Swap two names atomically, keeping the exact file that was displaced."""
+    if _renameat2 is None:
+        raise OSError(errno.ENOSYS, "knowledge writes require atomic file exchange")
+    if _renameat2(fd, os.fsencode(first), fd, os.fsencode(second), RENAME_EXCHANGE):
+        code = ctypes.get_errno()
+        raise OSError(code, os.strerror(code))
+
+
+def _verify_displaced(fd: int, name: str, expected: str) -> None:
+    """Only retire a displaced file when no outside editor has it open."""
+    flags = os.O_RDWR | os.O_NONBLOCK | os.O_NOFOLLOW
+    with os.fdopen(os.open(name, flags, dir_fd=fd), "rb") as previous:
+        file_fd = previous.fileno()
+        info = os.fstat(file_fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise OpError(
+                "write_conflict", "the displaced page is not an unshared regular file"
+            )
+        # A scanner racing to open this private name must never deliver the
+        # default lease-break signal (SIGIO) to the server.
+        fcntl.fcntl(file_fd, fcntl.F_SETSIG, signal.SIGURG)
+        try:
+            fcntl.fcntl(file_fd, fcntl.F_SETLEASE, fcntl.F_WRLCK)
+        except OSError as exc:
+            raise OpError(
+                "write_conflict", "the displaced page is open or cannot be leased"
+            ) from exc
+        data = previous.read(MAX_FILE_BYTES + 1)
+        if len(data) > MAX_FILE_BYTES:
+            raise OpError("write_conflict", "the displaced page exceeds the size limit")
+        revision = hashlib.sha256(data).hexdigest()
+        if revision != expected:
+            raise stale(revision)
+        os.unlink(name, dir_fd=fd)
+
+
+def write_page(source: Source, entry: Entry, text: str, expected_revision: str) -> Item:
+    """Replace one cataloged page. Directory locking serializes Aegis writers."""
+    path = entry.item.path
+    assert path is not None and path.is_relative_to(source.root)
+    data = text.encode()
+    if len(data) > MAX_FILE_BYTES:
+        raise OpError(
+            "bad_params", f"a page may contain at most {MAX_FILE_BYTES} bytes"
+        )
+    try:
+        item, _ = from_bytes(
+            source.worktree or source.root,
+            path,
+            parse_skill if source.format == "skill" else parse_doc,
+            entry.item.name,
+            scope="workspace",
+            data=data,
+        )
+    except ValueError as exc:
+        raise OpError("bad_params", str(exc)) from None
+
+    try:
+        with open_directory(path.parent) as fd:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            mode = os.stat(path.name, dir_fd=fd, follow_symlinks=False).st_mode
+            if (
+                not stat.S_ISREG(mode)
+                or not mode & 0o222
+                or not os.access(
+                    path.name,
+                    os.W_OK,
+                    dir_fd=fd,
+                    effective_ids=True,
+                    follow_symlinks=False,
+                )
+            ):
+                raise OpError("forbidden", "the knowledge page is read-only")
+            temp = WRITE_TEMP + secrets.token_hex(12)
+            exchanged = False
+            out = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=fd)
+            try:
+                with os.fdopen(out, "wb") as file:
+                    file.write(data)
+                    os.fchmod(file.fileno(), mode & 0o777)
+                current = regular_bytes(Path(path.name), MAX_FILE_BYTES, dir_fd=fd)
+                revision = hashlib.sha256(current).hexdigest()
+                if revision != expected_revision:
+                    raise stale(revision)
+                if current != data:
+                    _exchange(fd, temp, path.name)
+                    exchanged = True
+                    try:
+                        _verify_displaced(fd, temp, expected_revision)
+                    except (OSError, OpError) as exc:
+                        recovery = str(path.with_name(temp))
+                        try:
+                            _exchange(fd, temp, path.name)
+                        except OSError as restore:
+                            raise OpError(
+                                "write_conflict",
+                                f"could not restore the displaced page; preserved at {recovery}",
+                                {"recovery_path": recovery},
+                            ) from restore
+                        code = (
+                            exc.code if isinstance(exc, OpError) else "write_conflict"
+                        )
+                        message = exc.message if isinstance(exc, OpError) else str(exc)
+                        details = (exc.data or {}) if isinstance(exc, OpError) else {}
+                        raise OpError(
+                            code,
+                            f"{message} Restored the displaced page; other contents are at {recovery}.",
+                            {**details, "recovery_path": recovery},
+                        ) from exc
+            finally:
+                if not exchanged:
+                    try:
+                        os.unlink(temp, dir_fd=fd)
+                    except FileNotFoundError:
+                        pass
+    except FileNotFoundError:
+        raise stale(None) from None
+    except PermissionError:
+        raise OpError("forbidden", "the knowledge page cannot be written") from None
+    except OSError as exc:
+        raise OpError("write_failed", exc.strerror or str(exc)) from None
+    return item
+
+
 class Sources:
     def __init__(self) -> None:
         self._held: dict[Source, tuple[float, Snapshot]] = {}
@@ -160,6 +315,12 @@ class Sources:
             self._held.pop(removed, None)
             self._running.pop(removed, None)
         self._configured = current
+
+    def invalidate(self, path: Path) -> None:
+        for source in self._held.keys() | self._running.keys():
+            if path.is_relative_to(source.root):
+                self._held.pop(source, None)
+                self._running.pop(source, None)
 
     def snapshot(self, source: Source) -> Snapshot | None:
         held = self._held.get(source)
