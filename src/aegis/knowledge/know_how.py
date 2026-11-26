@@ -25,14 +25,13 @@ import asyncio
 import logging
 import os
 import re
-import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .importer import MAX_FILE_BYTES, regular_bytes
 from .items import FRONT, Item, _split, read_item, source_id
-from .. import launch
 from ..journal import paths, shell
 from ..ops import OpError
 from ..transcript.entries import NOTICE_HEADER
@@ -120,28 +119,19 @@ def read_entry(
 def read_docs(top: str) -> tuple[list[tuple[str, str]], int]:
     """(name, description) of the first docs in ``top``'s know-how folder, and
     how many it holds in all. A folder that cannot be read holds none."""
-    folder = os.path.join(top, FOLDER)
-    try:
-        r = launch.run(["ls", "-1", folder], text=True, timeout=5)
-    except (OSError, subprocess.TimeoutExpired):
+    # Shared scanner supplies the same pages as the catalog (including its
+    # no-symlink rules). The menu limit applies after matching the entries.
+    from .sources import Source, scan
+
+    root = Path(top)
+    if not (root / FOLDER).is_dir():
         return [], 0
-    if r.returncode != 0:
-        return [], 0
-    names = sorted(n for n in r.stdout.splitlines() if DOC_NAME.match(n))
-    docs = []
-    for name in names[:MAX_DOCS]:
-        try:
-            r = launch.run(
-                ["head", "-c", str(HEAD_BYTES), os.path.join(folder, name)],
-                text=True,
-                errors="replace",
-                timeout=5,
-            )
-        except (OSError, subprocess.TimeoutExpired):
-            continue
-        if r.returncode == 0:
-            docs.append((name, describe(r.stdout)))
-    return docs, len(names)
+    snapshot = scan(Source(root / FOLDER, "know-how", worktree=root), None)
+    names = sorted(snapshot.entries)
+    return [
+        (name, describe(snapshot.entries[name].text[:HEAD_BYTES]))
+        for name in names[:MAX_DOCS]
+    ], len(names)
 
 
 def block(main: str, top: str, cwd: str, docs: list[tuple[str, str]], n: int) -> str:
@@ -153,11 +143,13 @@ def block(main: str, top: str, cwd: str, docs: list[tuple[str, str]], n: int) ->
         "before you act:\n\n"
     )
     lines = []
+    root_id = source_id(Path(top))
     for name, description in docs:
         path = os.path.join(top, FOLDER, name)
         near = os.path.relpath(path, cwd)
         path = path if near.startswith("..") else near
-        lines.append(f"- {path}: {description}" if description else f"- {path}")
+        line = f"- {path}: {description}" if description else f"- {path}"
+        lines.append(f"{line} [{root_id}:{FOLDER}/{name}]")
     if n > len(docs):
         lines.append(f"- … and {n - len(docs)} more in {FOLDER}/")
     return head + "\n".join(lines)
@@ -187,11 +179,14 @@ class _Seen:
     started: bool = False
     dirs: set[str] = field(default_factory=set)
     empty: set[str] = field(default_factory=set)  # main checkouts with no docs
-    owed: dict[str, str] = field(default_factory=dict)  # main checkout -> block
+    owed: dict[str, tuple[Path, str]] = field(default_factory=dict)
 
 
 class KnowHow:
-    def __init__(self) -> None:
+    def __init__(
+        self, can_read: Callable[["Session", Path], bool] | None = None
+    ) -> None:
+        self._can_read = can_read or (lambda _session, _root: True)
         self._seen: dict[str, _Seen] = {}
 
     def _state(self, s: "Session") -> _Seen:
@@ -243,21 +238,21 @@ class KnowHow:
         st = self._state(s)
         known = {*s.know_how_sent, *st.owed, *st.empty}
 
-        def read() -> dict[str, tuple[str, list[tuple[str, str]], int]]:
-            out: dict[str, tuple[str, list[tuple[str, str]], int]] = {}
-            for p in found:
-                main, _, top = paths.place(p)
-                if main is None or top is None or main in known or main in out:
-                    continue
-                docs, n = read_docs(top)
-                out[main] = (top, docs, n)
-            return out
-
-        for main, (top, docs, n) in (await asyncio.to_thread(read)).items():
+        places = await asyncio.to_thread(lambda: [paths.place(p) for p in found])
+        for main, _, top in places:
+            if main is None or top is None or main in known:
+                continue
+            root = Path(top) / FOLDER
+            if not self._can_read(s, root):
+                continue
+            known.add(main)
+            docs, n = await asyncio.to_thread(read_docs, top)
+            if not self._can_read(s, root):
+                continue
             if not docs:
                 st.empty.add(main)
             elif main not in s.know_how_sent and main not in st.owed:
-                st.owed[main] = block(main, top, str(s.spec.cwd), docs, n)
+                st.owed[main] = (root, block(main, top, str(s.spec.cwd), docs, n))
 
     def pending(self, s: "Session") -> str:
         """The menus the session is owed, marked told, joined by a blank line;
@@ -265,7 +260,14 @@ class KnowHow:
         st = self._seen.get(s.log_id)
         if st is None or not st.owed:
             return ""
-        owed, st.owed = st.owed, {}
+        owed = {
+            main: menu
+            for main, (root, menu) in st.owed.items()
+            if self._can_read(s, root)
+        }
+        st.owed = {}
+        if not owed:
+            return ""
         s.know_how_sent = [*s.know_how_sent, *owed]
         try:
             s._metas.write_soon(s.log_id, s.meta)

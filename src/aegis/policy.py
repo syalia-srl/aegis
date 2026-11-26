@@ -213,6 +213,14 @@ class HostPolicy:
         """Whether this caller may read the registered knowledge root in this session."""
         return True
 
+    def knowledge_source_write(
+        self, who: Any, session: SessionView, root: Path
+    ) -> bool:
+        """Whether this caller may change a writable knowledge root."""
+        return self.can(who, "write", session) and self.knowledge_source(
+            who, session, root
+        )
+
     def catalog(self, who: Any) -> Catalog:
         return Catalog()
 
