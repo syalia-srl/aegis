@@ -537,7 +537,7 @@ class _knowledge:
         source_id: str | None = ...,
         kind: Literal["all", "skill", "memory", "flagged"] = ...,
     ) -> Any:
-        """Search or list visible knowledge entries, or read one by its qualified ID."""
+        """Search or list visible knowledge entries, or read one by qualified ID. For an agent's own worktree, omit log_id."""
     async def get(self, *, name: str | None = ..., entry_id: str | None = ...) -> Any:
         """Read a personal knowledge item by ID or name, with its edit stamp."""
     async def history(self, *, name: str) -> Any:
