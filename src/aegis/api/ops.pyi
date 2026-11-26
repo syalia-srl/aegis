@@ -577,8 +577,6 @@ class _knowledge:
         relative_path: str | None = ...,
     ) -> Any:
         """Read a know-how document in a session's Git worktree, by ID or path."""
-    async def write(self, *, entry_id: str, expected_revision: str, text: str) -> Any:
-        """Edit an existing workspace page chosen by its catalog ID. Follow the person's destination, or infer it from their conversation, audience, existing entries and repo conventions. Ask when the choice changes who can use the entry and both destinations remain plausible. Pass the revision you read and report the returned path. Use memory_save for personal reminders. Follow the repo's review flow for its files."""
 
 class _layout:
     async def dock(self, *, log_id: str, pane: str, where: str) -> Any:
@@ -623,7 +621,6 @@ class _memory:
     async def save(
         self,
         *,
-        expected_revision: str | None = ...,
         name: str,
         description: str,
         body: str,
@@ -633,7 +630,7 @@ class _memory:
         paths: builtins.list[str] = ...,
         asked: bool = ...,
     ) -> Any:
-        """Save a personal fact or reminder. For a direct request such as "remind me through Friday", set asked: true, lifetime: temporary and expires to Friday's date. Use expected_revision: null for a new memory or the current catalog revision when updating one. Report the returned path."""
+        """Save a memory: one fact that later sessions should know, such as who the person is, how they want you to work, or where something runs. Saving an existing name replaces that memory. Set asked: true when the person's message that began this turn asked you to remember it; it is then saved at once, with a card that lets them undo it. Otherwise a new memory is proposed: a card in your transcript asks the person to approve it, and it is not hinted until then; a change to an approved one applies at once, and its card lets the person undo it."""
     async def search(self, *, query: str, limit: int = ...) -> Any:
         """Search your memories (facts about the person, their projects and how they want you to work) with your own words. Returns the best names with their description, score, status and flags; read one with memory_read. Proposed and expired memories are included and marked."""
 

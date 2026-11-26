@@ -8,8 +8,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
-from datetime import date, timedelta
-from pathlib import Path
 
 import pytest
 
@@ -101,18 +99,13 @@ async def test_an_agents_own_memory_is_proposed_and_not_hinted(world):
 async def test_asked_in_a_persons_turn_saves_approved_with_an_undo_card(world):
     app = world.app
     s = await world.spawn()
-    expires = (date.today() + timedelta(days=5)).isoformat()
-    got = await save(
-        s, asked=True, expected_revision=None, lifetime="temporary", expires=expires
-    )
-    path = Path(got["path"])
-    assert got["status"] == "approved" and expires in path.read_text()
+    got = await save(s, asked=True)
+    assert got["status"] == "approved" and set(got) == {"saved", "status", "card"}
     e = card(s, got["card"])
     assert e["detail"]["op"] == "saved" and len(e["detail"]["sha"]) == 40
     assert "merge-after-green" in hinted(app, s, "merge the PR after the checks")
     assert await press(world, s, got["card"], "undo") == "ok"
     assert app.knowledge.store.get(app.user, "merge-after-green") is None
-    assert not path.exists()
 
 
 async def test_asked_never_skips_the_undo_card_of_a_change(world):
@@ -156,7 +149,6 @@ async def test_asked_in_a_queue_task_is_a_proposal(world):
         description="A worker says it was asked",
         body="It was not.",
         asked=True,
-        expected_revision=None,
     )
     said = await turn(
         s, mcp("queue_enqueue", queue="general", payload=payload), by_person=True
@@ -184,12 +176,8 @@ async def test_the_turn_knows_whether_a_person_began_it(world):
 async def test_approve_makes_it_hintable(world):
     app = world.app
     s = await world.spawn()
-    proposed = await save(s, expected_revision=None)
-    id = proposed["card"]
-    path = Path(proposed["path"])
-    assert proposed["status"] == "proposed" and "status: proposed" in path.read_text()
+    id = (await save(s))["card"]
     assert await press(world, s, id, "approve") == "ok"
-    assert "status: approved" in path.read_text()
     assert card(s, id)["status"] == "approved"
     assert app.knowledge.store.get(app.user, "merge-after-green").status == "approved"
     assert "merge-after-green" in hinted(app, s, "merge the PR after the checks")

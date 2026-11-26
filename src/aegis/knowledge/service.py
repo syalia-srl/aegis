@@ -61,7 +61,7 @@ class Knowledge:
             )
         self._encoding: set[str] = set()  # query texts encoding in the background
         self.sources = Sources()
-        self.usage = Usage(state_root / "knowledge-usage.sqlite", self.store.entry_id)
+        self.usage = Usage(state_root / "knowledge-usage.sqlite")
         # principal -> (store version, when scanned, items, index)
         self._indexes: dict[str, tuple[int, float, list[Item], Index]] = {}
         self._catalog: tuple[tuple[Item, ...], CatalogIndex] | None = None
@@ -265,14 +265,9 @@ class Knowledge:
         ranks: dict[str, int] = {}
         for hits in (skills, memories):
             for rank, h in enumerate(hits, 1):
-                ranks[h.entry_id or h.name] = rank
+                ranks[h.name] = rank
                 self.usage.add(
-                    principal,
-                    session_id,
-                    h.kind,
-                    h.entry_id or h.name,
-                    "hinted",
-                    f"rank={rank}",
+                    principal, session_id, h.kind, h.name, "hinted", f"rank={rank}"
                 )
         self._ranks[session_id] = ranks
         return hint.block(skills, memories)
@@ -335,18 +330,7 @@ class Knowledge:
 
     def read_rank(self, session_id: str, name: str) -> int | None:
         """The rank ``name`` had in the last hint ``session_id`` got."""
-        ranks = self._ranks.get(session_id, {})
-        if name in ranks or ":" in name:
-            return ranks.get(name)
-        # Historical callers supplied a personal name.
-        return next(
-            (
-                rank
-                for key, rank in ranks.items()
-                if key.endswith((f":memories/{name}.md", f":skills/{name}/SKILL.md"))
-            ),
-            None,
-        )
+        return self._ranks.get(session_id, {}).get(name)
 
     def forget(self, session_id: str) -> None:
         self._ranks.pop(session_id, None)

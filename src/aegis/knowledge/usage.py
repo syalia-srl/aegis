@@ -23,8 +23,7 @@ import queue
 import sqlite3
 import threading
 import time
-from collections.abc import Callable
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 log = logging.getLogger("aegis.knowledge")
 
@@ -74,11 +73,8 @@ def _connect(path: Path) -> sqlite3.Connection:
 
 
 class Usage:
-    def __init__(
-        self, path: Path, personal_id: Callable[[str, str, str], str] | None = None
-    ) -> None:
+    def __init__(self, path: Path) -> None:
         self.path = path
-        self._personal_id = personal_id
         self._q: queue.SimpleQueue = queue.SimpleQueue()
         self._failed: set[str] = set()  # causes already logged
         self._read: sqlite3.Connection | None = None
@@ -143,11 +139,6 @@ class Usage:
             return self._read.execute(sql, args).fetchall()
 
     # -- the API ----------------------------------------------------------------
-    def _key(self, principal: str, kind: str, name: str) -> str:
-        if self._personal_id is not None and ":" not in name:
-            return self._personal_id(principal, kind, name)
-        return name
-
     def add(
         self,
         principal: str,
@@ -165,20 +156,12 @@ class Usage:
             (
                 "sql",
                 "INSERT INTO usage VALUES (?,?,?,?,?,?,?)",
-                (
-                    ts or time.time(),
-                    principal,
-                    session,
-                    kind,
-                    self._key(principal, kind, name),
-                    event,
-                    detail,
-                ),
+                (ts or time.time(), principal, session, kind, name, event, detail),
             )
         )
 
     def summary(self, principal: str) -> dict[str, dict]:
-        """Per entry ID (historical personal names resolved): kind, event counts, and ``last_used``, the
+        """Per item name: kind, a count per event, and ``last_used``, the
         last read, invocation or run (None when never)."""
         rows = self._query(
             "SELECT item_name, item_kind, event, count(*), max(ts) FROM usage"
@@ -188,7 +171,7 @@ class Usage:
         out: dict[str, dict] = {}
         for name, kind, event, n, last in rows:
             s = out.setdefault(
-                self._key(principal, kind, name),
+                name,
                 {
                     "kind": kind,
                     "hinted": 0,
@@ -208,24 +191,11 @@ class Usage:
         sql = "SELECT ts, session, item_kind, item_name, event, detail FROM usage WHERE principal = ?"
         args: list = [principal]
         if name is not None:
-            sql += " AND item_name IN (?, ?, ?)"
-            args.extend(
-                (
-                    name,
-                    self._key(principal, "memory", name),
-                    self._key(principal, "skill", name),
-                )
-            )
+            sql += " AND item_name = ?"
+            args.append(name)
         got = self._query(sql + " ORDER BY ts, rowid", args)
         keys = ("ts", "session", "kind", "name", "event", "detail")
-        rows = [dict(zip(keys, r)) for r in got]
-        for row in rows:
-            key = self._key(principal, row["kind"], row["name"])
-            if ":" in key:
-                row["entry_id"] = key
-                path = PurePosixPath(key.partition(":")[2])
-                row["name"] = path.parent.name if path.name == "SKILL.md" else path.stem
-        return rows
+        return [dict(zip(keys, r)) for r in got]
 
     def raised(self, principal: str) -> dict[str, list[str]]:
         """The flags last kept for each of ``principal``'s items."""
