@@ -2758,3 +2758,124 @@ async def test_real_opencode_discovers_agent_and_queue_descriptions(
         assert session.cost_usd == 0
     finally:
         await world.stop()
+
+
+async def test_a_real_agent_chooses_contextual_knowledge_destinations(tmp_path: Path):
+    """Run with live provider credentials and make test-live for this case."""
+    import asyncio
+    from datetime import date, timedelta
+    from hashlib import sha256
+
+    from aegis.knowledge.history import ensure_repo
+
+    from .test_agents import World, turn
+
+    claude = shutil.which("claude")
+    assert claude, "claude is not on PATH"
+    ensure_repo(tmp_path)
+    (tmp_path / ".aegis.yaml").write_text(
+        "default_agent: opus\n"
+        "agents:\n"
+        f"  opus: {{harness: claude-code, model: {HAIKU}, effort: low, permission: full}}\n"
+        "knowledge:\n"
+        "  sources:\n"
+        "    - {root: .codex/skills, format: skill, writable: true}\n"
+        "    - {root: vendor}\n"
+    )
+    procedure = tmp_path / "know-how" / "release.md"
+    skill = tmp_path / ".codex" / "skills" / "restore-audit" / "SKILL.md"
+    reference = tmp_path / "vendor" / "baseline.md"
+    attachment = skill.with_name("checks.txt")
+    original_reference = "# Vendor Baseline\nKeep the original policy.\n"
+    for file, text in (
+        (procedure, "---\nwhen: Release the package\n---\nCheck backups.\n"),
+        (
+            skill,
+            "---\nname: restore-audit\ndescription: Audit restore evidence\n---\nCollect logs.\n",
+        ),
+        (reference, original_reference),
+        (attachment, "original attachment\n"),
+    ):
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_text(text)
+
+    world = await World(tmp_path, claude).start()
+
+    async def ask(session, message):
+        return await turn(session, message, timeout=180, by_person=True)
+
+    try:
+        writer = await world.spawn()
+        expires = date.today() + timedelta(days=5)
+        await ask(
+            writer,
+            "Use Aegis Knowledge tools for all discovery and writing. "
+            "Add 'Verify restoration of the amber ledger.' to the team's existing "
+            "release procedure. Remind only me that I own the restoration through "
+            f"{expires}. Update the workspace skill we use to audit restore evidence "
+            "so it says 'Compare the cobalt recovery logs.' Keep its resources. "
+            "Choose the existing destinations and report the actual saved paths.",
+        )
+        assert "Verify restoration of the amber ledger." in procedure.read_text()
+        assert "Compare the cobalt recovery logs." in skill.read_text()
+        assert attachment.read_text() == "original attachment\n"
+        (memory,) = [
+            item
+            for item in await world.app.knowledge.items(world.app.user)
+            if item.kind == "memory"
+        ]
+        assert memory.expires == expires and memory.status == "approved"
+        assert memory.path is not None
+        assert "restor" in memory.path.read_text().lower()
+        for path in (procedure, skill, memory.path):
+            assert any(
+                str(path) in (entry.get("md") or "") for entry in writer.entries()
+            )
+
+        await ask(
+            writer,
+            "Find the Vendor Baseline in Knowledge and attempt to append "
+            "'New vendor exception.' using its revision and the workspace write tool. "
+            "If the tool refuses, report its error and leave the page alone.",
+        )
+        assert reference.read_text() == original_reference
+        assert any(
+            entry.get("title") == "knowledge_write" and entry.get("status") == "err"
+            for entry in writer.entries()
+        )
+
+        other = await world.spawn()
+        readers = (writer, other)
+        await asyncio.gather(
+            *(
+                ask(
+                    session,
+                    "Find the team's release procedure in Aegis Knowledge and read its full "
+                    "text and revision. Keep them for my next instruction. Make no edits yet.",
+                )
+                for session in readers
+            )
+        )
+
+        lines = ("Record the indigo result.", "Record the silver result.")
+        await asyncio.gather(
+            *(
+                ask(
+                    session,
+                    f"Append exactly '{line}' to the release procedure with the Aegis workspace "
+                    "write tool, using the revision from your preceding turn. Attempt once without "
+                    "rereading or retrying. Report any conflict and its current revision.",
+                )
+                for session, line in zip(readers, lines, strict=True)
+            )
+        )
+        current = procedure.read_text()
+        assert sum(line in current for line in lines) == 1
+        revision = sha256(procedure.read_bytes()).hexdigest()
+        loser = readers[int(lines[0] in current)]
+        assert any(
+            "stale" in json.dumps(entry).lower() and revision in json.dumps(entry)
+            for entry in loser.entries()
+        )
+    finally:
+        await world.stop()
