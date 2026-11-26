@@ -99,6 +99,13 @@ ID and change the revision when the file changes. History, restore and
 other personal operations still use the name. Existing files acquire IDs
 when read, without a migration.
 
+`knowledge.worktree_get` reads a Markdown file directly under `know-how/`
+in a session's current Git worktree. Supply the session's log ID and either
+the returned entry ID or a worktree-relative path such as
+`know-how/releasing.md`. The caller needs read access to the session, and
+the entry ID must belong to that worktree. The read returns the document
+and its content revision. This operation leaves the file in its worktree.
+
 ## Expired and stale memories
 
 A temporary memory past its day is flagged expired and leaves the block

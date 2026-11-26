@@ -27,10 +27,14 @@ import os
 import re
 import subprocess
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .importer import MAX_FILE_BYTES, regular_bytes
+from .items import FRONT, Item, _split, read_item, source_id
 from .. import launch
 from ..journal import paths, shell
+from ..ops import OpError
 from ..transcript.entries import NOTICE_HEADER
 
 if TYPE_CHECKING:
@@ -61,6 +65,56 @@ def describe(text: str) -> str:
     found = when or BOLD_WHEN.search(text) or HEADING.search(text)
     line = " ".join(found.group(1).split()) if found else ""
     return line[:DESCRIPTION_CHARS]
+
+
+def _parse_doc(text: str, name: str, path: Path) -> Item:
+    text = text.replace("\r\n", "\n")
+    meta, body = _split(text) if FRONT.match(text) else ({}, text)
+    description = str(meta.get("when") or meta.get("description") or describe(text))
+    return Item("skill", name, description, body, meta, path)
+
+
+def read_entry(
+    cwd: str, *, entry_id: str | None, relative_path: str | None
+) -> tuple[Item, str] | None:
+    """Read a know-how document in the given session's own Git worktree."""
+    if not cwd or not Path(cwd).is_dir():
+        return None
+    _, _, top = paths.place(cwd)
+    if top is None:
+        return None
+    root = Path(top)
+    if entry_id is not None:
+        source, _, relative_path = entry_id.partition(":")
+        if source != source_id(root):
+            return None
+    parts = (relative_path or "").split("/")
+    if len(parts) != 2 or parts[0] != FOLDER or not DOC_NAME.fullmatch(parts[1]):
+        return None
+    name = parts[1]
+    path = root / FOLDER / name
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    try:
+        root_fd = os.open(root, flags)
+        try:
+            folder_fd = os.open(FOLDER, flags, dir_fd=root_fd)
+            try:
+                return read_item(
+                    root,
+                    path,
+                    _parse_doc,
+                    path.stem,
+                    scope="workspace",
+                    read_bytes=lambda _: regular_bytes(
+                        Path(name), MAX_FILE_BYTES, dir_fd=folder_fd
+                    ),
+                )
+            finally:
+                os.close(folder_fd)
+        finally:
+            os.close(root_fd)
+    except (OSError, ValueError, OpError):
+        return None
 
 
 def read_docs(top: str) -> tuple[list[tuple[str, str]], int]:

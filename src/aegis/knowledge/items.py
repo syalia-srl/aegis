@@ -154,6 +154,7 @@ def read_item(
     name: str,
     *,
     scope: Literal["personal", "workspace"],
+    read_bytes: Callable[[Path], bytes] = Path.read_bytes,
 ) -> tuple[Item, str]:
     """Read a known file once, keeping the revision of the exact bytes read."""
     relative_path = path.relative_to(root).as_posix()
@@ -162,7 +163,7 @@ def read_item(
         raise ValueError("the file is outside its knowledge source")
     if not resolved.is_file():
         raise FileNotFoundError(path)
-    data = resolved.read_bytes()
+    data = read_bytes(resolved)
     text = data.decode("utf-8")
     item = replace(
         parse(text, name, path),

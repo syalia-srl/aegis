@@ -783,6 +783,11 @@ worktree is a distinct root. The pair identifies the entry across edits.
 directly from disk. The body, full file text and SHA-256 revision come from
 the same bytes. A person's edit is saved approved, guarded by that revision
 as its edit stamp and checked under the store's lock.
+`knowledge.worktree_get` applies the same identity and revision to a
+know-how document. The caller names a session they may read. Its working
+directory determines the Git worktree, and the file is read under that
+worktree's `know-how/` directory without following symlinks. The operation
+reads one file on demand and does not build an index.
 `/setup`'s import (`knowledge.import`, `knowledge/importer.py`) reads each
 ticked source in a thread, never on the event loop, and saves it with `fresh`,
 which refuses a name any item holds. The ticks are the approval only in a

@@ -558,6 +558,14 @@ class _knowledge:
         duplicates: bool = ...,
     ) -> Any:
         """How your skills and memories are used: per item, how often it was hinted, read, invoked or run, when it was last used, and its flags (expired, or stale:<path> for a quoted path that is gone). unused_days keeps only the items not used in that many days, flag only the items with that flag. never_recalled marks an item hinted at least 10 times and never read or invoked. duplicates adds the pairs of likely duplicates (checks.duplicates), each pair once."""
+    async def worktree_get(
+        self,
+        *,
+        log_id: str,
+        entry_id: str | None = ...,
+        relative_path: str | None = ...,
+    ) -> Any:
+        """Read a know-how document in a session's Git worktree, by ID or path."""
 
 class _layout:
     async def dock(self, *, log_id: str, pane: str, where: str) -> Any:

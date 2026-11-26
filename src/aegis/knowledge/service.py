@@ -33,7 +33,7 @@ from collections.abc import Awaitable, Callable
 from datetime import date
 from pathlib import Path
 
-from . import checks, hint
+from . import checks, hint, know_how
 from .embed import Embedder, Loader, Vector, available, fastembed_loader
 from .items import Item
 from .search import QUERY_CHARS, Index, text_of
@@ -160,6 +160,13 @@ class Knowledge:
         if name is not None:
             return await asyncio.to_thread(self.store.read, principal, name)
         return None
+
+    async def read_worktree(
+        self, cwd: str, *, entry_id: str | None, relative_path: str | None
+    ) -> tuple[Item, str] | None:
+        return await asyncio.to_thread(
+            know_how.read_entry, cwd, entry_id=entry_id, relative_path=relative_path
+        )
 
     async def query_vector(self, text: str) -> Vector | None:
         """The vector of a search's query, encoded in a thread; None without

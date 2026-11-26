@@ -458,6 +458,12 @@ class ReadItem(_Strict):
     entry_id: str | None = None
 
 
+class ReadWorktreeItem(_Strict):
+    log_id: str = Field(min_length=1)
+    entry_id: str | None = None
+    relative_path: str | None = None
+
+
 class PutItem(_Strict):
     name: str
     text: str = Field(min_length=1)
@@ -1444,8 +1450,7 @@ def register_knowledge_ops(app: App) -> None:
     # The Knowledge view's ops: a person's, never an agent's, on the caller's
     # own store, an admin's included.
 
-    def row(owner: str, it: Item, used: dict) -> dict:
-        u = used.get(it.name, {})
+    def entry_fields(it: Item) -> dict:
         return {
             "id": it.id,
             "source_id": it.source_id,
@@ -1457,10 +1462,16 @@ def register_knowledge_ops(app: App) -> None:
             "revision": it.revision,
             "lifetime": it.lifetime,
             "expires": expiry.isoformat() if (expiry := it.expires) else None,
-            "kind": it.kind,
             "name": it.name,
             "description": it.description,
             "status": it.status,
+        }
+
+    def row(owner: str, it: Item, used: dict) -> dict:
+        u = used.get(it.name, {})
+        return {
+            **entry_fields(it),
+            "kind": it.kind,
             "flags": kn.flags_of(owner, it.name, it.expired()),
             "last_used": u.get("last_used"),
             "reads": u.get("read", 0) + u.get("invoked", 0),
@@ -1539,6 +1550,31 @@ def register_knowledge_ops(app: App) -> None:
             "stamp": it.revision,
             "files": files,
         }
+
+    @r.op(
+        "knowledge.worktree_get",
+        ReadWorktreeItem,
+        names=(("log_id", "session"),),
+        access="read",
+        local=True,
+    )
+    async def knowledge_worktree_get(p: ReadWorktreeItem, caller):
+        """Read a know-how document in a session's Git worktree, by ID or path."""
+        log_id = app.session_of("session", p.log_id)
+        session = app.view_of(log_id) if log_id else None
+        if session is None or not app.policy.can(app.who(caller).who, "read", session):
+            raise OpError("no_session", f"no session {p.log_id!r}")
+        if (p.entry_id is None) == (p.relative_path is None):
+            raise OpError(
+                "bad_params", "supply exactly one of entry_id or relative_path"
+            )
+        result = await kn.read_worktree(
+            session.cwd, entry_id=p.entry_id, relative_path=p.relative_path
+        )
+        if result is None:
+            raise OpError("not_found", "no matching know-how entry in this worktree")
+        it, text = result
+        return {**entry_fields(it), "kind": "doc", "body": it.body, "text": text}
 
     @r.op("knowledge.put", PutItem)
     async def knowledge_put(p: PutItem, caller):
