@@ -106,6 +106,50 @@ the returned entry ID or a worktree-relative path such as
 the entry ID must belong to that worktree. The read returns the document
 and its content revision. This operation leaves the file in its worktree.
 
+## Read-only source catalog
+
+Call `knowledge_catalog` with no arguments in an agent session to list its
+personal entries and the sources visible in its worktree. From the terminal,
+run `aegis call knowledge_catalog log_id=SESSION`. Pass `entry_id=ID` to
+read the body, original text, and content revision. The session selects its
+Git checkout's `know-how/` directory, including documents beyond the
+automatic notice's first 50. Without a session, a terminal call lists the
+caller's personal store.
+
+The catalog starts with `.claude/skills` and `.codex/skills` under the
+server's configuration directory. A missing default directory is skipped.
+Set `knowledge.sources` in YAML or in Settings under Search embeddings →
+sources to replace the default list. The Settings field accepts JSON. Use
+an empty list to disable these roots.
+
+```yaml
+knowledge:
+  sources:
+    - root: .claude/skills
+      format: skill
+    - root: .codex/skills
+      format: skill
+    - root: docs/runbooks
+      format: markdown
+      include: ['**/*.md']
+      exclude: ['drafts', 'private/**']
+```
+
+Roots may be absolute or relative to the configuration directory. Patterns
+match paths relative to the source root. The default include pattern is
+`**/*.md`. A skill contributes its `SKILL.md` and the names of its
+resources. Opening the entry reads Markdown and has no effect on skill
+invocation. The catalog skips symbolic links and reports unreadable paths
+in its errors. The host policy can deny a root for a caller and session.
+Personal entries retain their own store boundary.
+
+At startup the server scans configured sources, then refreshes them and
+the worktrees in use every five seconds. A catalog call for a newly
+encountered checkout can scan it immediately. Removing a configured root
+withdraws it on the next catalog call and leaves its files in place. The Knowledge
+view, personal search and skill commands continue to use their existing
+readers.
+
 ## Expired and stale memories
 
 A temporary memory past its day is flagged expired and leaves the block

@@ -285,3 +285,143 @@ def test_the_cards_edit_opens_the_view_on_the_item(server, page):
     page.wait_for_selector("#a2[data-view=knowledge] .kdetail .ked .cm-content")
     assert page.inner_text(".kdetail .kname") == "merge-after-green"
     assert page.errors == []
+
+
+def test_agent_reads_live_knowledge_source(server, page):
+    from os import environ
+    from pathlib import Path
+    from time import monotonic, sleep
+
+    def wait_for_startup_scan():
+        deadline = monotonic() + 10
+        while monotonic() < deadline:
+            if any(
+                "knowledge source startup scan finished (1 roots)" in line
+                for line in server.lines
+            ):
+                return
+            sleep(0.05)
+        pytest.fail(
+            "the server did not finish scanning the configured root before the first read"
+        )
+
+    def result():
+        said = page.locator(".row.prose .md").last.text_content()
+        assert said.startswith("mcp ok:")
+        return json.loads(said.removeprefix("mcp ok: "))
+
+    def catalog(turn, **args):
+        page.fill("#input", f"/mcp knowledge_catalog {json.dumps(args)}")
+        page.press("#input", "Enter")
+        turns_done(page, turn)
+        return result()
+
+    server.stop()
+    config = server.root / ".aegis.yaml"
+    config.write_text(config.read_text() + "\nknowledge: {sources: [{root: guides}]}\n")
+    guide = server.root / "guides" / "release.md"
+    guide.parent.mkdir()
+    guide.write_text("---\ntitle: Release checklist\n---\nBuild the package.\n")
+    retired = guide.with_name("retired.md")
+    retired.write_text("Old procedure.\n")
+    server.start()
+    wait_for_startup_scan()
+
+    page.goto(server.url)
+    spawn(page, "/mcp knowledge_catalog {}")
+    before = {entry["name"]: entry for entry in result()["items"]}
+    assert set(before) == {"release", "retired"}
+    entry = before["release"]
+    assert entry["title"] == "Release checklist"
+
+    guide.write_text(
+        "---\ntitle: Release checklist\n---\nVerify the package checksum.\n"
+    )
+    guide.with_name("added.md").write_text("New procedure.\n")
+    retired.unlink()
+    # No catalog request occurs between the edits and the scheduled refresh.
+    page.wait_for_timeout(5500)
+    after = {row["name"]: row for row in catalog(2)["items"]}
+    assert set(after) == {"release", "added"}
+    assert after["release"]["id"] == entry["id"]
+    got = catalog(3, entry_id=entry["id"])
+    assert got["body"] == "Verify the package checksum.\n"
+    assert got["revision"] != entry["revision"]
+
+    server.stop()
+    guide.write_text("Edited while the server was stopped.\n")
+    server.start()
+    wait_for_startup_scan()
+    page.goto(server.url)
+    spawn(page, f"/mcp knowledge_catalog {json.dumps({'entry_id': entry['id']})}")
+    recovered = result()
+    assert recovered["body"] == "Edited while the server was stopped.\n"
+    assert recovered["id"] == entry["id"] and recovered["revision"] != got["revision"]
+
+    if evidence := environ.get("WIKI_SOURCE_EVIDENCE"):
+        evidence = Path(evidence)
+        shown = page.locator(".row.prose .md").last
+        shown.screenshot(path=str(evidence / "desktop.png"))
+        page.set_viewport_size({"width": 390, "height": 844})
+        if page.locator("#a2").get_attribute("data-side") == "open":
+            page.click("#nav-side")
+        page.wait_for_function("document.querySelector('#a2').dataset.side !== 'open'")
+        shown.screenshot(path=str(evidence / "phone.png"))
+        (evidence / "reconciliation.txt").write_text(
+            f"Initial startup scan completed before the first catalog call.\n"
+            f"Initial entries: {', '.join(sorted(before))}\n"
+            f"Entries after scheduled scan: {', '.join(sorted(after))}\n"
+            f"Same entry ID after live edit: {got['id'] == entry['id']}\n"
+            f"Live body: {got['body']}"
+            f"Revision changed after live edit: {got['revision'] != entry['revision']}\n"
+            f"Restart scan completed before the first catalog call.\n"
+            f"Same entry ID after restart: {recovered['id'] == entry['id']}\n"
+            f"Recovered body: {recovered['body']}"
+            f"Revision changed after offline edit: {recovered['revision'] != got['revision']}\n"
+        )
+
+
+def test_catalog_discovers_default_skill_roots_on_startup(server, page):
+    from os import environ
+    from pathlib import Path
+
+    server.stop()
+    for harness in ("claude", "codex"):
+        skill = server.root / f".{harness}" / "skills" / f"{harness}-release"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text(
+            f"---\ndescription: Release with {harness}\n---\nCheck the package.\n"
+        )
+        (skill / "check.py").write_text("raise RuntimeError('Must not execute')\n")
+    server.start()
+    page.goto(server.url)
+    spawn(page, "/mcp knowledge_catalog {}")
+    result = page.locator(".row.prose .md").last
+    listing = json.loads(result.text_content().removeprefix("mcp ok: "))
+    entries = {entry["name"]: entry for entry in listing["items"]}
+    assert set(entries) == {"claude-release", "codex-release"}
+    assert {source["root"] for source in listing["sources"]} == {
+        str(server.root / ".claude/skills"),
+        str(server.root / ".codex/skills"),
+    }
+    assert listing["errors"] == []
+    for name, entry in sorted(entries.items()):
+        assert entry["kind"] == "skill"
+        assert entry["relative_path"] == f"{name}/SKILL.md"
+        assert entry["files"] == ["check.py"]
+    if evidence := environ.get("WIKI_SOURCE_EVIDENCE"):
+        (Path(evidence) / "default-skills.txt").write_text(
+            "Fresh aegis serve with no knowledge.sources setting.\n"
+            + "".join(
+                f"{name}: {entry['relative_path']} ({', '.join(entry['files'])})\n"
+                for name, entry in sorted(entries.items())
+            )
+        )
+
+    config = server.root / ".aegis.yaml"
+    config.write_text(config.read_text() + "\nknowledge: {sources: []}\n")
+    page.fill("#input", "/mcp knowledge_catalog {}")
+    page.press("#input", "Enter")
+    turns_done(page, 2)
+    listing = json.loads(result.text_content().removeprefix("mcp ok: "))
+    assert listing == {"items": [], "sources": [], "errors": []}

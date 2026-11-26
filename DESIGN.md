@@ -788,6 +788,20 @@ know-how document. The caller names a session they may read. Its working
 directory determines the Git worktree, and the file is read under that
 worktree's `know-how/` directory without following symlinks. The operation
 reads one file on demand and does not build an index.
+The read-only catalog combines the caller's personal entries, the selected
+session's Git know-how, and the configured roots. The default roots are
+`.claude/skills` and `.codex/skills` under the configuration directory. An
+explicit source list replaces these defaults. The catalog checks session
+visibility and the host's root policy before requesting an external snapshot.
+`src/aegis/knowledge/sources.py` walks directory descriptors without following
+symlinks, records unreadable paths, and reuses parsed files with the same stat
+signature. A background task starts at server boot and scans the configured
+roots, the configuration checkout, and live session worktrees. It refreshes
+those roots and recently read worktrees on the service's five-second cadence,
+publishing a complete snapshot per root. A catalog read uses the last
+published snapshot or joins the initial scan for a new root. Source
+configuration is reread through Config; a removed root immediately stops
+contributing entries. Catalog reads do not load or execute skills.
 `/setup`'s import (`knowledge.import`, `knowledge/importer.py`) reads each
 ticked source in a thread, never on the event loop, and saves it with `fresh`,
 which refuses a name any item holds. The ticks are the approval only in a
