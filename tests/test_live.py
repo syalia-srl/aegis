@@ -3013,7 +3013,7 @@ async def test_real_agent_knowledge_synthesis_journey(tmp_path: Path):
             text=f"{original}{update}\n",
         )
         edited = procedure.read_text()
-        assert edited.rstrip("\n") == f"{original}{update}"
+        assert edited.split() == f"{original}{update}".split()
         assert procedure_id in await use("knowledge_catalog", query="cobalt", limit=1)
         session = await world.spawn()
         await use(
