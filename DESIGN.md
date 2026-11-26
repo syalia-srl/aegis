@@ -818,6 +818,16 @@ workspace. The dated `memory.remind` operation uses the same personal
 revision check, person-turn approval, history and Undo as `memory.save`,
 and returns the saved path.
 
+`knowledge.synthesize` uses the configured `knowledge-synthesis` queue.
+The queue counts the tool-free Claude Code subprocess as a worker. It hands
+the generator only the requester-visible text collected by BM25 and bounded
+link traversal. The structured result maps numbered claims to catalog IDs and
+revisions. A revision-qualified catalog read verifies the current source bytes.
+The task log keeps the result until the recipient inbox accepts it. Synthesis
+callbacks carry a stable queue task identity, so recovery can retry an
+unconfirmed delivery without creating a second inbox response. Saving a guide
+is an explicit Knowledge write.
+
 A catalog query scores one BM25 corpus containing only entries visible to the
 requester, with title and description weighted above the full body. The index
 and ranking run in a thread. The service keeps one combined index keyed by

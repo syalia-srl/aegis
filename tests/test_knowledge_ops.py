@@ -397,3 +397,135 @@ async def test_agents_write_selected_pages_and_personal_reminder(
     assert history.log(memory.parent.parent, "memories/restore-this-week.md")[0][
         "message"
     ] == ("save memory restore-this-week")
+
+
+@pytest.mark.parametrize(
+    "mode", ["ok", "no-match", "fail", "slow", "retry", "restart", "restart-delivered"]
+)
+async def test_task_synthesis_from_the_agent_inbox(
+    tmp_path, fake_claude, monkeypatch, mode
+):
+    from .test_agents import CONFIG, World
+
+    history.ensure_repo(tmp_path)
+    config = CONFIG.replace(
+        "queues:\n", "queues:\n  knowledge-synthesis: {agent: opus}\n"
+    )
+    (tmp_path / ".aegis.yaml").write_text(
+        config + "knowledge: {sources: [{root: guides}]}\n"
+    )
+    how = tmp_path / "know-how"
+    guides = tmp_path / "guides"
+    how.mkdir()
+    guides.mkdir()
+    first = how / "recovery.md"
+    second = guides / "retention.md"
+    first.write_text(
+        "# Recovery\nKeep the zirconium ledger for seven days. [[Retention]]\n"
+    )
+    second.write_text("# Retention\nKeep the ledger for thirty days. [[Recovery]]\n")
+    monkeypatch.setenv(
+        "FAKE_CLAUDE_ONESHOT", mode if mode in ("fail", "slow") else "ok"
+    )
+    world = await World(tmp_path, fake_claude).start()
+    try:
+        s = await world.spawn()
+        app = world.app
+        interrupted = asyncio.Event()
+        if mode in ("retry", "restart", "restart-delivered"):
+            deliver = s.deliver
+
+            async def interrupt_once(header, body, **kwargs):
+                if not kwargs.get("durable") or interrupted.is_set():
+                    return await deliver(header, body, **kwargs)
+                if mode == "restart-delivered":
+                    await deliver(header, body, **kwargs)
+                    await until(
+                        lambda: any(
+                            e["kind"] == "inbox"
+                            and e["status"] == "ok"
+                            and e["title"] == header.removeprefix("> from ")
+                            for e in s.entries()
+                        )
+                    )
+                interrupted.set()
+                if mode == "retry":
+                    raise OSError("injected delivery failure")
+                raise asyncio.CancelledError
+
+            monkeypatch.setattr(s, "deliver", interrupt_once)
+        reply = ok(
+            await turn(
+                s,
+                mcp(
+                    "knowledge_synthesize",
+                    task="nonexistentfruit" if mode == "no-match" else "zirconium",
+                ),
+            )
+        )
+        task = app.queues.tasks[reply["task_id"]]
+        if mode == "slow":
+            await until(lambda: task.status == "running")
+            await app.queues.cancel(task)
+            assert task.status == "cancelled"
+        else:
+            await until(lambda: task.status in ("completed", "failed"))
+
+        def delivered():
+            return [
+                e
+                for e in s.entries()
+                if e["kind"] == "inbox"
+                and e["status"] == "ok"
+                and f"task#{task.id}" in e["title"]
+            ]
+
+        if mode.startswith("restart"):
+            await asyncio.wait_for(interrupted.wait(), 5)
+            assert not task.callback_delivered
+            log_id = s.log_id
+            await world.restart()
+            app = world.app
+            s = world.session(log_id)
+            task = app.queues.tasks[task.id]
+        await until(lambda: delivered() and not s.busy and task.callback_delivered)
+        if mode == "retry":
+            assert interrupted.is_set()
+        await app.queues._callback(task, "ok", "duplicate result")
+        assert len(delivered()) == 1
+        assert "duplicate result" not in str(s.entries()) + str(s.held)
+        if task.status == "completed":
+            guide = json.loads(task.result)
+            if mode != "no-match":
+                assert [c["relative_path"] for c in guide["citations"]] == [
+                    "know-how/recovery.md",
+                    "retention.md",
+                ]
+                assert guide["contradictions"][0]["sources"] == [1, 2]
+                for citation in guide["citations"]:
+                    params = {
+                        "entry_id": citation["id"],
+                        "expected_revision": citation["revision"],
+                    }
+                    page = ok(await turn(s, mcp("knowledge_catalog", **params)))
+                    assert page["revision"] == citation["revision"]
+                first.write_text(first.read_text() + "Changed.\n")
+                answer = await turn(
+                    s,
+                    mcp(
+                        "knowledge_catalog",
+                        entry_id=guide["citations"][0]["id"],
+                        expected_revision=guide["citations"][0]["revision"],
+                    ),
+                )
+                assert answer.startswith("mcp error: revision_changed")
+            else:
+                assert guide["citations"] == []
+                assert guide["gaps"] == ["No matching visible Knowledge pages."]
+        if mode == "fail":
+            assert task.status == "failed"
+        assert set(how.iterdir()) == {first}
+        assert set(guides.iterdir()) == {second}
+        assert not await app.knowledge.items(app.user)
+    finally:
+        await world.stop()
