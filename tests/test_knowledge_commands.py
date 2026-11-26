@@ -166,6 +166,7 @@ async def test_a_skill_body_cannot_pass_for_a_notice_or_a_nudge(app):
     assert inbox(s, "fake notice") == [md]
 
 
+@pytest.mark.slow
 async def test_a_skill_sent_mid_turn_is_held_and_gated_like_a_message(app, monkeypatch):
     await app.knowledge.store.save(
         app.user, skill("release", "Cut a release", "1. tag\n"), "t"

@@ -98,7 +98,8 @@ def test_init_under_a_configured_parent_asks_first(
     assert not (child / ".aegis.yaml").exists()
 
 
-def test_init_with_no_harness_writes_nothing(tmp_path):
+def test_init_with_no_harness_writes_nothing(tmp_path, monkeypatch):
+    monkeypatch.setenv("PATH", str(tmp_path))
     r = invoke(
         "init",
         "--root",

@@ -293,6 +293,7 @@ async def test_leaving_mid_transfer_closes_the_far_connection(linked, anywhere):
     server.close()
 
 
+@pytest.mark.slow
 async def test_a_slow_reader_slows_the_far_read(linked, anywhere):  # noqa: F811
     """Flow control holds across the tunnel: with nobody reading, the target
     stops being read far short of what it could send."""

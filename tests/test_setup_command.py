@@ -2,6 +2,8 @@
 """/setup: the one turn it delivers, and the record each run leaves (#612;
 the spec's sections 03 and 07)."""
 
+import pytest
+
 from aegis import setup
 
 from .conftest import until
@@ -69,6 +71,7 @@ def inbox(s) -> list[str]:
     ]
 
 
+@pytest.mark.slow
 async def test_setup_delivers_one_turn_and_no_session(app):
     lid = await spawn_here(app)
     s = app.sessions.sessions[lid]
@@ -80,6 +83,7 @@ async def test_setup_delivers_one_turn_and_no_session(app):
     assert len(app.sessions.sessions) == before
 
 
+@pytest.mark.slow
 async def test_the_setup_line_begins_a_person_turn(app):
     """The person's /setup line is their own message, as /remember is: the
     turn it begins may import approved (knowledge_ops.honoured)."""
