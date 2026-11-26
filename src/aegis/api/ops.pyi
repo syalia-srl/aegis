@@ -533,6 +533,8 @@ class _knowledge:
         entry_id: str | None = ...,
         query: str | None = ...,
         limit: int = ...,
+        source_id: str | None = ...,
+        kind: Literal["all", "skill", "memory", "flagged"] = ...,
     ) -> Any:
         """Search or list visible knowledge entries, or read one by its qualified ID."""
     async def get(self, *, name: str | None = ..., entry_id: str | None = ...) -> Any:
