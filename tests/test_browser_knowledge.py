@@ -321,7 +321,9 @@ def test_agent_reads_live_knowledge_source(server, page):
     config.write_text(config.read_text() + "\nknowledge: {sources: [{root: guides}]}\n")
     guide = server.root / "guides" / "release.md"
     guide.parent.mkdir()
-    guide.write_text("---\ntitle: Release checklist\n---\nBuild the package.\n")
+    guide.write_text(
+        "---\ntitle: Release checklist\n---\nBuild the package. [[Added]]\n"
+    )
     retired = guide.with_name("retired.md")
     retired.write_text("Old procedure.\n")
     server.start()
@@ -334,29 +336,37 @@ def test_agent_reads_live_knowledge_source(server, page):
     entry = before["release"]
     assert entry["title"] == "Release checklist"
 
+    assert catalog(2, entry_id=entry["id"])["links"][0]["status"] == "pending"
+
     guide.write_text(
-        "---\ntitle: Release checklist\n---\nVerify the package checksum.\n"
+        "---\ntitle: Release checklist\n---\nVerify the package checksum. [[Added]]\n"
     )
     guide.with_name("added.md").write_text("New procedure.\n")
     retired.unlink()
     # No catalog request occurs between the edits and the scheduled refresh.
     page.wait_for_timeout(5500)
-    after = {row["name"]: row for row in catalog(2)["items"]}
+    after = {row["name"]: row for row in catalog(3)["items"]}
     assert set(after) == {"release", "added"}
     assert after["release"]["id"] == entry["id"]
-    got = catalog(3, entry_id=entry["id"])
-    assert got["body"] == "Verify the package checksum.\n"
+    got = catalog(4, entry_id=entry["id"])
+    assert got["body"] == "Verify the package checksum. [[Added]]\n"
     assert got["revision"] != entry["revision"]
+    target = got["links"][0]["target_id"]
+    assert target == after["added"]["id"]
+    neighbor = catalog(5, entry_id=target)
+    assert neighbor["backlinks"][0]["id"] == entry["id"]
 
     server.stop()
-    guide.write_text("Edited while the server was stopped.\n")
+    guide.write_text("Edited while the server was stopped. [[Added]]\n")
     server.start()
     wait_for_startup_scan()
     page.goto(server.url)
     spawn(page, f"/mcp knowledge_catalog {json.dumps({'entry_id': entry['id']})}")
     recovered = result()
-    assert recovered["body"] == "Edited while the server was stopped.\n"
+    assert recovered["body"] == "Edited while the server was stopped. [[Added]]\n"
     assert recovered["id"] == entry["id"] and recovered["revision"] != got["revision"]
+
+    assert recovered["links"][0]["target_id"] == target
 
     if evidence := environ.get("WIKI_SOURCE_EVIDENCE"):
         evidence = Path(evidence)
@@ -373,6 +383,8 @@ def test_agent_reads_live_knowledge_source(server, page):
             f"Entries after scheduled scan: {', '.join(sorted(after))}\n"
             f"Same entry ID after live edit: {got['id'] == entry['id']}\n"
             f"Live body: {got['body']}"
+            f"Resolved target: {target}\n"
+            f"Target backlink: {neighbor['backlinks'][0]['id']}\n"
             f"Revision changed after live edit: {got['revision'] != entry['revision']}\n"
             f"Restart scan completed before the first catalog call.\n"
             f"Same entry ID after restart: {recovered['id'] == entry['id']}\n"
