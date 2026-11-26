@@ -1,11 +1,7 @@
 # ruff: noqa: F811  (fixtures imported from test_member_view and test_commands)
 """The memory tools and /remember, through the fake claude's real MCP calls."""
 
-import asyncio
 import json
-import subprocess
-from datetime import date, timedelta
-from pathlib import Path
 
 import pytest
 from websockets.asyncio.client import connect
@@ -117,7 +113,6 @@ async def test_read_permission_sessions_may_search_but_not_save(agents_world):
     s = agents_world.session(r["log_id"])
     ok(await turn(s, mcp("memory_search", query="anything")))
     ok(await turn(s, mcp("knowledge_stats")))
-    ok(await turn(s, mcp("knowledge_catalog")))
     said = await turn(s, mcp("memory_save", name="x", description="d", body="b"))
     assert said.startswith("mcp error: read_only"), said
 
@@ -198,16 +193,9 @@ async def test_catalog_search_read_and_revocation_over_mcp_and_browser_rpc(
             return response
 
         ws_search = (await catalog(1, query))["result"]
-        assert ws_search["total"] == 1
-        (ws_hit,) = ws_search["items"]
-        assert ws_hit["id"] == hit["id"] and ws_hit["revision"] == hit["revision"]
-        assert ws_hit["reads"] == hit["reads"] + 1 and ws_hit["last_used"] is not None
-        for request, before in ((ref, read), (target, neighbor)):
-            after = (await catalog(2, request))["result"]
-            assert after.pop("reads") == before.pop("reads") + 1
-            before.pop("last_used")
-            assert after.pop("last_used") is not None
-            assert after == before
+        assert ws_search["total"] == 1 and ws_search["items"] == [hit]
+        assert (await catalog(2, ref))["result"] == read
+        assert (await catalog(5, target))["result"] == neighbor
 
         monkeypatch.setattr(
             agents_world.app.policy,
@@ -246,115 +234,3 @@ async def test_agent_reads_personal_catalog_hit_by_id(agents_world):
     read = ok(await turn(session, mcp("knowledge_catalog", entry_id=hit["id"])))
     assert read["id"] == hit["id"] and read["revision"] == hit["revision"]
     assert read["body"].strip().endswith("Zirconium ledger.")
-
-
-async def test_agents_write_selected_pages_and_personal_reminder(
-    agents_world, monkeypatch
-):
-    w = agents_world
-    root = w.root
-    subprocess.run(["git", "init", "-q", str(root)], check=True)
-    how = root / "know-how"
-    how.mkdir()
-    procedure = how / "release.md"
-    procedure.write_text("---\nwhen: Releasing\n---\nCheck the backup.\n")
-    skill = root / ".codex" / "skills" / "release"
-    skill.mkdir(parents=True)
-    skill_page = skill / "SKILL.md"
-    skill_page.write_text(
-        "---\nname: release\ndescription: Release steps\n---\nFollow the procedure.\n"
-    )
-    attachment = skill / "notes.txt"
-    attachment.write_bytes(b"original notes")
-    with (root / ".aegis.yaml").open("a") as config:
-        config.write(
-            "knowledge:\n  sources:\n    - root: .codex/skills\n      format: skill\n      include: [release/SKILL.md]\n"
-        )
-    first = await w.spawn()
-    second = await w.spawn()
-
-    async def call(session, tool, **params):
-        return await turn(session, mcp(tool, **params), by_person=True)
-
-    pages = ok(await call(first, "knowledge_catalog"))["items"]
-    by_path = {page["relative_path"]: page for page in pages}
-    doc = by_path["know-how/release.md"]
-    bundle = by_path["release/SKILL.md"]
-    assert doc["writable"] and not bundle["writable"]
-    assert doc["id"] != bundle["id"] and bundle["files"] == ["notes.txt"]
-
-    def edit(page, text):
-        return dict(entry_id=page["id"], expected_revision=page["revision"], text=text)
-
-    skill_text = (
-        "---\nname: release\ndescription: Release steps\n---\nConfirm recovery.\n"
-    )
-    refused = await call(first, "knowledge_write", **edit(bundle, skill_text))
-    assert refused.startswith("mcp error: forbidden"), refused
-    assert "Follow the procedure." in skill_page.read_text()
-    with (root / ".aegis.yaml").open("a") as config:
-        config.write("      writable: true\n")
-    with monkeypatch.context() as patch:
-        patch.setattr(w.app.policy, "knowledge_source_write", lambda *_: False)
-        refused = await call(first, "knowledge_write", **edit(bundle, skill_text))
-        assert refused.startswith("mcp error: forbidden"), refused
-        assert "Follow the procedure." in skill_page.read_text()
-    saved = ok(await call(first, "knowledge_write", **edit(bundle, skill_text)))
-    assert saved["path"] == str(skill_page)
-    assert (
-        skill_page.read_text() == skill_text
-        and attachment.read_bytes() == b"original notes"
-    )
-    refused = await call(
-        first,
-        "knowledge_write",
-        **edit(
-            {**bundle, "id": bundle["id"].replace("SKILL.md", "notes.txt")}, "new notes"
-        ),
-    )
-    assert refused.startswith("mcp error: not_found"), refused
-    assert attachment.read_bytes() == b"original notes"
-
-    variants = [
-        "---\nwhen: Releasing\n---\nValidate the zirconium restore.\n",
-        "---\nwhen: Releasing\n---\nValidate the zirconium recovery.\n",
-    ]
-    replies = await asyncio.gather(
-        *(
-            call(session, "knowledge_write", **edit(doc, text))
-            for session, text in zip((first, second), variants, strict=True)
-        )
-    )
-    (written,) = [ok(reply) for reply in replies if reply.startswith("mcp ok: ")]
-    (conflict,) = [reply for reply in replies if reply.startswith("mcp error: stale")]
-    assert written["revision"] in conflict and written["path"] == str(procedure)
-    winner = next(i for i, reply in enumerate(replies) if reply.startswith("mcp ok: "))
-    assert procedure.read_text() == variants[winner]
-    found = ok(await call(second, "knowledge_catalog", query="zirconium"))["items"]
-    assert [page["id"] for page in found] == [doc["id"]]
-    assert found[0]["revision"] == written["revision"]
-    ok(await call(second, "knowledge_catalog", entry_id=doc["id"]))
-    used = await asyncio.to_thread(w.app.knowledge.usage.summary, w.app.user)
-    assert used[doc["id"]]["read"] == 1 and used[bundle["id"]]["read"] == 0
-
-    params = dict(
-        name="restore-this-week",
-        description="Personal restore assignment",
-        body=f"I will run the restore this week. See [[{doc['id']}]].",
-        lifetime="temporary",
-        expires=(date.today() + timedelta(days=5)).isoformat(),
-        paths=[str(root)],
-        asked=True,
-        expected_revision=None,
-    )
-    saved = ok(await call(first, "memory_save", **params))
-    assert saved["status"] == "approved" and saved["card"]
-    memory = Path(saved["path"])
-    assert memory.is_relative_to(w.app.roots.state_root)
-    assert params["expires"] in memory.read_text()
-    assert doc["id"] in memory.read_text()
-    refused = await call(second, "memory_save", **params)
-    assert refused.startswith("mcp error: stale") and saved["revision"] in refused
-    assert history.log(memory.parent.parent, "memories/restore-this-week.md")[0][
-        "message"
-    ] == ("save memory restore-this-week")

@@ -46,7 +46,7 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, Field
 
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 from . import launch
 from .skill_mcp import SkillToolError, stop_group
@@ -59,7 +59,7 @@ from .knowledge.items import (
     parse_skill,
     source_id,
 )
-from .knowledge.sources import Entry, Source, stale, write_page
+from .knowledge.sources import Entry, Source
 from .journal.paths import place
 from .monitors import iso_now
 from .ops import Caller, OpError
@@ -98,10 +98,6 @@ class ReadMemories(_Strict):
 
 
 class SaveMemory(_Strict):
-    expected_revision: str | None = Field(
-        None,
-        description="The personal memory revision from knowledge_catalog, or null to create.",
-    )
     name: str = Field(
         description="Lowercase letters, digits, - and _, such as 'deploy-host'. "
         "Saving an existing memory's name replaces it."
@@ -385,9 +381,8 @@ def remember_turn(text: str, now: str) -> tuple[str, str]:
         f"The person typed: /remember {text}\n\n"
         "Save this as one memory with memory_save and asked: true. Choose a "
         "short name, a one-line description and the type; make it temporary "
-        "with expires when it names a date or an event that will pass. Pass "
-        "expected_revision=null for a new memory, or read its revision first. "
-        "Then say in one line what you saved and its path.",
+        "with expires when it names a date or an event that will pass. Then "
+        "say in one line what you saved.",
     )
 
 
@@ -492,17 +487,6 @@ class CatalogItems(_Strict):
     source_id: str | None = Field(None, description="Filter results by source ID.")
     kind: Literal["all", "skill", "memory", "flagged"] = Field(
         "all", description="Filter results by kind or personal flags."
-    )
-
-
-class WritePage(_Strict):
-    entry_id: str = Field(
-        min_length=1,
-        description="The selected workspace entry ID from knowledge_catalog.",
-    )
-    expected_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
-    text: str = Field(
-        min_length=1, description="Complete Markdown page, including any front matter."
     )
 
 
@@ -653,7 +637,7 @@ def register_knowledge_ops(app: App) -> None:
         items = [memory(owner, n) for n in p.names]
         session = caller.log_id or ""
         for it in items:
-            rank = kn.read_rank(session, it.id)
+            rank = kn.read_rank(session, it.name)
             kn.usage.add(
                 owner,
                 session,
@@ -702,25 +686,12 @@ def register_knowledge_ops(app: App) -> None:
         }
         meta = {k: v for k, v in meta.items() if v is not None}
         it = Item("memory", p.name, p.description.strip(), p.body.rstrip() + "\n", meta)
-
-        def expect(current: Item | None) -> None:
-            revision = current.revision if current is not None else None
-            if revision != p.expected_revision:
-                raise stale(revision)
-
-        sha = await kn.store.save(
-            owner,
-            it,
-            author(caller),
-            expect=expect if "expected_revision" in p.model_fields_set else None,
-        )
+        sha = await kn.store.save(owner, it, author(caller))
         await kn.refresh(owner)  # the next send's hint sees it
         kn.usage.add(owner, caller.log_id or "", "memory", p.name, "saved")
         card = await after_save(caller, owner, asked, held, p.name, sha)
         out = saved_answer(p.name, status, card, p.asked and not asked)
         if (now := kn.store.get(owner, p.name)) is not None:
-            if "expected_revision" in p.model_fields_set:
-                out.update(id=now.id, path=str(now.path), revision=now.revision)
             # Its paths are looked for in the background: a hung or failing
             # read must not hold or fail a save that has committed.
             app.knowledge_check_soon(owner, [now])
@@ -863,7 +834,7 @@ def register_knowledge_ops(app: App) -> None:
                     "base64": base64.b64encode(data).decode("ascii"),
                 }
         session = caller.log_id or ""
-        rank = kn.read_rank(session, it.id)
+        rank = kn.read_rank(session, it.name)
         kn.usage.add(
             owner, session, "skill", it.name, "read", f"rank={rank}" if rank else None
         )
@@ -1466,7 +1437,7 @@ def register_knowledge_ops(app: App) -> None:
         for it in items:
             if p.kind and it.kind != p.kind:
                 continue
-            u = used.get(it.id, {})
+            u = used.get(it.name, {})
             last = u.get("last_used")
             if cutoff is not None and last is not None and last >= cutoff:
                 continue
@@ -1484,7 +1455,6 @@ def register_knowledge_ops(app: App) -> None:
             out.append(
                 {
                     "kind": it.kind,
-                    "id": it.id,
                     "name": it.name,
                     "description": it.description,
                     "status": it.status,
@@ -1523,19 +1493,14 @@ def register_knowledge_ops(app: App) -> None:
             "status": it.status,
         }
 
-    def counters(it: Item, used: dict) -> dict:
-        u = used.get(it.id, {})
-        return {
-            "last_used": u.get("last_used"),
-            "reads": u.get("read", 0) + u.get("invoked", 0),
-        }
-
     def row(owner: str, it: Item, used: dict) -> dict:
+        u = used.get(it.name, {})
         return {
             **entry_fields(it),
             "kind": it.kind,
             "flags": kn.flags_of(owner, it.name, it.expired()),
-            **counters(it, used),
+            "last_used": u.get("last_used"),
+            "reads": u.get("read", 0) + u.get("invoked", 0),
         }
 
     @r.op("knowledge.setting", Setting)
@@ -1621,85 +1586,12 @@ def register_knowledge_ops(app: App) -> None:
         _, _, top = await asyncio.to_thread(place, session.cwd)
         return who, session, Path(top) if top else None
 
-    async def catalog_sources(who, session, top: Path | None) -> list[Source]:
-        private, configured = await app.knowledge_source_settings()
-        if top is not None:
-            configured.insert(
-                0,
-                Source(
-                    top / "know-how",
-                    "know-how",
-                    worktree=top,
-                    private=private,
-                    writable=True,
-                ),
-            )
-        return list(
-            dict.fromkeys(
-                source
-                for source in configured
-                if not source.root.is_relative_to(private)
-                and app.policy.knowledge_source(who, session, source.root)
-            )
-        )
-
-    def can_write(who, session, source: Source) -> bool:
-        return source.writable and app.policy.knowledge_source_write(
-            who, session, source.root
-        )
-
-    @r.op("knowledge.write", WritePage, agent=True, local=True)
-    async def knowledge_write(p: WritePage, caller):
-        """Edit an existing workspace page chosen by its catalog ID. Follow the
-        person's destination, or infer it from their conversation, audience,
-        existing entries and repo conventions. Ask when the choice changes
-        who can use the entry and both destinations remain plausible. Pass
-        the revision you read and report the returned path. Use memory_save
-        for personal reminders. Follow the repo's review flow for its files."""
-        if not caller.log_id:
-            raise OpError("no_session", "workspace edits require a session")
-        who, session, top = await source_context(caller.log_id, caller)
-        wanted_source, _, wanted_path = p.entry_id.partition(":")
-        for source in await catalog_sources(who, session, top):
-            if source_id(source.worktree or source.root) != wanted_source:
-                continue
-            snapshot = await kn.source_snapshot(source)
-            if not app.policy.can(
-                who, "read", session
-            ) or not app.policy.knowledge_source(who, session, source.root):
-                continue
-            relative = PurePosixPath(wanted_path)
-            if source.worktree is not None:
-                if not relative.is_relative_to(
-                    source.root.relative_to(source.worktree)
-                ):
-                    continue
-                relative = relative.relative_to(
-                    source.root.relative_to(source.worktree)
-                )
-            entry = snapshot.entries.get(relative.as_posix())
-            if entry is None or entry.item.id != p.entry_id or entry.item.path is None:
-                continue
-            if not can_write(who, session, source):
-                raise OpError("forbidden", "the knowledge source is read-only")
-            try:
-                item = await asyncio.to_thread(
-                    write_page, source, entry, p.text, p.expected_revision
-                )
-            finally:
-                # A conflict can also discover a change from outside Aegis.
-                kn.sources.invalidate(entry.item.path)
-            kn.usage.add(principal(caller), caller.log_id, item.kind, item.id, "saved")
-            return {**entry_fields(item), "path": str(item.path)}
-        raise OpError("not_found", "no matching workspace page; read the catalog again")
-
     @r.op(
         "knowledge.catalog",
         CatalogItems,
         names=(("log_id", "session"),),
         access="read",
         agent=True,
-        read=True,
         local=True,
     )
     async def knowledge_catalog(p: CatalogItems, caller):
@@ -1714,7 +1606,20 @@ def register_knowledge_ops(app: App) -> None:
             who, session, top = await source_context(ref, caller)
             cwd = session.cwd
             worktree = str(top) if top is not None else None
-            configured = await catalog_sources(who, session, top)
+            private, configured = await app.knowledge_source_settings()
+            if top is not None:
+                configured.insert(
+                    0,
+                    Source(top / "know-how", "know-how", worktree=top, private=private),
+                )
+            configured = list(
+                dict.fromkeys(
+                    source
+                    for source in configured
+                    if not source.root.is_relative_to(private)
+                    and app.policy.knowledge_source(who, session, source.root)
+                )
+            )
 
         snapshots = await asyncio.gather(
             *(kn.source_snapshot(source) for source in configured)
@@ -1725,7 +1630,11 @@ def register_knowledge_ops(app: App) -> None:
             if p.entry_id is not None
             else None
         )
-        used = await asyncio.to_thread(kn.usage.summary, owner)
+        used = (
+            await asyncio.to_thread(kn.usage.summary, owner)
+            if personal is not None or p.entry_id is None
+            else {}
+        )
         personal_files = []
         if personal is not None and personal[0].kind == "skill":
             personal_files = await asyncio.to_thread(kn.store.entry_files, personal[0])
@@ -1755,10 +1664,8 @@ def register_knowledge_ops(app: App) -> None:
         def source_row(source: Source, entry: Entry) -> dict:
             return {
                 **entry_fields(entry.item),
-                **counters(entry.item, used),
                 "kind": "skill" if source.format == "skill" else "doc",
                 "files": list(entry.files),
-                "writable": can_write(who, session, source),
                 "root": str(source.worktree or source.root),
             }
 
@@ -1799,15 +1706,6 @@ def register_knowledge_ops(app: App) -> None:
                 raise OpError("not_found", "no matching knowledge entry")
             neighbors = await kn.catalog_neighbors(list(items.values()), p.entry_id)
             check_access("read")
-            rank = kn.read_rank(caller.log_id or "", it.id)
-            kn.usage.add(
-                owner,
-                caller.log_id or "",
-                it.kind,
-                it.id,
-                "read",
-                f"rank={rank}" if rank else None,
-            )
             return {
                 **page,
                 "body": it.body,
@@ -1868,7 +1766,6 @@ def register_knowledge_ops(app: App) -> None:
                     "scope": "workspace",
                     "include": list(source.include),
                     "exclude": list(source.exclude),
-                    "writable": can_write(who, session, source),
                 }
                 for source, _ in visible
             ],
@@ -1904,7 +1801,6 @@ def register_knowledge_ops(app: App) -> None:
         if result is None:
             raise OpError("not_found", "no matching know-how entry in this worktree")
         it, text = result
-        kn.usage.add(principal(caller), caller.log_id or "", it.kind, it.id, "read")
         return {**entry_fields(it), "kind": "doc", "body": it.body, "text": text}
 
     @r.op("knowledge.put", PutItem)

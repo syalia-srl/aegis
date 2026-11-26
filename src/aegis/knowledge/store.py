@@ -221,13 +221,6 @@ class Store:
     def _lock(self, principal: str) -> asyncio.Lock:
         return self._locks.setdefault(principal, asyncio.Lock())
 
-    def entry_id(self, principal: str, kind: str, name: str) -> str:
-        base = self.dir(principal)
-        file = self._path(base, kind, name)
-        if kind == "skill":
-            file /= "SKILL.md"
-        return f"{source_id(base)}:{file.relative_to(base).as_posix()}"
-
     def _path(self, base: Path, kind: str, name: str) -> Path:
         """A memory's file, or a skill's folder."""
         if kind == "memory":
@@ -247,7 +240,6 @@ class Store:
         extra: dict[str, bytes] | None = None,
         verb: str | None = None,
         fresh: bool = False,
-        expect: Expect | None = None,
     ) -> str:
         """Write ``item`` (and, for a skill, ``extra`` files in its folder) and
         commit; the commit's sha, "" when nothing changed. Refused with
@@ -272,9 +264,6 @@ class Store:
             other = "skill" if item.kind == "memory" else "memory"
             if self._path(base, other, item.name).exists():
                 raise OpError("name_taken", f"{item.name!r} already names another item")
-            if expect is not None:
-                current = await asyncio.to_thread(self.get, principal, item.name)
-                expect(current)
             held = self._path(base, item.kind, item.name).exists()
             if held and fresh:
                 raise OpError("name_taken", f"{item.name!r} already names an item")

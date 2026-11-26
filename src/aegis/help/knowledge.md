@@ -151,7 +151,6 @@ knowledge:
   sources:
     - root: .claude/skills
       format: skill
-      writable: true
     - root: .codex/skills
       format: skill
     - root: docs/runbooks
@@ -172,42 +171,6 @@ At startup the server scans configured sources, then refreshes them and
 the worktrees in use every five seconds. A catalog call for a newly
 encountered checkout can scan it immediately. Removing a configured root
 withdraws it on the next catalog call and leaves its files in place.
-
-## Write in the selected source
-
-Use the person's destination when they name one. Otherwise use the
-conversation, intended readers, existing entries and repository conventions.
-The current directory helps locate the checkout. Ask which audience should
-see the entry when both a personal and a shared destination still fit.
-
-- For an existing team procedure, read the page through the catalog in the
-  active checkout. Call `knowledge_write` with its entry ID, the
-  expected_revision from that read and the complete Markdown text. Inspect
-  the worktree diff and follow its review process.
-- For a personal reminder, call `memory_save` with the name and
-  expected_revision (null to create). Set the expiry for a temporary reminder
-  and use the paths field to associate it with the project. Use the catalog
-  ID in a wikilink if the reminder refers to a shared procedure.
-  Personal saves keep proposals, history and Undo.
-- For a workspace skill, select its catalog ID and update its `SKILL.md`
-  through `knowledge_write`. Its attachments stay in the skill's directory.
-  The workspace tool accepts only existing catalog pages.
-
-Report the saved path returned by these revision-checked calls. If a write
-returns stale, read the current revision
-and reconcile the changes before saving again. Worktree writes leave a
-normal file diff. An editor outside Aegis uses its own concurrency controls.
-
-The selected checkout's `know-how/` supports writes subject to host policy
-and file permissions. Configured roots are read-only unless the source
-sets `writable: true` and host policy permits the write. Catalog workspace
-results report whether the source allows editing. Try opt-in roots in a
-test workspace first. Search, follow a link, write a change and search again
-from a second session. Revoke writes with `writable: false`, remove a root
-to withdraw it from the catalog, and revert content using its own history.
-The personal tools, import, skill commands and existing session notices
-remain available during rollout. The knowledge.know_how setting controls
-the startup and repository-touch menus.
 
 ## Wiki links and backlinks
 
