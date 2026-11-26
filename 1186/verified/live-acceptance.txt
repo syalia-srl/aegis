@@ -1,0 +1,11 @@
+Commit c9774d85e2bf7a254e33f420c581f6ecfd8100aa
+Claude Code 2.1.309 and a local Qwen 3.5 4B model, 16384-token context.
+pytest -q --run-live -m live tests/test_live.py -k real_agent_chooses_contextual_knowledge_destinations
+1 passed, 41 deselected, 2 warnings in 83.53s (0:01:23)
+
+The agent selected the existing shared procedure and workspace skill from the catalog, and saved a personal reminder with its expiry.
+All three files and reported paths were verified. The original skill attachment was unchanged.
+A write to the vendor reference was refused and the file was unchanged.
+Both editors submitted the same pre-edit revision. One write succeeded and the loser reported the winning revision.
+
+29 passed, 7 warnings in 25.63s
