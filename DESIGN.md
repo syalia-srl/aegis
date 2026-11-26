@@ -807,13 +807,16 @@ personal usage rows are resolved by principal, kind and name when queried.
 
 `knowledge.write` edits an existing catalog page in the calling agent's
 session context. Configured sources opt in, while the active worktree's
-know-how supports writes subject to host policy. An atomic replacement
-beneath the verified root checks the expected content revision under a
-directory lock and reports the current revision on conflict. The source
-snapshot is invalidated so later reads and searches see the new bytes.
-Git review and attached files belong to the workspace. Personal agents
-can set an expected revision on `memory_save` while continuing to use the
-principal's commits, proposals and Undo.
+know-how supports writes subject to host policy. A directory lock serializes Aegis
+writers. The write uses Linux atomic file exchange and inspects the
+displaced inode under an exclusive lease before retiring it. If the
+revision changed or an outside editor has the inode open, Aegis
+restores the displaced file and reports the other contents' recovery
+path. The source snapshot is invalidated so later reads and searches see
+the resulting bytes. Git review and attachments belong to the
+workspace. The dated `memory.remind` operation uses the same personal
+revision check, person-turn approval, history and Undo as `memory.save`,
+and returns the saved path.
 
 A catalog query scores one BM25 corpus containing only entries visible to the
 requester, with title and description weighted above the full body. The index

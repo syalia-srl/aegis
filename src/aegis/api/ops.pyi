@@ -620,20 +620,30 @@ class _memory:
         """Delete a memory that is no longer true. The deletion is kept in the store's history: deleting an approved memory puts a card in your transcript that lets the person undo it, and the Knowledge view restores it from its history."""
     async def read(self, *, names: builtins.list[str]) -> Any:
         """Read one or more memories in full, by name: the ones the hint on your message names, or memory_search's hits."""
-    async def save(
+    async def remind(
         self,
         *,
-        expected_revision: str | None = ...,
         name: str,
         description: str,
         body: str,
+        expires: str,
+        expected_revision: str | None = ...,
+    ) -> Any:
+        """Save a private expiring reminder when the person says "remind me" or asks you to keep something for them through a date. Use the date as expires. Report the saved path. A request in the person's turn saves with Undo. A new reminder from a worker or wake stays proposed."""
+    async def save(
+        self,
+        *,
+        name: str,
+        description: str,
+        body: str,
+        expected_revision: str | None = ...,
         type: Literal["user", "feedback", "project", "reference"] = ...,
         lifetime: Literal["permanent", "temporary"] = ...,
         expires: str | None = ...,
         paths: builtins.list[str] = ...,
         asked: bool = ...,
     ) -> Any:
-        """Save a personal fact or reminder. For a direct request such as "remind me through Friday", set asked: true, lifetime: temporary and expires to Friday's date. Use expected_revision: null for a new memory or the current catalog revision when updating one. Report the returned path."""
+        """Save a personal memory. Use memory_remind for a reminder the person directly requests through a date. For a revision-checked memory save, use null for a new memory or the current catalog revision for an update. Report the returned path."""
     async def search(self, *, query: str, limit: int = ...) -> Any:
         """Search your memories (facts about the person, their projects and how they want you to work) with your own words. Returns the best names with their description, score, status and flags; read one with memory_read. Proposed and expired memories are included and marked."""
 

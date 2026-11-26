@@ -97,13 +97,7 @@ class ReadMemories(_Strict):
     )
 
 
-class SaveMemory(_Strict):
-    expected_revision: str | None = Field(
-        None,
-        description="Always include this field when choosing where to save a memory. "
-        "Pass an explicit JSON null for a new memory, or its current revision "
-        "from knowledge_catalog for an existing one. This also returns the saved path.",
-    )
+class MemoryText(_Strict):
     name: str = Field(
         description="Lowercase letters, digits, - and _, such as 'deploy-host'. "
         "Saving an existing memory's name replaces it."
@@ -118,6 +112,15 @@ class SaveMemory(_Strict):
         min_length=1,
         description="The fact in Markdown. For feedback or a project, add "
         "**Why:** and **How to apply:** lines. Link another item as [[name]].",
+    )
+
+
+class SaveMemory(MemoryText):
+    expected_revision: str | None = Field(
+        None,
+        description="Always include this field when choosing where to save a memory. "
+        "Pass an explicit JSON null for a new memory, or its current revision "
+        "from knowledge_catalog for an existing one. This also returns the saved path.",
     )
     type: Literal["user", "feedback", "project", "reference"] = Field(
         "reference",
@@ -141,6 +144,14 @@ class SaveMemory(_Strict):
         description="Set true explicitly for a person's direct request, including "
         "'please save a reminder', 'remind me', and /remember. Leave false only "
         "for your own initiative. The original turn must be the person's.",
+    )
+
+
+class RemindMemory(MemoryText):
+    expires: date = Field(description="The date this personal reminder expires.")
+    expected_revision: str | None = Field(
+        None,
+        description="Omit for a new reminder. For an update, pass its current catalog revision.",
     )
 
 
@@ -669,11 +680,10 @@ def register_knowledge_ops(app: App) -> None:
 
     @r.op("memory.save", SaveMemory, agent=True)
     async def memory_save(p: SaveMemory, caller):
-        """Save a personal fact or reminder. For a direct request such as
-        "remind me through Friday", set asked: true, lifetime: temporary and
-        expires to Friday's date. Use expected_revision: null for a new
-        memory or the current catalog revision when updating one. Report the
-        returned path.
+        """Save a personal memory. Use memory_remind for a reminder the
+        person directly requests through a date. For a revision-checked
+        memory save, use null for a new memory or the current catalog revision
+        for an update. Report the returned path.
 
         An explicit request in a person's turn saves with Undo. A new memory
         saved on the agent's initiative is proposed for approval. An update
@@ -731,6 +741,17 @@ def register_knowledge_ops(app: App) -> None:
             if now.expired():
                 out["flags"] = ["expired"]
         return out
+
+    @r.op("memory.remind", RemindMemory, agent=True)
+    async def memory_remind(p: RemindMemory, caller):
+        """Save a private expiring reminder when the person says "remind me"
+        or asks you to keep something for them through a date. Use the date
+        as expires. Report the saved path. A request in the person's turn
+        saves with Undo. A new reminder from a worker or wake stays proposed."""
+        return await memory_save(
+            SaveMemory(**p.model_dump(), lifetime="temporary", type="user", asked=True),
+            caller,
+        )
 
     @r.op("memory.delete", DeleteMemory, agent=True)
     async def memory_delete(p: DeleteMemory, caller):

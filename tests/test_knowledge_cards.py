@@ -102,8 +102,18 @@ async def test_asked_in_a_persons_turn_saves_approved_with_an_undo_card(world):
     app = world.app
     s = await world.spawn()
     expires = (date.today() + timedelta(days=5)).isoformat()
-    got = await save(
-        s, asked=True, expected_revision=None, lifetime="temporary", expires=expires
+    got = ok(
+        await turn(
+            s,
+            mcp(
+                "memory_remind",
+                name="merge-after-green",
+                description="Merge a PR only after every check",
+                body="Run the checks first.",
+                expires=expires,
+            ),
+            by_person=True,
+        )
     )
     path = Path(got["path"])
     assert got["status"] == "approved" and expires in path.read_text()
@@ -151,12 +161,11 @@ async def test_asked_in_a_queue_task_is_a_proposal(world):
     app = world.app
     s = await world.spawn()
     payload = mcp(
-        "memory_save",
+        "memory_remind",
         name="from-a-worker",
         description="A worker says it was asked",
         body="It was not.",
-        asked=True,
-        expected_revision=None,
+        expires=(date.today() + timedelta(days=5)).isoformat(),
     )
     said = await turn(
         s, mcp("queue_enqueue", queue="general", payload=payload), by_person=True

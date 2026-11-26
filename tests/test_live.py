@@ -2786,7 +2786,7 @@ async def test_a_real_agent_chooses_contextual_knowledge_destinations(tmp_path: 
         "    harness_tools: false\n"
         "    primer: false\n"
         "    notices: false\n"
-        "    tools: {allow: [knowledge_catalog, knowledge_write, memory_save]}\n"
+        "    tools: {allow: [knowledge_catalog, knowledge_write, memory_remind, memory_save]}\n"
         "knowledge:\n"
         "  sources:\n"
         "    - {root: .codex/skills, format: skill, writable: true}\n"
@@ -2837,23 +2837,17 @@ async def test_a_real_agent_chooses_contextual_knowledge_destinations(tmp_path: 
             if item.kind == "memory"
         ]
         assert memory.expires == expires and memory.lifetime == "temporary"
-        (save,) = [
-            entry for entry in writer.entries() if entry.get("title") == "memory_save"
-        ]
-        arguments = save["detail"]["args"].splitlines()
-        asked = "asked: true" in arguments
-        revision_supplied = "expected_revision: null" in arguments
-        assert memory.status == ("approved" if asked else "proposed")
-        print(
-            f"Live reminder: asked={asked}, explicit revision={revision_supplied}, status={memory.status}"
-        )
-        assert memory.path is not None
+        assert memory.status == "approved" and memory.path is not None
         assert "restor" in memory.path.read_text().lower()
-        for path in (
-            (procedure, skill, memory.path) if revision_supplied else (procedure, skill)
-        ):
+        (reminder,) = [
+            entry for entry in writer.entries() if entry.get("title") == "memory_remind"
+        ]
+        assert reminder["status"] == "ok"
+        for path in (procedure, skill, memory.path):
             assert any(
-                str(path) in (entry.get("md") or "") for entry in writer.entries()
+                str(path) in (entry.get("md") or "")
+                for entry in writer.entries()
+                if entry["kind"] == "prose"
             )
 
         await ask(

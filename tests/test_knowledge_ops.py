@@ -5,12 +5,13 @@ import asyncio
 import json
 import subprocess
 from datetime import date, timedelta
+from hashlib import sha256
 from pathlib import Path
 
 import pytest
 from websockets.asyncio.client import connect
 
-from aegis.knowledge import history
+from aegis.knowledge import history, sources
 from aegis.ops import OpError
 from aegis.web import PROTO
 
@@ -336,6 +337,44 @@ async def test_agents_write_selected_pages_and_personal_reminder(
     ok(await call(second, "knowledge_catalog", entry_id=doc["id"]))
     used = await asyncio.to_thread(w.app.knowledge.usage.summary, w.app.user)
     assert used[doc["id"]]["read"] == 1 and used[bundle["id"]]["read"] == 0
+
+    # A separate editor changes the page after Aegis read its expected
+    # revision, immediately before publication.
+    external = "---\nwhen: Releasing\n---\nExternal editor's version.\n"
+    during_restore = "# A second edit while restoring\n"
+    exchange = sources._exchange
+
+    def race(fd, first, second):
+        if first.startswith(sources.WRITE_TEMP) and second == procedure.name:
+            procedure.write_text(
+                external
+                if procedure.read_text() != "# Proposed edit\n"
+                else during_restore
+            )
+        return exchange(fd, first, second)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(sources, "_exchange", race)
+        refused = await call(
+            first, "knowledge_write", **edit(written, "# Proposed edit\n")
+        )
+    revision = sha256(external.encode()).hexdigest()
+    assert refused.startswith("mcp error: stale") and revision in refused
+    assert procedure.read_text() == external
+    (recovery,) = how.glob(f"{sources.WRITE_TEMP}*")
+    assert str(recovery) in refused and recovery.read_text() == during_restore
+
+    # An in-place editor already holding the original inode stays attached
+    # to the real path when Aegis refuses to retire that inode.
+    with procedure.open("r+") as editor:
+        refused = await call(
+            first,
+            "knowledge_write",
+            **edit({**written, "revision": revision}, variants[1]),
+        )
+        assert refused.startswith("mcp error: write_conflict"), refused
+        editor.write("# Continued edit\n")
+    assert procedure.read_text().startswith("# Continued edit")
 
     params = dict(
         name="restore-this-week",

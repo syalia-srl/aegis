@@ -184,11 +184,11 @@ see the entry when both a personal and a shared destination still fit.
   active checkout. Call `knowledge_write` with its entry ID, the
   expected_revision from that read and the complete Markdown text. Inspect
   the worktree diff and follow its review process.
-- For a personal reminder, call `memory_save` with the name and
-  expected_revision (null to create). Set the expiry for a temporary reminder
-  and use the paths field to associate it with the project. Use the catalog
-  ID in a wikilink if the reminder refers to a shared procedure.
-  Personal saves keep proposals, history and Undo.
+- For a dated personal reminder the person directly requests, call
+  `memory_remind` with the name, text and expiry. Use the catalog revision
+  for an update. The result includes its saved path. The person's turn can
+  save immediately with Undo. A wake or a queue worker can only propose a
+  new reminder. Use the catalog ID in a wikilink to the related procedure.
 - For a workspace skill, select its catalog ID and update its `SKILL.md`
   through `knowledge_write`. Its attachments stay in the skill's directory.
   The workspace tool accepts only existing catalog pages.
@@ -196,7 +196,11 @@ see the entry when both a personal and a shared destination still fit.
 Report the saved path returned by these revision-checked calls. If a write
 returns stale, read the current revision
 and reconcile the changes before saving again. Worktree writes leave a
-normal file diff. An editor outside Aegis uses its own concurrency controls.
+normal file diff. Workspace writes exchange files atomically and verify
+the displaced version before deleting it. If another editor raced the
+write, Aegis restores the displaced page and reports the recovery path
+for the other contents. An open in-place editor, a shared inode or a
+filesystem without the required safeguards can make a write fail safely.
 
 The selected checkout's `know-how/` supports writes subject to host policy
 and file permissions. Configured roots are read-only unless the source
