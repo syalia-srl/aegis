@@ -1645,7 +1645,7 @@ def register_knowledge_ops(app: App) -> None:
                     **entry_fields(it),
                     "kind": "skill" if source.format == "skill" else "doc",
                     "files": list(entry.files),
-                    "root": str(source.root),
+                    "root": str(source.worktree or source.root),
                 }
                 if p.entry_id == it.id:
                     return {**row, "body": it.body, "text": entry.text}

@@ -459,6 +459,7 @@ async def test_catalog_reconciles_sources_and_checks_policy_on_every_read(tmp_pa
         ADMIN,
     )
     assert entries["release-50"]["id"] == direct["id"]
+    assert entries["release-50"]["root"] == str(root)
     assert entries["release-50"]["description"] == "cutting a release"
 
     policy.denied = {guides, how}
