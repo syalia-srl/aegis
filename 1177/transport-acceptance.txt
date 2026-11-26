@@ -1,0 +1,8 @@
+Revision 0394fefda230675fcf6bcea10a0d5a9e5a9dc16f
+
+$ uv run pytest -q tests/test_knowledge_search.py tests/test_knowledge_embed.py tests/test_knowledge_hint.py tests/test_knowledge_ops.py tests/test_knowledge_view_ops.py tests/test_help_pages.py
+66 passed, 3 warnings in 30.01s
+
+$ uv run pytest -q tests/test_browser_knowledge.py -k browser_catalog
+.                                                                        [100%]
+1 passed, 9 deselected in 8.38s
