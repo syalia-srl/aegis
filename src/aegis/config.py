@@ -392,6 +392,7 @@ class KnowledgeSource(BaseModel):
     format: Literal["markdown", "skill"] = "markdown"
     include: tuple[str, ...] = ("**/*.md",)
     exclude: tuple[str, ...] = ()
+    writable: bool = False
 
     @field_validator("root")
     @classmethod

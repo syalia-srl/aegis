@@ -732,7 +732,7 @@ session is active.
 touches, read from the session's working directory and the paths its tool
 calls name, and owes it one block of each doc's `when:` line. The block rides
 with the notices (`Registry.notice_blocks`), and `Session.know_how_sent` keeps
-the main checkouts told. It is not the store below: a repository's docs are
+the main checkouts told, with catalog IDs for the touched worktree in the menu. A repository's docs are
 reviewed, shared and differ by branch. It ranks nothing, because the message a
 turn starts with predicts the doc read no better than chance.
 
@@ -788,7 +788,7 @@ know-how document. The caller names a session they may read. Its working
 directory determines the Git worktree, and the file is read under that
 worktree's `know-how/` directory without following symlinks. The operation
 reads one file on demand and does not build an index.
-The read-only catalog combines the caller's personal entries, the selected
+The catalog combines the caller's personal entries, the selected
 session's Git know-how, and the configured roots. The default roots are
 `.claude/skills` and `.codex/skills` under the configuration directory. An
 explicit source list replaces these defaults. The catalog checks session
@@ -801,7 +801,19 @@ those roots and recently read worktrees on the service's five-second cadence,
 publishing a complete snapshot per root. A catalog read uses the last
 published snapshot or joins the initial scan for a new root. Source
 configuration is reread through Config; a removed root immediately stops
-contributing entries. Catalog reads do not load or execute skills.
+contributing entries. Catalog reads leave skill execution to the explicit
+skill tools. Usage records and hint ranks use qualified IDs. Historic
+personal usage rows are resolved by principal, kind and name when queried.
+
+`knowledge.write` edits an existing catalog page in the calling agent's
+session context. Configured sources opt in, while the active worktree's
+know-how supports writes subject to host policy. An atomic replacement
+beneath the verified root checks the expected content revision under a
+directory lock and reports the current revision on conflict. The source
+snapshot is invalidated so later reads and searches see the new bytes.
+Git review and attached files belong to the workspace. Personal agents
+can set an expected revision on `memory_save` while continuing to use the
+principal's commits, proposals and Undo.
 
 A catalog query scores one BM25 corpus containing only entries visible to the
 requester, with title and description weighted above the full body. The index
