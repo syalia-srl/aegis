@@ -37,7 +37,7 @@ never their tokens, and `aegis link remove <name>` ends one.
 
 Links are kept in this server's state directory with owner-only permissions,
 because each holds a token. They are never in `.aegis.yaml`, which may be in
-git. Both servers need aegis 3.0.0 or newer.
+git. Both servers need aegis 2.23.0 or newer.
 
 One link joins a pair of servers. If the far server already links this one, it
 refuses the second link and says so; remove one of the two.
@@ -135,7 +135,7 @@ where its service may be used.
 A link is linked, connecting, offline, unauthorized (the far server refused
 the token; it does not retry, and a new token needs a new link), mismatch
 (a different name or an incompatible protocol), too_old (one of the servers runs
-an aegis older than 3.0.0) or refused (the far server already links this one). An offline link reconnects on
+an aegis older than 2.23.0) or refused (the far server already links this one). An offline link reconnects on
 its own, backing off up to 30 seconds, a mismatched, too_old or refused one
 tries again every 30 seconds, and a dropped link fails every call in flight. The Fleet and the
 Settings page show a server that is down as offline since the time it went

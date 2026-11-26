@@ -5,6 +5,506 @@ The format follows Keep a Changelog; this project uses SemVer (0.x).
 
 ## [Unreleased]
 
+## [2.23.0] - 2026-11-25
+
+This release removes standalone multi-user mode and requires aegis 2.23.0 or
+newer on both ends of a server link. Hosts that need several users can use the
+host policy and embed the client.
+
+### Harness compatibility
+
+- Claude Code 2.1.332 and Codex 0.172.0 are the new upper tested bounds. The
+  Claude Code sign-in card recognizes both setup-token authorization URLs.
+- OpenCode 2.4.2 is the tested minimum and maximum for this release. Its
+  prompt startup reconciles the MCP tool registry before choosing tools,
+  addressing the first-prompt race observed on 2.0.31 and 2.1.2 (#540).
+  The sign-in card recognizes the consolidated OpenCode account and service
+  key menu alongside the older Go and Console menus (#1118).
+
+### Performance
+
+- PR benchmarks measured slower cold file picking in #949 (837 to 1,095 ms),
+  #1036 (377 to 599 ms), #1069 (599 to 811 ms), and #1106 (580 to 831 ms).
+  #1027 measured a slower Files open (303 to 1,016 ms), #1071 a slower
+  browser entry median (2.08 to 2.61 ms), and #1100 a slower cold key
+  (3.07 to 3.72 ms). These are per-PR comparisons on GitHub runners. The
+  comparisons for #1073, #1077 and #1080 had failed samples, leaving those
+  measurements incomplete.
+
+### Added
+
+`aegis gc` reclaims the disk old sessions hold. For every session archived more than 7 days ago (`--days`), it packs the transcript (base64 images emptied, the rest gzipped; `peer_read`, the archive and the journal still read it) and deletes its uploads, sent files, stderr log, browser folders and the harness's own transcript, and it deletes every browser profile unused for as long. It lists what would go until you pass `--apply`. The disk notice now tells agents about it.
+  help: commands#the-aegis-program
+
+`/autohandoff [N]` continues a long session on its own. Past `N` tokens of context (the configured `handoff_at:` by default), `turn_end` asks the agent for a brief, and the `turn_end` that carries one continues the session in a fresh one when the turn ends, with no click. A sidebar button toggles it.
+  help: handoffs#autohandoff
+
+- **Model scores refresh every night, without a release.** A workflow rebuilds the Artificial Analysis ranking nightly and publishes it on the `model-ranking` branch; every aegis downloads it at start and then daily, reads it while it is newer than the packaged one, and keeps the last good copy when a download fails. `model_ranking: false` turns the download off.
+  help: config#models
+
+- **Share tabs of your own browser with agents.** The extension's popup has a
+  switch per tab that shares it with the agent sessions you tick; a shared
+  tab joins the browser's aegis tab group. An agent asks for a tab with
+  `browser_request`, or to open a page with `browser_open(where="person")`;
+  a card with Give and Refuse appears in its transcript and in the popup, and
+  the agent is woken with granted or denied. `browser_list` shows the tabs
+  granted to it. The session's side panel lists them; its card shows each
+  tab in full with Disconnect and Stop sharing, and the requests waiting
+  with Give and Refuse. The popup's chips revoke one agent. Give in aegis
+  hands over only a tab that matches the request, from one browser. Agents driving those tabs comes next
+  (#1034).
+  help: chrome#sharing-a-tab
+
+- **Agents drive the tabs you give them.** On a tab of your own browser
+  shared with it, an agent uses `browser_snapshot`, `browser_click`,
+  `browser_type`, `browser_press`, `browser_goto`, `browser_screenshot` and
+  `browser_events` with the tab's `chrome:<name>` id, as on a server
+  browser, and its clicks and keys reach the page as yours would. A ribbon at
+  the top of the page names the agents that have it, says what one is doing
+  and rings the element it touches. The session's side panel shows each
+  tab's last action. The extension, now 0.3.0, asks for the debugger
+  permission and access to the sites you share (#1034).
+  help: chrome#an-agent-at-work
+
+- **Hand a tab back and forth with agents.** Pause in a shared tab's ribbon
+  makes it yours until Resume: agents can read it, and their clicks, typing
+  and navigation wait. An agent that needs you calls `browser_handover` on
+  the tab: the ribbon turns red with its reason and a Done button, the
+  browser shows a notification and aegis a toast, and Done, in the ribbon
+  or on the tab in the session's side panel, wakes it with what happened.
+  Several agents on one tab act one at a time. Extension 0.4.0 (#1034).
+  help: chrome#pausing-and-handing-over
+
+- **Pair your own Chrome with aegis.** A Chromium extension (Chrome, Edge,
+  Brave), downloaded from Settings → Chrome, pairs with the server through a
+  one-time code and keeps a connection open with a device token that opens
+  nothing else. Settings lists the paired browser with its state and an
+  Unpair, the Fleet shows it as a card, and the popup draws the aegis mark in
+  the person's theme. Sharing tabs with agents comes in the next slices
+  (#1034).
+  help: chrome#pairing
+
+- **Let agents run scripts in a tab you share, when you say so.** Each shared
+  tab has a Scripts switch, off by default, in the extension's popup and on
+  the tab in the session's side panel. While it is on, an agent can call
+  `browser_eval` on the tab. A tab an agent asked to open is now named after
+  its site, and the snapshot of a page whose accessibility tree comes back
+  empty shows an outline of its elements instead. Extension 0.5.0 (#1042).
+  help: chrome#letting-agents-run-scripts
+
+- **A linked server's file rows can show their file.** A Read, Write or Edit
+  row on a session of a linked server now has a Fetch the file from <server>
+  button, and its menu an Open file entry: that server copies the file as it
+  is now and the card shows it through the link. Before, the button was
+  hidden there, and seeing the file meant asking the far agent to send it.
+  help: transcript#tool-rows
+
+- **Groups name themselves from their work.** With `group_names: {agent: <name>}`, each time a member joins or leaves a group, one one-shot call (the path recaps and `/btw` use) gives it a two-or-three-word name and a one-line title from its members' titles, plans and reports. The title shows on hover and on the group's Fleet card. A name a person or an agent chose stays; only its title changes.
+  help: config#group-names
+
+- **ChatGPT subscription quota appears beside Codex sessions.** aegis reads the Codex allowance without a model call and displays the actual window duration and reset, including plans whose primary window is weekly.
+  help: usage#chatgpt-quota-through-codex
+
+- **An agent preset can fence the aegis tools, queues and agents its sessions
+  use.** `tools:` in `.aegis.yaml` takes `allow` or `deny` over tool names and
+  groups (spawn, queues, workflows, schedules, browser, secrets, config, help),
+  plus `queues:` and `agents:` lists. A scoped session lists only its tools,
+  its workplace prompt leaves out the rest, and a call outside the scope, as a
+  tool or through `aegis call`, is refused with out_of_scope. The scope is
+  fixed at spawn and met with the starter's, so a worker or a spawned session
+  never gets more than the session that started it. Before, every session got
+  every aegis tool.
+  help: config#scope-an-agent
+
+- **Agents and queues can carry a quota guard.** `quota:` in `.aegis.yaml`
+  takes the lines a schedule's quota takes, now also as a map of `used`,
+  `projected` and `stop`, which schedules accept too. The gate a turn or a
+  worker passes is the most restrictive of its agent's, its queue's and the
+  guards of the agents that started it, and a stop line cuts running turns
+  until the window is back under it. A queue's `on_closed` rejects with
+  queue_closed, warns or holds, and `max_pending:` refuses with queue_full.
+  An agent's `on_closed: refuse` holds wakes, skips schedule runs and refuses
+  handoffs; under `warn`, and for a person's message, the session gets an
+  aegis notice (`guard:closed`) saying what is closed, which queues reject,
+  and when it opens. A stop line never cuts a turn a person started.
+  Before, only schedules were ever held on the quota.
+  help: config#guard-an-agent-or-a-queue
+
+- **Agents can carry a spending budget.** `budget:` in `.aegis.yaml` takes
+  caps in dollars or tokens, per session or per rolling window (`24h`, `7d`,
+  `30d`). A session's spend counts for its own agent and for every agent up
+  its chain of starters, a handoff onto another agent included, so a capped
+  agent cannot spend through a queue, a child or a handoff. Past a cap the
+  session gets an aegis notice (`budget:spent:<agent>:<per>`) telling it to
+  finish. After that turn it starts no turn a person did not start until the
+  window has room, which the notice names. A session cap never frees: the
+  queues refuse its line's enqueues and its pending tasks fail. Usage rows now carry the agent, the queue and the starter, and
+  `aegis usage --split agent` or `--split queue` groups by them.
+  help: config#budget-an-agent
+
+- **A line that starts with @ goes to another session or agent.** Telling
+  another session something meant switching tabs, and asking another model
+  meant starting a session. `@handle text` sends that session a note, held
+  while it is busy, and the tab you typed in keeps working. `@agent text` runs
+  the line once with that agent and shows the answer in your tab. Two or more
+  names make a committee whose answers your tab's agent merges in one turn.
+  In the middle of a line, `@` completes a session's handle.
+  help: handoffs
+
+- **Agents and queues describe when to use them.** Edit optional descriptions in Settings, read agent guidance with `agents_list` and discover queue purposes with `queues_list` before delegating.
+  help: queues#choose-a-queue
+
+- Streamed replies fade in letter by letter, with a short bounded delay that catches up during bursts. Existing transcripts appear immediately, and reduced motion disables the animation.
+  help: transcript#replies
+
+- **Review rebuildable repository files before deleting them.** `/gc` and the
+  `gc_propose` MCP tool show the same selection card with activity, space estimates,
+  rebuild instructions and exclusions. Only the person can approve deletion;
+  execution skips files that changed or started being used. The CLI adds an
+  explicit `aegis gc --repos` scope with interactive selection and confirmation.
+  help: gc
+
+- Browse a dedicated Models page, compare provider offers, and create or edit
+  agents from a fixed model selection or a rule following free providers.
+  Free-only sessions revalidate availability and prices before each use.
+  help: config#the-models-page
+
+- **Run Gemini, DeepSeek, Qwen and ChatGPT as native aegis sessions.** Choose a web provider in the composer and grant its fresh Chrome tab through the extension. Completed responses can request explicitly marked Bash with real local output and session-scoped aegis tools; durable execution state prevents blind replay. Model modes remain in Chrome.
+  help: web-harnesses
+
+- **Images and PDFs can be annotated for an agent.** Point, area, and off
+  are icons on the preview, with the name on hover. A click marks a point, a
+  drag outlines a region, and the note takes more than one line. Send stable
+  normalized coordinates with the file and PDF page instead of describing a
+  visual area by hand.
+  help: files#annotating-images-and-pdfs
+
+- **Cursor's two quota pools show on the gauges.** Auto and API, both resetting with the billing month, read from the account `cursor-agent` is signed in to. The dollar included-usage figure is not a third pool.
+  help: schedules#quota-lines
+
+- **Left and right page a card that holds several files.** With that row selected, and the message box not focused, ← and → move through the files and wrap from the last to the first, as the ‹ › buttons do. The same keys do it while the set is open in the viewer, and both are in the ? list.
+  help: transcript#files-and-the-viewer
+
+- **`aegis completions install` sets up tab completion.** Typing `aegis`
+  and Tab completed nothing: there was no script for the shell to load.
+  The command installs completions for bash, fish, zsh and nushell, and
+  `aegis completions show` prints the script.
+  help: commands#shell-completions
+
+- **Images and PDFs can be drawn on, highlighted, and marked with an arrow.** Point and area were the only marks. Draw stores the stroke and an arrow stores its two ends, both as normalized points. A highlight is a translucent region. Each tool is an icon, and its name shows on hover.
+  help: files#annotating-images-and-pdfs
+
+- **A docked image or PDF can be annotated.** The tools existed in Files and in the viewer, so a file beside the transcript had to be opened again before a mark could be made. The docked pane now has the same tools, and Send writes the message into the session's composer.
+  help: files#annotating-images-and-pdfs
+
+- **A PDF highlight names the words it covers.** The browser's own viewer could not report the page or the text under a mark. With Mozilla's viewer installed (`aegis pdfjs install`, about 6 MB, not shipped in the package), a PDF opens in it, and selecting text with Highlight sends those words with the page.
+  help: files#annotating-images-and-pdfs
+
+- **Agents can send an interactive table with `table_send`.** Markdown tables in a reply only scrolled; there was no built-in page for filter, search, sort, or controlled edits. `table_send` lands a themed artifact from columns/rows (or Markdown/HTML) and an edit policy the agent chooses, so the same tool covers view-only output and editable input. The page has a search box, per-column filters (numeric columns take comparisons and ranges, any column takes text or a regular expression), a column show/hide menu, numeric columns aligned in the mono face, a copy menu (Markdown, CSV, LaTeX, JSON, YAML, TOML), and editable cells that wrap, with keyboard navigation and undo. Columns can be typed: number, or select with a fuzzy-search list of options; rows the person adds are editable in every column.
+  help: artifacts#send-a-table
+
+- **pi runs as a harness.** Set `harness: pi` on an agent to run
+  [pi](https://pi.dev) 1.5.0 over its RPC mode, with any provider/model pi knows.
+  aegis's tools reach it through pi's own MCP client under the same names as in
+  Claude Code; a message sent mid-turn is steered into the running turn, a stop
+  aborts it (a running command included), and the card shows cost and context.
+  help: config#add-an-agent
+
+- **OpenCode signs in from the same card.** A turn whose key the provider refuses opens it, and Settings → Harnesses lists OpenCode with a Sign in button. Pick OpenCode Go and paste your key (aegis tries it with one short turn), or OpenCode Console and approve the code it shows.
+  help: sign-in#when-sign-in-fails
+
+- **Settings lists your harnesses and signs them in.** Each row shows the version and, when aegis keeps a token, until when it lasts; Sign in opens the sign-in card in the session you last looked at, without waiting for a turn to fail. Agents can open the card with `signin_open`, to renew before a token expires; only you can answer it.
+  help: sign-in#renew-from-settings-or-by-an-agent
+
+- **Per-host overrides in one tracked `.aegis.yaml`.** A `hosts:` section holds
+  what differs per server, in a block named after each server: its exit, an
+  agent's effort, its worker count. Each server applies the shared settings,
+  then its own block, so the file is committed and synced through git like any
+  other, with no uncommitted edits to step around. Exit here now writes this
+  server's block. Before, a git command that reset the file for a moment could
+  drop an uncommitted `exit_via:`, and a session started then went out
+  directly.
+  help: config#per-host-overrides
+
+- **Update aegis from the browser.** When a newer release is out, an admin gets an Update button beside the version, in the top bar and in the session panel's version card. It upgrades aegis with the installer that owns it (uv tool, pipx, or pip or uv in a venv), checks that the new build answers `--version` with a new number, and restarts the server in the same process, so a systemd unit sees no restart. The page reloads on the new version and interrupted turns continue. A failed install leaves the old server running and shows the installer's output in the card. Before, the tooltip named `uv tool upgrade` whatever the install was, and applying it took a shell, a restart and a reload (#955).
+  help: updating#update-from-the-browser
+
+- **A program that embeds aegis decides who may do what.** `Server(root,
+  policy=...)` takes a `HostPolicy`, and aegis asks it who a token is, what to
+  store as an owner, whether an operation may run, which sessions a caller may
+  list, read or change, what a start runs, which aegis tools a harness gets,
+  and what happened. `srv.token_for(who)` mints signed tokens for the host's
+  page, and `srv.as_who(who)` acts as one of its callers. `aegis serve` runs
+  the standalone policy and behaves as before.
+  help: library#host-policy
+
+- **An agent's sessions get the MCP servers it names.** `.aegis.yaml` takes an
+  `mcp:` map of HTTP and stdio servers, and an agent attaches them with its own
+  `mcp:` list. Every harness gets them beside aegis's own, with `${VAR}` read
+  from aegis's environment and no header or env value in a command line or a
+  file. A program adds servers with `Server(mcp=...)` and the host policy's
+  `mcp`. Settings adds, edits and tests them, and `aegis doctor` checks them.
+  help: config#mcp-servers
+
+- **The client mounts into a host page.** aegis's chat is no longer only the
+  standalone page: a Python host mounts `srv.asgi` under its own prefix, mints
+  a token with `srv.token_for(who)`, and `mount()` draws one session's
+  transcript and composer inside any element it names, with `connection`,
+  `entry`, `turnEnd` and `error` events and `send` and `destroy`. With
+  `theme: "host"` the mount paints in the page's own CSS variables, and its
+  CSS is scoped to `.aegis`, so it does not touch the host's styles; the
+  mount's own nodes keep ids (`#composer`, `#input`), so a host styles its own
+  boxes by class. One socket serves every mount on the page.
+  The chat's command menu and dictation are opt-in: `commands: true` builds
+  the `/` menu under the box and `dictation: true` its mic and hold-to-record.
+  `/aegis/manifest.json` lists the client's files with a hash each for the
+  host's own service worker.
+  help: library#the-chat-in-your-page
+
+- **A page embeds the whole client, not only its chat.** `mount()` draws all
+  three layouts — one session's chat, a tab strip, or the standalone client —
+  into an element the host owns, with `sidebar` and `page` deciding whether a
+  full mount brings the session panel or owns the document. A host's own tool
+  draws its card with `renderers`, its own speech service replaces the
+  browser's with `transcribe`, and the handle gains `sessionChanged`,
+  `turnStart` and `fileSent` plus `open`, `spawn` and `focus`, so a page
+  follows a session, starts one and reacts to a turn without folding aegis's
+  events by hand. The options, events, calls, stable classes, prefix, token and
+  manifest are on one page, with a Python host and a reverse proxy as examples.
+  help: embedding
+
+- **A link shows sessions both ways.** The far server's browser now lists the
+  linking server's sessions in its tab bar and Fleet, live while the link is
+  up, and drives them as through a link of its own. Before, only agents reached
+  back; the browser saw nothing.
+  help: links#what-people-can-do-across-a-link
+
+- **`turn_end` done names what the session left in its repos.** A done is still accepted, and its answer now lists the worktrees still there, the uncommitted files the session wrote, its unpushed commits, its branches without a pull request and its open pull requests, probed at that moment. The agent finishes what is its work and calls done again, or ignores the rest. Before, the person found the leftovers after archiving the session (#977).
+  help: sessions#what-the-agent-reports
+
+- **Product agents.** A host policy's `spawn` (or an agent in `.aegis.yaml`) can turn off the harness's own tools, isolate it from the machine's config, drop aegis's prompt and stop aegis's notices, so an agent a program runs sees only the MCP servers it is given. Claude Code and OpenCode support it; `meta` now lists only the tools a session has.
+  help: library#product-agents
+
+- **A mount can hide the composer's operator chips.** `controls: false` leaves
+  the model, effort and permission chips off the box in that mount, while the
+  full layout keeps them.
+  help: library#the-chat-in-your-page
+
+- **A feed has a card.** A feed's row in the sidebar shows what waits and a bar
+  per 5 minutes of the last hour, and its card shows items over the last hour,
+  day or week, the wait per item and where it went, what a batch costs in turn
+  time and tokens, the latest items and the source's last read. Send now,
+  Pause, Resume and Cancel act on it from the card, and the Fleet card counts
+  a session's feeds.
+  help: feeds#the-card
+
+- **Feeds wake a session with each batch of new items.** A session that had to
+  act on a growing source, a chat log appended to a file or a command's new
+  output, kept its own count of what it had read and re-armed a one-shot
+  monitor after every wake; a turn that forgot missed items, and a line written
+  between its read and its count was lost. `feed_start` binds a file (with an
+  optional `jq` filter for jsonl) or a command with a cursor to the session;
+  aegis keeps the cursor, debounces bursts, sends what came during a turn as
+  one block when it ends, and keeps the feed until it is cancelled or the
+  session closes.
+  help: feeds
+
+### Changed
+
+`peer_read` reads any archived session the caller can see, by handle or id, including one `aegis gc` packed. Before, it read only the archived session the caller continued after a handoff.
+  help: handoffs#read-a-peer
+
+- **The working row says what the running tool call does.** While a call runs,
+  the row shows that call's icon, pulsing, a verb of its kind of work
+  (reading, editing, testing, debugging, deploying, committing, searching,
+  coordinating, showing, planning), even when its run of rows is folded; a quick call stays about three seconds. Before, the verb
+  rotated through ten words that said nothing about the work.
+  help: transcript#while-the-agent-works
+
+- **The working row's counters lose their parentheses.** The seconds, token
+  counts and the Esc hint read as `12s · ↑ 3k · ↓ 1k tokens · esc to
+  interrupt`; the muted colour already sets them apart from the verb.
+  help: transcript#while-the-agent-works
+
+A handoff carries what the session waits on. The "continue fresh" chip, `/handoff` and `session_handoff` used to be refused while a monitor, a feed or a queue task would wake the session, so the work had to be cancelled and armed again by hand. Now the monitors, feeds, queue tasks, the schedules that fire into the session and its workflow follow the new session, its first message lists them, and they go back if it fails before answering. Only a background task of the harness still refuses.
+  help: handoffs#continue-in-a-fresh-session
+
+- **A handoff shows in both tabs, and the session's settings go with it.** The old tab reads "continued in" and the new handle, and the new one reads "continued from" and the old handle. Both list what moved: monitors, feeds, queue tasks, schedules, and the `/autohandoff`, `/autoclose` and quiet settings, which now follow the new session. Before this, the only trace was inside the new session's first message, and the new session dropped those settings. When autohandoff fires, the old tab shows a line with the context size. The sidebar's session buttons are icons in one row, with their names in the tooltips, and Autoclose and Autohandoff have icons of their own.
+  help: handoffs#continue-in-a-fresh-session
+
+- **Quiet is a mode, and works on a session in any state.** A quiet session's tab comes back when a turn ends with something for you, and goes away again when the next turn starts, whether you answered or a monitor, task or schedule woke it. The Quiet button, Alt+Q and `/quiet` now toggle, and an idle or waiting-for-you session can be quieted. Before, quiet lasted one turn and only a working session could take it.
+  help: sessions#quiet-sessions
+
+- **One kind of tab group, with no head.** A group is a named set of sessions
+  now: what a session spawns or enqueues joins it, and you can drag tabs in
+  and out, rename it in place, ungroup it, fold it, and open a page of just
+  its sessions. No session heads the group it started any more, so archiving
+  or handing off a member changes nothing about who leads.
+- **Quiet sessions and queue workers sit in their group.** Their cards are
+  drawn inside the group's stack in the Fleet and on the group's page, not
+  apart at the end of "Needs you first".
+  help: sessions#order-the-tabs
+
+- **A quota gauge projects at the current rate.** The arrow was the window's
+  average since it opened, so an early burst kept it over 100%, and a `pace`
+  line shut, for days after the agents had stopped. It is now what is spent plus
+  the recent rate times the hours left, with a half-life per window length (6 h
+  for a week) set in `quota.projection.half_life`, and the rate shows on hover
+  and in `quota_read`.
+  help: usage#where-a-quota-gauge-says-it-will-land
+
+- **A folded tab group keeps its members inside.** A member whose turn ended
+  needs you, review, done or error used to pop out beside the folded block, so
+  a few busy groups filled the bar again. Now only the tab you are looking at
+  is drawn beside it; the group's tab still shows the most urgent mark and its
+  `+N` chip turns alert while a member needs you.
+  help: sessions#order-the-tabs
+
+Alt+J lands with the start of the session's last message at the top of the transcript. Before, it stopped on the first unread row, which after several unread turns sat in the middle. Alt+U still goes to the first unread message.
+  help: sessions#switch-between-sessions
+
+- Shared model data now includes hourly provider offers, prices and free status,
+  with daily benchmark scores and refreshes every 15 minutes on each instance.
+  Agents can query advertised offers with `models_catalog`, filtered by provider
+  or free status, without provider logins.
+  help: config#models
+
+- Starting a web session opens and assigns its provider tab with Scripts enabled automatically. Later manual pause, Scripts disabling and revocation remain effective.
+  help: web-harnesses#start-a-session
+
+- Web sessions start with a compact dedicated bridge brief instead of the full coding-agent primer and ancestor instruction files. Context is discovered on demand and the task is sent separately.
+  help: web-harnesses#local-commands
+
+- Web sessions no longer receive automatic operational notices, knowledge hints or idle reminders. Normal replies finish without calling `turn_end`; explicitly requested Bash and Aegis calls remain available, including queues. Existing web sessions adopt the same behavior when resumed.
+  help: web-harnesses#simple-conversations
+
+- **In the full client, interrupt is Esc Esc.** One Esc while typing interrupted the turn by accident. The second Esc within a second interrupts; one Esc still closes a dialog or a menu. Embedded chat and tabs use the composer’s Interrupt button.
+  help: sessions#steer-a-running-session
+
+- **The working row moves and counts.** While a turn runs, its verb types,
+  blinks and backspaces into the next one, the asterisk pulses, and the row
+  counts the turn's new input and output tokens as they arrive. Before, it
+  was a static "Working" and a timer.
+  help: transcript#while-the-agent-works
+
+- **A failed Claude sign-in now opens a card that runs `claude setup-token` for you.** Open the link, approve, paste the code the page shows, and the waiting sessions continue. The login runs in a terminal that keeps nothing on disk and masks the token on screen; pasting a token made elsewhere still works.
+  help: sign-in#when-sign-in-fails
+
+- **The client is built from mounts, and its parts are labelled.** The
+  standalone page is one mount adopting the page's empty root, and a host's
+  chat is another; each builds its own parts, and the parts take their words
+  from a label table rather than carrying English in their markup or code. aegis
+  ships `en` and `es`: `lang` picks one, `labels` replaces single keys, a
+  missing key falls back to English and is logged once, and the standalone
+  page takes `?lang=es`. The full layout, a chat, the session panel, the tab
+  strip, the Fleet, the New session form, the command menu, dictation and the
+  terminal and browser views read Spanish from the same tables. Counts and
+  dates stay in code; their nouns come from the table.
+  help: library#the-chat-in-your-page
+
+- **Every link goes both ways, and agents act across it as at home.** A link
+  now joins two servers: the far server reaches back over the same socket, and
+  agents on each start, read, hand off to, wait on and close the other's
+  sessions, enqueue on its queues and use its schedules, as only a trusted link
+  allowed before. A far server's error text reaches the agent, and any link can
+  be an exit. Both servers need aegis 2.23.0, and a pair of servers keeps one
+  link: a second one is refused and says why.
+  help: links#what-agents-can-do-across-a-link
+
+### Removed
+
+- **Multi-user mode is gone.** A server has one token and one person, who may do everything. Tokens with roles, quota lines per member, a Linux user per member, the member view, the `/multiuser` command and the multi-user, tokens and running-a-server-for-others help pages are removed, and `aegis token add` and `aegis token list` with them. A server whose state still holds member tokens, or whose `.aegis.yaml` has a `multi_user` block, refuses to start and says what to delete.
+
+- **Trust on links.** `aegis link add --trusted`, `aegis link trust`, the
+  `link.trust` operation and the Trusted box in Settings are gone, since every
+  link is what a trusted one was. A `trusted` field in an older `links.json` is
+  ignored.
+
+### Fixed
+
+- **A session resumed by a restart keeps aegis's tools.** aegis bound its port
+  only after boot, and boot is where it resumes the turns the restart cut, so
+  a resumed Claude Code session reached `/mcp` while the port refused
+  connections and lost every aegis tool for the rest of its process. The
+  server now listens before it boots: that first connection waits until boot
+  ends and is then served.
+
+- **Codex shell commands can call aegis tools.** `aegis call` and `aegis tools` use a private temporary credentials file while the session token stays out of the shell environment. The file is removed when the Codex process ends.
+  help: commands#tools-from-an-agent-s-shell
+
+- **An outdated Chrome extension now says so.** A call the person's extension does not know, such as `browser_eval` on an extension older than 0.5.0, failed with not_supported, which an agent read as "this cannot be done". It now fails with extension_outdated and asks the agent to have the person update it. `browser_list`, `browser_request` and `browser_open` also name aegis's own extension, so an agent with no tabs no longer goes looking for another one.
+
+- **The session panel's actions stay on one row in a narrow panel.** With
+  Autohandoff the panel has seven action icons, and below about 220 px they
+  wrapped onto a second row. They now share one row at any width.
+- **Settings no longer draws two sections with one id.** The Model ranking
+  switch and the models table were both `set-models`, so a redraw of one could
+  replace the other.
+
+- **The tab strip stays where you scrolled it.** With more tabs than fit, any other session's tab redrawing (a state dot, a mark) scrolled the strip back to the open tab, so the tabs out of view could not be reached by scrolling. The strip now scrolls to the open tab only when the open tab changes or the strip's width does (#1094).
+
+- **Host notices wait until after the first turn.** New sessions and workers start their task without automatic disk, memory, CPU or quota notices. Later turns get active resource readings in a short form they can use to adapt their work.
+
+- **A worker stopped by an API error fails its task, and `task_resume` continues
+  it.** The task was marked ok with the `API Error:` line as its result and the
+  worker archived, so it could not be resumed.
+
+- **A linked server's files and artifacts open on the way back.** On a server that another server linked, every file and artifact sent in that server's sessions showed "Not Found", because there is no route back to it. The bytes now come down the link's own socket.
+
+- **An @ mention answer reaches the asking agent whole.** It was cut at 2,000 characters and pointed at a mention block the agent cannot read, so a long answer arrived without its second half.
+
+- **Models has a navigation icon.** The top bar now shows a model chip symbol, with the Models label beside it in the phone menu.
+
+- Web sessions no longer import nested Gemini prompt wrappers as person messages. Existing internal bridge copies render once as collapsed notices instead of repeated From Chrome messages.
+
+- Qwen and ChatGPT submit through their enabled Send button instead of leaving the prompt in the editor. DeepSeek recognizes its completed answer toolbar even when Copy has no accessibility label. Qwen recognizes the matching answer’s explicit finished state when its toolbar is absent. ChatGPT pins the definitive conversation URL rather than its temporary local route.
+
+- Chrome extension 0.5.2 processes storage-backed control messages in order, so automatic web-session launch cannot accept a request before it is saved. Browser calls remain concurrent.
+
+- Chrome extension 0.5.3 activates native web pages in the background without switching the visible tab. Native input waits for composer readiness and uses trusted clicks. DeepSeek and ChatGPT accept virtualized older history while exact executable sources remain validated; newly opened blank documents wait for navigation. Qwen preserves original Markdown from its rendered message instead of reading Monaco line numbers and display whitespace. Send clicks wait for stable positions, and DeepSeek sign-in pages ask for the person. Qwen sends with a settled Enter action after composer readiness.
+
+- **Esc stops a Cursor agent.** Closing its stdin left the turn running, and the lines it kept sending put the session back to work, so the interrupt showed and the agent did not stop. An interrupt now kills the process group at once and drops those lines.
+
+- **The list of marks sits beside the picture.** It used to grow under the preview and shrink it as marks were added.
+
+- **A PDF still scrolls while a tool is on.** The drawing layer was taking the wheel, so the viewer could not move until Annotate was turned off.
+
+- **A stroke shows while you draw it.** The draft had no width, so the line was drawn in a box of zero and appeared only when you let go.
+
+- **A long press on text on Android gets the selection bar.** Android fires its context menu before aegis's long-press timer and then cancels the touch, so the row's whole menu opened instead, kept the first word it saw, and its Copy copied only that word while Android's own text menu popped in on top. The menu now knows the press is a touch's, the bar takes its place, and the bar follows the handles.
+
+- **A streaming reply no longer disappears when a snapshot lands beside it.**
+  A whole transcript snapshot at the revision a tab already held could replace
+  what that tab had drawn, taking away a live reply that had grown without
+  moving its revision. A snapshot at that revision now keeps a live entry it
+  is missing or holds less of; one from a later record, a reconnect or a
+  session switch still replaces the view.
+
+- **A linked server's docked images and browsers draw on the home server.**
+  A docked file pane took the far server's `/files/…` URL as it was, so an
+  image the far session docked showed a broken icon on this server; it now
+  goes through `/via/<server>` like the file's card. A docked browser was
+  looked up by its bare id among this server's sessions, so the pane never
+  mounted; it is now found on the shown session's server and streams
+  through the link.
+
+- **The working row no longer tells a phone to press Esc.** "Esc to interrupt" named a key a touch screen does not have; on one the row now leaves it out, and the stop button beside the message box is the way to interrupt.
+
+- **OpenCode calls to an agent's own MCP servers show by name.** Extra servers ran in Code Mode, so the transcript showed one script call instead of the tool.
+
+- **turn_end no longer lists landed work as pending.** A commit made with `git commit -q`, or in a loop whose message the journal read from the command line, was listed as `branch <commit subject> ... has your commits and no pull request`, even on a pushed default branch: a commit row with no branch read its subject as the branch name. And a pull request the journal saw opened stayed `is open` after it was merged elsewhere; aegis now asks gh for that PR's state by number.
+
+### Security
+
+- **A host's policy decides session-less work, and `/mcp` stays off its public
+  mount.** A token minted for a person could spawn sessions as them without
+  `can()` ever being asked, and a host that mounted `srv.asgi` served the MCP
+  tools on its public prefix. Every session-less operation that starts work now
+  asks `can(who, "spawn", None)`, the rest ask `can(who, "read"|"write", None)`,
+  and only the loopback listener serves `/mcp`.
+  A host's `can()` must now accept `session=None` and the `"spawn"` action:
+  return true for what its callers may start, or they are refused.
+
 ## [2.22.0] - 2026-11-04
 
 ### Added

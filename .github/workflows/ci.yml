@@ -1,10 +1,10 @@
 name: ci
 # A branch runs CI through its pull request, once per head commit. Running on
-# every branch push as well ran the whole workflow twice for each PR commit
-# (#506). A push to main still runs, so main's own state is always known.
+# ordinary branch pushes as well ran the whole workflow twice for each PR commit
+# (#506). main and release branches also run CI on push.
 on:
   push:
-    branches: [main]
+    branches: [main, "release/**"]
   pull_request:
   # To run the gate again on one commit, as when measuring a flake.
   workflow_dispatch:

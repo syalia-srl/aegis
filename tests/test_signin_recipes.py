@@ -12,11 +12,15 @@ def screen_of(name: str, upto: str | None = None) -> str:
     return s.text()
 
 
-def test_the_paste_prompt_matches_link_with_the_url():
+@pytest.mark.parametrize("url_prefix", ["https://claude.com/cai", "https://claude.ai"])
+def test_the_paste_prompt_matches_link_with_the_url(url_prefix):
     rule, found = load_recipes()["claude-code"].match(
-        screen_of("claude/setup-token.jsonl", "Paste")
+        screen_of("claude/setup-token.jsonl", "Paste").replace(
+            "https://claude.com/cai", url_prefix
+        )
     )
     assert (rule.name, rule.step) == ("link", "paste")
+    assert found["url"].startswith(url_prefix + "/oauth/authorize?")
     assert found["url"].endswith("state=" + RECORDED_STATE)
 
 
@@ -54,6 +58,17 @@ def test_the_opencode_menu_offers_go_and_console():
     assert (rule.name, rule.step) == ("integration", "choose")
     assert found["options"] == ["OpenCode Go", "OpenCode Console"]
     assert found["rows"][found["current"]] == "OpenCode Go"
+
+
+def test_the_opencode_picker_offers_a_service_account_key():
+    recipe = load_recipes()["opencode"]
+    rule, found = recipe.match("◆  Select integration\n│  ● OpenCode\n│  ○ OpenAI")
+    assert (rule.step, found["options"]) == ("choose", ["OpenCode"])
+    rule, _ = recipe.match("◆  API key (service account)")
+    assert (rule.step, rule.prompt) == (
+        "paste",
+        "Paste your OpenCode service account API key.",
+    )
 
 
 def test_opencode_go_asks_for_its_key_then_connects():

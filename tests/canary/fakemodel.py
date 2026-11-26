@@ -42,6 +42,20 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
+
+async def _client_stays_connected(request: Request, delay: float) -> bool:
+    """Wait for a delayed fake reply unless the harness closes its request."""
+    if not delay:
+        return True
+    try:
+        async with asyncio.timeout(delay):
+            while (await request.receive())["type"] != "http.disconnect":
+                pass
+    except TimeoutError:
+        return True
+    return False
+
+
 SIDE = "ok"
 MODEL = "canary-model"
 LIMITED = "CANARY-429"
@@ -417,8 +431,8 @@ class FakeModel:
             return limited
         r = self.decide(c)
         self._record("anthropic", body, c, r)
-        if r.delay:
-            await asyncio.sleep(r.delay)
+        if not await _client_stays_connected(request, r.delay):
+            return Response(status_code=499)
         mid = "msg_" + uuid.uuid4().hex[:20]
         if r.tool:
             block = {
@@ -497,8 +511,8 @@ class FakeModel:
         if r.tool and r.namespace is None:
             r = _split_namespace(r)
         self._record("responses", body, c, r)
-        if r.delay:
-            await asyncio.sleep(r.delay)
+        if not await _client_stays_connected(request, r.delay):
+            return Response(status_code=499)
         rid = "resp_" + uuid.uuid4().hex[:20]
         if compact:
             item: dict[str, Any] = {
@@ -625,8 +639,8 @@ class FakeModel:
             return limited
         r = self.decide(c)
         self._record("chat", body, c, r)
-        if r.delay:
-            await asyncio.sleep(r.delay)
+        if not await _client_stays_connected(request, r.delay):
+            return Response(status_code=499)
         cid = "chatcmpl-" + uuid.uuid4().hex[:20]
         created = int(time.time())
         model = body.get("model", MODEL)

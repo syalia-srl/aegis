@@ -501,6 +501,7 @@ async def test_a_monitor_needs_progress_or_an_explicit_null(world):
     assert [m["description"] for m in a.wire()["monitors"]] == ["opted out"]
 
 
+@pytest.mark.slow
 async def test_a_monitor_links_to_the_latest_tool_call_holding_its_source(world):
     """An agent never sees a row's id, so it names the call by what it wrote
     there, and its own monitor_start, which holds the same text, never wins (#870)."""

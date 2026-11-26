@@ -1,1 +1,0 @@
-- Web sessions no longer import nested Gemini prompt wrappers as person messages. Existing internal bridge copies render once as collapsed notices instead of repeated From Chrome messages.

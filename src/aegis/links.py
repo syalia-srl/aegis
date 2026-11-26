@@ -8,7 +8,7 @@ the far server's agents.
 
 A link federates two servers (DESIGN.md, "A link federates two servers"). Its
 hello says ``both_ways``, and the far server's welcome says it back; a server
-from before 3.0 says neither, and the link fails as ``too_old``. Over the one
+from before 2.23 says neither, and the link fails as ``too_old``. Over the one
 socket this server opened, it sends requests and reads ``welcome``, ``reply``,
 ``snapshot``, ``patch`` and ``error`` back, and it also answers the far
 server's ``rcall`` frames with ``rreply``, running its calls here as a person
@@ -68,7 +68,7 @@ PROTO = 3
 # The release that first speaks links; both ends of one need it.
 LINKS_SINCE = "2.4.0"
 # The release from which every link goes both ways; both ends of one need it.
-BOTH_WAYS_SINCE = "3.0.0"
+BOTH_WAYS_SINCE = "2.23.0"
 
 HELLO_TIMEOUT_S = 10.0
 CALL_TIMEOUT_S = 15.0
@@ -188,7 +188,7 @@ def too_old(welcome: dict) -> str:
     build = welcome.get("build")
     version = build.get("version") if isinstance(build, dict) else None
     return (
-        f"{welcome.get('server')} runs aegis {version or 'from before 3.0'}; "
+        f"{welcome.get('server')} runs aegis {version or 'from before 2.23'}; "
         f"a link needs aegis {BOTH_WAYS_SINCE} or newer on both servers"
     )
 
@@ -219,7 +219,7 @@ class LinkStore:
             if isinstance(e, dict) and all(
                 isinstance(e.get(k), str) for k in ("name", "url", "token")
             ):
-                e.pop("trusted", None)  # before 3.0 a link could be one way
+                e.pop("trusted", None)  # before 2.23 a link could be one way
                 out.append(e)
         return out
 

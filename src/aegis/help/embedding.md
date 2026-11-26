@@ -59,7 +59,8 @@ in its URL as `?lang=es`.
 A chat and a tabs mount each own only their root and the nodes inside it.
 `full` is the standalone page's own layout, built into your element; it keeps
 its router and key table inside the mount and never reads or writes your URL
-hash. `sidebar: false` gives a full mount only the transcript, without the
+hash. To interrupt a working session in a chat or tabs mount, use the
+composer’s Interrupt button. Double Escape is a shortcut in the full layout. `sidebar: false` gives a full mount only the transcript, without the
 session panel, for a host that wants the conversation alone. `page: true` is
 only for the standalone page — it lets the mount own the document title,
 favicon, theme attribute, URL hash, service worker and push. Leave it false in

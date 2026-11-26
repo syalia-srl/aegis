@@ -1,1 +1,0 @@
-- **A linked server's files and artifacts open on the way back.** On a server that another server linked, every file and artifact sent in that server's sessions showed "Not Found", because there is no route back to it. The bytes now come down the link's own socket.

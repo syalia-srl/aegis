@@ -134,7 +134,7 @@ server's sessions appear in the other's Fleet and tab bar with a server tag,
 and take prompts, interrupts and closes from there. Agents on either side
 spawn, read, hand off to, enqueue on and wait on the other's sessions as at
 home, as in `peer_handoff(target="knuth@vps")`. Linking servers federates them,
-so link only servers you use. Both servers need aegis 3.0.0 or newer.
+so link only servers you use. Both servers need aegis 2.23.0 or newer.
 
 ## Skills and memories every session finds
 
@@ -358,7 +358,7 @@ the URL, for systemd and remote hosts.
 
 The defaults are `--port 8742 --host 127.0.0.1`. Anything but loopback has to be
 asked for with `--host`. The printed token is the server's only one: aegis is one
-person's workplace, and from 3.0 it has no multi-user mode. The token lives in
+person's workplace, and from 2.23 it has no multi-user mode. The token lives in
 `.aegis/state/token` and survives restarts; `aegis token revoke $USER` replaces
 it and prints the new one, which signs every browser out. Opening
 the printed URL once signs that browser in: the server moves the token into an

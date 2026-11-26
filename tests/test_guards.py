@@ -556,6 +556,7 @@ EXAMPLE = GUARDED.replace(
 )
 
 
+@pytest.mark.slow
 async def test_a_closed_agent_cannot_spend_through_a_queue_on_another_pool(
     world, tmp_path
 ):

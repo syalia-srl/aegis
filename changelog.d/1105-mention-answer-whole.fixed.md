@@ -1,1 +1,0 @@
-- **An @ mention answer reaches the asking agent whole.** It was cut at 2,000 characters and pointed at a mention block the agent cannot read, so a long answer arrived without its second half.

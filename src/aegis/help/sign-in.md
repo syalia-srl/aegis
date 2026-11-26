@@ -81,11 +81,12 @@ aegis does not recognise ends the card as failed with the reason and the
 login's last lines. The sessions keep waiting: **Start again** opens a new
 card for them. A server restart ends an open card the same way.
 
-For OpenCode the card runs `opencode auth login` and asks which subscription:
-**OpenCode Go** asks for your API key, which aegis types into the login and
-then tries with one short turn on the first OpenCode agent's model; **OpenCode
-Console** shows a code and a link where you approve it. A turn that OpenCode's
-provider refuses (a wrong or revoked key) opens the card by itself.
+For OpenCode the card runs `opencode auth login`. In 2.4.2, choose
+**OpenCode**, then choose **OpenCode account** for a browser sign-in or **API
+key (service account)** to paste a service account key. Older versions list
+**OpenCode Go** and **OpenCode Console** separately. After the terminal
+accepts a key, aegis checks it with one short turn on the first OpenCode
+agent's model. A turn that OpenCode's provider refuses opens the card by itself.
 
 **Show terminal** opens the terminal the login runs in, to see what it shows.
 That terminal keeps nothing on disk, and any token on its screen is replaced

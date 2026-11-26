@@ -50,7 +50,7 @@ class Login:
             self.fd, termios.TIOCSWINSZ, struct.pack("HHHH", 40, recipe.cols, 0, 0)
         )
 
-    def until(self, step: str) -> dict:
+    def until(self, step: str, *, name: str | None = None) -> dict:
         """Read until the recipe names ``step``; fail on any other end."""
         end = time.monotonic() + WAIT_S
         while time.monotonic() < end:
@@ -66,7 +66,11 @@ class Login:
             found = self.recipe.match(self.screen.text())
             if found is not None:
                 rule, captures = found
-                if rule.step == step:
+                if (
+                    rule.step == step
+                    and (name is None or rule.name == name)
+                    and (step != "choose" or captures["options"])
+                ):
                     return captures
                 assert rule.step != "failed", f"{rule.name}: {self.tail()}"
         pytest.fail(
@@ -106,15 +110,30 @@ def login(tmp_path):
 
 def test_sign_in_claude_reaches_the_paste_prompt(login):
     found = login("claude-code").until("paste")
-    assert found["url"].startswith("https://claude.com/cai/oauth/authorize?")
+    assert found["url"].startswith(
+        (
+            "https://claude.com/cai/oauth/authorize?",
+            "https://claude.ai/oauth/authorize?",
+        )
+    )
 
 
-def test_sign_in_opencode_reaches_the_go_key_prompt(login):
-    lg = login("opencode")
-    found = lg.until("choose")
-    assert {"OpenCode Go", "OpenCode Console"} <= set(found["options"])
-    moves = found["rows"].index("OpenCode Go") - found["current"]
-    lg.type(("\x1b[B" if moves > 0 else "\x1b[A") * abs(moves))
+def choose(login, menu, option):
+    moves = menu["rows"].index(option) - menu["current"]
+    login.type(("\x1b[B" if moves > 0 else "\x1b[A") * abs(moves))
     time.sleep(0.2)
-    lg.type("\r")
+    login.type("\r")
+
+
+def test_sign_in_opencode_reaches_the_key_prompt(login):
+    lg = login("opencode")
+    found = lg.until("choose", name="integration")
+    if "OpenCode" in found["options"]:
+        choose(lg, found, "OpenCode")
+        methods = lg.until("choose", name="method")
+        assert methods["options"] == ["OpenCode account", "API key (service account)"]
+        choose(lg, methods, "API key (service account)")
+    else:
+        assert {"OpenCode Go", "OpenCode Console"} <= set(found["options"])
+        choose(lg, found, "OpenCode Go")
     lg.until("paste")

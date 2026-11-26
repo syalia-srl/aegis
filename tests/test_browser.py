@@ -597,6 +597,8 @@ def ranked_server(tmp_path: Path, fake_claude: str, fake_opencode: str):
     (tmp_path / "models.json").write_text(json.dumps(RANKING))
     s = Server(tmp_path, fake_claude, fake_opencode)
     s.env["AEGIS_MODELS_FILE"] = str(tmp_path / "models.json")
+    # Both fake CLIs are passed explicitly. Hide any other locally installed CLIs.
+    s.env["PATH"] = str(tmp_path)
     s.start()
     yield s
     s.stop()
@@ -653,7 +655,8 @@ def test_model_options_show_rank_score_and_price(ranked_server, page):
 
 def model_view_rows(pg) -> list[str]:
     return pg.eval_on_selector_all(
-        "#set-models .set-mrow[data-model]", "els => els.map(e => e.dataset.model)"
+        "#set-models .set-mrow[data-model]",
+        "els => els.map(e => e.dataset.model === 'web' ? e.title : e.dataset.model)",
     )
 
 
@@ -662,6 +665,7 @@ def test_models_view_filters_and_sorts(ranked_server, page):
     page.wait_for_selector("#a2[data-view=fleet]")
     page.keyboard.press("Alt+KeyS")
     page.wait_for_selector("#set-models .set-mrow[data-model]")
+    web_models = ["Gemini web", "DeepSeek web", "Qwen web", "ChatGPT web"]
     # In use first, then by Intelligence Index; unranked ones last, in catalog
     # order, fake-plain too though it has a Coding Index.
     assert model_view_rows(page) == [
@@ -672,6 +676,7 @@ def test_models_view_filters_and_sorts(ranked_server, page):
         "haiku",
         "opencode-go/fake-video",
         "opencode-go/fake-plain",
+        *web_models,
     ]
     assert page.eval_on_selector_all(
         "#set-models .set-mrow.use", "els => els.map(e => e.dataset.model)"
@@ -685,6 +690,11 @@ def test_models_view_filters_and_sorts(ranked_server, page):
     assert page.inner_text(f"{plain} .ci") == "60.0"
     assert page.inner_text(f"{plain} .ii") == "unranked"
 
+    web_rows = page.locator('#set-models .set-mrow[data-model="web"]')
+    assert web_rows.locator(".h").all_text_contents() == web_models
+    assert web_rows.locator(".pr").all_text_contents() == ["—"] * 4
+    pick(page, "#set-models pick-chip[name=models-harness]", "Gemini web")
+    assert model_view_rows(page) == ["Gemini web"]
     pick(page, "#set-models pick-chip[name=models-harness]", "OpenCode")
     assert model_view_rows(page) == [
         "opencode-go/fake-pro",
@@ -713,6 +723,7 @@ def test_models_view_filters_and_sorts(ranked_server, page):
         "sonnet",
         "opus",
         "haiku",
+        *web_models,
     ]
 
     attr = page.locator("#set-models .set-attr")
@@ -6785,14 +6796,17 @@ def test_a_long_tip_does_not_widen_the_new_tab_on_a_phone(server, browser):
     page.wait_for_selector("#a2[data-view=fleet]")
     page.tap("#tab-add")
     page.wait_for_function("document.querySelector('#sp-agent').value !== ''")
-    page.evaluate(
-        """(() => { const t = document.getElementById('hint-tip'); t.hidden = false;
-        document.getElementById('hint-tip-go').textContent =
-          'Coordinate several agents with a workflow you approve as a plan, and the server runs it'; })()"""
+    page.wait_for_selector("#sp-hints[data-ready]", state="attached")
+    # A help repaint can replace the injected text between browser calls.
+    layout = page.evaluate(
+        f"""() => {{
+          document.getElementById('hint-tip').hidden = false;
+          const go = document.getElementById('hint-tip-go');
+          go.textContent = 'Coordinate several agents with a workflow you approve as a plan, and the server runs it';
+          return {{ wider: {WIDER}, clipped: go.scrollWidth > go.clientWidth }};
+        }}"""
     )
-    assert page.evaluate(WIDER) == []
-    go = page.locator("#hint-tip-go")
-    assert go.evaluate("e => e.scrollWidth > e.clientWidth")
+    assert layout == {"wider": [], "clipped": True}, layout
     assert errs == []
 
 

@@ -7,6 +7,9 @@ import os
 import signal
 import time
 
+import pytest
+
+
 from .knowledge_samples import skill
 from .one_person import BEN, recorded  # noqa: F401
 from .test_agents import mcp, turn
@@ -115,6 +118,7 @@ async def test_a_write_session_may_not_run_a_script(agents_world):
     assert "full permission" in said and s.skill_runs == {}
 
 
+@pytest.mark.slow
 async def test_a_timed_out_run_returns_though_a_child_holds_its_pipes(agents_world):
     app = agents_world.app
     await save_release(app, app.user)

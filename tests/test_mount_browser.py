@@ -488,15 +488,18 @@ def test_a_spanish_composer_reads_spanish(host, browser, width):  # noqa: F811
     )
 
     assert page.get_attribute("#chat2 .aegis #input", "placeholder") == (
-        "Escríbele al agente. Enter envía, Shift+Enter agrega una línea, "
-        "/ para comandos, Esc interrumpe."
+        "Escríbele al agente. Enter envía, Shift+Enter agrega una línea."
     )
     assert page.get_attribute("#chat2 .aegis #send", "title") == "Enviar (Enter)"
     assert page.get_attribute("#chat2 .aegis #send", "aria-label") == "Enviar"
     assert page.get_attribute("#chat2 .aegis #attach", "title") == ("Adjuntar archivos")
-    assert page.get_attribute("#chat2 .aegis #interrupt", "title") == (
-        "Interrumpir (Esc)"
-    )
+    interrupt = page.locator("#chat2 .aegis #interrupt")
+    assert interrupt.get_attribute("title") == "Interrumpir"
+    composer_send(page, "/busy 5")
+    interrupt.wait_for(timeout=30_000)
+    assert page.locator("#chat2 .aegis #working .wesc").count() == 0
+    interrupt.click()
+    interrupt.wait_for(state="hidden", timeout=30_000)
     # The English mount beside it still reads its own table.
     assert page.get_attribute("#chat .aegis #send", "title") == "Send (Enter)"
     assert page.get_attribute("#chat .aegis #attach", "title") == "Attach files"
@@ -642,9 +645,11 @@ def test_an_attachment_uploads_as_a_chip_and_goes_out_with_the_message(host, bro
     page.wait_for_selector("#chat .aegis #atts .chip.att.done", timeout=30_000)
     page.fill("#chat .aegis #input", "with a file")
     page.press("#chat .aegis #input", "Enter")
-    card = page.locator("#chat .aegis #entries .row.user .fcard.att")
-    card.first.wait_for(timeout=60_000)
-    assert "attached-note.txt" in page.inner_text("#chat .aegis #entries")
+    row = page.locator("#chat .aegis #entries .row.user.ok").filter(
+        has_text="with a file"
+    )
+    card = row.locator(".fcard.att").filter(has_text="attached-note.txt")
+    card.wait_for(timeout=60_000)
     # The tray is empty again once the send took the file.
     page.wait_for_selector("#chat .aegis #atts", state="hidden", timeout=10_000)
     assert errors == []

@@ -239,6 +239,7 @@ export default {
   "composer.placeholder.default": "Escríbele al agente. Enter envía, Shift+Enter agrega una línea, / para comandos, Esc Esc interrumpe.",
   "composer.attach": "Adjuntar archivos",
   "composer.interrupt": "Interrumpir",
+  "composer.placeholder.embedded": "Escríbele al agente. Enter envía, Shift+Enter agrega una línea.",
   "composer.interruptTitle": "Interrumpir (Esc Esc)",
   "composer.send": "Enviar",
   "composer.sendTitle": "Enviar (Enter)",

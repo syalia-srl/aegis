@@ -1,1 +1,0 @@
-- **A PDF still scrolls while a tool is on.** The drawing layer was taking the wheel, so the viewer could not move until Annotate was turned off.
