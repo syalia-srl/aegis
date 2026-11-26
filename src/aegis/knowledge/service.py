@@ -36,7 +36,7 @@ from pathlib import Path
 from . import checks, hint, know_how
 from .embed import Embedder, Loader, Vector, available, fastembed_loader
 from .items import Item
-from .search import QUERY_CHARS, Index, text_of
+from .search import QUERY_CHARS, CatalogHit, CatalogIndex, Index, text_of
 from .store import Store
 from .sources import Source, Sources, Snapshot
 from .usage import Usage
@@ -63,6 +63,7 @@ class Knowledge:
         self.usage = Usage(state_root / "knowledge-usage.sqlite")
         # principal -> (store version, when scanned, items, index)
         self._indexes: dict[str, tuple[int, float, list[Item], Index]] = {}
+        self._catalog: tuple[tuple[Item, ...], CatalogIndex] | None = None
         self._ranks: dict[str, dict[str, int]] = {}
         self._pruned = 0.0
         self._refreshing: dict[str, asyncio.Task] = {}
@@ -169,6 +170,32 @@ class Knowledge:
 
     async def refresh_source(self, source: Source) -> Snapshot:
         return await self.sources.refresh(source, self._clock(), SCAN_EVERY_S)
+
+    async def search_catalog(
+        self,
+        items: list[Item],
+        query: str,
+        limit: int,
+        *,
+        cwd: str | None,
+        worktree: str | None,
+    ) -> tuple[list[CatalogHit], int]:
+        """Reuse the most recent visible corpus only for exactly those revisions."""
+        key = tuple(items)
+        cached = self._catalog
+
+        def search() -> tuple[CatalogIndex, list[CatalogHit], int]:
+            index = (
+                cached[1]
+                if cached is not None and cached[0] == key
+                else CatalogIndex(items)
+            )
+            hits, total = index.rank(query, limit, cwd=cwd, worktree=worktree)
+            return index, hits, total
+
+        index, hits, total = await asyncio.to_thread(search)
+        self._catalog = (key, index)
+        return hits, total
 
     async def read_worktree(
         self, cwd: str, *, entry_id: str | None, relative_path: str | None

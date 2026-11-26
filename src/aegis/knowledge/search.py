@@ -1,4 +1,4 @@
-"""BM25 over a principal's items, one index per kind.
+"""BM25 over a principal's items or the visible wiki catalog.
 
 Each item is one bag of words: its name split on ``-`` and ``_`` (weight 3),
 its description (2) and the first 600 characters of its body (1), scored with
@@ -77,12 +77,17 @@ def text_of(item: Item) -> str:
     return f"{name}\n{item.description}\n{item.body[:BODY_CHARS]}"
 
 
-def _bag(item: Item) -> Counter[str]:
+def _bag(item: Item, *, full_body: bool = False) -> Counter[str]:
     bag: Counter[str] = Counter()
     for weight, text in (
-        (NAME_WEIGHT, item.name.replace("-", " ").replace("_", " ")),
+        (
+            NAME_WEIGHT,
+            (item.title if full_body else item.name)
+            .replace("-", " ")
+            .replace("_", " "),
+        ),
         (DESCRIPTION_WEIGHT, item.description),
-        (BODY_WEIGHT, item.body[:BODY_CHARS]),
+        (BODY_WEIGHT, item.body if full_body else item.body[:BODY_CHARS]),
     ):
         for t in terms(text):
             bag[t] += weight
@@ -101,14 +106,60 @@ def _matches(globs: list[str], cwd: str) -> bool:
 
 
 class _Kind:
-    def __init__(self, items: list[Item]) -> None:
+    def __init__(self, items: list[Item], *, full_body: bool = False) -> None:
         self.items = items
-        self.bags = [_bag(i) for i in items]
+        self.bags = [_bag(i, full_body=full_body) for i in items]
         self.lens = [sum(b.values()) for b in self.bags]
-        self.avg = sum(self.lens) / len(self.lens) if self.lens else 1.0
+        self.avg = (sum(self.lens) / len(self.lens) or 1.0) if self.lens else 1.0
         df = Counter(t for b in self.bags for t in b)
         n = len(self.bags)
         self.idf = {t: math.log((n - d + 0.5) / (d + 0.5) + 1) for t, d in df.items()}
+
+    def score(self, i: int, matches: set[str]) -> float:
+        bag = self.bags[i]
+        norm = K1 * (1 - B + B * self.lens[i] / self.avg)
+        return sum(
+            self.idf[t] * bag[t] * (K1 + 1) / (bag[t] + norm) for t in sorted(matches)
+        )
+
+
+@dataclass(frozen=True)
+class CatalogHit:
+    entry_id: str
+    score: float
+    matched_terms: list[str]
+    context_match: bool
+
+
+class CatalogIndex:
+    """One BM25 corpus, built only from entries visible to the caller."""
+
+    def __init__(self, items: list[Item]) -> None:
+        self._corpus = _Kind(items, full_body=True)
+
+    def rank(
+        self, query: str, limit: int, *, cwd: str | None, worktree: str | None
+    ) -> tuple[list[CatalogHit], int]:
+        q = set(terms(query[:QUERY_CHARS]))
+        ix = self._corpus
+        hits = []
+        for i, (item, bag) in enumerate(zip(ix.items, ix.bags)):
+            matches = q.intersection(bag)
+            if not matches:
+                continue
+            context = bool(
+                (
+                    worktree
+                    and item.scope == "workspace"
+                    and item.path
+                    and item.path.is_relative_to(worktree)
+                )
+                or (cwd and item.paths and _matches(item.paths, cwd))
+            )
+            score = ix.score(i, matches) * (2 if context else 1)
+            hits.append(CatalogHit(item.id, score, sorted(matches), context))
+        hits.sort(key=lambda hit: (-hit.score, hit.entry_id))
+        return hits[:limit], len(hits)
 
 
 class Index:
@@ -145,10 +196,7 @@ class Index:
             expired = item.expired(today)
             if hintable_only and (expired or item.status != "approved"):
                 continue
-            norm = K1 * (1 - B + B * ix.lens[i] / ix.avg)
-            score = sum(
-                ix.idf[t] * bag[t] * (K1 + 1) / (bag[t] + norm) for t in q if t in bag
-            )
+            score = ix.score(i, q.intersection(bag)) if bag else 0.0
             boosted = bool(cwd and item.paths and _matches(item.paths, cwd))
             if score > 0:
                 bm25[item.name] = score
