@@ -28,7 +28,8 @@ capture = { url = '(https://claude(?:\.com/cai|\.ai)/oauth/authorize\?\S+)' }
 # opencode 2.1.2's auth login: a searchable menu of integrations, then for
 # OpenCode Go a key prompt (stored without a check; the check runs a turn) and
 # for OpenCode Console a login-method menu and a device code. The active
-# prompt is marked ◆; answered ones turn to ◇.
+# prompt is marked ◆; answered ones turn to ◇. From 2.4.2, a fresh home
+# offers OpenCode with account and service-key methods in the same menu.
 [opencode]
 cmd = ["opencode", "auth", "login", "--standalone"]
 cols = 600
@@ -57,14 +58,20 @@ all = ['◆  Enter your OpenCode Go API key']
 prompt = "Paste your OpenCode Go API key."
 
 [[opencode.rules]]
+name = "service-key"
+step = "paste"
+all = ['◆  API key \(service account\)']
+prompt = "Paste your OpenCode service account API key."
+
+[[opencode.rules]]
 name = "method"
 step = "choose"
 all = ['◆  Select login method']
-prompt = "How to sign in to OpenCode Console:"
+prompt = "How to sign in to OpenCode:"
 
 [[opencode.rules]]
 name = "integration"
 step = "choose"
 all = ['◆  Select integration']
 prompt = "Which OpenCode subscription:"
-options = '^OpenCode (Go|Console)$'
+options = '^OpenCode(?: Go| Console)?$'
