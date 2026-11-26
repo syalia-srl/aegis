@@ -9996,11 +9996,7 @@ def test_realtime_retains_repeatedly_failed_audio_and_recovers_in_order(
     assert got["errors"] == ["recognition failed", "recognition failed"]
 
 
-def test_realtime_retry_recovers_retained_mic_audio_from_another_session(
-    dict_server, mic_page, tmp_path
-):
-    pg = mic_page
-    pg.set_viewport_size({"width": 390, "height": 844})
+def watch_mic_track(pg):
     pg.add_init_script("""
         const capture = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
         navigator.mediaDevices.getUserMedia = async (constraints) => {
@@ -10009,6 +10005,14 @@ def test_realtime_retry_recovers_retained_mic_audio_from_another_session(
           return stream;
         };
     """)
+
+
+def test_realtime_retry_recovers_retained_mic_audio_from_another_session(
+    dict_server, mic_page, tmp_path
+):
+    pg = mic_page
+    pg.set_viewport_size({"width": 390, "height": 844})
+    watch_mic_track(pg)
     blocked = True
 
     def route(ws):
@@ -10063,6 +10067,134 @@ def test_realtime_retry_recovers_retained_mic_audio_from_another_session(
     assert ended["inbox"][0]["realtime"]["state"] == "ended"
     assert not sends_of(dict_server, other)
     assert pg.errors == []
+
+
+def test_realtime_rejected_delivery_keeps_text_receipt_and_order(dict_server, page):
+    page.goto(dict_server.url)
+    got = run_dictation(
+        page,
+        """
+        const { Realtime } = await import('/static/js/realtime.js');
+        const attempts = [], sent = [], errors = [];
+        let stopped = false;
+        const r = new Realtime({
+          engine: {
+            recognition: async () => '',
+            recognize: async ([part]) => ({1: 'first', 2: 'second', 3: 'tail'}[part.length / 16000]),
+          },
+          deliver: async (_, params) => {
+            attempts.push(params);
+            if (attempts.length <= 2) throw new Error(attempts.length === 1 ? 'locked' : 'archived');
+            sent.push(params);
+          },
+          onState() {},
+          onError: (error) => errors.push(error.message),
+        });
+        r.start({key: 'origin'}, async (...args) => {
+          await source(...args);
+          return async () => { stopped = true; };
+        });
+        feed(tone(1), gap(10), tone(2), gap(10), tone(3));
+        await until(() => r.capture.retry?.kind === 'delivery');
+        const stop = r.stop();
+        await until(() => stopped && r.pendingText().endsWith('tail'));
+        const beforeRetry = r.pendingText();
+        r.retry();
+        await until(() => r.capture.retry?.kind === 'delivery' && errors.length === 2);
+        const afterRefusal = r.pendingText();
+        if (sent.length !== 0) throw new Error('later speech passed the refused delivery');
+        r.retry();
+        await stop;
+        return { attempts, sent, errors, beforeRetry, afterRefusal };
+        """,
+    )
+    assert got["beforeRetry"] == got["afterRefusal"] == "first\n\nsecond\n\ntail"
+    assert got["errors"] == ["locked", "archived"]
+    assert got["attempts"][0] == got["attempts"][1] == got["attempts"][2]
+    assert [m.get("text") for m in got["sent"]] == ["first", "second", "tail", None]
+    assert [m["realtime"]["state"] for m in got["sent"]] == [
+        "open",
+        "closing",
+        "closing",
+        "ended",
+    ]
+    assert len({m["nonce"] for m in got["sent"]}) == 4
+
+
+def test_realtime_delivery_retry_keeps_unsent_text_accessible(
+    dict_server, mic_page, tmp_path
+):
+    pg = mic_page
+    pg.set_viewport_size({"width": 390, "height": 844})
+    watch_mic_track(pg)
+    rejection = "in_workflow"
+    attempts = []
+
+    def route(ws):
+        server = ws.connect_to_server()
+
+        def from_page(message):
+            data = json.loads(message)
+            params = data.get("params", {})
+            if data.get("op") == "session.send" and params.get("realtime"):
+                attempts.append(params)
+                if rejection and params["realtime"]["state"] != "ended":
+                    ws.send(
+                        json.dumps(
+                            {
+                                "t": "reply",
+                                "id": data["id"],
+                                "error": {
+                                    "code": rejection,
+                                    "message": "test destination refused speech",
+                                },
+                            }
+                        )
+                    )
+                    return
+            server.send(message)
+
+        ws.on_message(from_page)
+
+    pg.route_web_socket(re.compile(r"/ws"), route)
+    pg.goto(dict_server.url)
+    pg.wait_for_selector("#a2[data-view=fleet]")
+    other = spawn(pg)
+    origin = spawn(pg)
+    press_mic(pg)
+    move_to_target(pg, "realtime")
+    pg.wait_for_timeout(1100)
+    pg.mouse.up()
+    pg.wait_for_selector("#realtime-status:not([hidden])")
+    pg.click("#realtime-stop")
+    pg.wait_for_function("window.testMicTrack.readyState === 'ended'")
+    pg.get_by_role("button", name="Retry delivery").wait_for()
+    pg.click(f"#tablist .tab[data-id='{other}']")
+    pg.wait_for_function("(id) => location.hash === '#s=' + id", arg=other)
+    assert len(attempts) == 1 and sends_of(dict_server, origin) == []
+    first = attempts[0]
+    assert first["log_id"] == origin and "kw=" in first["text"]
+
+    rejection = "archived"
+    pg.get_by_role("button", name="Retry delivery").click()
+    pg.get_by_text(re.compile("archived: test destination refused speech")).wait_for()
+    pg.get_by_role("button", name="View unsent speech").click()
+    text = pg.get_by_role("textbox", name="Unsent speech")
+    assert text.input_value() == first["text"]
+    assert text.get_attribute("readonly") is not None
+    pg.screenshot(path=tmp_path / "phone-realtime-unsent.png")
+    pg.get_by_role("dialog").get_by_role("button", name="Close").click()
+    assert attempts == [first, first] and sends_of(dict_server, origin) == []
+
+    rejection = None
+    pg.get_by_role("button", name="Retry delivery").click()
+    pg.wait_for_selector("#realtime-status", state="hidden")
+    assert attempts[:3] == [first, first, first]
+    assert [a["realtime"]["state"] for a in attempts] == ["closing"] * 3 + ["ended"]
+    block, ended = sends_of(dict_server, origin)
+    assert block["inbox"][0]["realtime"]["text"] == first["text"]
+    assert ended["inbox"][0]["realtime"]["state"] == "ended"
+    assert sends_of(dict_server, other) == [] and pg.errors == []
 
 
 def test_the_working_row_types_its_verb_and_counts_the_turns_tokens(server, page):

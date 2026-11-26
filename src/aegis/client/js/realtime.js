@@ -63,7 +63,7 @@ export class Realtime {
 
   start(origin, source) {
     const id = crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const rec = { origin, id, sequence: 0, sending: Promise.resolve(), closing: false };
+    const rec = { origin, id, sequence: 0, sending: Promise.resolve(), closing: false, unsent: new Map() };
     this.capture = rec;
     // Resolve model readiness and each block independently. Only delivery is
     // serialized, so recognition may finish while earlier blocks are pending.
@@ -81,21 +81,31 @@ export class Realtime {
         const keywords = await prepare();
         return this.engine.recognize(parts.map((part) => part.slice()), keywords);
       };
-      const verdict = (attempt) => attempt.then((text) => ({ text }), (error) => ({ error }));
+      const sequence = rec.sequence;
+      const remember = (text) => {
+        if (text) {
+          rec.unsent.set(sequence, text);
+          if (rec.deliveryBlocked) this.onState(rec);
+        }
+        return { text };
+      };
+      const verdict = (attempt) => attempt.then(remember, (error) => ({ error }));
       const result = verdict(recognize().catch(recognize));
       this.enqueue(rec, async (nonce) => {
         let { text, error } = await result;
         while (error) {
-          // Keep the audio and this queue position while the person retries.
-          // Later blocks may finish recognizing, but cannot be sent yet.
-          this.onError(error);
-          await new Promise((retry) => {
-            rec.retry = retry;
-            this.onState(rec);
-          });
+          // Later blocks can finish recognizing while this block waits.
+          await this.waitForRetry(rec, error, "recognition");
           ({ text, error } = await verdict(recognize()));
         }
-        if (text) await this.deliver(origin, { text, nonce, realtime: { id: rec.id, state: rec.closing ? "closing" : "open" } });
+        if (text) {
+          await this.send(rec, { text, nonce, realtime: { id: rec.id, state: rec.closing ? "closing" : "open" } });
+          rec.unsent.delete(sequence);
+          if (rec.deliveryBlocked) {
+            rec.deliveryBlocked = false;
+            this.onState(rec);
+          }
+        }
       });
     });
     rec.blocks = blocks;
@@ -112,18 +122,47 @@ export class Realtime {
     });
   }
 
+  waitForRetry(rec, error, kind) {
+    this.onError(error);
+    return new Promise((resume) => {
+      rec.retry = { kind, resume };
+      this.onState(rec);
+    });
+  }
+
   retry() {
     const rec = this.capture;
     if (!rec?.retry) return;
-    const resume = rec.retry;
+    const { resume } = rec.retry;
     rec.retry = null;
     this.onState(rec);
     resume();
   }
 
+  pendingText() {
+    return [...(this.capture?.unsent ?? [])]
+      .sort(([a], [b]) => a - b)
+      .map(([, text]) => text)
+      .join("\n\n");
+  }
+
+  async send(rec, params) {
+    for (;;) {
+      try {
+        await this.deliver(rec.origin, params);
+        return;
+      } catch (error) {
+        // Keep this exact payload (including its receipt) at the head of the
+        // queue. A refusal must never allow capture-ended to overtake speech.
+        rec.deliveryBlocked = true;
+        await this.waitForRetry(rec, error, "delivery");
+      }
+    }
+  }
+
   enqueue(rec, send) {
     const nonce = `${rec.id}:${rec.sequence++}`;
-    rec.sending = rec.sending.then(() => send(nonce)).catch((error) => this.onError(error));
+    rec.sending = rec.sending.then(() => send(nonce));
   }
 
   async stop() {
@@ -137,7 +176,7 @@ export class Realtime {
       catch (error) { this.onError(error); }
     }
     rec.blocks.finish();
-    this.enqueue(rec, (nonce) => this.deliver(rec.origin, { nonce, realtime: { id: rec.id, state: "ended" } }));
+    this.enqueue(rec, (nonce) => this.send(rec, { nonce, realtime: { id: rec.id, state: "ended" } }));
     await rec.sending;
     this.capture = null;
     this.onState(null);

@@ -21,6 +21,7 @@ export const FULL_HTML = `
   <div class="realtime-status" id="realtime-status" hidden>
     <span id="realtime-source" role="status"></span>
     <button class="btn" id="realtime-retry" type="button" data-t="dictation.realtimeRetry" hidden></button>
+    <button class="btn" id="realtime-view" type="button" data-t="dictation.realtimeView" hidden></button>
     <button class="btn" id="realtime-stop" type="button" data-t="dictation.stopRealtime"></button>
   </div>
 

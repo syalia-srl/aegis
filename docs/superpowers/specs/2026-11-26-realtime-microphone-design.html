@@ -60,7 +60,7 @@ details p{margin:10px 0 0}
 <dl>
 <dt>Origin</dt><dd>The session key is captured with the gesture. The page-wide status names the session and offers Stop mic while the user navigates or types.</dd>
 <dt>Boundaries</dt><dd>A block runs from first speech to 10 seconds of continuous silence or 60 seconds elapsed. The microphone keeps capturing while Whistle settles earlier blocks.</dd>
-<dt>Final text</dt><dd>The browser shares the dictation workers and orders results by their capture sequence. It sends each nonempty block once with a stable receipt. A recognition failure retries once with the same audio. If that fails, the browser retains the block and pauses delivery until Retry speech succeeds. Later blocks can finish recognition while they wait. It sends text alone.</dd>
+<dt>Final text</dt><dd>The browser shares the dictation workers and orders results by their capture sequence. It sends each nonempty block once with a stable receipt. A recognition failure retries once with the same audio. If that fails, the browser retains the block and pauses delivery until Retry speech succeeds. Later blocks can finish recognition while they wait. If the destination refuses delivery, Retry delivery uses the original payload and receipt at the same queue position. View unsent speech makes the waiting text selectable, including after stop. Realtime sends text alone.</dd>
 <dt>Stop</dt><dd>Stop drains and closes the microphone immediately. The final block and capture-ended follow every earlier block. If recognition is waiting for a retry, the page keeps the stop state and recovery control visible.</dd>
 <dt>Agent input</dt><dd>Voice uses the urgent human delivery path. Claude Code and Codex receive steering where available. Other harnesses hold inputs for their next turn. Each prompt identifies speech and reports capture state separately. The agent can respond promptly, wait silently for context, or queue small work according to the task.</dd>
 </dl>
@@ -76,7 +76,7 @@ details p{margin:10px 0 0}
 </section>
 <section id="verification">
 <h2>Verification</h2>
-<p>Check the fresh browser at desktop and 390 px. Exercise pointer correction, keyboard choice, editable dictation, audio with draft, switching sessions, typing, and stopping while away. Feed deterministic 16 kHz samples to cover both cutoffs, delayed recognition, repeated failure and ordered recovery, silent stop and tail flush. Inspect persisted rows and harness input for origin, human steering, held order and repeated receipts.</p>
+<p>Check the fresh browser at desktop and 390 px. Exercise pointer correction, keyboard choice, editable dictation, audio with draft, switching sessions, typing, and stopping while away. Feed deterministic 16 kHz samples to cover both cutoffs, delayed recognition, repeated recognition failure, delivery refusal, ordered recovery, silent stop and tail flush. Inspect persisted rows and harness input for origin, human steering, held order and repeated receipts.</p>
 <p>Microphone permission and a secure browser context are required. A browser tab owns the live device, so closing the tab ends access. Use the Stop mic control to flush the tail and notify the session.</p>
 </section>
 </main>

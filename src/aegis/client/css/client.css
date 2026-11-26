@@ -665,6 +665,11 @@
 .aegis .realtime-status [role=status]{min-width:0;margin-right:auto;overflow-wrap:anywhere}
 .aegis .realtime-status .btn{flex:none}
 .aegis .realtime-status .btn[hidden]{display:none}
+.aegis .realtime-unsent{box-sizing:border-box;width:100%;resize:vertical;padding:8px;background:var(--bg);color:var(--ink);border:1px solid var(--rule);border-radius:var(--r);font:inherit}
+@media(max-width:520px){
+  .aegis .realtime-status:has(#realtime-view:not([hidden])){flex-wrap:wrap}
+  .aegis .realtime-status:has(#realtime-view:not([hidden])) [role=status]{flex-basis:100%}
+}
 .aegis[data-layout=full]:has(>.realtime-status:not([hidden])){grid-template-rows:auto auto minmax(0,1fr)}
 .aegis[data-layout=full]:has(>.realtime-status:not([hidden])):has(>.netbanner:not([hidden])){grid-template-rows:auto auto auto minmax(0,1fr)}
 .aegis[data-view=window]:has(>.realtime-status:not([hidden])){grid-template-rows:auto minmax(0,1fr)}

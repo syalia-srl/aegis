@@ -2505,6 +2505,10 @@ const dictation = new DictationPart(app, $("composer"), {
       : (rec.retry ? "dictation.realtimeListeningPending" : "dictation.realtimeSource");
     $("realtime-source").textContent = app.t(status, { session: rec.origin.label });
     $("realtime-retry").hidden = !rec.retry;
+    $("realtime-retry").textContent = app.t(
+      rec.retry?.kind === "delivery" ? "dictation.realtimeRetryDelivery" : "dictation.realtimeRetry",
+    );
+    $("realtime-view").hidden = !rec.deliveryBlocked || !rec.unsent.size;
     $("realtime-stop").disabled = rec.closing;
   },
   canStart: () => !offline(),
@@ -2514,6 +2518,20 @@ const dictation = new DictationPart(app, $("composer"), {
   onTake,
 });
 $("realtime-retry").addEventListener("click", () => dictation.realtime.retry());
+$("realtime-view").addEventListener("click", async () => {
+  const text = document.createElement("textarea");
+  const label = app.t("dictation.realtimeUnsent");
+  text.className = "realtime-unsent";
+  text.setAttribute("aria-label", label);
+  text.readOnly = true;
+  text.rows = 6;
+  text.value = dictation.realtime.pendingText();
+  const closed = choose(label, text, [{ value: "close", label: app.t("dictation.realtimeClose"), primary: true }], { root });
+  text.focus();
+  text.select();
+  await closed;
+  if (!$("realtime-view").hidden) $("realtime-view").focus();
+});
 $("realtime-stop").addEventListener("click", () => dictation.realtime.stop());
 // On a touch screen Enter adds a line and the button sends: the key sits where
 // a mistap lands, and half a message costs a turn.

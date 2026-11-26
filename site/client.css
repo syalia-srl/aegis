@@ -697,6 +697,11 @@
 .a2 .realtime-status [role=status]{min-width:0;margin-right:auto;overflow-wrap:anywhere}
 .a2 .realtime-status .btn{flex:none}
 .a2 .realtime-status .btn[hidden]{display:none}
+.a2 .realtime-unsent{box-sizing:border-box;width:100%;resize:vertical;padding:8px;background:var(--bg);color:var(--ink);border:1px solid var(--rule);border-radius:var(--r);font:inherit}
+@media(max-width:520px){
+  .a2 .realtime-status:has(#realtime-view:not([hidden])){flex-wrap:wrap}
+  .a2 .realtime-status:has(#realtime-view:not([hidden])) [role=status]{flex-basis:100%}
+}
 .a2[data-layout=full]:has(>.realtime-status:not([hidden])){grid-template-rows:auto auto minmax(0,1fr)}
 .a2[data-layout=full]:has(>.realtime-status:not([hidden])):has(>.netbanner:not([hidden])){grid-template-rows:auto auto auto minmax(0,1fr)}
 .a2[data-view=window]:has(>.realtime-status:not([hidden])){grid-template-rows:auto minmax(0,1fr)}

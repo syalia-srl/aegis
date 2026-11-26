@@ -157,7 +157,13 @@ the earlier phrases.
 If recognition fails twice, the browser keeps the audio and pauses delivery.
 Choose **Retry speech** in the status bar to send the recovered block and the
 ones behind it in order. You can retry from another session or after you
-stop the mic. Keep the page open until recovery completes.
+stop the mic.
+
+If the session refuses a finalized block, **Retry delivery** resends it in
+place with the same receipt. **View unsent speech** opens selectable text
+for the finalized blocks still waiting. You can copy the text if the
+destination can no longer accept it. Keep the page open until you recover
+or copy the speech.
 
 Choose **Stop mic** in the status bar from any view. It closes the microphone
 immediately. The browser sends any remaining words in order and then tells
