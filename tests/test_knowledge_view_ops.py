@@ -395,10 +395,6 @@ async def test_catalog_reconciles_sources_and_checks_policy_on_every_read(tmp_pa
         (how / f"release-{n}.md").write_text(
             "---\nwhen: cutting a release\n---\nBuild.\n"
         )
-    late = how / "release-50.md"
-    late.write_text(
-        late.read_text() + "Maintenance procedures. " * 40 + "Zirconium ledger."
-    )
     guides = tmp_path / "guides"
     guides.mkdir()
     guide = guides / "handbook.md"
@@ -466,31 +462,7 @@ async def test_catalog_reconciles_sources_and_checks_policy_on_every_read(tmp_pa
     assert entries["release-50"]["root"] == str(root)
     assert entries["release-50"]["description"] == "cutting a release"
 
-    search = await catalog(query="zirconium ledger")
-    assert search["total"] == 1
-    (hit,) = search["items"]
-    assert hit["id"] == direct["id"] and hit["revision"] == direct["revision"]
-    assert hit["matched_terms"] == ["ledge", "zirco"]
-    assert hit["context_match"] and not hit["expired"]
-    assert hit["relative_path"] == "know-how/release-50.md"
-    assert (await catalog(entry_id=hit["id"]))["body"].endswith("Zirconium ledger.")
-
-    personal_match = {"query": "personal", "limit": 1}
-    unrestricted = await catalog(**personal_match)
-    assert unrestricted["total"] == 1
-    same_query = await catalog(query="release", limit=1)
-    assert same_query["total"] == 52 and len(same_query["items"]) == 1
     policy.denied = {guides, how}
-    permitted = await catalog(query="release", limit=1)
-    assert permitted["total"] == 1
-    assert permitted["items"][0]["relative_path"] == "release/SKILL.md"
-    # Excluded items leave the BM25 corpus as well as the result set.
-    policy.denied = {guides, how, tmp_path / ".codex" / "skills"}
-    hidden = await catalog(query="zirconium ledger")
-    assert hidden["items"] == [] and hidden["total"] == 0
-    only_personal = await catalog(**personal_match)
-    assert only_personal["items"][0]["score"] != unrestricted["items"][0]["score"]
-    policy.denied.remove(tmp_path / ".codex" / "skills")
     denied = await catalog()
     assert {r["name"] for r in denied["items"]} == {"personal", "release"}
     assert all(not e["path"].startswith(str(guides)) for e in denied["errors"])

@@ -474,9 +474,6 @@ aegis:                     <span class="c"># optional, ignored by other harnesse
 <p>One SQLite table per server, beside the journal's:</p>
 <pre>usage(ts, principal, session, item_kind, item_name, event, detail)
 <span class="c">-- event: hinted | read | invoked | ran | saved | approved | discarded | deleted | flagged</span></pre>
-<h3>Common catalog search</h3>
-<p>Implemented in delivery 3. Browser RPC and agent MCP use <code>knowledge.catalog</code> to search the caller's visible personal entries, configured roots and session worktree. BM25 covers the full body and weights title and description above it. Checkout and entry path rules boost matching entries. Access determines the corpus and its counts. Each hit carries the qualified ID and revision for the catalog read, along with its source, expiry and match reason.</p>
-<p>Enable extra roots in a test workspace first. Compare the catalog with personal memory and skill search before adopting it. Searches work with embeddings off. Removing a source removes it from the visible corpus and preserves its files.</p>
 <p>Every hint writes one <code>hinted</code> row per item shown. A <code>read</code> of an item that was hinted in the same turn also records the hint's rank in <code>detail</code>. That pair is how the engine is judged on real use: the share of reads that came from the hint, and at which rank. <code>knowledge_stats</code> and the Knowledge view are queries over this table. Rows older than a year are dropped.</p>
 
 <h2 id="view"><span class="n">10</span>The Knowledge view</h2>

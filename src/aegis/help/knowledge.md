@@ -116,21 +116,6 @@ Git checkout's `know-how/` directory, including documents beyond the
 automatic notice's first 50. Without a session, a terminal call lists the
 caller's personal store.
 
-Pass `query` to search the visible catalog. For example, run
-`aegis call knowledge_catalog log_id=SESSION query="restore a backup" limit=10`.
-The browser can send the same arguments to `knowledge.catalog`. The
-Knowledge view's personal search and the existing memory and skill tools
-keep their current behavior.
-
-Catalog search uses BM25 over each entry's title, description and full body
-and works with embeddings off. A page in the selected checkout or a matching
-entry path rule gets a score boost. Each hit includes its source ID, relative
-path, revision, approval state and expiry. A workspace hit includes its root.
-The matched_terms field contains the normalized terms that matched, and
-the context_match field tells you if the score includes the boost. `total` counts all
-visible matches before `limit` (20 by default, up to 100). Use the hit's ID
-with the same session to read it. Opening a skill this way reads its text.
-
 The catalog starts with `.claude/skills` and `.codex/skills` under the
 server's configuration directory. A missing default directory is skipped.
 Set `knowledge.sources` in YAML or in Settings under Search embeddings →

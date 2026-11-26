@@ -527,14 +527,9 @@ class _knowledge:
     async def card_unimport(self, *, log_id: str, id: str, name: str) -> Any:
         """Undo one item of an import card: its import commit is reverted, so it leaves aegis. Its original is wherever it then was."""
     async def catalog(
-        self,
-        *,
-        log_id: str | None = ...,
-        entry_id: str | None = ...,
-        query: str | None = ...,
-        limit: int = ...,
+        self, *, log_id: str | None = ..., entry_id: str | None = ...
     ) -> Any:
-        """Search or list visible knowledge entries, or read one by its qualified ID."""
+        """List visible knowledge sources and entries, or read a qualified entry."""
     async def get(self, *, name: str | None = ..., entry_id: str | None = ...) -> Any:
         """Read a personal knowledge item by ID or name, with its edit stamp."""
     async def history(self, *, name: str) -> Any:
