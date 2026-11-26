@@ -138,3 +138,43 @@ async def test_remember_refuses_empty_text_and_read_permission(agents_world):
     with pytest.raises(OpError) as e:
         await send(app, r["log_id"], "/remember the demo is on friday")
     assert e.value.code == "read_only" and "read permission" in e.value.message
+
+
+async def test_agent_searches_the_worktree_and_reads_by_id(agents_world):
+    root = agents_world.root
+    history.ensure_repo(root)
+    how = root / "know-how"
+    how.mkdir()
+    late = how / "restoring.md"
+    late.write_text("Routine preparation. " * 40 + "\nZirconium ledger.\n")
+    s = await agents_world.spawn()
+    search = ok(await turn(s, mcp("knowledge_catalog", query="zirconium ledger")))
+    assert search["total"] == 1
+    (hit,) = search["items"]
+    assert hit["relative_path"] == "know-how/restoring.md"
+    read = ok(await turn(s, mcp("knowledge_catalog", entry_id=hit["id"])))
+    assert read["body"].endswith("Zirconium ledger.\n")
+    assert read["revision"] == hit["revision"]
+
+
+async def test_agent_reads_personal_catalog_hit_by_id(agents_world):
+    app = agents_world.app
+    await app.knowledge.store.save(
+        app.user,
+        mem(
+            "calibration-log",
+            "Routine preparation",
+            "Maintenance notes. " * 40 + "\nZirconium ledger.",
+            expires="2000-01-01",
+        ),
+        "test",
+    )
+    session = await agents_world.spawn()
+    result = ok(await turn(session, mcp("knowledge_catalog", query="zirconium ledger")))
+    assert result["total"] == 1
+    (hit,) = result["items"]
+    assert hit["scope"] == "personal" and hit["expired"]
+    assert hit["relative_path"] == "memories/calibration-log.md"
+    read = ok(await turn(session, mcp("knowledge_catalog", entry_id=hit["id"])))
+    assert read["id"] == hit["id"] and read["revision"] == hit["revision"]
+    assert read["body"].strip().endswith("Zirconium ledger.")
