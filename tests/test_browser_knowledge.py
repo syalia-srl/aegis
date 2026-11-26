@@ -354,7 +354,9 @@ def test_agent_reads_live_knowledge_source(server, page):
     target = got["links"][0]["target_id"]
     assert target == after["added"]["id"]
     neighbor = catalog(5, entry_id=target)
-    assert neighbor["backlinks"][0]["id"] == entry["id"]
+    backlink = neighbor["backlinks"][0]["id"]
+    assert backlink == entry["id"]
+    assert catalog(6, entry_id=backlink) == got
 
     server.stop()
     guide.write_text("Edited while the server was stopped. [[Added]]\n")
@@ -384,7 +386,8 @@ def test_agent_reads_live_knowledge_source(server, page):
             f"Same entry ID after live edit: {got['id'] == entry['id']}\n"
             f"Live body: {got['body']}"
             f"Resolved target: {target}\n"
-            f"Target backlink: {neighbor['backlinks'][0]['id']}\n"
+            f"Target backlink: {backlink}\n"
+            "Following that backlink returned the original page and revision.\n"
             f"Revision changed after live edit: {got['revision'] != entry['revision']}\n"
             f"Restart scan completed before the first catalog call.\n"
             f"Same entry ID after restart: {recovered['id'] == entry['id']}\n"
