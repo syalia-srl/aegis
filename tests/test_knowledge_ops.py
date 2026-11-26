@@ -150,7 +150,10 @@ async def test_catalog_search_read_and_revocation_over_mcp_and_browser_rpc(
     how = root / "know-how"
     how.mkdir()
     late = how / "restoring.md"
-    late.write_text("Routine preparation. " * 40 + "\nZirconium ledger.\n")
+    late.write_text(
+        "Routine preparation. " * 40 + "\nZirconium ledger. [[Checklist]]\n"
+    )
+    (how / "checklist.md").write_text("# Checklist\n[[Restoring]]\n")
     s = await agents_world.spawn()
     query = {"query": "zirconium ledger"}
     search = ok(await turn(s, mcp("knowledge_catalog", **query)))
@@ -161,6 +164,13 @@ async def test_catalog_search_read_and_revocation_over_mcp_and_browser_rpc(
     read = ok(await turn(s, mcp("knowledge_catalog", **ref)))
     assert read["body"] == late.read_text()
     assert read["revision"] == hit["revision"]
+    (link,) = read["links"]
+    assert link["status"] == "resolved"
+    assert read["backlinks"][0]["id"] == link["target_id"]
+    assert read["neighbor_count"] == 1
+    target = {"entry_id": link["target_id"]}
+    neighbor = ok(await turn(s, mcp("knowledge_catalog", **target)))
+    assert neighbor["links"][0]["target_id"] == hit["id"]
 
     base = agents_world.base
     async with connect(base.replace("http:", "ws:") + "/ws", origin=base) as ws:
@@ -185,6 +195,7 @@ async def test_catalog_search_read_and_revocation_over_mcp_and_browser_rpc(
         ws_search = (await catalog(1, query))["result"]
         assert ws_search["total"] == 1 and ws_search["items"] == [hit]
         assert (await catalog(2, ref))["result"] == read
+        assert (await catalog(5, target))["result"] == neighbor
 
         monkeypatch.setattr(
             agents_world.app.policy,
