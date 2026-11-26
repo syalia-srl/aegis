@@ -1,9 +1,4 @@
-// The Knowledge view: the person's own skills and memories, one search box,
-// a kind filter and the rows, with an item's text in the editor, its history
-// and Delete beside them. The server decides each field (knowledge.list,
-// .get, .put, .history, .restore, .remove in knowledge_ops.py); this module
-// draws and asks. Every text it draws is set as textContent.
-
+import { markdown } from "./entries.js";
 import { open as openEditor } from "./editor.js";
 import { ago } from "./fleet.js";
 import { icon } from "./glyphs.js";
@@ -35,7 +30,7 @@ function button(cls, text, onClick) {
 // server's flags (expired, stale:<path>), else ok.
 function flagOf(r) {
   if (r.status === "proposed") return ["proposed", "prop", ""];
-  const f = r.flags[0];
+  const f = r.flags?.[0] || (r.expired ? "expired" : null);
   if (!f) return ["ok", "ok", ""];
   const [name, ...rest] = f.split(":");
   return [name, name === "expired" ? "exp" : "stale", rest.join(":")];
@@ -56,7 +51,9 @@ export class Knowledge {
   constructor(conn, box, { onOpen, onBack }) {
     this.conn = conn;
     this.box = box;
-    this.onOpen = onOpen; // a row's name: the app routes to #knowledge=<name>
+    this.onOpen = onOpen;
+    this.logId = "";
+    this.pageContext = "";
     this.onBack = onBack;
     this.kind = "all";
     this.rows = [];
@@ -72,8 +69,8 @@ export class Knowledge {
     if (this.drawn) return;
     this.drawn = true;
     this.q = Object.assign(el("input", "jq kq"), { type: "search", spellcheck: false, autocomplete: "off" });
-    this.q.placeholder = "Search skills and memories";
-    this.q.setAttribute("aria-label", "Search skills and memories");
+    this.q.placeholder = "Search knowledge";
+    this.q.setAttribute("aria-label", "Search knowledge");
     this.q.setAttribute("autocapitalize", "off");
     this.q.addEventListener("input", () => {
       clearTimeout(this.timer);
@@ -92,31 +89,77 @@ export class Knowledge {
       b.dataset.kind = k;
       this.kinds.append(b);
     }
+    this.context = el("pick-chip", "kfilter");
+    this.context.setAttribute("aria-label", "Session context");
+    this.context.addEventListener("change", async () => {
+      const next = this.context.value;
+      if (!(await this.leave())) {
+        this.context.value = this.logId;
+        return;
+      }
+      this.logId = next;
+      this.source.value = "";
+      if (this.name) {
+        this.closeItem();
+        this.onBack();
+      } else this.load();
+    });
+    this.source = el("pick-chip", "kfilter");
+    this.source.setAttribute("aria-label", "Knowledge source");
+    this.source.addEventListener("change", () => this.load());
+    this.source.options = [{ value: "", label: "All sources" }];
+    const filters = el("div", "kfilters");
+    filters.append(this.context, this.source);
     this.count = el("div", "jcount kcount");
     this.count.setAttribute("aria-live", "polite");
+    this.listErrors = el("div", "kerrors");
     this.list = el("div", "klist");
     this.detail = el("div", "kdetail");
     this.detail.hidden = true;
     const panes = el("div", "kpanes");
     panes.append(this.list, this.detail);
     const top = el("div", "ktop");
-    top.append(search, this.kinds, this.count);
+    top.append(search, filters, this.kinds, this.count, this.listErrors);
     this.box.replaceChildren(top, panes);
   }
 
-  // The view at #knowledge, or #knowledge=<name> with that item open.
-  async show(name) {
-    this.draw();
-    if ((name || null) !== this.name && !(await this.leave())) {
-      if (this.name) this.onOpen(this.name); // the URL back on the open item
-      return;
+  options(select, choices, selected) {
+    const existing = select.options;
+    if (existing.length !== choices.length || choices.some(([value, label], i) => existing[i].value !== value || existing[i].label !== label)) {
+      select.options = choices.map(([value, label]) => ({ value, label }));
     }
-    this.load();
-    // Back on the item already open, as from another view: its edit stays.
-    if (name && (name !== this.name || !this.ed)) this.openItem(name);
-    else if (!name) this.closeItem();
+    select.value = selected;
+  }
+
+  contexts(sessions) {
+    this.draw();
+    this.sessions = sessions;
+    const choices = [["", "No session context"], ...sessions.map((s) => [s.log_id, `${s.handle} · ${s.cwd}`])];
+    if (this.logId && !choices.some(([id]) => id === this.logId)) choices.push([this.logId, "Unavailable session"]);
+    this.options(this.context, choices, this.logId);
+  }
+
+  async show(name, context) {
+    this.draw();
+    const logId = context ?? this.logId;
+    if ((name || null) !== this.name || (name && logId !== this.pageContext)) {
+      if (!(await this.leave())) {
+        if (this.name) this.onOpen(this.name, this.pageContext);
+        return;
+      }
+      if (logId !== this.logId) this.source.value = "";
+      this.logId = logId;
+      this.contexts(this.sessions || []);
+      if (name) this.openItem(name, logId);
+      else this.closeItem();
+    }
     this.box.dataset.open = name ? "1" : "";
+    this.load();
     if (!name) this.q.focus();
+  }
+
+  navigate(id) {
+    this.onOpen(id, this.logId);
   }
 
   // Whether the open edit may be dropped: asks when it has unsaved changes.
@@ -133,10 +176,14 @@ export class Knowledge {
     clearTimeout(this.timer);
     const n = ++this.seq;
     this.chips();
-    const p = { query: this.q.value.trim(), kind: this.kind };
+    const query = this.q.value.trim();
+    const p = { kind: this.kind, limit: 100 };
+    if (query) p.query = query;
+    if (this.logId) p.log_id = this.logId;
+    if (this.source.value) p.source_id = this.source.value;
     let res;
     try {
-      res = await this.conn.call("knowledge.list", p);
+      res = await this.conn.call("knowledge.catalog", p);
     } catch (e) {
       if (n !== this.seq) return;
       this.rows = [];
@@ -145,18 +192,25 @@ export class Knowledge {
     }
     if (n !== this.seq) return;
     this.rows = res.items;
-    this.render(p);
+    const choices = new Map([["", "All sources"]]);
+    if (res.personal_source_id) choices.set(res.personal_source_id, "Personal knowledge");
+    for (const source of res.sources) choices.set(source.source_id, source.root);
+    const selected = choices.has(p.source_id) ? p.source_id : "";
+    this.options(this.source, [...choices], selected);
+    if (p.source_id && !selected) return this.load();
+    this.render(p, null, res);
   }
 
-  render(p, failed = null) {
+  render(p, failed = null, result = null) {
     const rows = this.rows.map((r) => this.row(r));
     if (!rows.length) {
       const what = p.query ? `Nothing matches “${p.query}”.` : this.kind === "all" ? "No skills or memories yet. An agent saves one with memory_save or skill_save, and /remember asks for one." : `No ${KINDS.find(([k]) => k === this.kind)[1]}.`;
       rows.push(el("div", "empty", failed || what));
     }
     this.list.replaceChildren(...rows);
+    this.listErrors.replaceChildren(...(result?.errors || []).map(({path, error}) => el("div", "kmeta", `${path} · ${error}`)));
     const n = this.rows.length;
-    this.count.textContent = failed || !n ? "" : `${n} ${n === 1 ? "item" : "items"}`;
+    this.count.textContent = failed || !n ? "" : `${result?.total > n ? `${n} of ${result.total}` : n} ${n === 1 ? "item" : "items"}`;
   }
 
   row(r) {
@@ -164,7 +218,10 @@ export class Knowledge {
     row.tabIndex = 0;
     row.setAttribute("role", "button");
     row.dataset.name = r.name;
-    if (r.name === this.name) row.classList.add("on");
+    const ref = r.scope === "personal" ? r.name : r.id;
+    row.dataset.ref = ref;
+    row.dataset.id = r.id;
+    if (ref === this.name || r.id === this.name) row.classList.add("on");
     const ic = el("span", "ic");
     ic.title = r.kind;
     ic.append(icon(r.kind === "skill" ? "play" : "book"));
@@ -172,8 +229,10 @@ export class Knowledge {
     const fl = el("span", `fl ${cls}`, flag);
     if (path) fl.title = `missing: ${path}`;
     const use = el("span", "use", r.reads ? `${used(r)} · ${r.reads} ${r.reads === 1 ? "read" : "reads"}` : used(r));
-    row.append(ic, el("span", "nm", r.name), use, fl, el("span", "ds", r.description));
-    opens(row, () => this.onOpen(r.name));
+    row.append(ic, el("span", "nm", r.title), use, fl, el("span", "ds", r.description));
+    const meta = [this.location(r), r.expires && `Expires ${r.expires}`, r.matched_terms?.length && `Matches ${r.matched_terms.join(", ")}`, r.context_match && "Matches session context"].filter(Boolean);
+    row.append(el("span", "ds", meta.join(" · ")));
+    opens(row, () => this.navigate(ref));
     return row;
   }
 
@@ -187,27 +246,33 @@ export class Knowledge {
     for (const x of this.list.querySelectorAll(".krow.on")) x.classList.remove("on");
   }
 
-  async openItem(name) {
+  async openItem(name, context = this.pageContext) {
     const n = ++this.openSeq;
     this.ed?.destroy();
     this.ed = null;
     this.note = null;
+    this.item = null;
     this.name = name;
-    for (const x of this.list.querySelectorAll(".krow")) x.classList.toggle("on", x.dataset.name === name);
+    this.pageContext = context;
+    for (const x of this.list.querySelectorAll(".krow")) x.classList.toggle("on", x.dataset.ref === name || x.dataset.id === name);
     this.detail.hidden = false;
-    this.detail.replaceChildren(this.head(name), el("div", "kmeta", "Loading…"));
+    const qualified = /^[0-9a-f]{64}:/.test(name);
+    const label = qualified ? "Knowledge page" : name;
+    this.detail.replaceChildren(this.head(label), el("div", "kmeta", "Loading…"));
     let it;
     try {
-      it = await this.conn.call("knowledge.get", { name });
+      const id = qualified ? name : (await this.conn.call("knowledge.get", { name })).id;
+      it = await this.readPage(id, context);
     } catch (e) {
       if (n !== this.openSeq) return;
-      const msg = e.code === "not_found" ? `No item named ${name} in your knowledge.` : e.message;
-      this.detail.replaceChildren(this.head(name), el("div", "kmeta err", msg));
-      this.drawHistory(n, name, false);
+      const msg = e.code === "not_found" ? qualified ? "This page is unavailable in the selected context." : `No item named ${name} in your knowledge.` : e.message;
+      this.detail.replaceChildren(this.head(label), el("div", "kmeta err", msg));
+      if (!qualified && e.code === "not_found") this.drawHistory(n, name, false);
       return;
     }
     if (n !== this.openSeq) return;
     this.drawItem(n, it);
+    this.detail.querySelector(".kname").focus();
   }
 
   // The pane's first line: Back (on a phone, where the pane replaces the
@@ -218,7 +283,9 @@ export class Knowledge {
     back.append(icon("left"), "All items");
     back.setAttribute("aria-label", "Back to all items");
     const title = el("div", "ktitle");
-    title.append(el("span", "kname", name));
+    const heading = el("h2", "kname", name);
+    heading.tabIndex = -1;
+    title.append(heading);
     if (it) {
       const [flag, cls] = flagOf(it);
       title.append(el("span", "kkind", it.kind), el("span", `fl ${cls}`, flag));
@@ -229,11 +296,19 @@ export class Knowledge {
 
   drawItem(n, it) {
     this.stamp = it.stamp;
+    this.item = it;
     const facts = [used(it), `${it.reads} ${it.reads === 1 ? "read" : "reads"}`];
-    for (const f of it.flags) facts.push(f.startsWith("stale:") ? `stale: ${f.slice(6)} is gone` : f);
+    for (const f of it.flags || []) facts.push(f.startsWith("stale:") ? `stale: ${f.slice(6)} is gone` : f);
     if (it.status === "proposed") facts.push("proposed by an agent: saving your edit approves it");
-    const kids = [this.head(it.name, it), el("div", "kdesc", it.description), el("div", "kmeta", facts.join(" · "))];
+    const kids = [this.head(it.title, it), el("div", "kdesc", it.description), el("div", "kmeta", this.location(it))];
+    kids.push(el("div", "kmeta", [it.stamp ? facts.join(" · ") : "Read-only", it.expires && `Expires ${it.expires}`, `Revision ${it.revision.slice(0, 12)}`].filter(Boolean).join(" · ")));
     if (it.files.length > 1) kids.push(el("div", "kmeta kfiles", `files: ${it.files.join(" · ")}`));
+    if (!it.stamp) {
+      kids.push(markdown(it.body), this.connections(it));
+      this.detail.replaceChildren(...kids);
+      return;
+    }
+    kids.push(this.connections(it));
     const host = el("div", "ked");
     this.note = el("div", "knote");
     this.note.setAttribute("aria-live", "polite");
@@ -264,6 +339,76 @@ export class Knowledge {
     this.drawHistory(n, it.name, true);
   }
 
+  readPage(id, context) {
+    const p = { entry_id: id };
+    if (context) p.log_id = context;
+    return this.conn.call("knowledge.catalog", p);
+  }
+
+  location(it, roots = {}) {
+    const root = it.root || roots[it.source_id];
+    return root ? `${root}/${it.relative_path}` : `Personal · ${it.relative_path}`;
+  }
+
+  connections(it) {
+    const box = el("div", "kconnections");
+    const links = new Map();
+    const open = (id, label) => button("btn knode", label, () => this.navigate(id));
+    const section = (title, nodes) => {
+      const sec = el("section");
+      sec.append(el("h3", null, title), nodes);
+      box.append(sec);
+    };
+    const list = el("ul");
+    for (const link of it.links) {
+      const row = el("li");
+      if (link.target_id) {
+        row.append(open(link.target_id, link.reference));
+        links.set(link.target_id, link.reference);
+      } else {
+        row.append(el("span", null, `${link.reference} · ${link.status === "pending" ? "Unresolved" : "Ambiguous"}`));
+        for (const candidate of link.candidates) {
+          const path = this.location(candidate, it.source_roots);
+          const choice = open(candidate.id, path);
+          const copy = button("btn sm", "Copy reference", async () => {
+            try {
+              await navigator.clipboard.writeText(`[[${candidate.id}]]`);
+              copy.textContent = "Copied";
+            } catch {
+              copy.replaceWith(el("code", "kmeta", `[[${candidate.id}]]`));
+            }
+          });
+          const option = el("div", "kchoice");
+          option.append(choice, copy);
+          row.append(option);
+        }
+      }
+      list.append(row);
+    }
+    if (list.childElementCount) section("Outgoing links", list);
+    if (it.backlinks.length) {
+      const incoming = el("ul");
+      for (const from of it.backlinks) {
+        const row = el("li");
+        row.append(open(from.id, from.title), el("span", "kmeta", this.location(from, it.source_roots)));
+        incoming.append(row);
+      }
+      section("Incoming references", incoming);
+    }
+    if (it.neighbor_count) {
+      const graph = el("div", "kgraph");
+      const branch = (label, neighbors, direction) => {
+        const side = el("div", `kbranch ${direction}`);
+        side.append(el("div", "kmeta", label));
+        for (const [id, title] of neighbors) if (id !== it.id) side.append(open(id, title));
+        return side;
+      };
+      graph.append(branch("Links here", it.backlinks.map((r) => [r.id, r.title]), "incoming"), el("span", "kcenter", it.title), branch("Links from here", links, "outgoing"));
+      section(`Local graph (${it.neighbor_count})`, graph);
+    }
+    return box;
+  }
+
   say(text, err = false) {
     if (!this.note) return;
     this.note.replaceChildren(text);
@@ -272,18 +417,22 @@ export class Knowledge {
 
   async save() {
     if (!this.ed?.dirty() || this.saveBtn.disabled) return;
-    const name = this.name;
+    const seq = this.openSeq;
+    const { name, id } = this.item;
     this.saveBtn.disabled = true;
     try {
       const r = await this.conn.call("knowledge.put", { name, text: this.ed.value(), stamp: this.stamp });
-      if (name !== this.name) return;
+      if (seq !== this.openSeq) return;
       this.stamp = r.stamp;
       this.ed.markSaved();
       this.say("Saved and approved.");
       this.load();
-      this.drawHistory(this.openSeq, name, true);
+      this.drawHistory(seq, name, true);
+      this.readPage(id, this.pageContext).then((page) => {
+        if (seq === this.openSeq) this.detail.querySelector(".kconnections").replaceWith(this.connections(page));
+      }).catch(() => {});
     } catch (e) {
-      if (name !== this.name) return;
+      if (seq !== this.openSeq) return;
       this.saveBtn.disabled = false;
       if (e.code === "stale") {
         this.say("It changed since you opened it, so nothing was saved. ", true);
@@ -301,15 +450,18 @@ export class Knowledge {
 
   async remove(it) {
     const ok = await ask(`Delete the ${it.kind} ${it.name}? Its history keeps it, and Restore brings it back.`, { ok: "Delete" });
-    if (!ok || it.name !== this.name) return;
+    if (!ok || it !== this.item) return;
+    const seq = this.openSeq;
     try {
       await this.conn.call("knowledge.remove", { name: it.name });
     } catch (e) {
-      this.say(e.message, true);
+      if (seq === this.openSeq) this.say(e.message, true);
       return;
     }
     this.load();
-    this.openItem(it.name); // the history stays, with Restore
+    if (seq !== this.openSeq) return;
+    if (it.name === this.name) this.openItem(it.name);
+    else this.navigate(it.name); // The legacy route keeps History after deletion.
   }
 
   async drawHistory(n, name, live) {
@@ -344,10 +496,12 @@ export class Knowledge {
   }
 
   async restore(name, h) {
-    if (!(await this.leave())) return;
+    const seq = this.openSeq;
+    if (!(await this.leave()) || seq !== this.openSeq) return;
     try {
       await this.conn.call("knowledge.restore", { name, sha: h.sha });
     } catch (e) {
+      if (seq !== this.openSeq) return;
       if (this.note) this.say(e.message, true);
       else this.detail.append(el("div", "kmeta err", e.message));
       return;
