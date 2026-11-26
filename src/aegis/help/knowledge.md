@@ -499,8 +499,9 @@ Agent requests return a task ID and deliver the result to the session inbox.
 Inspect it with `task_status` or stop it with `task_cancel`. The library entry
 point is `srv.queues.synthesize(session, task, context=...)`. Its task result
 contains JSON with steps, contradictions, gaps, limits and numbered citations.
-Use a source button in the guide, or pass the citation's `id` as `entry_id`
-and its `revision` as `expected_revision` to `knowledge_catalog`. If a page
+Use a source button in the guide, or call
+`knowledge_catalog entry_id=ID expected_revision=REVISION` with the citation's
+ID and revision. If a page
 changed, the catalog reports its current revision. Run synthesis again to
 use updated evidence. To keep a guide, explicitly save it to the intended
 source with the corresponding Knowledge writing operation.

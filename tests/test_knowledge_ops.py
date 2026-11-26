@@ -443,8 +443,17 @@ async def test_task_synthesis_from_the_agent_inbox(
             assert task.status == "cancelled"
         else:
             await until(lambda: task.status in ("completed", "failed"))
-        await until(lambda: task.callback_started)
+
+        def delivered():
+            return [
+                e
+                for e in s.entries()
+                if e["kind"] == "inbox" and f"task#{task.id}" in (e.get("md") or "")
+            ]
+
+        await until(lambda: delivered() and not s.busy)
         await app.queues._callback(task, "ok", "duplicate result")
+        assert len(delivered()) == 1
         assert "duplicate result" not in str(s.entries()) + str(s.held)
         if mode in ("ok", "no-match"):
             guide = json.loads(task.result)
