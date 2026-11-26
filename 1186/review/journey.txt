@@ -1,0 +1,7 @@
+Fresh aegis serve with a Git worktree and a personal MCP skill.
+Search ‘zirconium’ → select session → select know-how source → open page → follow outgoing link → follow backlink → open graph neighbor → return to search.
+Passed using Enter at 1280 px and 390 px. Query and filters persisted.
+Ambiguous targets showed both paths and the missing target was marked unresolved.
+The MCP startup marker remained absent throughout browsing. An explicit skill_read created it in the second session.
+A personal edit became searchable immediately and opened with the new text in a second session context.
+The other session updated the shared procedure through knowledge_write. Its returned path held the exact Markdown, and a search in the original session opened the updated procedure at both widths.
