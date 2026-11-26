@@ -42,6 +42,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
+
 async def _client_stays_connected(request: Request, delay: float) -> bool:
     """Wait for a delayed fake reply unless the harness closes its request."""
     if not delay:
