@@ -1,0 +1,3 @@
+Fresh aegis serve with no knowledge.sources setting.
+claude-release: claude-release/SKILL.md (check.py)
+codex-release: codex-release/SKILL.md (check.py)
