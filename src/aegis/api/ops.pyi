@@ -526,8 +526,8 @@ class _knowledge:
         """knowledge.card.undo"""
     async def card_unimport(self, *, log_id: str, id: str, name: str) -> Any:
         """Undo one item of an import card: its import commit is reverted, so it leaves aegis. Its original is wherever it then was."""
-    async def get(self, *, name: str) -> Any:
-        """One item for the view: its file's whole text, the stamp an edit sends back, and a skill's files."""
+    async def get(self, *, name: str | None = ..., entry_id: str | None = ...) -> Any:
+        """Read a personal knowledge item by ID or name, with its edit stamp."""
     async def history(self, *, name: str) -> Any:
         """The commits that changed an item, newest first, a deleted one's included."""
     async def import_(
@@ -558,6 +558,14 @@ class _knowledge:
         duplicates: bool = ...,
     ) -> Any:
         """How your skills and memories are used: per item, how often it was hinted, read, invoked or run, when it was last used, and its flags (expired, or stale:<path> for a quoted path that is gone). unused_days keeps only the items not used in that many days, flag only the items with that flag. never_recalled marks an item hinted at least 10 times and never read or invoked. duplicates adds the pairs of likely duplicates (checks.duplicates), each pair once."""
+    async def worktree_read(
+        self,
+        *,
+        log_id: str,
+        entry_id: str | None = ...,
+        relative_path: str | None = ...,
+    ) -> Any:
+        """Read a know-how document in a session's Git worktree, by ID or path."""
 
 class _layout:
     async def dock(self, *, log_id: str, pane: str, where: str) -> Any:

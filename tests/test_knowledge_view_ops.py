@@ -5,14 +5,19 @@ included, and every change is one commit."""
 
 from __future__ import annotations
 
+from subprocess import run
 
 import pytest
 
+from aegis.app import App
 from aegis.knowledge import history
-from aegis.ops import Caller, OpError
+from aegis.knowledge.items import source_id
+from aegis.ops import Caller, OpError, Principal
+from aegis.roots import make_roots
 
 from .knowledge_samples import mem, skill
 from .one_person import BEN, recorded  # noqa: F401
+from .policies import Named, Who
 from .test_agents import turn, world  # noqa: F401  (fixture)
 from .one_person import ADMIN, homes, spawn  # noqa: F401
 from .one_person import world as members  # noqa: F401
@@ -92,6 +97,132 @@ async def test_get_returns_the_whole_file_its_stamp_and_a_skills_files(world):
     assert got["files"] == ["SKILL.md", "go.py"] and len(got["stamp"]) == 64
     assert (await refused(world, "knowledge.get", name="nope")).code == "not_found"
     assert (await refused(world, "knowledge.get", name="../x")).code == "bad_name"
+
+
+async def test_qualified_reads_keep_names_and_history_in_each_personal_store(members):
+    store = members.app.knowledge.store
+    owner = members.app.who(ADMIN).name
+    member = Caller("user", principal=Principal("wiki-member"))
+    await seed(members, mem("release", "Admin procedure"), owner=owner)
+    await seed(
+        members,
+        mem(
+            "release",
+            "Member freeze",
+            status="proposed",
+            lifetime="temporary",
+            expires="2020-01-01",
+        ),
+        owner="wiki-member",
+    )
+    (admin_row,) = (await call(members, "knowledge.list", ADMIN))["items"]
+    (member_row,) = (await call(members, "knowledge.list", member))["items"]
+    assert admin_row["id"] != member_row["id"]
+    assert (
+        admin_row["relative_path"]
+        == member_row["relative_path"]
+        == "memories/release.md"
+    )
+    assert admin_row["source_id"] != member_row["source_id"]
+    for caller, row, description in (
+        (ADMIN, admin_row, "Admin procedure"),
+        (member, member_row, "Member freeze"),
+    ):
+        got = await call(members, "knowledge.get", caller, entry_id=row["id"])
+        assert got == await call(members, "knowledge.get", caller, name="release")
+        assert got["description"] == description
+        assert got["stamp"] == got["revision"] == row["revision"]
+        assert got["title"] == "release" and got["scope"] == "personal"
+    assert member_row["status"] == "proposed" and member_row["flags"] == ["expired"]
+    assert member_row["expires"] == "2020-01-01"
+    assert (await call(members, "knowledge.history", member, name="release"))["history"]
+    assert (
+        await refused(members, "knowledge.get", ADMIN, entry_id=member_row["id"])
+    ).code == "not_found"
+    assert (
+        await refused(members, "knowledge.get", member, entry_id=admin_row["id"])
+    ).code == "not_found"
+
+    path = store.dir("wiki-member") / member_row["relative_path"]
+    path.write_text(path.read_text() + "New detail\n")
+    got = await call(members, "knowledge.get", member, entry_id=member_row["id"])
+    assert (
+        got["body"].endswith("New detail\n")
+        and got["revision"] != member_row["revision"]
+    )
+    assert (await refused(members, "knowledge.get", member)).code == "bad_params"
+    assert (
+        await refused(
+            members, "knowledge.get", member, name="release", entry_id=got["id"]
+        )
+    ).code == "bad_params"
+
+
+async def test_one_caller_reads_homonymous_worktree_entries_by_id(tmp_path):
+    main = tmp_path / "checkout"
+    branch = tmp_path / "worktree"
+    rel = "know-how/release.md"
+    path = main / rel
+    path.parent.mkdir(parents=True)
+    text = "---\ntitle: Release checklist\nwhen: during a release\n---\nBuild.\n"
+    path.write_text(text)
+    history.ensure_repo(main)
+    history.commit(main, [rel], "add release know-how", "test")
+    run(
+        ["git", "-C", str(main), "worktree", "add", "--detach", str(branch)], check=True
+    )
+    (branch / rel).write_text(text.replace("Build.", "Test."))
+
+    policy = Named(read_only={"reader": {"alice", "bob"}})
+    app = App(make_roots(tmp_path, None), policy=policy)
+    reader = Caller("user", principal=Principal("reader", Who("reader")))
+    contexts = (
+        ("20261126-000000-aaaaaa", "alice", main, "Build.\n"),
+        ("20261126-000000-bbbbbb", "bob", branch, "Test.\n"),
+    )
+    op = "knowledge.worktree.read"
+    entries = []
+    for log_id, owner, root, body in contexts:
+        app.sessions.archived[log_id] = {
+            "owner": owner,
+            "cwd": str(root),
+            "archived": True,
+        }
+        entry = await app.registry.call(
+            op, {"log_id": log_id, "relative_path": rel}, reader
+        )
+        assert entry == await app.registry.call(
+            op, {"log_id": log_id, "entry_id": entry["id"]}, reader
+        )
+        assert entry["name"] == "release" and entry["title"] == "Release checklist"
+        assert entry["description"] == "during a release"
+        assert entry["relative_path"] == rel and entry["scope"] == "workspace"
+        assert entry["body"] == body
+        entries.append(entry)
+    assert entries[0]["id"] != entries[1]["id"]
+    assert entries[0]["revision"] != entries[1]["revision"]
+
+    main_context, _, _, _ = contexts[0]
+    branch_context, _, _, _ = contexts[1]
+    with pytest.raises(OpError, match="no matching know-how entry"):
+        await app.registry.call(
+            op, {"log_id": main_context, "entry_id": entries[1]["id"]}, reader
+        )
+
+    (main / "know-how" / "escape.md").symlink_to(branch / rel)
+    for rel in ("know-how/escape.md", "know-how/../know-how/release.md"):
+        with pytest.raises(OpError, match="no matching know-how entry"):
+            await app.registry.call(
+                op,
+                {"log_id": main_context, "entry_id": f"{source_id(main)}:{rel}"},
+                reader,
+            )
+    policy.hidden["reader"] = {"bob"}
+    with pytest.raises(OpError) as denied:
+        await app.registry.call(
+            op, {"log_id": branch_context, "entry_id": entries[1]["id"]}, reader
+        )
+    assert denied.value.code == "no_session"
 
 
 async def test_put_saves_the_edit_approved_as_one_commit(world):

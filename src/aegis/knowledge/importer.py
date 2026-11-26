@@ -58,12 +58,17 @@ def _unreadable(e: OSError) -> None:
     raise _refuse(Path(e.filename or "?"), f"cannot be read ({e.strerror})")
 
 
-def regular_bytes(path: Path, max_bytes: int | None = None) -> bytes:
+def regular_bytes(
+    path: Path, max_bytes: int | None = None, *, dir_fd: int | None = None
+) -> bytes:
     """A regular file's bytes, read through the descriptor its type was
     checked on and never past the size it had then; anything else is
     refused, and so is one over ``max_bytes``, before it is read.
     O_NONBLOCK, so opening a fifo does not wait for a writer."""
-    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+    flags = os.O_RDONLY | os.O_NONBLOCK
+    if dir_fd is not None:
+        flags |= os.O_NOFOLLOW
+    fd = os.open(path, flags, dir_fd=dir_fd)
     try:
         st = os.fstat(fd)
         if not stat.S_ISREG(st.st_mode):
