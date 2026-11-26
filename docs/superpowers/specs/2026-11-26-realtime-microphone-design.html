@@ -60,7 +60,7 @@ details p{margin:10px 0 0}
 <dl>
 <dt>Origin</dt><dd>The session key is captured with the gesture. The page-wide status names the session and offers Stop mic while the user navigates or types.</dd>
 <dt>Boundaries</dt><dd>A block runs from first speech to 10 seconds of continuous silence or 60 seconds elapsed. The microphone keeps capturing while Whistle settles earlier blocks.</dd>
-<dt>Final text</dt><dd>The browser shares the dictation workers and orders results by their capture sequence. It sends each nonempty block once with a stable receipt. It sends text alone.</dd>
+<dt>Final text</dt><dd>The browser shares the dictation workers and orders results by their capture sequence. It sends each nonempty block once with a stable receipt. A recognition failure retries once using the same audio. If that fails, the browser reports the error and continues with the next block. It sends text alone.</dd>
 <dt>Stop</dt><dd>Stop drains the microphone, flushes the final block, then sends capture-ended even if the capture was silent.</dd>
 <dt>Agent input</dt><dd>Voice uses the urgent human delivery path. Claude Code and Codex receive steering where available. Other harnesses hold inputs for their next turn. Each prompt identifies speech and reports capture state separately. The agent can respond promptly, wait silently for context, or queue small work according to the task.</dd>
 </dl>

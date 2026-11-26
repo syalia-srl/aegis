@@ -1751,7 +1751,9 @@ The page owns realtime capture independently of the composer it started in.
 10 seconds of silence or 60 seconds of elapsed audio, and keeps collecting
 while the shared Whistle workers run. The page waits for each complete
 transcript in capture order and sends it with the original session key and a
-nonce. It drains the mic before enqueueing the final block and capture-ended
+nonce. A failed recognition is retried once with the retained block. If the
+retry fails, the browser reports the error and proceeds with later blocks.
+It drains the mic before enqueueing the final block and capture-ended
 notification. `session.send` uses urgent human inbox delivery, so harnesses
 that steer can read the speech mid-turn and other harnesses keep it in the
 held queue. The transcript fold retains the message origin and capture state

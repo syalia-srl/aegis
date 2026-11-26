@@ -67,12 +67,20 @@ export class Realtime {
     this.capture = rec;
     // Resolve model readiness and each block independently. Only delivery is
     // serialized, so recognition may finish while earlier blocks are pending.
-    const ready = this.engine.recognition().then((keywords) => ({ keywords }), (error) => ({ error }));
+    let ready;
+    const prepare = () => ready ??= this.engine.recognition().catch((error) => {
+      ready = null;
+      throw error;
+    });
+    prepare().catch(() => {}); // warm the model while the person speaks
     const blocks = new VoiceBlocks((parts) => {
-      const result = ready.then(({ keywords, error }) => {
-        if (error) throw error;
-        return this.engine.recognize(parts, keywords);
-      }).then((text) => ({ text }), (error) => ({ error }));
+      // The workers take ownership of their buffers. Keep this block until
+      // recognition settles so a failed attempt can retry without losing it.
+      // Only recognition is retried here. Delivery keeps its own receipt.
+      const recognize = async () => this.engine.recognize(parts.map((part) => part.slice()), await prepare());
+      const result = recognize().catch(recognize).then(
+        (text) => ({ text }), (error) => ({ error }),
+      );
       this.enqueue(rec, async (nonce) => {
         const { text, error } = await result;
         if (error) throw error;

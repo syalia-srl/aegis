@@ -9942,6 +9942,54 @@ def test_realtime_sample_boundaries_and_out_of_order_final_results(dict_server, 
     assert got["errors"] == []
 
 
+def test_realtime_retries_a_failed_block_without_reordering_or_duplication(
+    dict_server, page
+):
+    page.goto(dict_server.url)
+    got = run_dictation(
+        page,
+        """
+        const { Realtime } = await import('/static/js/realtime.js');
+        const calls = [], sent = [], errors = [];
+        let rejectFirst;
+        const r = new Realtime({
+          engine: {
+            recognition: async () => '',
+            recognize: (parts) => {
+              const length = parts[0].length / 16000;
+              calls.push(length);
+              // A real worker takes the input buffers from its caller.
+              structuredClone(parts, {transfer: parts.map(p => p.buffer)});
+              if (length === 1 && !rejectFirst)
+                return new Promise((_, reject) => { rejectFirst = reject; });
+              if (length === 3) throw new Error('permanent error');
+              return Promise.resolve(length === 1 ? 'recovered' : 'next block');
+            },
+          },
+          deliver: async (_, p) => sent.push([p.text ?? null, p.realtime.state, p.nonce]),
+          onState() {},
+          onError: (e) => errors.push(e.message),
+        });
+        r.start({key: 'origin'}, source);
+        feed(tone(1), gap(10), tone(2), gap(10), tone(3));
+        await until(() => calls.length === 2);
+        if (sent.length) throw new Error('the second block overtook the first');
+        rejectFirst(new Error('transient error'));
+        await until(() => sent.length === 2);
+        await r.stop();
+        return { calls, sent, errors };
+        """,
+    )
+    assert got["calls"] == [1, 2, 1, 3, 3]
+    assert [m[:2] for m in got["sent"]] == [
+        ["recovered", "open"],
+        ["next block", "open"],
+        [None, "ended"],
+    ]
+    assert len({m[2] for m in got["sent"]}) == 3
+    assert got["errors"] == ["permanent error"]
+
+
 def test_the_working_row_types_its_verb_and_counts_the_turns_tokens(server, page):
     """#938: while a turn runs the verb types out letter by letter and the
     counters show the turn's new input and output tokens; they start at zero
