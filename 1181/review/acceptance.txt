@@ -1,0 +1,9 @@
+Reviewed commit: 02fa909da9625911c096ff6f2c04dea4298893c2
+Scoped acceptance on b1144083: 41 passed. The only later change is the browser backlink assertion.
+Final-head focused cases (2 passed):
+- tests/test_knowledge_view_ops.py::test_catalog_links_resolve_by_origin_and_track_the_visible_generations
+- tests/test_knowledge_ops.py::test_catalog_search_read_and_revocation_over_mcp_and_browser_rpc
+The two ambiguous candidates are both visible. After a source is denied, the inaccessible target becomes pending, the private backlink disappears, and the distinct neighbor count drops from four to two.
+Final-head browser test (1 passed):
+- tests/test_browser_knowledge.py::test_agent_reads_live_knowledge_source
+The browser reads the newly created target by ID, opens its backlink, and compares the resulting entry and revision to the original page.

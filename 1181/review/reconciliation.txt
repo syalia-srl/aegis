@@ -1,0 +1,13 @@
+Initial startup scan completed before the first catalog call.
+Initial entries: release, retired
+Entries after scheduled scan: added, release
+Same entry ID after live edit: True
+Live body: Verify the package checksum. [[Added]]
+Resolved target: fd9178daaf73b52cc106724ac700fa906c8a1ef357aab02328162b264ad5e6c5:added.md
+Target backlink: fd9178daaf73b52cc106724ac700fa906c8a1ef357aab02328162b264ad5e6c5:release.md
+Following that backlink returned the original page and revision.
+Revision changed after live edit: True
+Restart scan completed before the first catalog call.
+Same entry ID after restart: True
+Recovered body: Edited while the server was stopped. [[Added]]
+Revision changed after offline edit: True
