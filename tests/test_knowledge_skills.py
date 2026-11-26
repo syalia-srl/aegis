@@ -71,8 +71,10 @@ async def test_the_hint_names_skills_and_memories_separately(kn):
     b = kn.hint_for("ana", "s1", "deploy the bot", None)
     lines = [ln for ln in b.splitlines() if ln]
     assert lines[0] == hint.HEADER
-    assert lines[1] == "skills: deploy-bot: Deploy the bot to its host"
-    assert lines[2] == "memories: bot-host: The bot runs on host b"
+    skill_id = kn.store.get("ana", "deploy-bot").id
+    memory_id = kn.store.get("ana", "bot-host").id
+    assert lines[1] == f"skills: deploy-bot: Deploy the bot to its host [{skill_id}]"
+    assert lines[2] == f"memories: bot-host: The bot runs on host b [{memory_id}]"
     assert lines[3].startswith("read with skill_read / memory_read")
     rows = kn.usage.rows("ana", "deploy-bot")
     assert [(r["kind"], r["event"], r["detail"]) for r in rows] == [

@@ -69,6 +69,7 @@ class Hit:
     score: float
     status: str = "approved"
     flags: list[str] = field(default_factory=list)
+    entry_id: str = ""
 
 
 def text_of(item: Item) -> str:
@@ -217,7 +218,9 @@ class Index:
             item, expired, boosted = held[name]
             score = score * 2 if boosted else score
             flags = ["expired"] if expired else []
-            hit = Hit(kind, item.name, item.description, score, item.status, flags)
+            hit = Hit(
+                kind, item.name, item.description, score, item.status, flags, item.id
+            )
             scored.append((-score, item.name, hit))
         scored.sort(key=lambda s: (s[0], s[1]))
         return [h for _, _, h in scored[:limit]]
