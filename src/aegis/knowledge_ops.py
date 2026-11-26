@@ -52,7 +52,7 @@ from . import launch
 from .skill_mcp import SkillToolError, stop_group
 from .knowledge import checks, history, importer
 from .knowledge.items import Item, check_name, dump, parse_memory, parse_skill
-from .knowledge.sources import Source
+from .knowledge.sources import Entry, Source
 from .journal.paths import place
 from .monitors import iso_now
 from .ops import Caller, OpError
@@ -472,8 +472,11 @@ class CatalogItems(_Strict):
         description="Session whose worktree supplies sources. Agents default to their own.",
     )
     entry_id: str | None = Field(
-        None, description="Read one entry by ID; omit to list entries."
+        None, description="Read one entry by ID; omit to list or search entries."
     )
+
+    query: str | None = Field(None, description="Search visible entries with BM25.")
+    limit: int = Field(20, ge=1, le=100, description="Maximum number of search hits.")
 
 
 class PutItem(_Strict):
@@ -1581,12 +1584,17 @@ def register_knowledge_ops(app: App) -> None:
         local=True,
     )
     async def knowledge_catalog(p: CatalogItems, caller):
-        """List visible knowledge sources and entries, or read a qualified entry."""
+        """Search or list visible knowledge entries, or read one by its qualified ID."""
+        if p.entry_id is not None and p.query is not None:
+            raise OpError("bad_params", "supply either entry_id or query")
         owner = principal(caller)
         configured = []
+        cwd = worktree = None
         ref = p.log_id or caller.log_id
         if ref:
             who, session, top = await source_context(ref, caller)
+            cwd = session.cwd
+            worktree = str(top) if top is not None else None
             private, configured = await app.knowledge_source_settings()
             if top is not None:
                 configured.insert(
@@ -1622,29 +1630,79 @@ def register_knowledge_ops(app: App) -> None:
         snapshots = await asyncio.gather(
             *(kn.source_snapshot(source) for source in configured)
         )
-        rows = {}
+        personal_items = await kn.items(owner) if p.entry_id is None else []
+        # Recheck after obtaining the snapshots, which may have required I/O.
+        visible = []
+        if ref:
+            if not app.policy.can(who, "read", session):
+                raise OpError("no_session", f"no session {ref!r}")
+            visible = [
+                (source, snapshot)
+                for source, snapshot in zip(configured, snapshots)
+                if app.policy.knowledge_source(who, session, source.root)
+            ]
+
+        def source_row(source: Source, entry: Entry) -> dict:
+            return {
+                **entry_fields(entry.item),
+                "kind": "skill" if source.format == "skill" else "doc",
+                "files": list(entry.files),
+                "root": str(source.worktree or source.root),
+            }
+
+        entries = {}
+        items = {it.id: it for it in personal_items}
         errors = []
-        for source, snapshot in zip(configured, snapshots):
+        for source, snapshot in visible:
             for key, error in sorted(snapshot.errors.items()):
                 errors.append({"path": str(source.root / key), "error": error})
             for _, entry in sorted(snapshot.entries.items()):
                 it = entry.item
-                row = {
-                    **entry_fields(it),
-                    "kind": "skill" if source.format == "skill" else "doc",
-                    "files": list(entry.files),
-                    "root": str(source.worktree or source.root),
-                }
                 if p.entry_id == it.id:
-                    return {**row, "body": it.body, "text": entry.text}
-                rows.setdefault(it.id, row)
+                    return {
+                        **source_row(source, entry),
+                        "body": it.body,
+                        "text": entry.text,
+                    }
+                entries.setdefault(it.id, (source, entry))
+                items.setdefault(it.id, it)
         if p.entry_id is not None:
             raise OpError("not_found", "no matching knowledge entry")
-        personal_rows = [
-            {**entry_fields(it), "kind": it.kind} for it in await kn.items(owner)
-        ]
+
+        def result_row(it: Item) -> dict:
+            if it.id in entries:
+                return source_row(*entries[it.id])
+            return {**entry_fields(it), "kind": it.kind}
+
+        search_fields = {}
+        if p.query is not None:
+            hits, total = await kn.search_catalog(
+                list(items.values()), p.query, p.limit, cwd=cwd, worktree=worktree
+            )
+            if ref and (
+                not app.policy.can(who, "read", session)
+                or any(
+                    not app.policy.knowledge_source(who, session, source.root)
+                    for source, _ in visible
+                )
+            ):
+                raise OpError("forbidden", "knowledge access changed; retry the search")
+            all_rows = [
+                {
+                    **result_row(items[hit.entry_id]),
+                    "score": hit.score,
+                    "matched_terms": hit.matched_terms,
+                    "context_match": hit.context_match,
+                    "expired": items[hit.entry_id].expired(),
+                }
+                for hit in hits
+            ]
+            search_fields["total"] = total
+        else:
+            all_rows = [result_row(item) for item in items.values()]
         return {
-            "items": personal_rows + list(rows.values()),
+            **search_fields,
+            "items": all_rows,
             "sources": [
                 {
                     "root": str(source.root),
@@ -1653,7 +1711,7 @@ def register_knowledge_ops(app: App) -> None:
                     "include": list(source.include),
                     "exclude": list(source.exclude),
                 }
-                for source in configured
+                for source, _ in visible
             ],
             "errors": errors,
         }

@@ -802,6 +802,16 @@ publishing a complete snapshot per root. A catalog read uses the last
 published snapshot or joins the initial scan for a new root. Source
 configuration is reread through Config; a removed root immediately stops
 contributing entries. Catalog reads do not load or execute skills.
+
+A catalog query scores one BM25 corpus containing only entries visible to the
+requester, with title and description weighted above the full body. The index
+and ranking run in a thread. The service keeps one combined index keyed by
+its visible items and their revisions, and checks permission before using it.
+The selected Git checkout and matching path rules boost scores. Result rows
+include the matching normalized terms and the context boost flag. Counts are
+computed before limiting the response. Agents and browsers read hits through
+the catalog's existing qualified ID operation. The personal tools and hint
+keep their separate indexes and optional vector ranking.
 `/setup`'s import (`knowledge.import`, `knowledge/importer.py`) reads each
 ticked source in a thread, never on the event loop, and saves it with `fresh`,
 which refuses a name any item holds. The ticks are the approval only in a
