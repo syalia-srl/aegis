@@ -88,6 +88,24 @@ Restore on an earlier version brings it back. On a phone the rows drop
 the usage column, and an open item takes the whole width, with a back
 button to the list.
 
+## Entry IDs and revisions
+
+`knowledge.list` returns an `id` for each personal entry. It combines the
+source ID and the path relative to that source. Pass that entry ID to
+`knowledge.get` to read the entry, or pass its historical `name`. An ID
+only resolves within the caller's own store. The read returns the body and
+the full file text with the revision of those bytes. Edits keep the entry
+ID and change the revision when the file changes. History, restore and
+other personal operations still use the name. Existing files acquire IDs
+when read, without a migration.
+
+`knowledge.worktree.read` reads a Markdown file directly under `know-how/`
+in a session's current Git worktree. Supply the session's log ID and either
+the returned entry ID or a worktree-relative path such as
+`know-how/releasing.md`. The caller needs read access to the session, and
+the entry ID must belong to that worktree. The read returns the document
+and its content revision. This operation leaves the file in its worktree.
+
 ## Expired and stale memories
 
 A temporary memory past its day is flagged expired and leaves the block

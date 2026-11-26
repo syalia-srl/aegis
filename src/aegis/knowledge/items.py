@@ -12,9 +12,11 @@ and keeps serving the rest.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import re
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -50,6 +52,22 @@ class Item:
     body: str
     meta: dict[str, Any] = field(default_factory=dict)
     path: Path | None = None
+    source_id: str = ""
+    relative_path: str = ""
+    scope: Literal["personal", "workspace"] | None = None
+    revision: str = ""
+
+    @property
+    def id(self) -> str:
+        return f"{self.source_id}:{self.relative_path}" if self.source_id else ""
+
+    @property
+    def title(self) -> str:
+        return str(self.meta.get("title") or self.name)
+
+    @property
+    def format(self) -> str:
+        return "markdown"
 
     @property
     def status(self) -> str:
@@ -122,6 +140,39 @@ def parse_memory(text: str, name: str, path: Path | None = None) -> Item:
 def parse_skill(skill_md: str, name: str, path: Path | None = None) -> Item:
     """A skill from its SKILL.md. The name is its folder's."""
     return _parse("skill", skill_md, name, path)
+
+
+def source_id(root: Path) -> str:
+    """Identify a directory on this server, including a specific Git worktree."""
+    return hashlib.sha256(bytes(root.resolve())).hexdigest()
+
+
+def read_item(
+    root: Path,
+    path: Path,
+    parse: Callable[[str, str, Path], Item],
+    name: str,
+    *,
+    scope: Literal["personal", "workspace"],
+    read_bytes: Callable[[Path], bytes] = Path.read_bytes,
+) -> tuple[Item, str]:
+    """Read a known file once, keeping the revision of the exact bytes read."""
+    relative_path = path.relative_to(root).as_posix()
+    resolved = path.resolve()
+    if not resolved.is_relative_to(root.resolve()):
+        raise ValueError("the file is outside its knowledge source")
+    if not resolved.is_file():
+        raise FileNotFoundError(path)
+    data = read_bytes(resolved)
+    text = data.decode("utf-8")
+    item = replace(
+        parse(text, name, path),
+        source_id=source_id(root),
+        relative_path=relative_path,
+        scope=scope,
+        revision=hashlib.sha256(data).hexdigest(),
+    )
+    return item, text
 
 
 def dump(item: Item) -> str:
