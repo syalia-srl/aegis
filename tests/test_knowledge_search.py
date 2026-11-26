@@ -1,8 +1,10 @@
 import time
+from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
-from aegis.knowledge.search import Index
+from aegis.knowledge.search import CatalogIndex, Index
 
 from .knowledge_samples import fixture_hit_at_3, fixture_items, mem, skill
 
@@ -77,3 +79,32 @@ def test_fixture_bench_hit_at_3():
     assert hits >= 0.6, (
         hits
     )  # a floor against regressions; the bench prints the exact value
+
+
+def test_catalog_ranks_homonyms_by_checkout_and_keeps_expired_entries():
+    item = mem("restoring", "Calibrate the ledger", expires="2000-01-01")
+    items = [
+        replace(
+            item,
+            source_id=root,
+            relative_path="restoring.md",
+            path=Path(f"/{root}/restoring.md"),
+            scope="workspace",
+        )
+        for root in ("other", "checkout")
+    ]
+    index = CatalogIndex(items)
+    hits, total = index.rank("calibrate", 1, cwd="/checkout/src", worktree="/checkout")
+    assert total == 2
+    assert hits[0].entry_id == "checkout:restoring.md" and hits[0].context_match
+    assert hits[0].matched_terms == ["calib"]
+
+
+def test_catalog_weights_title_and_description_above_body():
+    items = [
+        replace(mem("first", "notes", title="Zirconium"), source_id="first"),
+        replace(mem("second", "Zirconium", "notes"), source_id="second"),
+        replace(mem("third", "notes", "Zirconium"), source_id="third"),
+    ]
+    hits, _ = CatalogIndex(items).rank("zirconium", 3, cwd=None, worktree=None)
+    assert [hit.entry_id for hit in hits] == ["first:", "second:", "third:"]
