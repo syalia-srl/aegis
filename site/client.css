@@ -684,33 +684,6 @@
 .a2 .mic[data-state=listening]{color:var(--on-accent);background:var(--err);border-color:transparent;box-shadow:0 0 0 calc(var(--level,0) * 6px) color-mix(in srgb,var(--err) 35%,transparent)}
 .a2 .mic[data-state=finishing]{color:var(--err);border-color:var(--err)}
 .a2 .mic:disabled{opacity:.35;cursor:default}
-.a2 .mic-chooser{position:relative;display:inline-flex}
-.a2 .mic-chooser>.mic:first-child{border-radius:6px 0 0 6px}
-.a2 .mic-chooser .mic-options{border-radius:0 6px 6px 0;border-left:0;padding:5px 4px}
-.a2 .mic-options .ic{width:10px}
-.a2 .mic-targets{position:absolute;right:0;bottom:calc(100% + 8px);z-index:5;display:grid;gap:4px;width:max-content;padding:5px;background:var(--raised);border:1px solid var(--rule);border-radius:var(--r);box-shadow:0 3px 14px #0004}
-.a2 .mic-targets[hidden]{display:none}
-.a2 .mic-targets .btn{min-height:42px;padding:4px 14px;text-align:left}
-.a2 .mic-targets .btn:is(.on,:focus-visible){color:var(--on-accent);background:var(--accent);border-color:var(--accent)}
-.a2 .realtime-status{display:flex;align-items:center;gap:10px;padding:5px 12px;background:var(--accent-soft);color:var(--strong);border-left:2px solid var(--accent);font:12px var(--font-chrome)}
-.a2 .realtime-status[hidden]{display:none}
-.a2 .realtime-status [role=status]{min-width:0;margin-right:auto;overflow-wrap:anywhere}
-.a2 .realtime-status .btn{flex:none}
-.a2 .realtime-status .btn[hidden]{display:none}
-.a2 .realtime-unsent{box-sizing:border-box;width:100%;resize:vertical;padding:8px;background:var(--bg);color:var(--ink);border:1px solid var(--rule);border-radius:var(--r);font:inherit}
-@media(max-width:520px){
-  .a2 .realtime-status:has(#realtime-view:not([hidden])){flex-wrap:wrap}
-  .a2 .realtime-status:has(#realtime-view:not([hidden])) [role=status]{flex-basis:100%}
-}
-.a2[data-layout=full]:has(>.realtime-status:not([hidden])){grid-template-rows:auto auto minmax(0,1fr)}
-.a2[data-layout=full]:has(>.realtime-status:not([hidden])):has(>.netbanner:not([hidden])){grid-template-rows:auto auto auto minmax(0,1fr)}
-.a2[data-view=window]:has(>.realtime-status:not([hidden])){grid-template-rows:auto minmax(0,1fr)}
-.a2[data-view=window]:has(>.realtime-status:not([hidden])):has(>.netbanner:not([hidden])){grid-template-rows:auto auto minmax(0,1fr)}
-.a2 .voice-text{white-space:pre-wrap;overflow-wrap:anywhere}
-.a2 .voice-block .runline .rs{white-space:normal;overflow-wrap:anywhere;color:var(--ink)}
-.a2 #entries .voice-block[data-fold=in]:not(.run-open){display:none}
-.a2 #entries .voice-block[data-fold=head]:not(.run-open)>:not(.runline){display:none}
-
 /* Hold the mic to record (record.js, #932): the press must stay a press on a
    touch screen, not a scroll, a text selection or the long-press menu. The bar
    covers the box while a take runs; --lift (0..1) follows the slide to lock. */

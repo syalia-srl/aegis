@@ -118,16 +118,13 @@ queued while offline, goes without the line.
 
 ## Record an audio message
 
-In a session, press and hold the mic until the two choices appear. Slide to
-**Send audio** and release to send the take with your draft. The target under
-your pointer lights up as you move. Release over the mic for dictation, or
-press Esc to discard the take. You can use the same gesture with a mouse.
-With a keyboard, open Microphone modes, focus Send audio, and press Enter
-when you finish speaking. Capture starts when you open the choices.
-
-The new-tab box offers audio before you have a session. Hold its mic and
-release to send the take with the first message. Sliding up locks that
-recording until you press stop.
+Press and hold the mic button, in a session's box or the new-tab box, to
+record audio instead of dictating; a short tap still dictates. A bar with a
+timer covers the box while it records, and releasing sends the take with
+whatever you typed. For a long take, slide up while holding: the recording
+locks, you can lift your finger, and the bar's stop button (or a tap on the
+mic) ends it and sends it. The bar's bin, or Esc, throws the take away. With
+a mouse it works the same: hold the button down, drag up to lock.
 
 The recording is an attachment, nothing is transcribed. aegis saves it in
 the session's inbox as Ogg Opus, mono, 16 kHz, about 200 KB a minute, and the
@@ -138,37 +135,6 @@ under a second is not sent.
 
 An agent that needs your voice itself, a narration to cut a video to for
 example, asks you to hold the mic rather than record in another app.
-
-## Speak in realtime
-
-In a session, hold the mic and slide past Send audio to **Realtime**. Release
-to select it. With a keyboard, open Microphone modes and select Realtime.
-Your speech from the start of the gesture goes to the session where you
-pressed the mic. You can visit other sessions and keep typing while the
-status bar shows where the mic is listening.
-
-The browser sends a block of text after 10 seconds of continuous silence or
-60 seconds from the block's first speech, whichever comes first. Speech
-recognition runs in the browser. Each block arrives as a message from you,
-and Codex and Claude Code can read it during a running turn. Consecutive
-blocks fold together with the latest phrase showing. Expand the row to read
-the earlier phrases.
-
-If recognition fails twice, the browser keeps the audio and pauses delivery.
-Choose **Retry speech** in the status bar to send the recovered block and the
-ones behind it in order. You can retry from another session or after you
-stop the mic.
-
-If the session refuses a finalized block, **Retry delivery** resends it in
-place with the same receipt. **View unsent speech** opens selectable text
-for the finalized blocks still waiting. You can copy the text if the
-destination can no longer accept it. Keep the page open until you recover
-or copy the speech.
-
-Choose **Stop mic** in the status bar from any view. It closes the microphone
-immediately. The browser sends any remaining words in order and then tells
-the session that capture ended, even if you said nothing. Microphone
-permission and HTTPS or localhost are required.
 
 ## Rename it
 

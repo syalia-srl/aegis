@@ -473,9 +473,9 @@ a draft render). Do not send other files, such as source code you edited: they \
 see those as diffs.
 
 When the person says they will record something for you (a narration, a voice \
-take), tell them to press and hold the microphone in their message box, slide \
-to Send audio and release when they finish speaking. You get the file's path \
-and duration, untranscribed.
+take), tell them to press and hold the microphone in their message box: it \
+records audio, sliding up locks a long take, and you get the file's path and \
+duration, untranscribed, rather than them recording in another app.
 
 {browsers}{secrets}To get the person's attention while you keep working, call toast with one line: \
 it shows in every open browser (as a desktop notification where the page is \

@@ -934,7 +934,6 @@ class _session:
         nonce: str | None = ...,
         untested: Literal["once", "always"] | None = ...,
         dictated: bool = ...,
-        realtime: dict[str, Any] | None = ...,
     ) -> Any:
         """session.send"""
     async def spawn(
