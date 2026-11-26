@@ -1,0 +1,10 @@
+Initial startup scan completed before the first catalog call.
+Initial entries: release, retired
+Entries after scheduled scan: added, release
+Same entry ID after live edit: True
+Live body: Verify the package checksum.
+Revision changed after live edit: True
+Restart scan completed before the first catalog call.
+Same entry ID after restart: True
+Recovered body: Edited while the server was stopped.
+Revision changed after offline edit: True
