@@ -18,6 +18,8 @@
 // `transcribe` hook, which takes each piece instead. A mount that never turns
 // dictation on builds no button and enters no code path.
 
+import { MicChooser } from "../mic-chooser.js";
+import { Realtime } from "../realtime.js";
 import { Dictation } from "../dictation.js";
 import { HoldToRecord } from "../record.js";
 import { icon } from "../glyphs.js";
@@ -75,6 +77,13 @@ export class DictationPart {
       onError: refuse,
       onDone: (file, ms, ctx) => ctx.box.onTake?.(file, ms, ctx.box.ctx?.()),
     });
+    if (opts.realtime) this.realtime = new Realtime({
+      engine: this.dictation,
+      deliver: opts.realtime,
+      onState: opts.onRealtime,
+      onError: (error) => refuse(this.t("dictation.realtimeError", { error: error.message || error })),
+    });
+    this.refuse = refuse;
     this.add(host, opts);
   }
 
@@ -92,7 +101,7 @@ export class DictationPart {
   // A long press stays a tap while a take or a dictation is running, or while
   // the box cannot start one at all (no connection).
   busy() {
-    return (this.opts.canStart && !this.opts.canStart()) || this.dictation.state !== "idle";
+    return !!this.realtime?.capture || (this.opts.canStart && !this.opts.canStart()) || this.dictation.state !== "idle";
   }
 
   allowed() {
@@ -123,10 +132,30 @@ export class DictationPart {
     if (!navigator.mediaDevices) {
       button.disabled = true;
       button.title = this.t("dictation.needsHttps");
-    } else button.title += this.t("dictation.hold");
+    } else button.title += this.t(opts.realtime ? "dictation.chooseHold" : "dictation.hold");
+    if (opts.realtime) {
+      this.chooserInput = input;
+      this.chooser = new MicChooser(button, {
+        t: this.t,
+        available: () => !!box.ctx()?.key && !this.busy() && !this.recorder.active && !this.realtime.capture,
+        context: () => ({ origin: box.ctx(), target: this.target(box) }),
+        tap: ({ target }, source) => {
+          if (source) return this.dictation.start(target, source);
+          if (this.realtime.capture) return this.realtime.stop();
+          if (this.allowed() && !this.recorder.active) return this.dictation.toggle(target, "button");
+        },
+        send: (file, { origin }) => {
+          if (file) box.onTake(file, file.recordedMs, origin);
+          else this.refuse(this.t("dictation.tooShort"));
+        },
+        live: ({ origin }, source) => this.realtime.start(origin, source),
+        error: (error) => this.refuse(this.t("dictation.cannotRecord", { error: error.message || error })),
+      });
+      return button;
+    }
     this.recorder.attach(button, () => ({ box }));
     button.addEventListener("click", () => {
-      if (!this.allowed()) return;
+      if (!this.allowed() || this.realtime?.capture) return;
       this.dictation.toggle(this.target(box), "button");
     });
     return button;
@@ -142,7 +171,7 @@ export class DictationPart {
   // Alt+M (the full layout's key table): the box whose textarea it names.
   toggle(input, reason = "key") {
     const box = this.boxes.get(input);
-    if (!box || !this.allowed()) return;
+    if (!box || !this.allowed() || this.realtime?.capture) return;
     return this.dictation.toggle(this.target(box), reason);
   }
 
@@ -154,16 +183,18 @@ export class DictationPart {
   // A recording belongs to its box: moving that box to another session stops
   // it, as the page's follow() always did.
   stopIfHere(input, reason = "tab") {
+    if (this.chooserInput === input) this.chooser?.discard();
     if (this.dictation.target?.el === input) return this.dictation.stop(reason);
   }
 
   // Esc: throw away the take in progress, if there is one.
   discard() {
-    return this.recorder.discard();
+    return this.chooser?.discard() || this.recorder.discard();
   }
 
   destroy() {
     this.dictation.stop("tab");
-    this.recorder.discard();
+    this.discard();
+    this.realtime?.stop();
   }
 }
