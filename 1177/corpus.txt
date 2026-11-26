@@ -1,0 +1,11 @@
+base cold scan         354.0 ms   2492.0 KiB peak   2492.0 KiB incremental   2355.4 KiB retained   3 results/roots
+base first catalog      25.0 ms   2735.8 KiB peak    380.3 KiB incremental   2665.7 KiB retained 400 results/roots
+base warm catalog       12.4 ms   3016.2 KiB peak    350.3 KiB incremental   2674.7 KiB retained 400 results/roots
+base peak RSS 115460 KiB
+base legacy hit@3 0.800
+head cold scan         272.5 ms   2496.9 KiB peak   2496.9 KiB incremental   2360.0 KiB retained   3 results/roots
+head first catalog    1070.0 ms   3023.1 KiB peak    662.9 KiB incremental   2762.8 KiB retained 400 results/roots
+head warm catalog       53.2 ms   3044.5 KiB peak    281.5 KiB incremental   2762.9 KiB retained 400 results/roots
+head peak RSS 116780 KiB
+head legacy hit@3 0.800
+head common hit@3 0.767 across 60 queries
