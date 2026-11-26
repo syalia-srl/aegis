@@ -6796,14 +6796,17 @@ def test_a_long_tip_does_not_widen_the_new_tab_on_a_phone(server, browser):
     page.wait_for_selector("#a2[data-view=fleet]")
     page.tap("#tab-add")
     page.wait_for_function("document.querySelector('#sp-agent').value !== ''")
-    page.evaluate(
-        """(() => { const t = document.getElementById('hint-tip'); t.hidden = false;
-        document.getElementById('hint-tip-go').textContent =
-          'Coordinate several agents with a workflow you approve as a plan, and the server runs it'; })()"""
+    page.wait_for_selector("#sp-hints[data-ready]", state="attached")
+    # A help repaint can replace the injected text between browser calls.
+    layout = page.evaluate(
+        f"""() => {{
+          document.getElementById('hint-tip').hidden = false;
+          const go = document.getElementById('hint-tip-go');
+          go.textContent = 'Coordinate several agents with a workflow you approve as a plan, and the server runs it';
+          return {{ wider: {WIDER}, clipped: go.scrollWidth > go.clientWidth }};
+        }}"""
     )
-    assert page.evaluate(WIDER) == []
-    go = page.locator("#hint-tip-go")
-    assert go.evaluate("e => e.scrollWidth > e.clientWidth")
+    assert layout == {"wider": [], "clipped": True}, layout
     assert errs == []
 
 
