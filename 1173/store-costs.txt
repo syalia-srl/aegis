@@ -1,0 +1,7 @@
+One corpus of 200 synthetic memories, same files and Python for both revisions.
+Medians over 7 rounds, milliseconds per operation. Baseline and change alternate.
+revision cold-scan warm-scan name-read
+main 146.165 6.322 0.726
+delivery 142.269 4.774 0.787
+delivery 151.109 4.373 0.764
+main 109.449 4.180 0.586

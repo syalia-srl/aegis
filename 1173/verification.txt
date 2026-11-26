@@ -1,0 +1,15 @@
+$ uv run pytest -q tests/test_knowledge_items.py tests/test_knowledge_store.py tests/test_knowledge_history.py
+.......................................                                  [100%]
+39 passed in 3.88s
+
+$ uv run pytest -q --disable-warnings tests/test_knowledge_view_ops.py tests/test_library.py tests/test_help_pages.py
+....................................................                     [100%]
+52 passed, 3 warnings in 29.65s
+
+$ uv run pytest -q -m slow tests/test_browser_knowledge.py -k "view_lists or editing_saves or restore_brings or view_on_a_phone"
+....                                                                     [100%]
+4 passed, 3 deselected in 28.49s
+
+$ uv run pytest -q --disable-warnings tests/test_knowledge_view_ops.py -k qualified_reads
+.                                                                        [100%]
+1 passed, 13 deselected, 2 warnings in 2.67s
