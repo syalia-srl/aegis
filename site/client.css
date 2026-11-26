@@ -1970,6 +1970,29 @@
    usage column and the open item takes the list's place. */
 .a2[data-view=knowledge] .v-knowledge{display:flex;flex-direction:column;overflow:auto}
 .a2 .knowledge{max-width:1180px;width:100%;margin:0 auto;padding:22px 28px 32px;font-size:13px}
+.a2 .knowledge .kfilters{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
+.a2 .knowledge .kfilter{min-width:0;max-width:100%;padding:6px 8px;border:1px solid var(--rule);border-radius:var(--r);background:var(--bg);color:var(--ink);font:inherit}
+.a2 .knowledge .kfilter .menu{width:max-content;max-width:min(55ch, calc(100vw - 32px))}
+.a2 .knowledge .kfilter .opt{white-space:normal;overflow-wrap:anywhere}
+.a2 .knowledge .kerrors{overflow-wrap:anywhere}
+.a2 .knowledge .kconnections{display:grid;gap:8px}
+.a2 .knowledge .kconnections h3{margin:4px 0;font-size:13px}
+.a2 .knowledge .kconnections ul{padding-left:20px;margin:0}
+.a2 .knowledge .kconnections li+li{margin-top:4px}
+.a2 .knowledge .kconnections li .kmeta{display:block}
+.a2 .knowledge .knode{max-width:100%;white-space:normal;overflow-wrap:anywhere;text-align:left}
+.a2 .knowledge .kchoice{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:4px 0}
+.a2 .knowledge .kgraph{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:8px;align-items:center;padding:8px;border:1px solid var(--rule);border-radius:var(--r)}
+.a2 .knowledge :is(.kbranch,.kcenter){overflow-wrap:anywhere}
+.a2 .knowledge .kbranch{display:grid;gap:4px;min-width:0}
+.a2 .knowledge .kbranch:not(:has(button)){display:none}
+.a2 .knowledge .kbranch .knode{justify-content:center;border-color:var(--rule)}
+.a2 .knowledge .kcenter{position:relative;padding:6px;text-align:center;border:1px solid var(--accent);border-radius:var(--r);background:var(--accent-soft)}
+.a2 .knowledge .kgraph:has(.incoming button) .kcenter::before,.a2 .knowledge .kgraph:has(.outgoing button) .kcenter::after{content:"";position:absolute;top:50%;width:8px;border-top:1px solid var(--accent)}
+.a2 .knowledge .kcenter::before{right:100%}
+.a2 .knowledge .kcenter::after{left:100%}
+.a2 .knowledge .kdetail .md{overflow-wrap:anywhere}
+.a2 .knowledge .kdetail .md pre{overflow:auto}
 .a2 .knowledge .kpanes{display:flex;gap:18px;align-items:flex-start;margin-top:14px}
 .a2 .knowledge .klist{flex:1 1 0;min-width:0;border:1px solid var(--rule);border-radius:var(--r-lg);overflow:hidden;background:var(--bg)}
 .a2 .knowledge .klist .empty{padding:24px 14px;color:var(--muted);text-align:center}
@@ -1989,10 +2012,10 @@
 .a2 .knowledge .fl.exp{color:var(--err)}
 .a2 .knowledge .kdetail{flex:1.4 1 0;min-width:0;display:flex;flex-direction:column;gap:8px;border:1px solid var(--rule);border-radius:var(--r-lg);background:var(--surface);padding:12px 14px}
 .a2 .knowledge .khead{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.a2 .knowledge .kback{display:none}
+.a2 .knowledge .kback{display:inline-flex;align-items:center}
 .a2 .knowledge .kback .ic{width:14px;height:14px;margin-right:4px}
 .a2 .knowledge .ktitle{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;min-width:0}
-.a2 .knowledge .kname{font-family:var(--font-mono);font-size:14px;color:var(--strong);overflow-wrap:anywhere}
+.a2 .knowledge .kname{margin:0;font-weight:500;font-family:var(--font-mono);font-size:14px;color:var(--strong);overflow-wrap:anywhere}
 .a2 .knowledge .kkind{font-family:var(--font-mono);font-size:11px;color:var(--faint)}
 .a2 .knowledge .kdesc{color:var(--ink)}
 .a2 .knowledge .kmeta{font-family:var(--font-mono);font-size:11px;color:var(--muted);overflow-wrap:anywhere}
@@ -2010,11 +2033,11 @@
 .a2 .knowledge .kvnow{font-family:var(--font-mono);font-size:10.5px;color:var(--ok)}
 @media (max-width:640px){
   .a2 .knowledge{padding:12px 12px 24px}
+  .a2 .knowledge .kfilters{flex-direction:column;align-items:flex-start}
   .a2 .krow{grid-template-columns:18px minmax(0,1fr) auto}
   .a2 .krow .use{display:none}
   .a2 .knowledge[data-open="1"] .ktop,.a2 .knowledge[data-open="1"] .klist{display:none}
   .a2 .knowledge[data-open="1"] .kpanes{margin-top:0}
-  .a2 .knowledge .kback{display:inline-flex;align-items:center}
   .a2 .knowledge .kdetail{padding:10px}
   .a2 .knowledge .ked{height:52vh}
 }

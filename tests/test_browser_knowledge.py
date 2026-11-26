@@ -520,14 +520,29 @@ def test_knowledge_wiki_navigation_at_desktop_and_phone(server, page):
     context = page.get_by_role("combobox", name="Session context")
     source = page.get_by_role("combobox", name="Knowledge source")
     query = page.get_by_role("searchbox", name="Search knowledge")
+
+    def choose(chip, label):
+        chip.fill(label)
+        page.get_by_role("option", name=label, exact=True).wait_for()
+        chip.press("Enter")
+
+    def choose_context(log_id):
+        label = page.locator(".kfilters pick-chip").first.evaluate(
+            "(chip, id) => chip.options.find(option => option.value === id)?.label",
+            log_id,
+        )
+        assert label
+        choose(context, label)
+        return label
+
     query.fill("zirconium")
     page.locator(".klist .empty").wait_for()
-    context.select_option(session)
+    context_label = choose_context(session)
     hit = page.get_by_role("button", name="Restore the ledger", exact=False)
     hit.wait_for()
-    source.select_option(label="Personal knowledge")
+    choose(source, "Personal knowledge")
     page.locator(".klist .empty").wait_for()
-    source.select_option(label=str(how))
+    choose(source, str(how))
     hit.wait_for()
 
     evidence = environ.get("KNOWLEDGE_VIEW_EVIDENCE")
@@ -571,8 +586,8 @@ def test_knowledge_wiki_navigation_at_desktop_and_phone(server, page):
         page.get_by_role("button", name="Back to all items").press("Enter")
         hit.wait_for()
         assert query.input_value() == "zirconium"
-        assert context.input_value() == session
-        assert source.locator("option:checked").inner_text() == str(how)
+        assert context.input_value() == context_label
+        assert source.input_value() == str(how)
         assert not marker.exists()
 
     hit.press("Enter")
@@ -585,13 +600,13 @@ def test_knowledge_wiki_navigation_at_desktop_and_phone(server, page):
     page.get_by_text("Saved and approved.").wait_for()
     assert "molybdenum" in skill.read_text()
     page.get_by_role("button", name="Back to all items").press("Enter")
-    source.select_option(label="All sources")
+    choose(source, "All sources")
     query.fill("molybdenum")
     page.locator(".krow[data-name=verify-ledger]").wait_for()
     page.set_viewport_size({"width": 1280, "height": 920})
     second = spawn(page)
     page.click("#knowledge-btn")
-    context.select_option(second)
+    choose_context(second)
     query.fill("molybdenum")
     page.locator(".krow[data-name=verify-ledger]").press("Enter")
     page.wait_for_function(

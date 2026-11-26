@@ -68,19 +68,19 @@ Open Knowledge from the top bar or press Alt+I. **Session context** adds
 that session's worktree and the configured sources it can read, and boosts
 results that match its checkout or path. **Knowledge source** limits the
 results to one source. The search box matches titles, descriptions and full
-page text. The All, Skills, Memories and Flagged filters narrow the results.
+document text. The All, Skills, Memories and Flagged filters narrow the results.
 Flagged lists personal proposals and expired or stale entries.
 
 Each result shows its path and source, plus any expiry or search match.
 Personal rows also show usage and status. Open a result with Enter or click
 it. Follow **Outgoing links**, **Incoming references**, or a node in the
-**Local graph** to move between pages. Ambiguous links show the candidate
+**Local graph** to navigate between entries. Ambiguous links show the candidate
 paths. **Copy reference** copies the qualified link for pasting into the
 source. An unresolved link has no visible destination. **Back to all items**
-keeps the search and filters. Browsing a skill reads its text without loading
+retains the search and filters. Browsing a skill reads its text without loading
 the skill or starting its MCP server.
 
-Workspace pages are read-only in Knowledge. Edit a workspace page in its source.
+Workspace entries open read-only. Edit their files at the source.
 
 Open a personal row to read and edit the item's whole file, its frontmatter
 included, in the editor. Save, or Ctrl+S, commits the edit

@@ -89,7 +89,7 @@ export class Knowledge {
       b.dataset.kind = k;
       this.kinds.append(b);
     }
-    this.context = el("select", "kfilter");
+    this.context = el("pick-chip", "kfilter");
     this.context.setAttribute("aria-label", "Session context");
     this.context.addEventListener("change", async () => {
       const next = this.context.value;
@@ -104,9 +104,10 @@ export class Knowledge {
         this.onBack();
       } else this.load();
     });
-    this.source = el("select", "kfilter");
+    this.source = el("pick-chip", "kfilter");
     this.source.setAttribute("aria-label", "Knowledge source");
     this.source.addEventListener("change", () => this.load());
+    this.source.options = [{ value: "", label: "All sources" }];
     const filters = el("div", "kfilters");
     filters.append(this.context, this.source);
     this.count = el("div", "jcount kcount");
@@ -123,9 +124,9 @@ export class Knowledge {
   }
 
   options(select, choices, selected) {
-    const existing = [...select.options];
-    if (existing.length !== choices.length || choices.some(([value, label], i) => existing[i].value !== value || existing[i].text !== label)) {
-      select.replaceChildren(...choices.map(([value, label]) => new Option(label, value)));
+    const existing = select.options;
+    if (existing.length !== choices.length || choices.some(([value, label], i) => existing[i].value !== value || existing[i].label !== label)) {
+      select.options = choices.map(([value, label]) => ({ value, label }));
     }
     select.value = selected;
   }
