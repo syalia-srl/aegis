@@ -1,19 +1,29 @@
 """Realtime delivery in the published agent CLIs, with a localhost model."""
 
+import json
+
 import pytest
 
 from ..conftest import until
-from .fakemodel import Rule, Say, Shell
+from .fakemodel import Call, Rule, Say, Shell
 
 pytestmark = pytest.mark.live
 
 
 @pytest.mark.parametrize("setup", ["claude-code", "codex"], indirect=True)
-async def test_realtime_steers_a_running_live_harness(canary):
+async def test_realtime_steers_a_running_live_harness(canary, monkeypatch):
     from aegis.transcript.store import read_store
 
+    requests = []
+    record = canary.model._record
+
+    def observe(api, body, conversation, reply):
+        requests.append(json.dumps(body.get("messages") or body.get("input") or []))
+        record(api, body, conversation, reply)
+
+    monkeypatch.setattr(canary.model, "_record", observe)
     canary.model.script(
-        Rule("CANARY-VOICE-BUSY", [Shell("sleep 4"), Say("busy done")]),
+        Rule("CANARY-VOICE-BUSY", [Shell("sleep 4"), Call("meta"), Say("busy done")]),
         Rule("CANARY-VOICE-BLOCK", [Say("voice received")]),
     )
     session = await canary.spawn()
@@ -36,8 +46,8 @@ async def test_realtime_steers_a_running_live_harness(canary):
     assert voice["steered"] and voice["inbox"][0]["by_person"]
     assert "files" not in voice
     await until(
-        lambda: any("CANARY-VOICE-BLOCK" in x["last_person"] for x in canary.model.log),
-        timeout=60,
+        lambda: any("CANARY-VOICE-BLOCK" in body for body in requests),
+        timeout=25,
         what="the voice block to reach the model through the real CLI",
     )
     await until(
