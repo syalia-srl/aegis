@@ -65,7 +65,10 @@ usage:
   subscriptions: {a1b2: {name: claude-max, fee: 200, renews: 14}}
 harness_versions: {person: warn, agent: "off", startup: "off", accepted: {opencode: ["2.0.33"]}}
 nudges: {silent_s: false, plan_min: 20}
-knowledge: {embeddings: minishlab/potion-multilingual-128M, know_how: false}
+knowledge:
+  embeddings: minishlab/potion-multilingual-128M
+  know_how: false
+  sources: [{root: docs, format: markdown, include: ['**/*.md'], exclude: [drafts]}]
 quota: {projection: {half_life: {5h: 45m, week: 12h, month: 2d}}}
 notices:
   disk: {on: 80, critical: 95, clear: 70}
@@ -179,3 +182,18 @@ def test_every_key_has_a_control_in_settings(tmp_path):
     }
     missing = [k for k in reader_keys() if ALIASES.get(k, k) not in schema | named]
     assert missing == []
+
+
+def test_source_defaults_match_settings_and_explicit_empty_list_disables_them(tmp_path):
+    snapshot = config.Config(tmp_path).current()
+    field = next(
+        f for f in snapshot.wire()["schema"] if f["key"] == "knowledge.sources"
+    )
+    roots = [source.root for source in snapshot.knowledge["sources"]]
+    assert roots == [".claude/skills", ".codex/skills"]
+    assert field["default"] == [{"root": root, "format": "skill"} for root in roots]
+
+    (tmp_path / ".aegis.yaml").write_text("knowledge: {sources: []}\n")
+    snapshot = config.Config(tmp_path).current()
+    assert snapshot.knowledge["sources"] == ()
+    assert snapshot.wire()["doc"]["settings"]["knowledge.sources"] == []
