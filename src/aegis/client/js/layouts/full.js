@@ -18,10 +18,6 @@ import { applyLabels } from "../labels.js";
 
 export const FULL_HTML = `
   <div class="netbanner" id="netbanner" role="status" hidden><span class="lbl" data-t="shell.noConnection"></span><span id="netbanner-t"></span><button class="btn" id="netbanner-retry" type="button" data-t="shell.retry"></button></div>
-  <div class="realtime-status" id="realtime-status" hidden>
-    <span id="realtime-source" role="status"></span>
-    <button class="btn" id="realtime-stop" type="button" data-t="dictation.stopRealtime"></button>
-  </div>
 
   <main class="view v-boot">
     <div class="boot">

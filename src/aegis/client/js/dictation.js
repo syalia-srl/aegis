@@ -58,7 +58,7 @@ export function voiceSecs(a) {
   return n * (HOP / SR);
 }
 
-export function concat(parts) {
+function concat(parts) {
   const out = new Float32Array(parts.reduce((n, p) => n + p.length, 0));
   let at = 0;
   for (const p of parts) {
@@ -161,21 +161,16 @@ const STOPPED = {
 
 // The microphone, mono at 16 kHz. Resolves to the function that stops it.
 // `onEnd` fires once with "track" or "suspended" if the browser ends the capture.
-export async function micSource(onSamples, onEnd = () => {}, onStream = () => {}) {
+export async function micSource(onSamples, onEnd = () => {}) {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+  });
   const ctx = new AudioContext();
-  let stream;
   try {
-    const worklet = ctx.audioWorklet.addModule(new URL("./capture.worklet.js", import.meta.url));
-    // Observe early failures while the permission prompt is open.
-    worklet.catch(() => {});
-    stream = await navigator.mediaDevices.getUserMedia({
-      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
-    });
-    onStream(stream);
-    await worklet;
+    await ctx.audioWorklet.addModule(new URL("./capture.worklet.js", import.meta.url));
     await ctx.resume();
   } catch (e) {
-    stream?.getTracks().forEach((t) => t.stop());
+    stream.getTracks().forEach((t) => t.stop());
     await ctx.close();
     throw e;
   }
@@ -184,21 +179,12 @@ export async function micSource(onSamples, onEnd = () => {}, onStream = () => {}
   mute.gain.value = 0;
   ctx.createMediaStreamSource(stream).connect(node).connect(mute).connect(ctx.destination);
   const rs = resampler(ctx.sampleRate);
-  let drained;
-  node.port.onmessage = ({ data }) => {
-    if (data === "drained") drained?.();
-    else onSamples(rs(data));
-  };
+  node.port.onmessage = ({ data }) => onSamples(rs(data));
   let closing = false;
   stream.getAudioTracks()[0].addEventListener("ended", () => !closing && onEnd("track"));
   ctx.addEventListener("statechange", () => !closing && ctx.state !== "running" && onEnd("suspended"));
   return async () => {
     closing = true;
-    if (ctx.state === "running") await new Promise((resolve) => {
-      const timeout = setTimeout(resolve, 100);
-      drained = () => { clearTimeout(timeout); resolve(); };
-      node.port.postMessage("drain");
-    });
     node.port.onmessage = null;
     stream.getTracks().forEach((t) => t.stop());
     await ctx.close();
@@ -405,7 +391,11 @@ export class Dictation {
     try {
       // A host's transcribe hook replaces the workers, so neither the model
       // (17.8 MB) nor the server's keywords are needed.
-      rec.keywords = await this.recognition();
+      if (!this.transcribe) {
+        const p = await this.prepare();
+        rec.keywords = (p.keywords || []).join("\n");
+        await this.boot(p.base);
+      }
     } catch (e) {
       return this.abort(rec, this.t("dictation.modelUnavailable", { error: e?.message ?? e }));
     }
@@ -423,21 +413,6 @@ export class Dictation {
     for (const p of rec.chunker.finish(rec.emitted === 0)) this.enqueue(rec, p);
     this.settleState();
     if (STOPPED[reason]) this.onError(this.t(STOPPED[reason]));
-  }
-
-  async recognition() {
-    if (this.transcribe) return "";
-    const p = await this.prepare();
-    await this.boot(p.base);
-    return (p.keywords || []).join("\n");
-  }
-
-  async recognize(parts, keywords) {
-    const texts = await Promise.all(parts.map((audio) => new Promise((resolve, reject) => {
-      this.queue.push({ id: this.next++, audio, final: true, keywords, resolve, reject });
-      this.dispatch();
-    })));
-    return texts.map((text) => text.trim()).filter(Boolean).join(" ");
   }
 
   boot(base) {
@@ -503,7 +478,7 @@ export class Dictation {
       if (w.job || !this.queue.length) continue;
       const job = this.queue.splice(pick(this.queue), 1)[0];
       w.job = job;
-      w.w.postMessage({ type: "transcribe", id: job.id, audio: job.audio, keywords: job.keywords ?? job.rec.keywords }, [job.audio.buffer]);
+      w.w.postMessage({ type: "transcribe", id: job.id, audio: job.audio, keywords: job.rec.keywords }, [job.audio.buffer]);
     }
   }
 
@@ -523,11 +498,6 @@ export class Dictation {
   // back the provisional text behind it. A final with a failed part leaves
   // the provisional text as it is: a wrong half must not wipe words on screen.
   settle(job, text, failed = false, message = "") {
-    if (job.resolve) {
-      if (failed) job.reject(new Error(message));
-      else job.resolve(text);
-      return;
-    }
     const { rec, item } = job;
     if (!failed) item.texts[job.i] = text;
     else {

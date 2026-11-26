@@ -205,28 +205,3 @@ export class HoldToRecord {
     return bar;
   }
 }
-
-// The chooser uses the same stream for all outcomes. Keep the encoded take
-// only if the person selects Send audio.
-export function attachmentTake(stream) {
-  const [mime, ext] = TYPES.find(([t]) => MediaRecorder.isTypeSupported(t)) || ["", "webm"];
-  const recorder = new MediaRecorder(stream, { ...(mime && { mimeType: mime }), audioBitsPerSecond: BITRATE });
-  const chunks = [];
-  const started = performance.now();
-  const done = new Promise((resolve) => {
-    recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
-    recorder.onstop = () => resolve(chunks);
-    recorder.onerror = () => resolve([]);
-  });
-  recorder.start();
-  return async () => {
-    const ms = Math.round(performance.now() - started);
-    if (recorder.state !== "inactive") recorder.stop();
-    const audio = await done;
-    if (ms < MIN_MS || !audio.length) return null;
-    const type = (recorder.mimeType || mime || "audio/webm").split(";")[0];
-    const file = new File(audio, `recording.${ext}`, { type });
-    file.recordedMs = ms;
-    return file;
-  };
-}

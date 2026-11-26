@@ -260,11 +260,6 @@ class SpawnParams(_Strict):
     )
 
 
-class RealtimeInput(_Strict):
-    id: str = Field(min_length=1, max_length=64)
-    state: Literal["open", "closing", "ended"]
-
-
 class SendParams(_Strict):
     log_id: str
     text: str = ""
@@ -281,25 +276,10 @@ class SendParams(_Strict):
     # The box got dictated text since the last send: the agent reads the text
     # with dictation.NOTE after it (#579).
     dictated: bool = False
-    realtime: RealtimeInput | None = None
 
     @model_validator(mode="after")
     def _says_something(self) -> "SendParams":
-        if self.realtime:
-            if (
-                self.attachments
-                or self.dictated
-                or self.expect_rev is not None
-                or not self.nonce
-            ):
-                raise ValueError(
-                    "realtime input needs a nonce and takes no attachments or draft metadata"
-                )
-            if bool(self.text.strip()) != (self.realtime.state != "ended"):
-                raise ValueError(
-                    "realtime blocks need text, and capture-ended has none"
-                )
-        elif not self.text and not self.attachments:
+        if not self.text and not self.attachments:
             raise ValueError("a message needs text or attachments")
         return self
 
@@ -3239,44 +3219,6 @@ class App:
             s = reg.open(p.log_id)
             s.check_lock()  # before a / command or an upload acts on it
             s.check_handed_off()
-            if p.realtime is not None:
-                if caller.is_agent:
-                    raise OpError(
-                        "forbidden", "realtime input comes from the person's microphone"
-                    )
-                assert p.nonce is not None
-                if p.nonce in s.fold().realtime_receipts or any(
-                    (message.get("realtime") or {}).get("nonce") == p.nonce
-                    for message in s.held
-                ):
-                    return
-                await self.resume_one(s)
-                state = p.realtime.state
-                text = p.text.strip()
-                if state == "ended":
-                    header = "> from person:microphone · realtime capture ended"
-                    body = "Realtime microphone capture ended. Continue as the person’s task calls for."
-                else:
-                    header = f"> from person:microphone · realtime transcript · capture {state}"
-                    body = (
-                        "The person's speech is arriving in blocks. Respond quickly when useful. "
-                        "You may wait silently for more context or queue small work as appropriate. "
-                        "Follow the person's task and allow for transcription errors.\n\n"
-                        + text
-                    )
-                await s.deliver(
-                    header,
-                    body,
-                    urgent=True,
-                    by_person=True,
-                    realtime={
-                        "id": p.realtime.id,
-                        "state": state,
-                        "text": text,
-                        "nonce": p.nonce,
-                    },
-                )
-                return
             # A message written offline carries the transcript's revision as the
             # writer saw it: if anything a person reads has happened since, it
             # goes back to ask instead of answering a question no longer asked.
