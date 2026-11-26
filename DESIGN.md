@@ -789,7 +789,9 @@ directory determines the Git worktree, and the file is read under that
 worktree's `know-how/` directory without following symlinks. The operation
 reads one file on demand and does not build an index.
 The read-only catalog combines the caller's personal entries, the selected
-session's Git know-how, and the current configured roots. It checks session
+session's Git know-how, and the configured roots. The default roots are
+`.claude/skills` and `.codex/skills` under the configuration directory. An
+explicit source list replaces these defaults. The catalog checks session
 visibility and the host's root policy before requesting an external snapshot.
 `src/aegis/knowledge/sources.py` walks directory descriptors without following
 symlinks, records unreadable paths, and reuses parsed files with the same stat

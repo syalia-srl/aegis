@@ -90,7 +90,14 @@ from .cascade import Cooling, Fall, classify, pick
 from .cgroups import SessionCgroups
 from .channels import Channels, Throttle
 from .claude.process import PERMISSION_MODE, ControlError
-from .config import CONTEXT_DEFAULTS, Config, Snapshot, accept_version, write_host
+from .config import (
+    CONTEXT_DEFAULTS,
+    DEFAULT_KNOWLEDGE_SOURCES,
+    Config,
+    Snapshot,
+    accept_version,
+    write_host,
+)
 from .harness import harness_for
 from .model_catalog import ModelCatalog
 from .config_ops import register_config_ops
@@ -2185,6 +2192,7 @@ class App:
                 setting.include,
                 setting.exclude,
                 private=private,
+                optional=setting in DEFAULT_KNOWLEDGE_SOURCES,
             )
             for setting in self.config.current().knowledge["sources"]
         ]

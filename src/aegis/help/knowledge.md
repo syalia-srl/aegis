@@ -116,9 +116,11 @@ Git checkout's `know-how/` directory, including documents beyond the
 automatic notice's first 50. Without a session, a terminal call lists the
 caller's personal store.
 
-Register additional directories in the server's YAML configuration or in
-Settings under Search embeddings → sources. The Settings field accepts the
-list as JSON.
+The catalog starts with `.claude/skills` and `.codex/skills` under the
+server's configuration directory. A missing default directory is skipped.
+Set `knowledge.sources` in YAML or in Settings under Search embeddings →
+sources to replace the default list. The Settings field accepts JSON. Use
+an empty list to disable these roots.
 
 ```yaml
 knowledge:

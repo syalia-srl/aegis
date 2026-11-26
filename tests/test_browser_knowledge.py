@@ -379,3 +379,49 @@ def test_agent_reads_live_knowledge_source(server, page):
             f"Recovered body: {recovered['body']}"
             f"Revision changed after offline edit: {recovered['revision'] != got['revision']}\n"
         )
+
+
+def test_catalog_discovers_default_skill_roots_on_startup(server, page):
+    from os import environ
+    from pathlib import Path
+
+    server.stop()
+    for harness in ("claude", "codex"):
+        skill = server.root / f".{harness}" / "skills" / f"{harness}-release"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text(
+            f"---\ndescription: Release with {harness}\n---\nCheck the package.\n"
+        )
+        (skill / "check.py").write_text("raise RuntimeError('Must not execute')\n")
+    server.start()
+    page.goto(server.url)
+    spawn(page, "/mcp knowledge_catalog {}")
+    result = page.locator(".row.prose .md").last
+    listing = json.loads(result.text_content().removeprefix("mcp ok: "))
+    entries = {entry["name"]: entry for entry in listing["items"]}
+    assert set(entries) == {"claude-release", "codex-release"}
+    assert {source["root"] for source in listing["sources"]} == {
+        str(server.root / ".claude/skills"),
+        str(server.root / ".codex/skills"),
+    }
+    assert listing["errors"] == []
+    for name, entry in sorted(entries.items()):
+        assert entry["kind"] == "skill"
+        assert entry["relative_path"] == f"{name}/SKILL.md"
+        assert entry["files"] == ["check.py"]
+    if evidence := environ.get("WIKI_SOURCE_EVIDENCE"):
+        (Path(evidence) / "default-skills.txt").write_text(
+            "Fresh aegis serve with no knowledge.sources setting.\n"
+            + "".join(
+                f"{name}: {entry['relative_path']} ({', '.join(entry['files'])})\n"
+                for name, entry in sorted(entries.items())
+            )
+        )
+
+    config = server.root / ".aegis.yaml"
+    config.write_text(config.read_text() + "\nknowledge: {sources: []}\n")
+    page.fill("#input", "/mcp knowledge_catalog {}")
+    page.press("#input", "Enter")
+    turns_done(page, 2)
+    listing = json.loads(result.text_content().removeprefix("mcp ok: "))
+    assert listing == {"items": [], "sources": [], "errors": []}

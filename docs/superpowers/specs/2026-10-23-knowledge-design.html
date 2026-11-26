@@ -220,8 +220,9 @@ svg text{font-family:var(--font-mono)}
 <h2>Read-only source catalog</h2>
 <p>The catalog is implemented as a separate read operation during rollout.
 It lists the caller's personal entries, know-how from the selected session's
-Git worktree, and configured Markdown and skill directories that the host
-allows the caller to read. Worktree entry IDs are shared with the direct
+Git worktree, and Markdown and skill directories that the host allows the
+caller to read. The workspace's Claude and Codex skill directories are the
+defaults, and an explicit source list replaces them. Worktree entry IDs are shared with the direct
 worktree reader. A skill contributes one page and names its resources.</p>
 <p>Files remain in their source directories. The server scans in a worker
 thread at startup and every five seconds while serving. It reuses unchanged

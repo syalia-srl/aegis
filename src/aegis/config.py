@@ -337,9 +337,6 @@ def workflows_from(raw: object) -> dict:
 NUDGES_DEFAULTS: dict = {"silent_s": 2, "plan_min": 15}
 
 
-KNOWLEDGE_DEFAULTS: dict = {"embeddings": "off", "know_how": True, "sources": ()}
-
-
 # The quota: block (quota/projection.py): how far back "the current rate" looks,
 # per window length. Absent lengths use the window's span / 28, at least 30 min.
 QUOTA_SPANS = {"5h": 5 * 3600, "week": 7 * 86400, "month": 30 * 86400}
@@ -413,11 +410,22 @@ class KnowledgeSource(BaseModel):
         return patterns
 
 
+DEFAULT_KNOWLEDGE_SOURCES = (
+    KnowledgeSource(root=".claude/skills", format="skill"),
+    KnowledgeSource(root=".codex/skills", format="skill"),
+)
+KNOWLEDGE_DEFAULTS: dict = {
+    "embeddings": "off",
+    "know_how": True,
+    "sources": DEFAULT_KNOWLEDGE_SOURCES,
+}
+
+
 def knowledge_from(raw: object) -> dict:
     """The ``knowledge:`` block over its defaults: ``embeddings``, off or a
     fastembed model's name (knowledge/embed.py), and ``know_how``, whether a
     session is told about a repository's docs (knowledge/know_how.py).
-    ``sources`` registers additional directories for the read-only catalog.
+    ``sources`` replaces the default skill roots for the read-only catalog.
     An invalid value carries ``error`` for aegis doctor."""
     out = dict(KNOWLEDGE_DEFAULTS)
     if raw is None:
@@ -693,7 +701,15 @@ def fields() -> list[dict]:
         add("quota", f"quota.projection.half_life.{name}", "text", default)
     add("embeddings", "knowledge.embeddings", "text", KNOWLEDGE_DEFAULTS["embeddings"])
     add("embeddings", "knowledge.know_how", "bool", KNOWLEDGE_DEFAULTS["know_how"])
-    add("embeddings", "knowledge.sources", "json", [])
+    add(
+        "embeddings",
+        "knowledge.sources",
+        "json",
+        [
+            source.model_dump(mode="json", exclude_defaults=True)
+            for source in DEFAULT_KNOWLEDGE_SOURCES
+        ],
+    )
     add("ranking", "model_ranking", "bool", True)
     for k, v in host_from(None)[0].items():
         add("host", f"host.{k}", "list", v)

@@ -182,3 +182,18 @@ def test_every_key_has_a_control_in_settings(tmp_path):
     }
     missing = [k for k in reader_keys() if ALIASES.get(k, k) not in schema | named]
     assert missing == []
+
+
+def test_source_defaults_match_settings_and_explicit_empty_list_disables_them(tmp_path):
+    snapshot = config.Config(tmp_path).current()
+    field = next(
+        f for f in snapshot.wire()["schema"] if f["key"] == "knowledge.sources"
+    )
+    roots = [source.root for source in snapshot.knowledge["sources"]]
+    assert roots == [".claude/skills", ".codex/skills"]
+    assert field["default"] == [{"root": root, "format": "skill"} for root in roots]
+
+    (tmp_path / ".aegis.yaml").write_text("knowledge: {sources: []}\n")
+    snapshot = config.Config(tmp_path).current()
+    assert snapshot.knowledge["sources"] == ()
+    assert snapshot.wire()["doc"]["settings"]["knowledge.sources"] == []

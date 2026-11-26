@@ -27,6 +27,7 @@ class Source:
     # Know-how IDs remain relative to the Git worktree, as in the direct reader.
     worktree: Path | None = None
     private: Path | None = None
+    optional: bool = False
 
 
 @dataclass(frozen=True)
@@ -119,7 +120,7 @@ def scan(source: Source, previous: Snapshot | None) -> Snapshot:
             fd = sub
         walk(fd, PurePosixPath())
     except FileNotFoundError as exc:
-        if source.format != "know-how":
+        if source.format != "know-how" and not source.optional:
             errors["."] = exc.strerror or str(exc)
     except OSError as exc:
         errors["."] = exc.strerror or str(exc)
