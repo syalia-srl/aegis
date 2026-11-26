@@ -165,6 +165,26 @@ withdraws it on the next catalog call and leaves its files in place. The Knowled
 view, personal search and skill commands continue to use their existing
 readers.
 
+## Wiki links and backlinks
+
+Put `[[Title]]` or `[[name]]` in Markdown prose to link to a page. A title or
+name matches without regard to case. The catalog looks in the source of the
+page containing the link first, then in the rest of the visible catalog. A
+link uses the page's own source even when you read it from another checkout.
+For an exact destination, paste its complete catalog ID into
+`[[<source_id>:<relative_path>]]`. Links in code blocks and inline code are
+examples and are skipped.
+
+Read a page with `knowledge_catalog entry_id=ID` to get its `links` and
+`backlinks`. A resolved link has a target_id you can pass to the same
+operation. An ambiguous link lists the visible candidates with their IDs and
+paths, so you can copy the intended ID into the Markdown. A pending link has
+no visible match. Backlinks list the visible pages with a resolved link to
+this page. The neighbor_count field is the number of distinct other pages
+linked in either direction. These fields come from the same catalog in the browser RPC.
+Changes to titles, files, and source visibility are reflected when the catalog
+next sees those changes. Opening a linked skill reads its text.
+
 ## Expired and stale memories
 
 A temporary memory past its day is flagged expired and leaves the block
