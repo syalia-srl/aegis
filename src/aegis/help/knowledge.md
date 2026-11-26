@@ -116,7 +116,9 @@ Git checkout's `know-how/` directory, including documents beyond the
 automatic notice's first 50. Without a session, a terminal call lists the
 caller's personal store.
 
-Register additional directories in the server's YAML configuration.
+Register additional directories in the server's YAML configuration or in
+Settings under Search embeddings → sources. The Settings field accepts the
+list as JSON.
 
 ```yaml
 knowledge:

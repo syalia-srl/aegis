@@ -1587,6 +1587,21 @@ export class Settings {
     } else if (f.kind === "bool") {
       el = select(k, ["", "true", "false"], k in s ? String(s[k]) : "", (x) => x || `default, ${f.default}`);
       el.addEventListener("input", () => set(el.value ? el.value === "true" : undefined));
+    } else if (f.kind === "json") {
+      const value = s[k];
+      el = h("textarea", { rows: 5, value: typeof value === "string" ? value : JSON.stringify(value ?? f.default, null, 2), spellcheck: false, className: "pick set-cmd" });
+      el.addEventListener("input", () => {
+        const raw = el.value.trim();
+        if (!raw) return set(undefined);
+        let parsed;
+        try {
+          parsed = JSON.parse(raw);
+        } catch {
+          // Keep invalid input so config.write can mark the block without saving.
+          return set(raw);
+        }
+        set(parsed);
+      });
     } else {
       const number = (f.kind === "int" || f.kind === "number") && !f.off;
       el = h("input", { type: number ? "number" : "text", step: "any", value: shown(s[k]), placeholder: shown(f.default), spellcheck: false, className: f.kind === "list" || f.kind === "text" ? "pick set-cmd" : "pick set-num" });

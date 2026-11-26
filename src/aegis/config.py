@@ -38,7 +38,7 @@ from io import StringIO
 from pathlib import Path
 from typing import Any, Literal, cast
 
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, Field, JsonValue, ValidationError, field_validator
 from ruamel.yaml import YAML, YAMLError
 from ruamel.yaml.comments import CommentedMap
 from ruamel.yaml.scalarstring import LiteralScalarString
@@ -637,7 +637,9 @@ SECTIONS = {
         "Search embeddings",
         "Embeddings: off, or a fastembed model fused with keyword search, such"
         " as minishlab/potion-multilingual-128M. It needs the embeddings extra"
-        " and about a gigabyte of memory, and is read when aegis starts.",
+        " and about a gigabyte of memory, and is read when aegis starts."
+        " Edit catalog sources as a JSON list of root, format, include and exclude"
+        " entries.",
     ),
     "host": (
         "Host",
@@ -650,7 +652,8 @@ SECTIONS = {
 def fields() -> list[dict]:
     """The keys the Settings page draws from the wire, in order. ``kind`` says
     which control: agent (a configured generation agent), size, int, number, bool, text, list
-    (of strings) or switch (a notice kind, written ``false`` when off);
+    (of strings), json (structured values) or switch (a notice kind, written
+    ``false`` when off);
     ``off`` marks a number the file may set to false."""
     out: list[dict] = []
 
@@ -690,6 +693,7 @@ def fields() -> list[dict]:
         add("quota", f"quota.projection.half_life.{name}", "text", default)
     add("embeddings", "knowledge.embeddings", "text", KNOWLEDGE_DEFAULTS["embeddings"])
     add("embeddings", "knowledge.know_how", "bool", KNOWLEDGE_DEFAULTS["know_how"])
+    add("embeddings", "knowledge.sources", "json", [])
     add("ranking", "model_ranking", "bool", True)
     for k, v in host_from(None)[0].items():
         add("host", f"host.{k}", "list", v)
@@ -906,9 +910,7 @@ class ConfigDoc(BaseModel):
     usage: UsageDoc = Field(default_factory=UsageDoc)
     # Each key of fields() the file sets, by its dotted path; a switch only
     # when it is off (false).
-    settings: dict[str, bool | int | float | str | list[str]] = Field(
-        default_factory=dict
-    )
+    settings: dict[str, JsonValue] = Field(default_factory=dict)
 
 
 def _exit_via(data: dict) -> str | None:
@@ -1099,6 +1101,8 @@ def _settings_doc(data: dict) -> dict:
         if f["kind"] == "switch":
             if v is False:
                 out[f["key"]] = False
+        elif f["kind"] == "json" and v is not _MISSING:
+            out[f["key"]] = json.loads(json.dumps(v, default=str))
         elif v is not _MISSING and v is not None and not isinstance(v, dict):
             out[f["key"]] = [str(x) for x in v] if isinstance(v, list) else v
     return out
