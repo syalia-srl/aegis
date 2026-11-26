@@ -4,9 +4,11 @@
 import json
 
 import pytest
+from websockets.asyncio.client import connect
 
 from aegis.knowledge import history
 from aegis.ops import OpError
+from aegis.web import PROTO
 
 from .conftest import until
 from .knowledge_samples import mem
@@ -140,7 +142,9 @@ async def test_remember_refuses_empty_text_and_read_permission(agents_world):
     assert e.value.code == "read_only" and "read permission" in e.value.message
 
 
-async def test_agent_searches_the_worktree_and_reads_by_id(agents_world):
+async def test_catalog_search_read_and_revocation_over_mcp_and_browser_rpc(
+    agents_world, monkeypatch
+):
     root = agents_world.root
     history.ensure_repo(root)
     how = root / "know-how"
@@ -148,13 +152,54 @@ async def test_agent_searches_the_worktree_and_reads_by_id(agents_world):
     late = how / "restoring.md"
     late.write_text("Routine preparation. " * 40 + "\nZirconium ledger.\n")
     s = await agents_world.spawn()
-    search = ok(await turn(s, mcp("knowledge_catalog", query="zirconium ledger")))
+    query = {"query": "zirconium ledger"}
+    search = ok(await turn(s, mcp("knowledge_catalog", **query)))
     assert search["total"] == 1
     (hit,) = search["items"]
     assert hit["relative_path"] == "know-how/restoring.md"
-    read = ok(await turn(s, mcp("knowledge_catalog", entry_id=hit["id"])))
-    assert read["body"].endswith("Zirconium ledger.\n")
+    ref = {"entry_id": hit["id"]}
+    read = ok(await turn(s, mcp("knowledge_catalog", **ref)))
+    assert read["body"] == late.read_text()
     assert read["revision"] == hit["revision"]
+
+    base = agents_world.base
+    async with connect(base.replace("http:", "ws:") + "/ws", origin=base) as ws:
+        await ws.send(json.dumps({"t": "hello", "token": "tok", "proto": PROTO}))
+        assert json.loads(await ws.recv())["t"] == "welcome"
+
+        async def catalog(id, params):
+            await ws.send(
+                json.dumps(
+                    {
+                        "t": "call",
+                        "id": id,
+                        "op": "knowledge.catalog",
+                        "params": {"log_id": s.log_id, **params},
+                    }
+                )
+            )
+            response = json.loads(await ws.recv())
+            assert response["t"] == "reply" and response["id"] == id
+            return response
+
+        ws_search = (await catalog(1, query))["result"]
+        assert ws_search["total"] == 1 and ws_search["items"] == [hit]
+        assert (await catalog(2, ref))["result"] == read
+
+        monkeypatch.setattr(
+            agents_world.app.policy,
+            "knowledge_source",
+            lambda who, session, root: root != how,
+        )
+        denied = (await catalog(3, query))["result"]
+        assert denied["total"] == 0 and denied["items"] == []
+        assert (await catalog(4, ref))["error"]["code"] == "not_found"
+
+    denied = ok(await turn(s, mcp("knowledge_catalog", **query)))
+    assert denied["total"] == 0 and denied["items"] == []
+    assert (await turn(s, mcp("knowledge_catalog", **ref))).startswith(
+        "mcp error: not_found"
+    )
 
 
 async def test_agent_reads_personal_catalog_hit_by_id(agents_world):
