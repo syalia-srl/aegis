@@ -105,6 +105,7 @@ export class Transcript {
     this.openRuns = new Set(); // the first entry id of each run the reader opened
     this.headOf = new Map(); // id of a hidden row -> id of the row drawing its run's line
     this.marked = false; // some mounted row carries a fold mark
+    this.mountedVoice = false; // a voice block has been mounted in this view
     // Tab walks the rows' summaries and buttons; the row holding focus is the selection.
     list.addEventListener("focusin", (ev) => {
       const r = ev.target.closest(".row");
@@ -246,6 +247,7 @@ export class Transcript {
   }
 
   mount(e) {
+    if (e.detail?.realtime && e.detail.capture_state !== "ended") this.mountedVoice = true;
     const n = render(this.whole(e), { base: this.base ?? undefined, open: this.opener, renderers: this.renderers, t: this.t });
     for (const f of n.querySelectorAll(".fence")) watch(f);
     if (this.statPaths && n.querySelector(".md code.ref[data-index]")) {
@@ -538,6 +540,7 @@ export class Transcript {
     this.openRuns.clear();
     this.headOf.clear();
     this.marked = false;
+    this.mountedVoice = false;
     this.watch.disconnect();
     unwatch(this.list);
     this.refWatch.disconnect();
@@ -762,7 +765,7 @@ export class Transcript {
   // rows still says all it holds. A run of system notes alone stays as it is:
   // each is one line already. A node whose part did not change is not written.
   fold() {
-    if (!this.foldLevel && !this.marked && !this.list.querySelector(".voice-block")) return;
+    if (!this.foldLevel && !this.marked && (!this.mountedVoice || !this.list.querySelector(".voice-block"))) return;
     this.headOf.clear();
     const marked = new Set();
     let run = [];
