@@ -1,9 +1,14 @@
-Tested commit: 18161c1b9499503433f2a3976e5175bb332958e9
+Tested commit: 9022ff954f50219067b32dd22b3c050bd7ff1f66
 $ uv run pytest -q tests/test_knowledge_items.py tests/test_knowledge_store.py tests/test_knowledge_history.py
 .......................................                                  [100%]
-39 passed in 3.99s
+39 passed in 3.91s
 
 $ uv run pytest -vv --disable-warnings tests/test_knowledge_view_ops.py -k "homonymous or qualified_reads"
 tests/test_knowledge_view_ops.py::test_qualified_reads_keep_names_and_history_in_each_personal_store PASSED [ 50%]
 tests/test_knowledge_view_ops.py::test_one_caller_reads_homonymous_worktree_entries_by_id PASSED [100%]
-================= 2 passed, 13 deselected, 2 warnings in 3.08s =================
+================= 2 passed, 13 deselected, 2 warnings in 3.48s =================
+
+$ uv run pytest -q --disable-warnings tests/test_know_how.py tests/test_knowledge_import.py tests/test_policy_names.py tests/test_help_pages.py tests/test_library.py
+........................................................................ [ 85%]
+............                                                             [100%]
+84 passed, 3 warnings in 49.34s
