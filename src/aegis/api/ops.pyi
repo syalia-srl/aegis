@@ -577,6 +577,8 @@ class _knowledge:
         relative_path: str | None = ...,
     ) -> Any:
         """Read a know-how document in a session's Git worktree, by ID or path."""
+    async def write(self, *, entry_id: str, expected_revision: str, text: str) -> Any:
+        """Edit an existing workspace page chosen by its catalog ID. Follow the person's destination, or infer it from their conversation, audience, existing entries and repo conventions. Ask when the choice changes who can use the entry and both destinations remain plausible. Pass the revision you read and report the returned path. Use memory_save for personal reminders. Follow the repo's review flow for its files."""
 
 class _layout:
     async def dock(self, *, log_id: str, pane: str, where: str) -> Any:
@@ -621,6 +623,7 @@ class _memory:
     async def save(
         self,
         *,
+        expected_revision: str | None = ...,
         name: str,
         description: str,
         body: str,
