@@ -1,11 +1,16 @@
-Commit c9774d85e2bf7a254e33f420c581f6ecfd8100aa
+Commit 13de1bbbda5444e73779b8cb809942709c3cd3d0
 Claude Code 2.1.309 and a local Qwen 3.5 4B model, 16384-token context.
 pytest -q --run-live -m live tests/test_live.py -k real_agent_chooses_contextual_knowledge_destinations
-1 passed, 41 deselected, 2 warnings in 83.53s (0:01:23)
+1 passed, 41 deselected, 2 warnings in 93.02s (0:01:33)
 
 The agent selected the existing shared procedure and workspace skill from the catalog, and saved a personal reminder with its expiry.
 All three files and reported paths were verified. The original skill attachment was unchanged.
 A write to the vendor reference was refused and the file was unchanged.
 Both editors submitted the same pre-edit revision. One write succeeded and the loser reported the winning revision.
 
-29 passed, 7 warnings in 25.63s
+{"asked_supplied":false,"asked_effective":false,"explicit_create_revision":true,"lifetime":"temporary","expires":"2026-12-01"}
+expires: 2026-12-01
+status: proposed
+Deterministic MCP and card tests separately verify an explicit personal request with Undo, an unrequested proposal and approval, and queue provenance refusing to confer approval.
+
+74 passed, 8 warnings in 39.81s
