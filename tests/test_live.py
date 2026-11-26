@@ -2920,9 +2920,10 @@ async def test_real_agent_knowledge_synthesis_journey(tmp_path: Path):
     import subprocess
     from hashlib import sha256
 
+    from aegis.claude.stream import ToolCall
     from aegis.knowledge import history
     from aegis.knowledge.items import source_id
-    from aegis.transcript.entries import tool_output
+    from aegis.transcript.entries import PARSERS, tool_output
 
     from .test_agents import World, turn
 
@@ -2939,7 +2940,7 @@ async def test_real_agent_knowledge_synthesis_journey(tmp_path: Path):
         f"    harness: claude-code\n    model: {json.dumps(model)}\n"
         "    effort: low\n    permission: full\n    harness_tools: false\n"
         "    primer: false\n    notices: false\n"
-        "    tools: {allow: [help_read, knowledge_catalog, knowledge_write, knowledge_synthesize]}\n"
+        "    tools: {allow: [help_search, help_read, knowledge_catalog, knowledge_write, knowledge_synthesize, task_status]}\n"
         "queues: {knowledge-synthesis: {agent: opus}}\n"
         "knowledge: {sources: [{root: guides}]}\n"
     )
@@ -2959,92 +2960,154 @@ async def test_real_agent_knowledge_synthesis_journey(tmp_path: Path):
 
     world = await World(tmp_path, claude).start()
     try:
+        primary = await world.spawn()
 
-        async def use(tool, *, session=None, **params):
-            if session is None:
-                session = await world.spawn()
-            reply = await turn(
-                session,
-                f"Make one MCP tool call to mcp__aegis__{tool} with exactly these arguments: "
-                f"{json.dumps(params)}. Stop after the tool succeeds.",
-                timeout=150,
-                by_person=True,
-            )
-            calls = [
-                e
-                for e in session.entries()
-                if e.get("title") == tool
-                and e.get("status") == "ok"
-                and all(
-                    f"{key}: {value}" in e["detail"]["args"]
-                    for key, value in params.items()
-                    if key != "text"
-                )
-            ]
-            assert calls, (
-                reply,
-                [e for e in session.entries() if e.get("title") == tool],
-            )
+        def calls(session):
             records, _ = read_store(session.store.path)
-            output = tool_output(records, calls[-1]["id"])
-            assert output, calls[-1]
-            return output
+            parser = PARSERS["claude"]()
+            completed = {
+                row["id"]
+                for row in session.entries()
+                if row["kind"] == "tool" and row["status"] == "ok"
+            }
+            return [
+                (
+                    event.name.removeprefix("mcp__aegis__"),
+                    event.input,
+                    tool_output(records, event.id),
+                )
+                for record in records
+                if record["src"] == "claude"
+                for event in parser.feed(record["line"])
+                if isinstance(event, ToolCall) and event.id in completed
+            ]
+
+        async def ask(session, request):
+            return await turn(session, request, timeout=180, by_person=True)
 
         procedure_id = f"{source_id(tmp_path)}:know-how/restore.md"
         verification_id = f"{source_id(guides)}:verification.md"
-        assert "knowledge_synthesize" in await use(
-            "help_read", page="knowledge", section="synthesize-a-task"
+        original = procedure.read_bytes()
+        original_revision = sha256(original).hexdigest()
+        reply = await ask(
+            primary,
+            "I need to update our zirconium ledger recovery procedure in Aegis Knowledge. "
+            "First use the built-in help to learn how the Knowledge catalog works. Then "
+            "find the procedure by searching for zirconium. Open the result and follow "
+            "its link to the verification instructions. What do those instructions require?",
         )
-        assert procedure_id in await use(
-            "knowledge_catalog", query="zirconium", limit=1
+        found = calls(primary)
+        assert any(name in ("help_read", "help_search") for name, _, _ in found), (
+            reply,
+            found,
         )
-        restored = await use("knowledge_catalog", entry_id=procedure_id)
-        assert verification_id in restored
-        assert "verification checksum" in (
-            await use("knowledge_catalog", entry_id=verification_id)
+        reads = [
+            (params, output)
+            for name, params, output in found
+            if name == "knowledge_catalog"
+        ]
+        search = next(
+            (
+                i
+                for i, (params, _) in enumerate(reads)
+                if "zirconium" in params.get("query", "").lower()
+            ),
+            -1,
         )
-        original = procedure.read_text()
-        revision = sha256(original.encode()).hexdigest()
-        assert revision in restored
-        await use(
-            "knowledge_write",
-            entry_id=procedure_id,
-            expected_revision=revision,
-            text=f"{original}{update}\n",
+        page = next(
+            (
+                i
+                for i, (params, _) in enumerate(reads)
+                if params.get("entry_id") == procedure_id
+            ),
+            -1,
         )
-        edited = procedure.read_text()
-        assert edited.split() == f"{original}{update}".split()
-        assert procedure_id in await use("knowledge_catalog", query="cobalt", limit=1)
-        session = await world.spawn()
-        await use(
-            "knowledge_synthesize", session=session, task="restore the cobalt ledger"
+        linked = next(
+            (
+                i
+                for i, (params, _) in enumerate(reads)
+                if params.get("entry_id") == verification_id
+            ),
+            -1,
+        )
+        assert 0 <= search < page < linked, (reply, found)
+        assert (
+            verification_id in reads[page][1]
+            and "verification checksum" in reads[linked][1]
+        )
+
+        reply = await ask(
+            primary,
+            f"Keep the existing recovery procedure and its link. Add this sentence to that "
+            f"same Knowledge page: {update} Use the revision you read so someone else's "
+            "edit cannot be overwritten. Tell me when it has been saved.",
+        )
+        assert any(
+            name == "knowledge_write"
+            and params.get("entry_id") == procedure_id
+            and params.get("expected_revision") == original_revision
+            for name, params, _ in calls(primary)
+        ), reply
+        edited = procedure.read_bytes()
+        assert edited.decode().split() == f"{original.decode()}{update}".split()
+
+        observer = await world.spawn()
+        reply = await ask(
+            observer,
+            "Use Aegis Knowledge to find the updated procedure for the cobalt ledger. "
+            "Search for cobalt and tell me what changed.",
+        )
+        assert any(
+            name == "knowledge_catalog"
+            and "cobalt" in params.get("query", "").lower()
+            and output
+            and procedure_id in output
+            for name, params, output in calls(observer)
+        ), reply
+
+        reply = await ask(
+            primary,
+            "Please use Aegis Knowledge's task synthesis to make a short guide for "
+            "restoring the cobalt ledger. Use the guide returned by that worker. "
+            "Open every source it cites at the revision cited and tell me what you verified.",
+        )
+        assert any(name == "knowledge_synthesize" for name, _, _ in calls(primary)), (
+            reply
         )
         (task,) = world.app.queues.tasks.values()
         await until(lambda: task.status in ("completed", "failed"), timeout=105)
         assert task.status == "completed", task.error
         guide = json.loads(task.result)
         assert guide["steps"], guide
-        assert {row["id"] for row in guide["citations"]} == {
-            procedure_id,
-            verification_id,
-        }
-        assert (
-            next(c["revision"] for c in guide["citations"] if c["id"] == procedure_id)
-            == sha256(edited.encode()).hexdigest()
-        )
+        citations = {row["id"]: row["revision"] for row in guide["citations"]}
+        assert citations.keys() == {procedure_id, verification_id}
+        assert citations[procedure_id] == sha256(edited).hexdigest()
         await until(
-            lambda: any(
-                e["kind"] == "inbox" and f"task#{task.id}" in (e.get("md") or "")
-                for e in session.entries()
+            lambda: (
+                not primary.busy
+                and any(
+                    e["kind"] == "inbox" and f"task#{task.id}" in (e.get("md") or "")
+                    for e in primary.entries()
+                )
             ),
-            timeout=30,
+            timeout=180,
         )
-        for citation in guide["citations"]:
-            page = await use(
-                "knowledge_catalog",
-                entry_id=citation["id"],
-                expected_revision=citation["revision"],
+
+        def opened():
+            return {
+                params["entry_id"]: params["expected_revision"]
+                for name, params, output in calls(primary)
+                if name == "knowledge_catalog"
+                and "expected_revision" in params
+                and output
+                and params["expected_revision"] in output
+            }
+
+        if opened() != citations:
+            reply = await ask(
+                primary,
+                "The guide is back. Open each of its cited source revisions and report what each says.",
             )
-            assert citation["revision"] in page
+        assert opened() == citations, (reply, opened(), citations)
     finally:
         await world.stop()
