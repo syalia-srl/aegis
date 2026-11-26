@@ -870,6 +870,73 @@ async def test_a_real_agent_uses_a_knowledge_memory_from_the_hint(tmp_path: Path
         await asyncio.wait_for(task, 30)
 
 
+async def test_a_real_agent_follows_a_catalog_wikilink_and_backlink(tmp_path: Path):
+    """Follow catalog IDs through real Claude Code and the server's MCP endpoint."""
+    import asyncio
+    from uuid import uuid4
+
+    import uvicorn
+
+    from aegis.app import App
+    from aegis.knowledge.items import source_id
+    from aegis.roots import make_roots
+    from aegis.web import build_web
+
+    from .test_agents import _free_port
+
+    claude = shutil.which("claude")
+    assert claude, "claude is not on PATH"
+    (tmp_path / ".aegis.yaml").write_text(
+        f"agents:\n  haiku: {{harness: claude-code, model: {HAIKU}, effort: low, permission: full}}\n"
+        "knowledge: {sources: [{root: guides}]}\n"
+    )
+    guides = tmp_path / "guides"
+    guides.mkdir()
+    destination_token = uuid4().hex
+    backlink_token = uuid4().hex
+    (guides / "start.md").write_text("[[Destination]]\n")
+    (guides / "destination.md").write_text(f"Destination token: {destination_token}\n")
+    (guides / "return.md").write_text(
+        f"Backlink token: {backlink_token}\n[[Destination]]\n"
+    )
+    start_id = f"{source_id(guides)}:start.md"
+
+    port = _free_port()
+    app = App(
+        make_roots(tmp_path, None),
+        claude_bin=claude,
+        base_url=f"http://127.0.0.1:{port}",
+    )
+    server = uvicorn.Server(
+        uvicorn.Config(
+            build_web(app, "t", {f"127.0.0.1:{port}"}), port=port, log_level="warning"
+        )
+    )
+    task = asyncio.create_task(server.serve())
+    await until(lambda: server.started, timeout=10, what="uvicorn")
+    try:
+        spawned = await app.registry.call("session.spawn", {"agent": "haiku"})
+        session = app.sessions.sessions[spawned["log_id"]]
+        await session.send(
+            f"Use only the aegis knowledge_catalog MCP tool. Read entry {start_id} "
+            "by ID, open its resolved link by target_id, then open the entry from "
+            "that page's backlinks whose relative_path is return.md. "
+            "Return the two tokens from the destination and backlink pages."
+        )
+        await until(
+            lambda: session.status == "idle" and session.cost_usd,
+            timeout=120,
+            what="the catalog traversal",
+        )
+        said = " ".join(
+            e.get("md") or "" for e in session.entries() if e["kind"] == "prose"
+        )
+        assert destination_token in said and backlink_token in said, said
+    finally:
+        server.should_exit = True
+        await asyncio.wait_for(task, 30)
+
+
 async def test_a_real_agent_calls_a_skill_tool(tmp_path: Path):
     """A skill's MCP server, used by a real model (#695): the agent loads a
     skill that brings a server, learns its tool from skill_read, and calls it

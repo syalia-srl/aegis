@@ -1610,27 +1610,18 @@ def register_knowledge_ops(app: App) -> None:
                 )
             )
 
-        if p.entry_id is not None:
-            personal = await kn.read(owner, entry_id=p.entry_id)
-            if personal is not None:
-                it, raw = personal
-                files = (
-                    await asyncio.to_thread(kn.store.entry_files, it)
-                    if it.kind == "skill"
-                    else []
-                )
-                return {
-                    **entry_fields(it),
-                    "kind": it.kind,
-                    "body": it.body,
-                    "text": raw,
-                    "files": files,
-                }
-
         snapshots = await asyncio.gather(
             *(kn.source_snapshot(source) for source in configured)
         )
-        personal_items = await kn.items(owner) if p.entry_id is None else []
+        personal_items = await kn.items(owner)
+        personal = (
+            await kn.read(owner, entry_id=p.entry_id)
+            if p.entry_id is not None
+            else None
+        )
+        personal_files = []
+        if personal is not None and personal[0].kind == "skill":
+            personal_files = await asyncio.to_thread(kn.store.entry_files, personal[0])
         # Recheck after obtaining the snapshots, which may have required I/O.
         visible = []
         if ref:
@@ -1642,6 +1633,18 @@ def register_knowledge_ops(app: App) -> None:
                 if app.policy.knowledge_source(who, session, source.root)
             ]
 
+        def check_access(action: str) -> None:
+            if ref and (
+                not app.policy.can(who, "read", session)
+                or any(
+                    not app.policy.knowledge_source(who, session, source.root)
+                    for source, _ in visible
+                )
+            ):
+                raise OpError(
+                    "forbidden", f"knowledge access changed; retry the {action}"
+                )
+
         def source_row(source: Source, entry: Entry) -> dict:
             return {
                 **entry_fields(entry.item),
@@ -1652,22 +1655,32 @@ def register_knowledge_ops(app: App) -> None:
 
         entries = {}
         items = {it.id: it for it in personal_items}
+        if personal is not None:
+            items[personal[0].id] = personal[0]
+        elif p.entry_id is not None:
+            # A direct personal read can discover a deletion before the cache.
+            items.pop(p.entry_id, None)
         errors = []
         for source, snapshot in visible:
             for key, error in sorted(snapshot.errors.items()):
                 errors.append({"path": str(source.root / key), "error": error})
             for _, entry in sorted(snapshot.entries.items()):
                 it = entry.item
-                if p.entry_id == it.id:
-                    return {
-                        **source_row(source, entry),
-                        "body": it.body,
-                        "text": entry.text,
-                    }
                 entries.setdefault(it.id, (source, entry))
                 items.setdefault(it.id, it)
         if p.entry_id is not None:
-            raise OpError("not_found", "no matching knowledge entry")
+            if personal is not None:
+                it, raw = personal
+                page = {**entry_fields(it), "kind": it.kind, "files": personal_files}
+            elif p.entry_id in entries:
+                source, entry = entries[p.entry_id]
+                it, raw = entry.item, entry.text
+                page = source_row(source, entry)
+            else:
+                raise OpError("not_found", "no matching knowledge entry")
+            neighbors = await kn.catalog_neighbors(list(items.values()), p.entry_id)
+            check_access("read")
+            return {**page, "body": it.body, "text": raw, **neighbors}
 
         def result_row(it: Item) -> dict:
             if it.id in entries:
@@ -1679,14 +1692,7 @@ def register_knowledge_ops(app: App) -> None:
             hits, total = await kn.search_catalog(
                 list(items.values()), p.query, p.limit, cwd=cwd, worktree=worktree
             )
-            if ref and (
-                not app.policy.can(who, "read", session)
-                or any(
-                    not app.policy.knowledge_source(who, session, source.root)
-                    for source, _ in visible
-                )
-            ):
-                raise OpError("forbidden", "knowledge access changed; retry the search")
+            check_access("search")
             all_rows = [
                 {
                     **result_row(items[hit.entry_id]),

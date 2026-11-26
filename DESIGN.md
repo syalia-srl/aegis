@@ -812,6 +812,15 @@ include the matching normalized terms and the context boost flag. Counts are
 computed before limiting the response. Agents and browsers read hits through
 the catalog's existing qualified ID operation. The personal tools and hint
 keep their separate indexes and optional vector ranking.
+
+A qualified catalog read also resolves Markdown wikilinks and looks up
+backlinks by entry ID. The graph is built off the event loop over the visible
+catalog, then cached against the same ordered items and revisions. New and
+changed snapshots rebuild the graph, including references that previously had
+no match. Resolution checks the referring page's source before looking in the
+rest of the visible catalog. Full entry IDs select a specific destination.
+Policy is checked again after graph construction, before returning a page.
+
 `/setup`'s import (`knowledge.import`, `knowledge/importer.py`) reads each
 ticked source in a thread, never on the event loop, and saves it with `fresh`,
 which refuses a name any item holds. The ticks are the approval only in a
