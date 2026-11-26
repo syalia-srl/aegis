@@ -36,6 +36,7 @@ from pathlib import Path
 from . import checks, hint, know_how
 from .embed import Embedder, Loader, Vector, available, fastembed_loader
 from .items import Item
+from .links import LinkGraph, Neighbors
 from .search import QUERY_CHARS, CatalogHit, CatalogIndex, Index, text_of
 from .store import Store
 from .sources import Source, Sources, Snapshot
@@ -64,6 +65,7 @@ class Knowledge:
         # principal -> (store version, when scanned, items, index)
         self._indexes: dict[str, tuple[int, float, list[Item], Index]] = {}
         self._catalog: tuple[tuple[Item, ...], CatalogIndex] | None = None
+        self._links: tuple[tuple[Item, ...], LinkGraph] | None = None
         self._ranks: dict[str, dict[str, int]] = {}
         self._pruned = 0.0
         self._refreshing: dict[str, asyncio.Task] = {}
@@ -196,6 +198,18 @@ class Knowledge:
         index, hits, total = await asyncio.to_thread(search)
         self._catalog = (key, index)
         return hits, total
+
+    async def catalog_neighbors(self, items: list[Item], entry_id: str) -> Neighbors:
+        """Reuse links only for the same caller-visible entries and revisions."""
+        key = tuple(items)
+        cached = self._links
+        graph = (
+            cached[1]
+            if cached is not None and cached[0] == key
+            else await asyncio.to_thread(LinkGraph, key)
+        )
+        self._links = (key, graph)
+        return graph.neighbors(entry_id)
 
     async def read_worktree(
         self, cwd: str, *, entry_id: str | None, relative_path: str | None
