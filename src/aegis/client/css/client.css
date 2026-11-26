@@ -662,7 +662,7 @@
 .aegis .mic-targets .btn:is(.on,:focus-visible){color:var(--on-accent);background:var(--accent);border-color:var(--accent)}
 .aegis .realtime-status{display:flex;align-items:center;gap:10px;padding:5px 12px;background:var(--accent-soft);color:var(--strong);border-left:2px solid var(--accent);font:12px var(--font-chrome)}
 .aegis .realtime-status[hidden]{display:none}
-.aegis .realtime-status [role=status]{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.aegis .realtime-status [role=status]{min-width:0;overflow-wrap:anywhere}
 .aegis .realtime-status .btn{margin-left:auto;flex:none}
 .aegis[data-layout=full]:has(>.realtime-status:not([hidden])){grid-template-rows:auto auto minmax(0,1fr)}
 .aegis[data-layout=full]:has(>.realtime-status:not([hidden])):has(>.netbanner:not([hidden])){grid-template-rows:auto auto auto minmax(0,1fr)}

@@ -9788,6 +9788,9 @@ def test_realtime_touch_capture_stays_bound_to_its_origin(
     pg.click("#send")
     turns_done(pg, 1)
     assert label in pg.inner_text("#realtime-source")
+    assert pg.locator("#realtime-source").evaluate(
+        "(node) => node.scrollWidth <= node.clientWidth"
+    )
     pg.screenshot(path=tmp_path / "phone-realtime-away.png")
     gate["shut"] = True
     pg.click("#realtime-stop")
