@@ -59,7 +59,7 @@ if TYPE_CHECKING:
     from .config import Config
     from .monitors import Monitors
     from .registry import Registry
-    from .session import Session
+    from .session import Session, SpawnSpec
 
 log = logging.getLogger("aegis.queues")
 # A queue's priority when .aegis.yaml leaves it out.
@@ -99,6 +99,11 @@ class Task:
     # The @ mention it answers, as {id, log_id, member}: its result goes to
     # that mention, not to an inbox (mentions.py).
     mention: dict | None = None
+
+    # Synthesis uses a tool-free process instead of a resumable session.
+    synthesis: bool = False
+    # Record the inbox attempt before delivering so retries cannot queue it twice.
+    callback_started: bool = False
 
     def public(self) -> dict:
         d = asdict(self)
@@ -213,6 +218,8 @@ class Queues:
         self.far_callback: Callable[[Task, str, str], Awaitable[None]] | None = None
         # Takes the result of an @agent run (mentions.py; app.py sets it).
         self.on_mention: Callable[[Task, str, str], Awaitable[None]] | None = None
+        self.synthesize: Callable[[Task, SpawnSpec], Awaitable[str]] | None = None
+        self._syntheses: dict[str, asyncio.Task] = {}
         self._registry = registry
         self._monitors = monitors
         self._path = path
@@ -225,6 +232,8 @@ class Queues:
 
     def shutdown(self) -> None:
         """The server is stopping: a SIGTERM grace check must not outlive it."""
+        for task in self._syntheses.values():
+            task.cancel()
         for h in self._sigterm_timers:
             h.cancel()
         self._sigterm_timers.clear()
@@ -284,7 +293,9 @@ class Queues:
         resume = []
         for t in self.tasks.values():
             if t.status == "running":
-                if t.worker in self._registry.sessions:
+                if t.synthesis:
+                    self._fail(t, "the server restarted during synthesis")
+                elif t.worker in self._registry.sessions:
                     resume.append(t)
                 else:
                     self._fail(t, "its worker was gone after a restart")
@@ -349,10 +360,12 @@ class Queues:
         scope: dict | None = None,
         agent: str | None = None,
         mention: dict | None = None,
+        synthesis: bool = False,
     ) -> Task:
         t = Task(
             agent=agent,
             mention=mention,
+            synthesis=synthesis,
             id=f"task-{secrets.token_hex(4)}",
             queue=queue,
             payload=payload,
@@ -552,7 +565,15 @@ class Queues:
             self._fail(t, f"the queue's agent {q['agent']!r} cannot start: {e.message}")
             return
         if self._registry.start_spec is not None:
-            spec, _ = self._registry.start_spec(spec, t.queue)
+            spec, gate = self._registry.start_spec(spec, t.queue)
+            if t.synthesis and not gate.may_start:
+                self._fail(t, f"the synthesis worker could not start: {gate.why}")
+                return
+        if t.synthesis:
+            t.status = "running"
+            self._log(t, "dispatched")
+            self._syntheses[t.id] = asyncio.create_task(self._run_synthesis(t, spec))
+            return
         try:
             s = await self._registry.spawn(
                 spec,
@@ -569,8 +590,35 @@ class Queues:
             self._registry.refresh_card(t.enqueuer)  # it names the worker now
         await s.send(t.payload)
 
+    async def _run_synthesis(self, t: Task, spec: SpawnSpec) -> None:
+        try:
+            if self.synthesize is None:
+                raise OpError("unavailable", "knowledge synthesis is unavailable")
+            result = await self.synthesize(t, spec)
+        except OpError as e:
+            self._fail(t, e.message)
+        except Exception:
+            log.exception("aegis: synthesis worker failed for %s", t.id)
+            self._fail(t, "the synthesis worker failed")
+        else:
+            t.status, t.result, t.finished_at = "completed", result, time.time()
+            self._log(t, "completed")
+            await self._callback(t, "ok", result)
+        finally:
+            self._syntheses.pop(t.id, None)
+            if t.enqueuer:
+                self._registry.refresh_card(t.enqueuer)
+            await self.dispatch()
+
     async def cancel(self, t: Task) -> None:
-        if t.status == "pending":
+        if t.synthesis and t.status in ("pending", "running"):
+            t.status, t.finished_at = "cancelled", time.time()
+            self._log(t, "cancelled")
+            if job := self._syntheses.pop(t.id, None):
+                job.cancel()
+                await asyncio.gather(job, return_exceptions=True)
+            await self._callback(t, "error", "Knowledge synthesis was cancelled.")
+        elif t.status == "pending":
             t.status, t.finished_at = "cancelled", time.time()
             self._log(t, "cancelled")
         elif t.status == "running":
@@ -583,6 +631,10 @@ class Queues:
         await self.dispatch()
 
     async def resume(self, t: Task) -> None:
+        if t.synthesis:
+            raise LookupError(
+                "start a new synthesis to read the current Knowledge revisions"
+            )
         s = self._registry.sessions.get(t.worker or "")
         if s is None:
             if t.worker in self._registry.archived:
@@ -711,12 +763,15 @@ class Queues:
             except Exception:
                 log.exception("aegis: could not send the callback of %s back", t.id)
             return
-        if not t.callback or not t.enqueuer:
+        if not t.callback or not t.enqueuer or (t.synthesis and t.callback_started):
             return
         s = self._registry.sessions.get(t.enqueuer)
         if s is None:
             return
         try:
+            if t.synthesis:
+                t.callback_started = True
+                self._log(t, "callback_started")
             # The enqueuer's own task: it reaches a workflow node too.
             await s.deliver(
                 f"> from queue:{t.queue} · task#{t.id} · {outcome} · {iso_now()}",

@@ -170,6 +170,16 @@ def open_directory(path: Path):
         os.close(fd)
 
 
+def current_revision(path: Path) -> str | None:
+    """Fingerprint a current page without following links or reading a device."""
+    try:
+        with open_directory(path.parent) as fd:
+            data = regular_bytes(Path(path.name), MAX_FILE_BYTES, dir_fd=fd)
+    except (OSError, ValueError, OpError):
+        return None
+    return hashlib.sha256(data).hexdigest()
+
+
 def stale(revision: str | None) -> OpError:
     return OpError(
         "stale",

@@ -2912,3 +2912,105 @@ async def test_a_real_agent_chooses_contextual_knowledge_destinations(tmp_path: 
         )
     finally:
         await world.stop()
+
+
+async def test_real_agent_knowledge_synthesis_journey(tmp_path: Path):
+    """Exercise discovery, source edits, synthesis, and citation reads with the real CLI."""
+    import os
+    import subprocess
+
+    from aegis.knowledge import history
+    from aegis.knowledge.items import source_id
+
+    from .test_agents import World, turn
+
+    claude = shutil.which("claude")
+    assert claude, "claude is not on PATH"
+    version = subprocess.check_output([claude, "--version"], text=True).split()[0]
+    model = os.environ.get("AEGIS_LIVE_KNOWLEDGE_MODEL", HAIKU)
+    history.ensure_repo(tmp_path)
+    (tmp_path / ".aegis.yaml").write_text(
+        f"harness_versions: {{accepted: {{claude-code: [{version!r}]}}}}\n"
+        "default_agent: opus\n"
+        "agents:\n"
+        "  opus:\n"
+        f"    harness: claude-code\n    model: {json.dumps(model)}\n"
+        "    effort: low\n    permission: full\n    harness_tools: false\n"
+        "    primer: false\n    notices: false\n"
+        "    tools: {allow: [help_search, knowledge_catalog, knowledge_write, knowledge_synthesize]}\n"
+        "queues: {knowledge-synthesis: {agent: opus}}\n"
+        "knowledge: {sources: [{root: guides}]}\n"
+    )
+    how = tmp_path / "know-how"
+    guides = tmp_path / "guides"
+    how.mkdir()
+    guides.mkdir()
+    procedure = how / "restore.md"
+    reference = guides / "verification.md"
+    update = "Reconcile the amber ledger against the cobalt register."
+    procedure.write_text(
+        "# Restore the ledger\nVerify the zirconium ledger. [[Verification]]\n"
+    )
+    reference.write_text(
+        "# Verification\nRecord the verification checksum. [[Restore the ledger]]\n"
+    )
+
+    world = await World(tmp_path, claude).start()
+    try:
+        session = await world.spawn()
+
+        def count(tool):
+            return sum(
+                e.get("title") == tool and e.get("status") == "ok"
+                for e in session.entries()
+            )
+
+        async def use(tool, request, calls=1):
+            before = count(tool)
+            reply = await turn(
+                session,
+                f"Use the Aegis {tool} tool. Do not pass log_id. {request}",
+                timeout=150,
+                by_person=True,
+            )
+            assert count(tool) - before >= calls, reply
+
+        await use("help_search", 'Search the help for "knowledge task synthesis".')
+        await use(
+            "knowledge_catalog",
+            'Search for "zirconium". Then read the matching page by entry_id '
+            "and follow its resolved link using target_id. Report the two titles.",
+            calls=3,
+        )
+        await use(
+            "knowledge_write",
+            "Append this sentence to the Restore the ledger page using its "
+            f"entry ID, revision, and full Markdown text: {update}",
+        )
+        await use("knowledge_catalog", 'Search for "cobalt". Report the result title.')
+        await use(
+            "knowledge_synthesize",
+            'Set task to "restore the cobalt ledger". Then finish this turn.',
+        )
+        assert update in procedure.read_text()
+        await until(lambda: bool(world.app.queues.tasks), timeout=15)
+        (task,) = world.app.queues.tasks.values()
+        await until(lambda: task.status in ("completed", "failed"), timeout=105)
+        assert task.status == "completed", task.error
+        guide = json.loads(task.result)
+        assert guide["steps"], guide
+        ids = {row["id"] for row in guide["citations"]}
+        assert ids == {
+            f"{source_id(tmp_path)}:know-how/restore.md",
+            f"{source_id(guides)}:verification.md",
+        }
+        await until(lambda: not session.busy and task.callback_started, timeout=160)
+        for citation in guide["citations"]:
+            await use(
+                "knowledge_catalog",
+                f'Open the synthesis citation with entry_id "{citation["id"]}" and '
+                f'expected_revision "{citation["revision"]}". Report the title.',
+            )
+        await world.app.sessions.close(session.log_id)
+    finally:
+        await world.stop()

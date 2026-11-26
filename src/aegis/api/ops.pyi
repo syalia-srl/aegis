@@ -531,6 +531,7 @@ class _knowledge:
         *,
         log_id: str | None = ...,
         entry_id: str | None = ...,
+        expected_revision: str | None = ...,
         query: str | None = ...,
         limit: int = ...,
         source_id: str | None = ...,
@@ -569,6 +570,10 @@ class _knowledge:
         duplicates: bool = ...,
     ) -> Any:
         """How your skills and memories are used: per item, how often it was hinted, read, invoked or run, when it was last used, and its flags (expired, or stale:<path> for a quoted path that is gone). unused_days keeps only the items not used in that many days, flag only the items with that flag. never_recalled marks an item hinted at least 10 times and never read or invoked. duplicates adds the pairs of likely duplicates (checks.duplicates), each pair once."""
+    async def synthesize(
+        self, *, log_id: str | None = ..., task: str, context: str = ...
+    ) -> Any:
+        """Start a read-only Knowledge worker for a task. The queue result has steps, citations, contradictions, gaps and limits. Open a citation with knowledge_catalog and its entry_id and expected_revision. Use task_cancel to stop the worker."""
     async def worktree_read(
         self,
         *,
