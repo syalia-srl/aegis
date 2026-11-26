@@ -164,6 +164,10 @@ class Knowledge:
         return None
 
     async def source_snapshot(self, source: Source) -> Snapshot:
+        # A new worktree can be read before the next scheduled scan.
+        return self.sources.snapshot(source) or await self.refresh_source(source)
+
+    async def refresh_source(self, source: Source) -> Snapshot:
         return await self.sources.refresh(source, self._clock(), SCAN_EVERY_S)
 
     async def read_worktree(

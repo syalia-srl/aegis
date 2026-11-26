@@ -290,38 +290,92 @@ def test_the_cards_edit_opens_the_view_on_the_item(server, page):
 def test_agent_reads_live_knowledge_source(server, page):
     from os import environ
     from pathlib import Path
+    from time import monotonic, sleep
 
+    def wait_for_startup_scan():
+        deadline = monotonic() + 10
+        while monotonic() < deadline:
+            if any(
+                "knowledge source startup scan finished (1 roots)" in line
+                for line in server.lines
+            ):
+                return
+            sleep(0.05)
+        pytest.fail(
+            "the server did not finish scanning the configured root before the first read"
+        )
+
+    def result():
+        said = page.locator(".row.prose .md").last.text_content()
+        assert said.startswith("mcp ok:")
+        return json.loads(said.removeprefix("mcp ok: "))
+
+    def catalog(turn, **args):
+        page.fill("#input", f"/mcp knowledge_catalog {json.dumps(args)}")
+        page.press("#input", "Enter")
+        turns_done(page, turn)
+        return result()
+
+    server.stop()
     config = server.root / ".aegis.yaml"
     config.write_text(config.read_text() + "\nknowledge: {sources: [{root: guides}]}\n")
     guide = server.root / "guides" / "release.md"
     guide.parent.mkdir()
     guide.write_text("---\ntitle: Release checklist\n---\nBuild the package.\n")
+    retired = guide.with_name("retired.md")
+    retired.write_text("Old procedure.\n")
+    server.start()
+    wait_for_startup_scan()
+
     page.goto(server.url)
     spawn(page, "/mcp knowledge_catalog {}")
-    said = page.locator(".row.prose .md").last.text_content()
-    assert said.startswith("mcp ok:")
-    (entry,) = json.loads(said.removeprefix("mcp ok: "))["items"]
+    before = {entry["name"]: entry for entry in result()["items"]}
+    assert set(before) == {"release", "retired"}
+    entry = before["release"]
     assert entry["title"] == "Release checklist"
 
     guide.write_text(
         "---\ntitle: Release checklist\n---\nVerify the package checksum.\n"
     )
-    # The normal refresh cadence must elapse through the real server.
-    page.wait_for_timeout(5100)
-    page.fill(
-        "#input", f"/mcp knowledge_catalog {json.dumps({'entry_id': entry['id']})}"
-    )
-    page.press("#input", "Enter")
-    turns_done(page, 2)
-    said = page.locator(".row.prose .md").last.text_content()
-    got = json.loads(said.removeprefix("mcp ok: "))
+    guide.with_name("added.md").write_text("New procedure.\n")
+    retired.unlink()
+    # No catalog request occurs between the edits and the scheduled refresh.
+    page.wait_for_timeout(5500)
+    after = {row["name"]: row for row in catalog(2)["items"]}
+    assert set(after) == {"release", "added"}
+    assert after["release"]["id"] == entry["id"]
+    got = catalog(3, entry_id=entry["id"])
     assert got["body"] == "Verify the package checksum.\n"
     assert got["revision"] != entry["revision"]
+
+    server.stop()
+    guide.write_text("Edited while the server was stopped.\n")
+    server.start()
+    wait_for_startup_scan()
+    page.goto(server.url)
+    spawn(page, f"/mcp knowledge_catalog {json.dumps({'entry_id': entry['id']})}")
+    recovered = result()
+    assert recovered["body"] == "Edited while the server was stopped.\n"
+    assert recovered["id"] == entry["id"] and recovered["revision"] != got["revision"]
+
     if evidence := environ.get("WIKI_SOURCE_EVIDENCE"):
-        result = page.locator(".row.prose .md").last
-        result.screenshot(path=str(Path(evidence) / "desktop.png"))
+        evidence = Path(evidence)
+        shown = page.locator(".row.prose .md").last
+        shown.screenshot(path=str(evidence / "desktop.png"))
         page.set_viewport_size({"width": 390, "height": 844})
         if page.locator("#a2").get_attribute("data-side") == "open":
             page.click("#nav-side")
         page.wait_for_function("document.querySelector('#a2').dataset.side !== 'open'")
-        result.screenshot(path=str(Path(evidence) / "phone.png"))
+        shown.screenshot(path=str(evidence / "phone.png"))
+        (evidence / "reconciliation.txt").write_text(
+            f"Initial startup scan completed before the first catalog call.\n"
+            f"Initial entries: {', '.join(sorted(before))}\n"
+            f"Entries after scheduled scan: {', '.join(sorted(after))}\n"
+            f"Same entry ID after live edit: {got['id'] == entry['id']}\n"
+            f"Live body: {got['body']}"
+            f"Revision changed after live edit: {got['revision'] != entry['revision']}\n"
+            f"Restart scan completed before the first catalog call.\n"
+            f"Same entry ID after restart: {recovered['id'] == entry['id']}\n"
+            f"Recovered body: {recovered['body']}"
+            f"Revision changed after offline edit: {recovered['revision'] != got['revision']}\n"
+        )

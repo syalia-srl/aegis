@@ -1587,19 +1587,7 @@ def register_knowledge_ops(app: App) -> None:
         ref = p.log_id or caller.log_id
         if ref:
             who, session, top = await source_context(ref, caller)
-            config_root = app.roots.config_root
-            private = await asyncio.to_thread(app.roots.state_root.resolve)
-            configured = [
-                Source(
-                    Path("/", *(config_root / setting.root).parts[1:]),
-                    setting.format,
-                    setting.include,
-                    setting.exclude,
-                    private=private,
-                )
-                for setting in app.config.current().knowledge["sources"]
-            ]
-            kn.sources.configure(configured)
+            private, configured = await app.knowledge_source_settings()
             if top is not None:
                 configured.insert(
                     0,

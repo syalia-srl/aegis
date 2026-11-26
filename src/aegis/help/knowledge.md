@@ -141,10 +141,10 @@ invocation. The catalog skips symbolic links and reports unreadable paths
 in its errors. The host policy can deny a root for a caller and session.
 Personal entries retain their own store boundary.
 
-Source configuration takes effect on the next catalog call. Each root is
-reconciled from disk on first access after a server start and at most once
-every five seconds on subsequent calls. Removing a configured root removes
-it from the catalog immediately and leaves its files in place. The Knowledge
+At startup the server scans configured sources, then refreshes them and
+the worktrees in use every five seconds. A catalog call for a newly
+encountered checkout can scan it immediately. Removing a configured root
+withdraws it on the next catalog call and leaves its files in place. The Knowledge
 view, personal search and skill commands continue to use their existing
 readers.
 

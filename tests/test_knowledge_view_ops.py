@@ -476,6 +476,7 @@ async def test_catalog_reconciles_sources_and_checks_policy_on_every_read(tmp_pa
     new.write_text("New procedure.")
     next_tick = app.knowledge._clock() + 6
     app.knowledge._clock = lambda: next_tick
+    await app._refresh_knowledge_sources()
     after = await catalog(entry_id=before["id"])
     assert (
         after["body"].endswith("Second edition.\n")

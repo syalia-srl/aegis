@@ -160,6 +160,13 @@ class Sources:
             self._running.pop(removed, None)
         self._configured = current
 
+    def snapshot(self, source: Source) -> Snapshot | None:
+        held = self._held.get(source)
+        return held[1] if held is not None else None
+
+    def worktrees(self) -> set[Source]:
+        return {source for source in self._held if source.worktree is not None}
+
     async def refresh(self, source: Source, now: float, every: float) -> Snapshot:
         held = self._held.get(source)
         if held is not None and now - held[0] < every:
@@ -174,9 +181,10 @@ class Sources:
                     return result  # configuration retired this generation
                 self._held.pop(source, None)
                 self._held[source] = (now, result)
-                # Old config and worktrees need no indefinite cache.
-                if len(self._held) > 32:
-                    del self._held[next(iter(self._held))]
+                # Registered roots stay cached. Bound the recently read worktrees.
+                worktrees = [root for root in self._held if root.worktree is not None]
+                if len(worktrees) > 32:
+                    del self._held[worktrees[0]]
                 return result
             finally:
                 if self._running.get(source) is asyncio.current_task():

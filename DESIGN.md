@@ -793,9 +793,11 @@ session's Git know-how, and the current configured roots. It checks session
 visibility and the host's root policy before requesting an external snapshot.
 `src/aegis/knowledge/sources.py` walks directory descriptors without following
 symlinks, records unreadable paths, and reuses parsed files with the same stat
-signature. Each scan publishes a whole root on the service's five-second
-refresh cadence, with concurrent readers sharing the in-flight scan. Snapshots
-live in memory and are rebuilt from disk on access after a restart. Source
+signature. A background task starts at server boot and scans the configured
+roots, the configuration checkout, and live session worktrees. It refreshes
+those roots and recently read worktrees on the service's five-second cadence,
+publishing a complete snapshot per root. A catalog read uses the last
+published snapshot or joins the initial scan for a new root. Source
 configuration is reread through Config; a removed root immediately stops
 contributing entries. Catalog reads do not load or execute skills.
 `/setup`'s import (`knowledge.import`, `knowledge/importer.py`) reads each

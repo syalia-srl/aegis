@@ -224,10 +224,11 @@ Git worktree, and configured Markdown and skill directories that the host
 allows the caller to read. Worktree entry IDs are shared with the direct
 worktree reader. A skill contributes one page and names its resources.</p>
 <p>Files remain in their source directories. The server scans in a worker
-thread, reuses unchanged parses, then publishes the complete root. Concurrent
-readers share a scan. The first read after restart builds from disk. Removing
-a root from configuration withdraws it on the next call. Personal search,
-notices, and skill invocation continue through their existing entry points.</p>
+thread at startup and every five seconds while serving. It reuses unchanged
+parses, then publishes the complete root. A newly encountered checkout can be
+scanned on its first read and joins periodic refresh. Removing a root from
+configuration withdraws it on the next call. Personal search, notices, and
+skill invocation continue through their existing entry points.</p>
 </section>
 
 <h1>Native skills and memory: knowledge that aegis keeps, finds and prunes</h1>
