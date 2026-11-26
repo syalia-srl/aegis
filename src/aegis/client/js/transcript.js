@@ -762,39 +762,43 @@ export class Transcript {
   // rows still says all it holds. A run of system notes alone stays as it is:
   // each is one line already. A node whose part did not change is not written.
   fold() {
-    if (!this.foldLevel && !this.marked) return; // off, and no row left to undo
+    if (!this.foldLevel && !this.marked && !this.list.querySelector(".voice-block")) return;
     this.headOf.clear();
     const marked = new Set();
-    if (this.foldLevel) {
-      let run = [];
-      const close = (next) => {
-        const rows = run.map((e) => this.nodes.get(e.id)).filter(Boolean);
-        if (rows.length && run.some((e) => e.kind !== "system")) {
-          const open = this.openRuns.has(run[0].id);
-          const head = rows[0];
-          for (const n of rows) {
-            const part = n === head ? "head" : "in";
-            if (n.dataset.fold !== part) {
-              if (n.dataset.fold === "head") n.querySelector(":scope > .runline")?.remove();
-              n.dataset.fold = part;
-            }
-            n.classList.toggle("run-open", open);
-            if (!open && n !== head) this.headOf.set(n.dataset.id, head.dataset.id);
-            marked.add(n);
+    let run = [];
+    let type = null;
+    const close = (next) => {
+      const voice = type?.startsWith("voice:");
+      const rows = run.map((e) => this.nodes.get(e.id)).filter(Boolean);
+      if (rows.length && (voice ? run.length > 1 : run.some((e) => e.kind !== "system"))) {
+        const open = this.openRuns.has(run[0].id);
+        const head = rows[0];
+        for (const n of rows) {
+          const part = n === head ? "head" : "in";
+          if (n.dataset.fold !== part) {
+            if (n.dataset.fold === "head") n.querySelector(":scope > .runline")?.remove();
+            n.dataset.fold = part;
           }
-          head.dataset.run = run[0].id;
-          drawLine(head, run, next, open, this.t);
+          n.classList.toggle("run-open", open);
+          if (!open && n !== head) this.headOf.set(n.dataset.id, head.dataset.id);
+          marked.add(n);
         }
-        run = [];
-      };
-      // The latest recap is what a reader coming back reads first: it never folds.
-      const recap = [...this.entries.values()].findLast((e) => e.kind === "recap")?.id;
-      for (const e of this.entries.values()) {
-        if (e.fold && e.fold <= this.foldLevel && e.id !== recap) run.push(e);
-        else if (run.length) close(e);
+        head.dataset.run = run[0].id;
+        drawLine(head, run, next, open, this.t, voice);
       }
-      if (run.length) close(null);
+      run = [];
+    };
+    // A typed message, agent intervention or capture-ended row ends a voice
+    // run, even if the surrounding entries fold at the prose view's level.
+    const recap = this.foldLevel && [...this.entries.values()].findLast((e) => e.kind === "recap")?.id;
+    for (const e of this.entries.values()) {
+      const next = e.detail?.realtime && e.detail.capture_state !== "ended" ? `voice:${e.detail.realtime}`
+        : e.fold && e.fold <= this.foldLevel && e.id !== recap ? "prose" : null;
+      if (run.length && next !== type) close(e);
+      if (next) run.push(e);
+      type = next;
     }
+    if (run.length) close(null);
     for (const n of this.list.querySelectorAll(".row[data-fold]")) {
       if (marked.has(n)) continue;
       if (n.dataset.fold === "head") n.querySelector(":scope > .runline")?.remove();
@@ -809,7 +813,7 @@ export class Transcript {
 
 // A run's line, as a button laid out like a row: its time, a caret, and what
 // the run holds.
-function drawLine(head, run, next, open, t) {
+function drawLine(head, run, next, open, t, voice) {
   let b = head.querySelector(":scope > .runline");
   if (!b) {
     b = document.createElement("button");
@@ -823,8 +827,12 @@ function drawLine(head, run, next, open, t) {
     head.prepend(b);
   }
   const [t0, g, rs] = b.children;
-  const text = runText(run, next, t);
-  const time = hhmm(run[0].ts);
+  const latest = voice ? run.at(-1) : run[0];
+  const text = voice
+    ? `${latest.md} · ${t("dictation.realtimeBlocks", { count: run.length })}`
+    : runText(run, next, t);
+  const time = hhmm(latest.ts);
+  b.setAttribute("aria-expanded", String(open));
   const caret = CARET_ICON[open ? "open" : "shut"];
   if (t0.textContent !== time) t0.textContent = time;
   if (g.dataset.caret !== caret) {
