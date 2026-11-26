@@ -208,8 +208,6 @@ class Fold:
         # What an attached send went out as, by pending id: the echo repeats
         # that text, while the pending entry shows what the person typed.
         self._said: dict[str, str] = {}
-        self._inbox_parts: dict[str, list[str]] = {}
-        self.realtime_receipts: set[str] = set()
         self._calls: dict[str, ToolCall] = {}
         # Whether the last shell command failed: a test or a read after it is
         # debugging, for the running row's verb (#1012).
@@ -480,10 +478,9 @@ class Fold:
         while self._pending:
             pid = self._pending.popleft()
             self._said.pop(pid, None)
-            for part in self._inbox_parts.pop(pid, [pid]):
-                e = self._entries.get(part)
-                if e is not None:
-                    ops += self._upsert({**e, "status": "lost"})
+            e = self._entries.get(pid)
+            if e is not None:
+                ops += self._upsert({**e, "status": "lost"})
         return ops
 
     def activity(self) -> str:
@@ -616,44 +613,8 @@ class Fold:
                 ops += self._upsert({**e, "status": status, "detail": detail})
         return ops
 
-    def _voice_row(self, voice: dict, ts: float | None, status: str) -> dict:
-        return _entry(
-            f"voice:{voice['nonce']}",
-            "user",
-            status,
-            ts,
-            "mic",
-            md=voice["text"],
-            detail={"realtime": voice["id"], "capture_state": voice["state"]},
-        )
-
-    def _realtime_inbox(self, pid: str, rec: dict) -> list[dict]:
-        """Keep each part in its original position, including held batches."""
-        ids = []
-        ops: list[dict] = []
-        for i, message in enumerate(rec["inbox"]):
-            if voice := message.get("realtime"):
-                self.realtime_receipts.add(voice["nonce"])
-                row = self._voice_row(voice, message["ts"], "pending")
-            else:
-                row = _entry(
-                    f"{pid}:{i}",
-                    "inbox",
-                    "pending",
-                    message["ts"],
-                    d.COMMS_GLYPH,
-                    title=message["header"].removeprefix("> from "),
-                    md=message["header"] + "\n" + message["body"],
-                )
-            ids.append(row["id"])
-            ops += self._upsert(row)
-        self._inbox_parts[pid] = ids
-        return ops
-
     def _own(self, i: int, ts: float | None, rec: dict) -> list[dict]:
         kind = rec.get("kind")
-        if kind == "realtime_held":
-            return self._upsert(self._voice_row(rec["realtime"], ts, "held"))
         if kind == "send":
             clock = self.standing["clock"]
             self._slash_idle = (
@@ -678,9 +639,6 @@ class Fold:
             pid = f"pending:{i}"
             self._pending.append(pid)
             text = str(rec.get("text", ""))
-            if rec.get("inbox"):
-                self._said[pid] = text
-                return folded + self._realtime_inbox(pid, rec)
             head, notices = split_notices(text)
             attached = self._dockable_copies(rec.get("files") or [])
             if attached or notices or without_note(head)[1]:
@@ -1554,19 +1512,13 @@ class Fold:
             else:
                 pid = self._take(ev.text, command=False)
             carried = self._entries.get(pid) if pid is not None else None
-            parts = self._inbox_parts.pop(pid, None) if pid is not None else None
             if pid is not None:
                 self._said.pop(pid, None)
-                if parts is None:
-                    ops += self._remove(pid)
+                ops += self._remove(pid)
             self._turn_open = True
             self._clock(ts, "work")
             # The notices it carried follow it as their own rows.
             head, notices = split_notices(ev.text)
-            if parts is not None:
-                for part in parts:
-                    ops += self._upsert({**self._entries[part], "status": "ok"})
-                return ops + self._notice_rows(id, ts, notices)
             if tasks := d.task_notices(head):
                 # Claude Code's own wake for a background command or a
                 # subagent that ended: a row like aegis's wakes, never the

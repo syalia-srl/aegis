@@ -1746,27 +1746,13 @@ bar that says it is on is the host's, out of the page's reach. A send from a box
 agent; the fold strips that exact line off the person's row and marks it
 `detail.dictated`, so the transcript and the harness keep the same text.
 
-In the standalone session composer, a mic press starts capture before the
-gesture resolves. A tap feeds the draft via the dictation engine. The slide
-targets route the same stream to an audio attachment or realtime speech.
-Only the selected audio take leaves the browser. Its attachment upload carries
-`recorded_ms`, and the server rewrites it as mono 16 kHz Opus when `ffmpeg`
-is available (`recordings.py`).
-
-The page owns realtime capture independently of the composer it started in.
-`js/realtime.js` counts 16 kHz samples from first speech, closes a block at
-10 seconds of silence or 60 seconds of elapsed audio, and keeps collecting
-while the shared Whistle workers run. The page waits for each complete
-transcript in capture order and sends it with the original session key and a
-nonce. A failed recognition is retried once with the retained block. If the
-retry fails, the page keeps its samples and pauses delivery at that queue
-position until the person chooses Retry speech and recognition succeeds.
-The controls remain available after the microphone stops. It drains the mic before enqueueing the final block and capture-ended
-notification. `session.send` uses urgent human inbox delivery, so harnesses
-that steer can read the speech mid-turn and other harnesses keep it in the
-held queue. The transcript fold retains the message origin and capture state
-independently, keeps receipts with the send history and preserves each block
-in a held batch. The browser groups consecutive blocks of the same capture.
+The one exception is a take the person chooses to send: holding a composer's
+mic records audio with `MediaRecorder` instead of dictating (`js/record.js`,
+#932), and the take goes up as an ordinary attachment whose
+`attachment.begin` carries `recorded_ms`. The send rewrites it with `ffmpeg`
+as mono 16 kHz Opus (`recordings.py`), because browsers do not honor a
+requested sample rate, and the agent's line names it a recording with its
+duration. Without `ffmpeg` the browser's file and clock stand.
 
 Reading replies aloud follows the same rule the other way: the reply is already
 in the page, and it is spoken there (`js/speak.js`). The browser's own
