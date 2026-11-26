@@ -620,6 +620,42 @@ def test_knowledge_wiki_navigation_at_desktop_and_phone(server, page):
     page.press("#input", "Enter")
     turns_done(page, 1)
     assert marker.exists()
+
+    def agent_call(tool, turn, **args):
+        page.fill("#input", f"/mcp {tool} {json.dumps(args)}")
+        page.press("#input", "Enter")
+        turns_done(page, turn)
+        reply = page.locator(".row.prose .md").last.text_content()
+        assert reply.startswith("mcp ok: ")
+        return json.loads(reply.removeprefix("mcp ok: "))
+
+    (workspace_page,) = agent_call("knowledge_catalog", 2, query="zirconium")["items"]
+    procedure = how / "restore.md"
+    text = procedure.read_text() + "Test the vanadium restoration.\n"
+    saved = agent_call(
+        "knowledge_write",
+        3,
+        entry_id=workspace_page["id"],
+        expected_revision=workspace_page["revision"],
+        text=text,
+    )
+    assert saved["path"] == str(procedure) and procedure.read_text() == text
+    page.goto(f"{server.url}#s={session}")
+    page.locator("#input").wait_for()
+    page.click("#knowledge-btn")
+    choose_context(session)
+    choose(source, "All sources")
+    query.fill("vanadium")
+    hit = page.get_by_role("button", name="Restore the ledger", exact=False)
+    hit.press("Enter")
+    page.locator(".kdetail .md").get_by_text(
+        "Test the vanadium restoration.", exact=False
+    ).wait_for()
+    for width, height in ((1280, 920), (390, 844)):
+        page.set_viewport_size({"width": width, "height": height})
+        if evidence:
+            page.screenshot(path=str(Path(evidence) / f"contextual-write-{width}.png"))
+
     assert page.errors == []
     if evidence:
         (Path(evidence) / "journey.txt").write_text(
@@ -631,4 +667,6 @@ def test_knowledge_wiki_navigation_at_desktop_and_phone(server, page):
             "The MCP startup marker remained absent throughout browsing. "
             "An explicit skill_read created it in the second session.\n"
             "A personal edit became searchable immediately and opened with the new text in a second session context.\n"
+            "The other session updated the shared procedure through knowledge_write. Its returned path held "
+            "the exact Markdown, and a search in the original session opened the updated procedure at both widths.\n"
         )

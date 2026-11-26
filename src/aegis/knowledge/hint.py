@@ -31,7 +31,9 @@ def wanted(text: str) -> bool:
 
 def _line(label: str, hits: list[Hit]) -> str:
     return f"{label}: " + " · ".join(
-        f"{h.name}: {h.description[:DESCRIPTION_CHARS]}" for h in hits
+        f"{h.name}: {h.description[:DESCRIPTION_CHARS]}"
+        + (f" [{h.entry_id}]" if h.entry_id else "")
+        for h in hits
     )
 
 
