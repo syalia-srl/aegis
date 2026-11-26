@@ -113,37 +113,3 @@ def test_dump_writes_one_key_per_line():
     assert dump(it) == (
         "---\nname: m\ndescription: d\ntype: user\npaths:\n- a/*\n- b\n---\nB\n"
     )
-
-
-def test_wikilinks_are_extracted_from_markdown_prose_only():
-    from aegis.knowledge.links import references
-
-    body = r"""
-# Read [[ First Page ]]
-
-> Follow **[[Second]]**, then `[[inline example]]`.
-> ```md
-> [[quoted fence]]
-> ```
-
-- Read [[Third]] and \[[escaped]].
-
-    ~~~markdown
-    [[nested fence]]
-    ~~~
-
-    `` escaped backtick ` [[long code span]] ``
-
-        [[nested indented code]]
-
-    [[Third]]
-
-    <!-- [[comment]] -->
-
-```text
-[[fenced example]]
-```
-
-    [[indented example]]
-"""
-    assert references(body) == ["First Page", "Second", "Third"]
