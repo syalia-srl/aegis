@@ -1,10 +1,14 @@
-"""Read-only sources scanned in a worker thread and published one root at a time."""
+"""File sources scanned in a worker thread and published one root at a time."""
 
 from __future__ import annotations
 
 import asyncio
+import fcntl
+import hashlib
 import os
+import secrets
 import stat
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Literal
@@ -28,6 +32,7 @@ class Source:
     worktree: Path | None = None
     private: Path | None = None
     optional: bool = False
+    writable: bool = False
 
 
 @dataclass(frozen=True)
@@ -112,20 +117,14 @@ def scan(source: Source, previous: Snapshot | None) -> Snapshot:
             errors[key] = str(exc)
 
     # Open each component so a replaced ancestor cannot redirect a scan.
-    fd = os.open("/", DIR_FLAGS)
     try:
-        for part in source.root.parts[1:]:
-            sub = os.open(part, DIR_FLAGS, dir_fd=fd)
-            os.close(fd)
-            fd = sub
-        walk(fd, PurePosixPath())
+        with open_directory(source.root) as fd:
+            walk(fd, PurePosixPath())
     except FileNotFoundError as exc:
         if source.format != "know-how" and not source.optional:
             errors["."] = exc.strerror or str(exc)
     except OSError as exc:
         errors["."] = exc.strerror or str(exc)
-    finally:
-        os.close(fd)
 
     if source.format == "skill":
         bundles: dict[PurePosixPath, list[str]] = {
@@ -148,6 +147,90 @@ def scan(source: Source, previous: Snapshot | None) -> Snapshot:
     return Snapshot(entries, errors)
 
 
+@contextmanager
+def open_directory(path: Path):
+    fd = os.open("/", DIR_FLAGS)
+    try:
+        for part in path.parts[1:]:
+            child = os.open(part, DIR_FLAGS, dir_fd=fd)
+            os.close(fd)
+            fd = child
+        yield fd
+    finally:
+        os.close(fd)
+
+
+def stale(revision: str | None) -> OpError:
+    return OpError(
+        "stale",
+        f"entry changed; current revision is {revision or 'absent'}. Read it again before saving.",
+        {"revision": revision},
+    )
+
+
+def write_page(source: Source, entry: Entry, text: str, expected_revision: str) -> Item:
+    """Replace one cataloged page. Directory locking serializes Aegis writers."""
+    path = entry.item.path
+    assert path is not None and path.is_relative_to(source.root)
+    data = text.encode()
+    if len(data) > MAX_FILE_BYTES:
+        raise OpError(
+            "bad_params", f"a page may contain at most {MAX_FILE_BYTES} bytes"
+        )
+    try:
+        item, _ = from_bytes(
+            source.worktree or source.root,
+            path,
+            parse_skill if source.format == "skill" else parse_doc,
+            entry.item.name,
+            scope="workspace",
+            data=data,
+        )
+    except ValueError as exc:
+        raise OpError("bad_params", str(exc)) from None
+
+    try:
+        with open_directory(path.parent) as fd:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            mode = os.stat(path.name, dir_fd=fd, follow_symlinks=False).st_mode
+            if (
+                not stat.S_ISREG(mode)
+                or not mode & 0o222
+                or not os.access(
+                    path.name,
+                    os.W_OK,
+                    dir_fd=fd,
+                    effective_ids=True,
+                    follow_symlinks=False,
+                )
+            ):
+                raise OpError("forbidden", "the knowledge page is read-only")
+            temp = f".aegis-write-{secrets.token_hex(12)}"
+            out = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=fd)
+            try:
+                with os.fdopen(out, "wb") as file:
+                    file.write(data)
+                    os.fchmod(file.fileno(), mode & 0o777)
+                current = regular_bytes(Path(path.name), MAX_FILE_BYTES, dir_fd=fd)
+                revision = hashlib.sha256(current).hexdigest()
+                if revision != expected_revision:
+                    raise stale(revision)
+                if current != data:
+                    os.replace(temp, path.name, src_dir_fd=fd, dst_dir_fd=fd)
+            finally:
+                try:
+                    os.unlink(temp, dir_fd=fd)
+                except FileNotFoundError:
+                    pass
+    except FileNotFoundError:
+        raise stale(None) from None
+    except PermissionError:
+        raise OpError("forbidden", "the knowledge page cannot be written") from None
+    except OSError as exc:
+        raise OpError("write_failed", exc.strerror or str(exc)) from None
+    return item
+
+
 class Sources:
     def __init__(self) -> None:
         self._held: dict[Source, tuple[float, Snapshot]] = {}
@@ -160,6 +243,12 @@ class Sources:
             self._held.pop(removed, None)
             self._running.pop(removed, None)
         self._configured = current
+
+    def invalidate(self, path: Path) -> None:
+        for source in self._held.keys() | self._running.keys():
+            if path.is_relative_to(source.root):
+                self._held.pop(source, None)
+                self._running.pop(source, None)
 
     def snapshot(self, source: Source) -> Snapshot | None:
         held = self._held.get(source)
