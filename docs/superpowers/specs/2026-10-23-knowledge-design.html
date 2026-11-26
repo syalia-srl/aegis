@@ -216,20 +216,6 @@ svg text{font-family:var(--font-mono)}
 </nav>
 
 <main>
-<section id="source-catalog">
-<h2>Read-only source catalog</h2>
-<p>The catalog is implemented as a separate read operation during rollout.
-It lists the caller's personal entries, know-how from the selected session's
-Git worktree, and configured Markdown and skill directories that the host
-allows the caller to read. Worktree entry IDs are shared with the direct
-worktree reader. A skill contributes one page and names its resources.</p>
-<p>Files remain in their source directories. The server scans in a worker
-thread, reuses unchanged parses, then publishes the complete root. Concurrent
-readers share a scan. The first read after restart builds from disk. Removing
-a root from configuration withdraws it on the next call. Personal search,
-notices, and skill invocation continue through their existing entry points.</p>
-</section>
-
 <h1>Native skills and memory: knowledge that aegis keeps, finds and prunes</h1>
 <div class="meta"><span>docs/superpowers/specs/2026-10-23-knowledge-design.html</span><span>·</span><span>built</span><span>·</span><span>issues #694, #695, #696</span></div>
 <p class="lede">Today each harness keeps its own skills and its own memory, loads all of it into every session, and nobody can tell which parts are used or still true. This spec moves both into aegis, per user, as Markdown files. aegis finds the few that matter for each message with a search index, records every use, and gives the person and an agent the means to prune what went stale.</p>

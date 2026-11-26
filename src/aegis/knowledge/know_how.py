@@ -67,7 +67,7 @@ def describe(text: str) -> str:
     return line[:DESCRIPTION_CHARS]
 
 
-def parse_doc(text: str, name: str, path: Path) -> Item:
+def _parse_doc(text: str, name: str, path: Path) -> Item:
     text = text.replace("\r\n", "\n")
     meta, body = _split(text) if FRONT.match(text) else ({}, text)
     description = str(meta.get("when") or meta.get("description") or describe(text))
@@ -102,7 +102,7 @@ def read_entry(
                 return read_item(
                     root,
                     path,
-                    parse_doc,
+                    _parse_doc,
                     path.stem,
                     scope="workspace",
                     read_bytes=lambda _: regular_bytes(

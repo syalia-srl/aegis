@@ -38,7 +38,7 @@ from io import StringIO
 from pathlib import Path
 from typing import Any, Literal, cast
 
-from pydantic import BaseModel, Field, JsonValue, ValidationError, field_validator
+from pydantic import BaseModel, Field
 from ruamel.yaml import YAML, YAMLError
 from ruamel.yaml.comments import CommentedMap
 from ruamel.yaml.scalarstring import LiteralScalarString
@@ -337,7 +337,7 @@ def workflows_from(raw: object) -> dict:
 NUDGES_DEFAULTS: dict = {"silent_s": 2, "plan_min": 15}
 
 
-KNOWLEDGE_DEFAULTS: dict = {"embeddings": "off", "know_how": True, "sources": ()}
+KNOWLEDGE_DEFAULTS: dict = {"embeddings": "off", "know_how": True}
 
 
 # The quota: block (quota/projection.py): how far back "the current rate" looks,
@@ -388,59 +388,23 @@ def quota_from(raw: object) -> dict:
     return {"half_life": got}
 
 
-class KnowledgeSource(BaseModel):
-    model_config = {"extra": "forbid", "frozen": True}
-
-    root: str = Field(min_length=1)
-    format: Literal["markdown", "skill"] = "markdown"
-    include: tuple[str, ...] = ("**/*.md",)
-    exclude: tuple[str, ...] = ()
-
-    @field_validator("root")
-    @classmethod
-    def valid_root(cls, root: str) -> str:
-        if not root.strip() or "\x00" in root or ".." in Path(root).parts:
-            raise ValueError("use a directory without parent components")
-        return root
-
-    @field_validator("include", "exclude")
-    @classmethod
-    def valid_patterns(cls, patterns: tuple[str, ...]) -> tuple[str, ...]:
-        if any(
-            not p or Path(p).is_absolute() or ".." in Path(p).parts for p in patterns
-        ):
-            raise ValueError("use nonempty patterns relative to the source root")
-        return patterns
-
-
 def knowledge_from(raw: object) -> dict:
     """The ``knowledge:`` block over its defaults: ``embeddings``, off or a
     fastembed model's name (knowledge/embed.py), and ``know_how``, whether a
-    session is told about a repository's docs (knowledge/know_how.py).
-    ``sources`` registers additional directories for the read-only catalog.
-    An invalid value carries ``error`` for aegis doctor."""
+    session is told about a repository's docs (knowledge/know_how.py). A wrong
+    block keeps the defaults and carries ``error`` for aegis doctor."""
     out = dict(KNOWLEDGE_DEFAULTS)
     if raw is None:
         return out
     if not isinstance(raw, dict):
         return out | {
-            "error": "knowledge must be a mapping with embeddings, know_how and sources"
+            "error": "knowledge must be a mapping with embeddings and know_how"
         }
     for k, v in raw.items():
         if k not in KNOWLEDGE_DEFAULTS:
             return out | {
-                "error": f"knowledge has no key {k!r}; it takes embeddings, know_how and sources"
+                "error": f"knowledge has no key {k!r}; it takes embeddings and know_how"
             }
-        if k == "sources":
-            try:
-                if not isinstance(v, list):
-                    return out | {"error": "knowledge.sources must be a list"}
-                out["sources"] = tuple(
-                    KnowledgeSource.model_validate(source) for source in v
-                )
-            except ValidationError as exc:
-                return out | {"error": f"knowledge.sources: {exc}"}
-            continue
         if k == "know_how":
             if not isinstance(v, bool):
                 return out | {"error": f"knowledge.know_how {v!r} is not true or false"}
@@ -637,9 +601,7 @@ SECTIONS = {
         "Search embeddings",
         "Embeddings: off, or a fastembed model fused with keyword search, such"
         " as minishlab/potion-multilingual-128M. It needs the embeddings extra"
-        " and about a gigabyte of memory, and is read when aegis starts."
-        " Edit catalog sources as a JSON list of root, format, include and exclude"
-        " entries.",
+        " and about a gigabyte of memory, and is read when aegis starts.",
     ),
     "host": (
         "Host",
@@ -652,8 +614,7 @@ SECTIONS = {
 def fields() -> list[dict]:
     """The keys the Settings page draws from the wire, in order. ``kind`` says
     which control: agent (a configured generation agent), size, int, number, bool, text, list
-    (of strings), json (structured values) or switch (a notice kind, written
-    ``false`` when off);
+    (of strings) or switch (a notice kind, written ``false`` when off);
     ``off`` marks a number the file may set to false."""
     out: list[dict] = []
 
@@ -693,7 +654,6 @@ def fields() -> list[dict]:
         add("quota", f"quota.projection.half_life.{name}", "text", default)
     add("embeddings", "knowledge.embeddings", "text", KNOWLEDGE_DEFAULTS["embeddings"])
     add("embeddings", "knowledge.know_how", "bool", KNOWLEDGE_DEFAULTS["know_how"])
-    add("embeddings", "knowledge.sources", "json", [])
     add("ranking", "model_ranking", "bool", True)
     for k, v in host_from(None)[0].items():
         add("host", f"host.{k}", "list", v)
@@ -910,7 +870,9 @@ class ConfigDoc(BaseModel):
     usage: UsageDoc = Field(default_factory=UsageDoc)
     # Each key of fields() the file sets, by its dotted path; a switch only
     # when it is off (false).
-    settings: dict[str, JsonValue] = Field(default_factory=dict)
+    settings: dict[str, bool | int | float | str | list[str]] = Field(
+        default_factory=dict
+    )
 
 
 def _exit_via(data: dict) -> str | None:
@@ -1101,8 +1063,6 @@ def _settings_doc(data: dict) -> dict:
         if f["kind"] == "switch":
             if v is False:
                 out[f["key"]] = False
-        elif f["kind"] == "json" and v is not _MISSING:
-            out[f["key"]] = json.loads(json.dumps(v, default=str))
         elif v is not _MISSING and v is not None and not isinstance(v, dict):
             out[f["key"]] = [str(x) for x in v] if isinstance(v, list) else v
     return out

@@ -38,7 +38,6 @@ from .embed import Embedder, Loader, Vector, available, fastembed_loader
 from .items import Item
 from .search import QUERY_CHARS, Index, text_of
 from .store import Store
-from .sources import Source, Sources, Snapshot
 from .usage import Usage
 
 HINT_ITEMS = 3
@@ -59,7 +58,6 @@ class Knowledge:
                 embeddings, state_root / "knowledge-vectors", load or fastembed_loader
             )
         self._encoding: set[str] = set()  # query texts encoding in the background
-        self.sources = Sources()
         self.usage = Usage(state_root / "knowledge-usage.sqlite")
         # principal -> (store version, when scanned, items, index)
         self._indexes: dict[str, tuple[int, float, list[Item], Index]] = {}
@@ -162,9 +160,6 @@ class Knowledge:
         if name is not None:
             return await asyncio.to_thread(self.store.read, principal, name)
         return None
-
-    async def source_snapshot(self, source: Source) -> Snapshot:
-        return await self.sources.refresh(source, self._clock(), SCAN_EVERY_S)
 
     async def read_worktree(
         self, cwd: str, *, entry_id: str | None, relative_path: str | None

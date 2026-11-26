@@ -157,38 +157,18 @@ def read_item(
     read_bytes: Callable[[Path], bytes] = Path.read_bytes,
 ) -> tuple[Item, str]:
     """Read a known file once, keeping the revision of the exact bytes read."""
+    relative_path = path.relative_to(root).as_posix()
     resolved = path.resolve()
     if not resolved.is_relative_to(root.resolve()):
         raise ValueError("the file is outside its knowledge source")
     if not resolved.is_file():
         raise FileNotFoundError(path)
-    return from_bytes(
-        root.resolve(),
-        path,
-        parse,
-        name,
-        scope=scope,
-        data=read_bytes(resolved),
-        relative_path=path.relative_to(root).as_posix(),
-    )
-
-
-def from_bytes(
-    root: Path,
-    path: Path,
-    parse: Callable[[str, str, Path], Item],
-    name: str,
-    *,
-    scope: Literal["personal", "workspace"],
-    data: bytes,
-    relative_path: str | None = None,
-) -> tuple[Item, str]:
-    """Build an entry from bytes already read under a verified root."""
+    data = read_bytes(resolved)
     text = data.decode("utf-8")
     item = replace(
         parse(text, name, path),
-        source_id=hashlib.sha256(bytes(root)).hexdigest(),
-        relative_path=relative_path or path.relative_to(root).as_posix(),
+        source_id=source_id(root),
+        relative_path=relative_path,
         scope=scope,
         revision=hashlib.sha256(data).hexdigest(),
     )
