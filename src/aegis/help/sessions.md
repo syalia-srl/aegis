@@ -152,12 +152,17 @@ The browser sends a block of text after 10 seconds of continuous silence or
 recognition runs in the browser. Each block arrives as a message from you,
 and Codex and Claude Code can read it during a running turn. Consecutive
 blocks fold together with the latest phrase showing. Expand the row to read
-the earlier phrases. If recognition fails, the browser retries the block once
-and reports an error if it still cannot transcribe it.
+the earlier phrases.
 
-Choose **Stop mic** in the status bar from any view. The browser sends any
-remaining words and then tells the session that capture ended, even if you
-said nothing. Microphone permission and HTTPS or localhost are required.
+If recognition fails twice, the browser keeps the audio and pauses delivery.
+Choose **Retry speech** in the status bar to send the recovered block and the
+ones behind it in order. You can retry from another session or after you
+stop the mic. Keep the page open until recovery completes.
+
+Choose **Stop mic** in the status bar from any view. It closes the microphone
+immediately. The browser sends any remaining words in order and then tells
+the session that capture ended, even if you said nothing. Microphone
+permission and HTTPS or localhost are required.
 
 ## Rename it
 

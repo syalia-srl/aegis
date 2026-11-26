@@ -1752,8 +1752,9 @@ The page owns realtime capture independently of the composer it started in.
 while the shared Whistle workers run. The page waits for each complete
 transcript in capture order and sends it with the original session key and a
 nonce. A failed recognition is retried once with the retained block. If the
-retry fails, the browser reports the error and proceeds with later blocks.
-It drains the mic before enqueueing the final block and capture-ended
+retry fails, the page keeps its samples and pauses delivery at that queue
+position until the person chooses Retry speech and recognition succeeds.
+The controls remain available after the microphone stops. It drains the mic before enqueueing the final block and capture-ended
 notification. `session.send` uses urgent human inbox delivery, so harnesses
 that steer can read the speech mid-turn and other harnesses keep it in the
 held queue. The transcript fold retains the message origin and capture state

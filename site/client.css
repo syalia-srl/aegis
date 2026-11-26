@@ -694,8 +694,9 @@
 .a2 .mic-targets .btn:is(.on,:focus-visible){color:var(--on-accent);background:var(--accent);border-color:var(--accent)}
 .a2 .realtime-status{display:flex;align-items:center;gap:10px;padding:5px 12px;background:var(--accent-soft);color:var(--strong);border-left:2px solid var(--accent);font:12px var(--font-chrome)}
 .a2 .realtime-status[hidden]{display:none}
-.a2 .realtime-status [role=status]{min-width:0;overflow-wrap:anywhere}
-.a2 .realtime-status .btn{margin-left:auto;flex:none}
+.a2 .realtime-status [role=status]{min-width:0;margin-right:auto;overflow-wrap:anywhere}
+.a2 .realtime-status .btn{flex:none}
+.a2 .realtime-status .btn[hidden]{display:none}
 .a2[data-layout=full]:has(>.realtime-status:not([hidden])){grid-template-rows:auto auto minmax(0,1fr)}
 .a2[data-layout=full]:has(>.realtime-status:not([hidden])):has(>.netbanner:not([hidden])){grid-template-rows:auto auto auto minmax(0,1fr)}
 .a2[data-view=window]:has(>.realtime-status:not([hidden])){grid-template-rows:auto minmax(0,1fr)}

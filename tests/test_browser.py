@@ -9942,7 +9942,7 @@ def test_realtime_sample_boundaries_and_out_of_order_final_results(dict_server, 
     assert got["errors"] == []
 
 
-def test_realtime_retries_a_failed_block_without_reordering_or_duplication(
+def test_realtime_retains_repeatedly_failed_audio_and_recovers_in_order(
     dict_server, page
 ):
     page.goto(dict_server.url)
@@ -9951,7 +9951,7 @@ def test_realtime_retries_a_failed_block_without_reordering_or_duplication(
         """
         const { Realtime } = await import('/static/js/realtime.js');
         const calls = [], sent = [], errors = [];
-        let rejectFirst;
+        let attempts = 0, stopped = false, finished = false;
         const r = new Realtime({
           engine: {
             recognition: async () => '',
@@ -9960,34 +9960,109 @@ def test_realtime_retries_a_failed_block_without_reordering_or_duplication(
               calls.push(length);
               // A real worker takes the input buffers from its caller.
               structuredClone(parts, {transfer: parts.map(p => p.buffer)});
-              if (length === 1 && !rejectFirst)
-                return new Promise((_, reject) => { rejectFirst = reject; });
-              if (length === 3) throw new Error('permanent error');
-              return Promise.resolve(length === 1 ? 'recovered' : 'next block');
+              if (length === 1 && ++attempts <= 3) throw new Error('recognition failed');
+              return Promise.resolve({1: 'recovered', 2: 'next block', 3: 'tail'}[length]);
             },
           },
           deliver: async (_, p) => sent.push([p.text ?? null, p.realtime.state, p.nonce]),
           onState() {},
           onError: (e) => errors.push(e.message),
         });
-        r.start({key: 'origin'}, source);
+        r.start({key: 'origin'}, async (...args) => {
+          await source(...args);
+          return async () => { stopped = true; };
+        });
         feed(tone(1), gap(10), tone(2), gap(10), tone(3));
-        await until(() => calls.length === 2);
-        if (sent.length) throw new Error('the second block overtook the first');
-        rejectFirst(new Error('transient error'));
-        await until(() => sent.length === 2);
-        await r.stop();
+        await until(() => r.capture.retry);
+        const stop = r.stop().then(() => { finished = true; });
+        await until(() => stopped && calls.includes(3));
+        if (sent.length || finished) throw new Error('delivery advanced past the failed block');
+        r.retry();
+        await until(() => r.capture.retry && errors.length === 2);
+        if (sent.length || finished) throw new Error('the first manual retry lost the queue position');
+        r.retry();
+        await stop;
         return { calls, sent, errors };
         """,
     )
-    assert got["calls"] == [1, 2, 1, 3, 3]
+    assert got["calls"] == [1, 2, 1, 3, 1, 1]
     assert [m[:2] for m in got["sent"]] == [
-        ["recovered", "open"],
-        ["next block", "open"],
+        ["recovered", "closing"],
+        ["next block", "closing"],
+        ["tail", "closing"],
         [None, "ended"],
     ]
-    assert len({m[2] for m in got["sent"]}) == 3
-    assert got["errors"] == ["permanent error"]
+    assert len({m[2] for m in got["sent"]}) == 4
+    assert got["errors"] == ["recognition failed", "recognition failed"]
+
+
+def test_realtime_retry_recovers_retained_mic_audio_from_another_session(
+    dict_server, mic_page, tmp_path
+):
+    pg = mic_page
+    pg.set_viewport_size({"width": 390, "height": 844})
+    pg.add_init_script("""
+        const capture = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+        navigator.mediaDevices.getUserMedia = async (constraints) => {
+          const stream = await capture(constraints);
+          window.testMicTrack = stream.getAudioTracks()[0];
+          return stream;
+        };
+    """)
+    blocked = True
+
+    def route(ws):
+        server = ws.connect_to_server()
+
+        def from_page(message):
+            data = json.loads(message)
+            if blocked and data.get("op") == "dictation.prepare":
+                ws.send(
+                    json.dumps(
+                        {
+                            "t": "reply",
+                            "id": data["id"],
+                            "error": {
+                                "code": "unavailable",
+                                "message": "test model unavailable",
+                            },
+                        }
+                    )
+                )
+            else:
+                server.send(message)
+
+        ws.on_message(from_page)
+
+    pg.route_web_socket(re.compile(r"/ws"), route)
+    pg.goto(dict_server.url)
+    pg.wait_for_selector("#a2[data-view=fleet]")
+    other = spawn(pg)
+    origin = spawn(pg)
+    label = pg.locator(f"#tablist .tab[data-id='{origin}']").inner_text().strip()
+    press_mic(pg)
+    move_to_target(pg, "realtime")
+    pg.wait_for_timeout(1100)
+    pg.mouse.up()
+    pg.wait_for_selector("#realtime-status:not([hidden])")
+    pg.click("#realtime-stop")
+    pg.wait_for_function("window.testMicTrack.readyState === 'ended'")
+    pg.get_by_role("button", name="Retry speech").wait_for()
+    pg.wait_for_function("() => document.getElementById('realtime-stop').disabled")
+    pg.click(f"#tablist .tab[data-id='{other}']")
+    pg.wait_for_function("(id) => location.hash === '#s=' + id", arg=other)
+    assert label in pg.inner_text("#realtime-source")
+    assert sends_of(dict_server, origin) == []
+    pg.screenshot(path=tmp_path / "phone-realtime-retry.png")
+
+    blocked = False
+    pg.get_by_role("button", name="Retry speech").click()
+    pg.wait_for_selector("#realtime-status", state="hidden")
+    block, ended = sends_of(dict_server, origin)
+    assert "kw=" in block["inbox"][0]["realtime"]["text"]
+    assert ended["inbox"][0]["realtime"]["state"] == "ended"
+    assert not sends_of(dict_server, other)
+    assert pg.errors == []
 
 
 def test_the_working_row_types_its_verb_and_counts_the_turns_tokens(server, page):

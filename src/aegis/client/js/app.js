@@ -2500,9 +2500,11 @@ const dictation = new DictationPart(app, $("composer"), {
   onRealtime: (rec) => {
     $("realtime-status").hidden = !rec;
     if (!rec) return;
-    $("realtime-source").textContent = app.t(
-      rec.closing ? "dictation.realtimeFinishing" : "dictation.realtimeSource", { session: rec.origin.label },
-    );
+    const status = rec.closing
+      ? (rec.retry ? "dictation.realtimeStoppedPending" : "dictation.realtimeFinishing")
+      : (rec.retry ? "dictation.realtimeListeningPending" : "dictation.realtimeSource");
+    $("realtime-source").textContent = app.t(status, { session: rec.origin.label });
+    $("realtime-retry").hidden = !rec.retry;
     $("realtime-stop").disabled = rec.closing;
   },
   canStart: () => !offline(),
@@ -2511,6 +2513,7 @@ const dictation = new DictationPart(app, $("composer"), {
   onLevel: () => artifacts.dictationCheck(),
   onTake,
 });
+$("realtime-retry").addEventListener("click", () => dictation.realtime.retry());
 $("realtime-stop").addEventListener("click", () => dictation.realtime.stop());
 // On a touch screen Enter adds a line and the button sends: the key sits where
 // a mistap lands, and half a message costs a turn.

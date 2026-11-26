@@ -77,13 +77,24 @@ export class Realtime {
       // The workers take ownership of their buffers. Keep this block until
       // recognition settles so a failed attempt can retry without losing it.
       // Only recognition is retried here. Delivery keeps its own receipt.
-      const recognize = async () => this.engine.recognize(parts.map((part) => part.slice()), await prepare());
-      const result = recognize().catch(recognize).then(
-        (text) => ({ text }), (error) => ({ error }),
-      );
+      const recognize = async () => {
+        const keywords = await prepare();
+        return this.engine.recognize(parts.map((part) => part.slice()), keywords);
+      };
+      const verdict = (attempt) => attempt.then((text) => ({ text }), (error) => ({ error }));
+      const result = verdict(recognize().catch(recognize));
       this.enqueue(rec, async (nonce) => {
-        const { text, error } = await result;
-        if (error) throw error;
+        let { text, error } = await result;
+        while (error) {
+          // Keep the audio and this queue position while the person retries.
+          // Later blocks may finish recognizing, but cannot be sent yet.
+          this.onError(error);
+          await new Promise((retry) => {
+            rec.retry = retry;
+            this.onState(rec);
+          });
+          ({ text, error } = await verdict(recognize()));
+        }
         if (text) await this.deliver(origin, { text, nonce, realtime: { id: rec.id, state: rec.closing ? "closing" : "open" } });
       });
     });
@@ -99,6 +110,15 @@ export class Realtime {
         this.onState(null);
       }
     });
+  }
+
+  retry() {
+    const rec = this.capture;
+    if (!rec?.retry) return;
+    const resume = rec.retry;
+    rec.retry = null;
+    this.onState(rec);
+    resume();
   }
 
   enqueue(rec, send) {
