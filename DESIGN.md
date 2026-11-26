@@ -776,13 +776,10 @@ thread, so the paths a memory quotes are looked for off the event loop; they liv
 and in the usage db's `flags` table, so a restart logs no flag twice.
 The Knowledge view's ops (`knowledge.list`, `.get`, `.put`, `.history`,
 `.restore`, `.remove`) are a person's, never an agent's, and act on the
-caller's own store, an admin's included. File-backed items carry a source ID
-derived from their canonical root and a path relative to that root. Each Git
-worktree is a distinct root. The pair identifies the entry across edits.
-`knowledge.get` accepts the entry ID or the historical personal name and reads
-directly from disk. The body, full file text and SHA-256 revision come from
-the same bytes. A person's edit is saved approved, guarded by that revision
-as its edit stamp and checked under the store's lock.
+caller's own store, an admin's included. A person's edit is saved approved,
+guarded by a stamp: the SHA-256 of the item's file when the view read it,
+checked under the store's lock, so an edit never overwrites a change it did
+not see.
 `/setup`'s import (`knowledge.import`, `knowledge/importer.py`) reads each
 ticked source in a thread, never on the event loop, and saves it with `fresh`,
 which refuses a name any item holds. The ticks are the approval only in a

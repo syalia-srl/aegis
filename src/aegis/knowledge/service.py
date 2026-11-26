@@ -151,16 +151,6 @@ class Knowledge:
         """Every item of ``principal``, from the cache the index uses."""
         return (await self._held(principal))[0]
 
-    async def read(
-        self, principal: str, *, name: str | None = None, entry_id: str | None = None
-    ) -> tuple[Item, str] | None:
-        """Read the current personal entry directly, even with a warm index."""
-        if entry_id is not None:
-            return await asyncio.to_thread(self.store.read_by_id, principal, entry_id)
-        if name is not None:
-            return await asyncio.to_thread(self.store.read, principal, name)
-        return None
-
     async def query_vector(self, text: str) -> Vector | None:
         """The vector of a search's query, encoded in a thread; None without
         embeddings."""

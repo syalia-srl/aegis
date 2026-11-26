@@ -3,7 +3,6 @@ import asyncio
 import pytest
 
 from aegis.knowledge import history
-from aegis.knowledge.items import source_id
 from aegis.knowledge.store import Store
 from aegis.ops import OpError
 
@@ -18,23 +17,6 @@ async def test_names_are_unique_across_kinds(tmp_path):
     assert e.value.code == "name_taken"
     # Another principal is another namespace.
     await st.save("ben", skill("release"), "s2")
-
-
-async def test_a_qualified_read_is_limited_to_files_of_its_source(tmp_path):
-    store = Store(tmp_path)
-    await store.save("ana", mem("release"), "test")
-    await store.save("ben", mem("release"), "test")
-    root = store.dir("ana")
-    (root / "memories" / "outside.md").symlink_to(
-        store.dir("ben") / "memories" / "release.md"
-    )
-    for rel in (
-        "memories/outside.md",
-        "memories/../memories/release.md",
-        ".git/config",
-    ):
-        assert store.read_by_id("ana", f"{source_id(root)}:{rel}") is None
-    assert [item.name for item in store.items("ana")] == ["release"]
 
 
 async def test_a_malformed_file_is_skipped_and_the_rest_work(tmp_path, caplog):

@@ -453,11 +453,6 @@ class ItemRef(_Strict):
     name: str
 
 
-class ReadItem(_Strict):
-    name: str | None = None
-    entry_id: str | None = None
-
-
 class PutItem(_Strict):
     name: str
     text: str = Field(min_length=1)
@@ -467,6 +462,13 @@ class PutItem(_Strict):
 class RestoreItem(_Strict):
     name: str
     sha: str = Field(pattern=r"^[0-9a-f]{7,40}$")
+
+
+def stamp_of(it: Item) -> str:
+    """What the view's edit was opened on: the item's own file, as bytes.
+    Blocking: reads it."""
+    assert it.path is not None
+    return hashlib.sha256(it.path.read_bytes()).hexdigest()
 
 
 def register_knowledge_ops(app: App) -> None:
@@ -1447,16 +1449,6 @@ def register_knowledge_ops(app: App) -> None:
     def row(owner: str, it: Item, used: dict) -> dict:
         u = used.get(it.name, {})
         return {
-            "id": it.id,
-            "source_id": it.source_id,
-            "relative_path": it.relative_path,
-            "title": it.title,
-            "format": it.format,
-            "scope": it.scope,
-            "paths": it.paths,
-            "revision": it.revision,
-            "lifetime": it.lifetime,
-            "expires": expiry.isoformat() if (expiry := it.expires) else None,
             "kind": it.kind,
             "name": it.name,
             "description": it.description,
@@ -1515,28 +1507,24 @@ def register_knowledge_ops(app: App) -> None:
             raise OpError("not_found", f"no item named {name!r}")
         return it
 
-    @r.op("knowledge.get", ReadItem, access="read")
-    async def knowledge_get(p: ReadItem, caller):
-        """Read a personal knowledge item by ID or name, with its edit stamp."""
+    @r.op("knowledge.get", ItemRef, access="read")
+    async def knowledge_get(p: ItemRef, caller):
+        """One item for the view: its file's whole text, the stamp an edit
+        sends back, and a skill's files."""
         owner = principal(caller)
-        if (p.name is None) == (p.entry_id is None):
-            raise OpError("bad_params", "supply exactly one of name or entry_id")
-        result = await kn.read(owner, name=p.name, entry_id=p.entry_id)
-        if result is None:
-            ref = p.entry_id if p.entry_id is not None else p.name
-            raise OpError("not_found", f"no item matching {ref!r}")
-        it, text = result
-        files = (
-            await asyncio.to_thread(kn.store.entry_files, it)
-            if it.kind == "skill"
-            else []
-        )
+
+        def read():
+            it = held_item(owner, p.name)
+            data = it.path.read_bytes() if it.path else b""
+            files = kn.store.files(owner, it.name) if it.kind == "skill" else []
+            return it, data, files
+
+        it, data, files = await asyncio.to_thread(read)
         used = await asyncio.to_thread(kn.usage.summary, owner)
         return {
             **row(owner, it, used),
-            "body": it.body,
-            "text": text,
-            "stamp": it.revision,
+            "text": data.decode("utf-8"),
+            "stamp": hashlib.sha256(data).hexdigest(),
             "files": files,
         }
 
@@ -1566,7 +1554,7 @@ def register_knowledge_ops(app: App) -> None:
         def expect(it: Item | None) -> None:
             if it is None or it.kind != held.kind:
                 raise OpError("not_found", f"no {held.kind} named {p.name!r}")
-            if it.revision != p.stamp:
+            if stamp_of(it) != p.stamp:
                 raise OpError(
                     "stale",
                     f"{p.name!r} changed since you opened it; reload it and edit again",
@@ -1583,7 +1571,7 @@ def register_knowledge_ops(app: App) -> None:
             "saved": p.name,
             "sha": sha,
             "status": now.status,
-            "stamp": now.revision,
+            "stamp": await asyncio.to_thread(stamp_of, now),
         }
 
     @r.op("knowledge.history", ItemRef, access="read")

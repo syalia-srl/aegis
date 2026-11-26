@@ -23,16 +23,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from . import history
-from .items import (
-    Item,
-    Kind,
-    check_name,
-    dump,
-    parse_memory,
-    parse_skill,
-    read_item,
-    source_id,
-)
+from .items import Item, Kind, check_name, dump, parse_memory, parse_skill
 from ..ops import OpError
 
 log = logging.getLogger("aegis.knowledge")
@@ -95,19 +86,16 @@ class Store:
             got = held.get(p)
             if got is None or got[0] != key:
                 changed = True
-                read = self._read(base, p, parse, name)
-                got = (key, read[0] if read is not None else None)
+                got = (key, self._read(p, parse, name))
             fresh[p] = got
         changed = changed or fresh.keys() != held.keys()
         self._parsed[principal] = fresh
         return [it for _, it in fresh.values() if it is not None], changed
 
-    def _read(
-        self, base: Path, path: Path, parse, name: str
-    ) -> tuple[Item, str] | None:
+    def _read(self, path: Path, parse, name: str) -> Item | None:
         self.parses += 1
         try:
-            return read_item(base, path, parse, name, scope="personal")
+            return parse(path.read_text(encoding="utf-8"), name, path)
         except (OSError, UnicodeDecodeError, ValueError) as e:
             try:
                 key = (str(path), path.stat().st_mtime)
@@ -119,35 +107,14 @@ class Store:
             return None
 
     def get(self, principal: str, name: str) -> Item | None:
-        read = self.read(principal, name)
-        return read[0] if read is not None else None
-
-    def read(self, principal: str, name: str) -> tuple[Item, str] | None:
-        """Read a personal item by its historical name, with its raw text."""
         base = self.dir(principal)
         check_name(name)
         p = base / "memories" / f"{name}.md"
         if p.is_file():
-            return self._read(base, p, parse_memory, name)
+            return self._read(p, parse_memory, name)
         p = base / "skills" / name / "SKILL.md"
         if p.is_file():
-            return self._read(base, p, parse_skill, name)
-        return None
-
-    def read_by_id(self, principal: str, entry_id: str) -> tuple[Item, str] | None:
-        """Read a qualified ID within the caller's own store."""
-        base = self.dir(principal)
-        source, _, rel = entry_id.partition(":")
-        if source != source_id(base):
-            return None
-        parts = rel.split("/")
-        if any(part in ("", ".", "..") or "\0" in part for part in parts):
-            return None
-        match parts:
-            case ["memories", file] if file.endswith(".md"):
-                return self._read(base, base / rel, parse_memory, Path(file).stem)
-            case ["skills", name, "SKILL.md"]:
-                return self._read(base, base / rel, parse_skill, name)
+            return self._read(p, parse_skill, name)
         return None
 
     def _skill_dir(self, principal: str, name: str) -> Path:
@@ -157,17 +124,9 @@ class Store:
         return folder
 
     def files(self, principal: str, name: str) -> list[str]:
-        return self._files_in(self._skill_dir(principal, name))
-
-    def entry_files(self, item: Item) -> list[str]:
-        """The files of a personal skill already resolved by a store read."""
-        assert item.kind == "skill" and item.path is not None
-        return self._files_in(item.path.parent)
-
-    @staticmethod
-    def _files_in(folder: Path) -> list[str]:
         """The files of a skill's folder, relative and sorted. A symlink is
         left out, since ``read_file`` would refuse it."""
+        folder = self._skill_dir(principal, name)
         return sorted(
             p.relative_to(folder).as_posix()
             for p in folder.rglob("*")
