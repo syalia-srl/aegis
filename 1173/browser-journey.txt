@@ -1,0 +1,8 @@
+Tested commit: 3a87d12cf5260d45d5c8fdfbd80c8676dba997fb
+$ LOGNAME=knowledge-demo USER=knowledge-demo KNOWLEDGE_EVIDENCE_DIR=<output> uv run pytest -q -s -m slow tests/test_knowledge_capture_1174.py
+Desktop 1366 x 900: legacy proposal and expired memory are visible.
+Desktop: opened the proposal, saved it approved, and saw its Git edit in History.
+Phone 390 x 844: opened the expired memory full width, then returned to the list.
+Chromium reported zero console errors.
+.
+1 passed in 10.31s
