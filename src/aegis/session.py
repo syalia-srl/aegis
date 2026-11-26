@@ -1122,6 +1122,7 @@ class Session:
         through_lock: bool = False,
         urgent: bool = False,
         by_person: bool = False,
+        realtime: dict | None = None,
     ) -> Literal["sent", "held", "steered"]:
         """An inbox message. Idle or stopped: sent now (a stopped session is
         resumed to receive it). Mid-turn: held, and sent with any others when
@@ -1136,17 +1137,28 @@ class Session:
         if not through_lock:
             self.check_lock()
             self.check_handed_off()
-        msg = {"header": header, "body": body, "ts": time.time()}
+        raw: dict = {"header": header, "body": body, "ts": time.time()}
+        if realtime is not None:
+            raw["realtime"] = realtime
         if by_person:
-            msg["by_person"] = True
-        if not (msg := self._quiet(msg)):
+            raw["by_person"] = True
+        if not (msg := self._quiet(raw)):
             return "sent"  # aegis's own news, which a product agent never gets
-        if urgent and self.status == "working" and self.harness.steers_mid_turn:
+        earlier_voice = realtime is not None and any(
+            (m.get("realtime") or {}).get("id") == realtime["id"] for m in self.held
+        )
+        if (
+            urgent
+            and self.status == "working"
+            and self.harness.steers_mid_turn
+            and not earlier_voice
+            and (realtime is None or not self._flushing)
+        ):
             # Steered in as a person's mid-turn message is: a user message at
             # the next tool boundary (Claude Code) or a turn/steer (Codex).
-            await self._send(_inbox_text([msg]), steered=True, by_person=by_person)
+            await self._send_inbox([msg], steered=True, by_person=by_person)
             return "steered"
-        if self.status == "working" or self._flushing:
+        if self.status == "working" or self._flushing or earlier_voice:
             self._hold(msg)
             return "held"
         if self._host.quota_hold(self) is not None or (
@@ -1154,12 +1166,18 @@ class Session:
         ):
             self._hold(msg | {"held_for": "quota"})
             return "held"
-        await self._send(_inbox_text([msg]), by_person=by_person)
+        await self._send_inbox([msg], by_person=by_person)
         return "sent"
 
     def _hold(self, msg: dict) -> None:
         self.held.append(msg)
-        self._metas.write_soon(self.log_id, self.meta)
+        if voice := msg.get("realtime"):
+            # Put the row where the block arrived, even if another harness
+            # turn still has to end before the session can hear it.
+            self._metas.write(self.meta())
+            self._record({"kind": "realtime_held", "realtime": voice, "ts": msg["ts"]})
+        else:
+            self._metas.write_soon(self.log_id, self.meta)
         self._publish_now()
         self._host.status_changed(self)
 
@@ -1183,9 +1201,8 @@ class Session:
             if batch:
                 # Before the send gathers notices: the "held" warning ends here.
                 self._host.status_changed(self)
-                await self._send(
-                    _inbox_text(batch),
-                    by_person=any(m.get("by_person") for m in batch),
+                await self._send_inbox(
+                    batch, by_person=any(m.get("by_person") for m in batch)
                 )
         finally:
             self._flushing = False
@@ -1193,6 +1210,20 @@ class Session:
                 # The turn the send started ended before it returned, and its
                 # end found the session busy flushing (#536).
                 self._host.flush_ended(self)
+
+    async def _send_inbox(
+        self, batch: list[dict], *, steered: bool = False, by_person: bool = False
+    ) -> None:
+        has_realtime = any("realtime" in message for message in batch)
+        await self._send(
+            _inbox_text(batch),
+            typed=next(
+                (m["realtime"]["text"] for m in batch if m.get("realtime")), None
+            ),
+            steered=steered,
+            by_person=by_person,
+            inbox=batch if has_realtime else None,
+        )
 
     @property
     def inbox(self) -> Path:
@@ -1230,6 +1261,7 @@ class Session:
         *,
         steered: bool = False,
         by_person: bool = False,
+        inbox: list[dict] | None = None,
     ) -> None:
         if self.spec.model_selector:
             await self._host.prepare_turn(self)
@@ -1252,6 +1284,8 @@ class Session:
             if extra := "\n\n".join(b for b in blocks if b):
                 text = f"{text}\n\n{extra}"
         record: dict = {"kind": "send", "text": text}
+        if inbox:
+            record["inbox"] = inbox
         if attached:
             record |= {"typed": typed or "", "files": attached}
         if steered:
