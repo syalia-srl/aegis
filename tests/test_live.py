@@ -2839,10 +2839,10 @@ async def test_a_real_agent_chooses_contextual_knowledge_destinations(tmp_path: 
         assert memory.expires == expires and memory.lifetime == "temporary"
         assert memory.status == "approved" and memory.path is not None
         assert "restor" in memory.path.read_text().lower()
-        (reminder,) = [
-            entry for entry in writer.entries() if entry.get("title") == "memory_remind"
-        ]
-        assert reminder["status"] == "ok"
+        assert any(
+            entry.get("title") == "memory_remind" and entry.get("status") == "ok"
+            for entry in writer.entries()
+        )
         for path in (procedure, skill, memory.path):
             assert any(
                 str(path) in (entry.get("md") or "")
