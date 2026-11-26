@@ -38,7 +38,7 @@ from io import StringIO
 from pathlib import Path
 from typing import Any, Literal, cast
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError, field_validator
 from ruamel.yaml import YAML, YAMLError
 from ruamel.yaml.comments import CommentedMap
 from ruamel.yaml.scalarstring import LiteralScalarString
@@ -337,7 +337,7 @@ def workflows_from(raw: object) -> dict:
 NUDGES_DEFAULTS: dict = {"silent_s": 2, "plan_min": 15}
 
 
-KNOWLEDGE_DEFAULTS: dict = {"embeddings": "off", "know_how": True}
+KNOWLEDGE_DEFAULTS: dict = {"embeddings": "off", "know_how": True, "sources": ()}
 
 
 # The quota: block (quota/projection.py): how far back "the current rate" looks,
@@ -388,23 +388,59 @@ def quota_from(raw: object) -> dict:
     return {"half_life": got}
 
 
+class KnowledgeSource(BaseModel):
+    model_config = {"extra": "forbid", "frozen": True}
+
+    root: str = Field(min_length=1)
+    format: Literal["markdown", "skill"] = "markdown"
+    include: tuple[str, ...] = ("**/*.md",)
+    exclude: tuple[str, ...] = ()
+
+    @field_validator("root")
+    @classmethod
+    def valid_root(cls, root: str) -> str:
+        if not root.strip() or "\x00" in root or ".." in Path(root).parts:
+            raise ValueError("use a directory without parent components")
+        return root
+
+    @field_validator("include", "exclude")
+    @classmethod
+    def valid_patterns(cls, patterns: tuple[str, ...]) -> tuple[str, ...]:
+        if any(
+            not p or Path(p).is_absolute() or ".." in Path(p).parts for p in patterns
+        ):
+            raise ValueError("use nonempty patterns relative to the source root")
+        return patterns
+
+
 def knowledge_from(raw: object) -> dict:
     """The ``knowledge:`` block over its defaults: ``embeddings``, off or a
     fastembed model's name (knowledge/embed.py), and ``know_how``, whether a
-    session is told about a repository's docs (knowledge/know_how.py). A wrong
-    block keeps the defaults and carries ``error`` for aegis doctor."""
+    session is told about a repository's docs (knowledge/know_how.py).
+    ``sources`` registers additional directories for the read-only catalog.
+    An invalid value carries ``error`` for aegis doctor."""
     out = dict(KNOWLEDGE_DEFAULTS)
     if raw is None:
         return out
     if not isinstance(raw, dict):
         return out | {
-            "error": "knowledge must be a mapping with embeddings and know_how"
+            "error": "knowledge must be a mapping with embeddings, know_how and sources"
         }
     for k, v in raw.items():
         if k not in KNOWLEDGE_DEFAULTS:
             return out | {
-                "error": f"knowledge has no key {k!r}; it takes embeddings and know_how"
+                "error": f"knowledge has no key {k!r}; it takes embeddings, know_how and sources"
             }
+        if k == "sources":
+            try:
+                if not isinstance(v, list):
+                    return out | {"error": "knowledge.sources must be a list"}
+                out["sources"] = tuple(
+                    KnowledgeSource.model_validate(source) for source in v
+                )
+            except ValidationError as exc:
+                return out | {"error": f"knowledge.sources: {exc}"}
+            continue
         if k == "know_how":
             if not isinstance(v, bool):
                 return out | {"error": f"knowledge.know_how {v!r} is not true or false"}

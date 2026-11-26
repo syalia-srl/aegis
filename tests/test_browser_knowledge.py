@@ -285,3 +285,40 @@ def test_the_cards_edit_opens_the_view_on_the_item(server, page):
     page.wait_for_selector("#a2[data-view=knowledge] .kdetail .ked .cm-content")
     assert page.inner_text(".kdetail .kname") == "merge-after-green"
     assert page.errors == []
+
+
+def test_agent_reads_live_knowledge_source(server, page):
+    from os import environ
+    from pathlib import Path
+
+    config = server.root / ".aegis.yaml"
+    config.write_text(config.read_text() + "\nknowledge: {sources: [{root: guides}]}\n")
+    guide = server.root / "guides" / "release.md"
+    guide.parent.mkdir()
+    guide.write_text("---\ntitle: Release checklist\n---\nBuild the package.\n")
+    page.goto(server.url)
+    spawn(page, "/mcp knowledge_catalog {}")
+    said = page.locator(".row.prose .md").last.text_content()
+    assert said.startswith("mcp ok:")
+    (entry,) = json.loads(said.removeprefix("mcp ok: "))["items"]
+    assert entry["title"] == "Release checklist"
+
+    guide.write_text(
+        "---\ntitle: Release checklist\n---\nVerify the package checksum.\n"
+    )
+    # The normal refresh cadence must elapse through the real server.
+    page.wait_for_timeout(5100)
+    page.fill(
+        "#input", f"/mcp knowledge_catalog {json.dumps({'entry_id': entry['id']})}"
+    )
+    page.press("#input", "Enter")
+    turns_done(page, 2)
+    said = page.locator(".row.prose .md").last.text_content()
+    got = json.loads(said.removeprefix("mcp ok: "))
+    assert got["body"] == "Verify the package checksum.\n"
+    assert got["revision"] != entry["revision"]
+    if evidence := environ.get("WIKI_SOURCE_EVIDENCE"):
+        result = page.locator(".row.prose .md").last
+        result.screenshot(path=str(Path(evidence) / "desktop.png"))
+        page.set_viewport_size({"width": 390, "height": 844})
+        result.screenshot(path=str(Path(evidence) / "phone.png"))
