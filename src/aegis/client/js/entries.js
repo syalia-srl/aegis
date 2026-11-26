@@ -1989,13 +1989,6 @@ const RENDERERS = {
   user(e, opts = {}) {
     const t = opts.t || en;
     const body = el("div", "body");
-    if (e.detail?.realtime) {
-      const ended = e.detail.capture_state === "ended";
-      if (!ended) body.append(el("div", "voice-text", e.md));
-      body.append(el("div", "dictated", t(ended ? "dictation.realtimeEnded" : "dictation.realtime")));
-      if (!ended) body.append(copyButton("message", t));
-      return row(e, `user ${e.status} ${ended ? "voice-ended" : "voice-block"}`, body);
-    }
     if (e.md) body.append(markdown(e.md, { breaks: true, t }));
     if (e.detail?.files?.length) {
       // What the person attached: one card that pages, as a file_send's.

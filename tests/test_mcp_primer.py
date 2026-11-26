@@ -9,11 +9,11 @@ import pytest
 from aegis.mcp import primer
 from aegis.scopes import ANY, GROUPS, TOOLS, Scope
 
-# SHA-256 of the unscoped primer for this session, without and with the
-# browsers paragraph. The baseline includes the current Send audio gesture.
-BASELINE = {
-    False: "baf57bc7e6a9f3bd0c92f3dc5a5010a38d705905f71018a7d55e21f98155b180",
-    True: "304ffe0b3e9445e66d5ba28b2faf8ae3a5c45ca94ab197c55ca4d330672981b9",
+# sha256 of the primer before scopes, for this session, without and with the
+# browsers paragraph. An unscoped session must keep getting exactly it.
+BEFORE = {
+    False: "a30351dd0b25e9284a761028ca8423396d30bb88b9978b76414cf5d00abf94ee",
+    True: "9b89dcc028957c921e4c8e47c4d856aecb1ad49e0c49967dcd4952b7e0f20e09",
 }
 
 
@@ -27,11 +27,11 @@ def text(scope: Scope, browsers: bool = True) -> str:
 
 
 @pytest.mark.parametrize("browsers", [False, True])
-def test_the_unscoped_primer_matches_its_baseline(browsers):
+def test_the_unscoped_primer_is_byte_identical_to_before(browsers):
     got = hashlib.sha256(
         text(ANY, browsers).split("\n\nDelegation discovery:")[0].encode()
     ).hexdigest()
-    assert got == BASELINE[browsers]
+    assert got == BEFORE[browsers]
 
 
 def test_a_primer_without_workflows_never_names_them():
