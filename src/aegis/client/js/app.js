@@ -2468,19 +2468,71 @@ const onTake = (file, ms, ctx) => {
   if (app.state.shown === ctx.key && onSession()) send();
   else toast("The recording waits in its session's box: send it from there");
 };
+async function sendRealtime({ key }, params) {
+  // Reconnect retries keep the original nonce and never advance the stream
+  // until this block is acknowledged.
+  for (;;) {
+    try {
+      return await answered(app.callFor(key, "session.send", params));
+    } catch (error) {
+      if (error === LATE) app.conn.drop();
+      else if (error.code !== "offline") throw error;
+      if (app.conn.stopped) throw error;
+      await waitOnline();
+    }
+  }
+}
+
 const dictation = new DictationPart(app, $("composer"), {
   input: () => input,
   // A session's box holds that session's draft, so text that lands after the
   // box moved to another session goes to the draft it started in.
   draft: () => (app.state.shown ? `aegis.draft.${app.state.shown}` : null),
   heard: (key) => key && spoken.add(key),
-  ctx: () => ({ key: app.state.shown }),
+  ctx: () => {
+    const key = app.state.shown;
+    const session = app.state.sessions.get(key);
+    const server = key && app.forKey(key).server;
+    const label = session?.handle ?? key;
+    return { key, label: server ? `${label}@${server}` : label };
+  },
+  realtime: sendRealtime,
+  onRealtime: (rec) => {
+    $("realtime-status").hidden = !rec;
+    if (!rec) return;
+    const status = rec.closing
+      ? (rec.retry ? "dictation.realtimeStoppedPending" : "dictation.realtimeFinishing")
+      : (rec.retry ? "dictation.realtimeListeningPending" : "dictation.realtimeSource");
+    $("realtime-source").textContent = app.t(status, { session: rec.origin.label });
+    $("realtime-retry").hidden = !rec.retry;
+    $("realtime-retry").textContent = app.t(
+      rec.retry?.kind === "delivery" ? "dictation.realtimeRetryDelivery" : "dictation.realtimeRetry",
+    );
+    $("realtime-view").hidden = !rec.deliveryBlocked || !rec.unsent.size;
+    $("realtime-stop").disabled = rec.closing;
+  },
   canStart: () => !offline(),
   prepare: () => app.conn.call("dictation.prepare"),
   onState: (state) => artifacts.dictationState(state),
   onLevel: () => artifacts.dictationCheck(),
   onTake,
 });
+$("realtime-retry").addEventListener("click", () => dictation.realtime.retry());
+$("realtime-view").addEventListener("click", async () => {
+  const text = document.createElement("textarea");
+  const label = app.t("dictation.realtimeUnsent");
+  text.className = "realtime-unsent";
+  text.setAttribute("aria-label", label);
+  text.readOnly = true;
+  text.rows = 6;
+  text.value = dictation.realtime.pendingText();
+  const closed = choose(label, text, [{ value: "close", label: app.t("dictation.realtimeClose"), primary: true }], { root });
+  text.focus();
+  text.select();
+  await closed;
+  if (!$("realtime-view").hidden) $("realtime-view").focus();
+});
+$("realtime-stop").addEventListener("click", () => dictation.realtime.stop());
 // On a touch screen Enter adds a line and the button sends: the key sits where
 // a mistap lands, and half a message costs a turn.
 const touch = matchMedia("(pointer: coarse)");
