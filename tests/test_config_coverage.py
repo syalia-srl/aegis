@@ -65,7 +65,10 @@ usage:
   subscriptions: {a1b2: {name: claude-max, fee: 200, renews: 14}}
 harness_versions: {person: warn, agent: "off", startup: "off", accepted: {opencode: ["2.0.33"]}}
 nudges: {silent_s: false, plan_min: 20}
-knowledge: {embeddings: minishlab/potion-multilingual-128M, know_how: false}
+knowledge:
+  embeddings: minishlab/potion-multilingual-128M
+  know_how: false
+  sources: [{root: docs, format: markdown, include: ['**/*.md'], exclude: [drafts]}]
 quota: {projection: {half_life: {5h: 45m, week: 12h, month: 2d}}}
 notices:
   disk: {on: 80, critical: 95, clear: 70}
