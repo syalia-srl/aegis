@@ -474,39 +474,3 @@ restart of its process included, so its menu and its tools always agree;
 the switch reaches the sessions you start after it. Turn the switch off in Settings to go back: until it
 is on, what aegis holds and what the harness still holds both run, and the
 hint names only aegis's.
-
-## Synthesize a task
-
-Enable synthesis in a test workspace by adding a queue whose agent uses Claude
-Code and a model you have authorized for the selected Knowledge sources.
-
-```yaml
-queues:
-  knowledge-synthesis:
-    agent: reviewer
-    max_pending: 4
-```
-
-Choose a session in Knowledge and click **Synthesize a task**, or call
-`knowledge_synthesize` with `task` and optional `context` in an agent session.
-The queue runs a tool-free worker with text from the catalog. The server starts
-with BM25 matches and follows resolved links, visiting each ID once. It reads
-up to 12 pages and sends up to 28,000 characters of page body. Retrieval and
-generation have a 90-second budget after the worker starts. Ambiguous and
-unresolved links appear as gaps. The result also names any limits reached.
-
-Agent requests return a task ID and deliver the result to the session inbox.
-Inspect it with `task_status` or stop it with `task_cancel`. The library entry
-point is `srv.queues.synthesize(session, task, context=...)`. Its task result
-contains JSON with steps, contradictions, gaps, limits and numbered citations.
-Use a source button in the guide, or call
-`knowledge_catalog entry_id=ID expected_revision=REVISION` with the citation's
-ID and revision. If a page
-changed, the catalog reports its current revision. Run synthesis again to
-use updated evidence. To keep a guide, explicitly save it to the intended
-source with the corresponding Knowledge writing operation.
-
-Before enabling the queue in another workspace, find a procedure, follow its
-link, edit the source and check the new search result from another session.
-Synthesize the task and open each cited revision. Remove the queue to disable
-new synthesis requests.

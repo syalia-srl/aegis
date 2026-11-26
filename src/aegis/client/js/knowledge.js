@@ -3,8 +3,7 @@ import { open as openEditor } from "./editor.js";
 import { ago } from "./fleet.js";
 import { icon } from "./glyphs.js";
 import { opens } from "./journal.js";
-import { ask, cancelAsk, choose } from "./dialog.js";
-import { rootOf } from "./root.js";
+import { ask } from "./dialog.js";
 
 const KINDS = [
   ["all", "all"],
@@ -120,9 +119,6 @@ export class Knowledge {
     const panes = el("div", "kpanes");
     panes.append(this.list, this.detail);
     const top = el("div", "ktop");
-    this.synthesisButton = button("btn", "Synthesize a task", () => this.synthesize());
-    this.synthesisButton.hidden = true;
-    filters.append(this.synthesisButton);
     top.append(search, filters, this.kinds, this.count, this.listErrors);
     this.box.replaceChildren(top, panes);
   }
@@ -195,7 +191,6 @@ export class Knowledge {
       return;
     }
     if (n !== this.seq) return;
-    this.synthesisButton.hidden = !res.synthesis;
     this.rows = res.items;
     const choices = new Map([["", "All sources"]]);
     if (res.personal_source_id) choices.set(res.personal_source_id, "Personal knowledge");
@@ -204,100 +199,6 @@ export class Knowledge {
     this.options(this.source, [...choices], selected);
     if (p.source_id && !selected) return this.load();
     this.render(p, null, res);
-  }
-
-  async synthesize() {
-    const context = this.logId;
-    const root = rootOf(this.box);
-    const input = el("textarea", "jq");
-    input.setAttribute("aria-label", "Task");
-    input.maxLength = 2000;
-    input.value = this.q.value;
-    if (await choose("Synthesize a Knowledge guide", input, [
-      { value: "run", label: "Synthesize", primary: true },
-      { value: "close", label: "Close" },
-    ], { root }) !== "run" || !input.value.trim()) return;
-
-    this.synthesisButton.disabled = true;
-    try {
-      const { task_id } = await this.conn.call("knowledge.synthesize", {
-        log_id: context, task: input.value,
-      });
-      const status = el("p", null, "Synthesizing…");
-      const wait = choose("Knowledge synthesis", status, [
-        { value: "cancel", label: "Cancel synthesis" },
-      ], { root });
-      let timer, settled = false;
-      const result = await Promise.race([
-        wait.then(() => null),
-        new Promise((resolve, reject) => {
-          const read = async () => {
-            try {
-              const result = await this.conn.call("task.status", { task_id });
-              if (settled) return;
-              if (["pending", "running"].includes(result.status)) timer = setTimeout(read, 500);
-              else resolve(result);
-            } catch (e) {
-              reject(e);
-            }
-          };
-          timer = setTimeout(read, 0);
-        }),
-      ]).finally(() => {
-        settled = true;
-        clearTimeout(timer);
-        if (status.closest(".dialog:not([hidden])")) cancelAsk();
-      });
-      if (!result) {
-        await this.conn.call("task.cancel", { task_id });
-        return;
-      }
-      if (result.status !== "completed") throw new Error(result.error || result.status);
-      await this.showGuide(JSON.parse(result.result), context, root);
-    } catch (e) {
-      await ask(e.message, { root, ok: "Close", cancel: "Dismiss" });
-    } finally {
-      this.synthesisButton.disabled = false;
-    }
-  }
-
-  async showGuide(guide, context, root) {
-    const body = el("div", "kconnections");
-    let selected;
-    for (const [label, claims] of [["Steps", guide.steps], ["Contradictions", guide.contradictions]]) {
-      if (!claims.length) continue;
-      const list = el(label === "Steps" ? "ol" : "ul");
-      for (const claim of claims) {
-        const row = el("li", null, claim.text);
-        for (const number of claim.sources) {
-          const citation = guide.citations[number - 1];
-          row.append(" ", button("btn sm", `[${number}] ${citation.title}`, () => {
-            selected = citation;
-            cancelAsk();
-          }));
-        }
-        list.append(row);
-      }
-      body.append(el("h3", null, label), list);
-    }
-    for (const gap of guide.gaps) body.append(el("p", null, gap));
-    if (guide.limits.length) body.append(el("p", null, `Limits reached: ${guide.limits.join(", ")}`));
-    while (true) {
-      selected = null;
-      await choose("Knowledge guide", body, [{ value: "close", label: "Close" }], { root });
-      if (!selected) return;
-      const citation = selected;
-      const content = el("div", "kconnections");
-      try {
-        const page = await this.conn.call("knowledge.catalog", {
-          entry_id: citation.id, expected_revision: citation.revision, log_id: context,
-        });
-        content.append(el("p", "kmeta", `${citation.relative_path} · Revision ${citation.revision}`), markdown(page.body));
-      } catch (e) {
-        content.append(el("p", null, e.message));
-      }
-      await choose(citation.title, content, [{ value: "back", label: "Back to guide" }], { root });
-    }
   }
 
   render(p, failed = null, result = null) {

@@ -48,9 +48,9 @@ from pydantic import BaseModel, Field
 
 from pathlib import Path, PurePosixPath
 
-from . import launch, oneshot
+from . import launch
 from .skill_mcp import SkillToolError, stop_group
-from .knowledge import checks, history, importer, synthesis
+from .knowledge import checks, history, importer
 from .knowledge.items import (
     Item,
     check_name,
@@ -59,16 +59,13 @@ from .knowledge.items import (
     parse_skill,
     source_id,
 )
-from .knowledge.sources import Entry, Source, current_revision, stale, write_page
+from .knowledge.sources import Entry, Source, stale, write_page
 from .journal.paths import place
 from .monitors import iso_now
-from .ops import Caller, OpError, Principal
-from .scopes import check_name as check_scope_name
+from .ops import Caller, OpError
 
 if TYPE_CHECKING:
     from .app import App
-    from .queues import Task
-    from .session import SpawnSpec
 
 log = logging.getLogger("aegis.knowledge")
 
@@ -504,25 +501,12 @@ class CatalogItems(_Strict):
         None, description="Read one entry by ID; omit to list or search entries."
     )
 
-    expected_revision: str | None = Field(
-        None,
-        pattern=r"^[0-9a-f]{64}$",
-        description="Require this revision when reading by ID.",
-    )
     query: str | None = Field(None, description="Search visible entries with BM25.")
     limit: int = Field(20, ge=1, le=100, description="Maximum number of search hits.")
     source_id: str | None = Field(None, description="Filter results by source ID.")
     kind: Literal["all", "skill", "memory", "flagged"] = Field(
         "all", description="Filter results by kind or personal flags."
     )
-
-
-class Synthesize(_Strict):
-    log_id: str | None = Field(
-        None, description="Browser session context. Agents use their own."
-    )
-    task: str = Field(min_length=1, max_length=2000)
-    context: str = Field("", max_length=4000)
 
 
 class WritePage(_Strict):
@@ -1744,15 +1728,9 @@ def register_knowledge_ops(app: App) -> None:
         local=True,
     )
     async def knowledge_catalog(p: CatalogItems, caller):
-        """Search or list visible knowledge entries, or read one by qualified ID.
-        For an agent's own worktree, omit log_id."""
-        return await catalog(p, caller)
-
-    async def catalog(p: CatalogItems, caller, *, within: set[Source] | None = None):
+        """Search or list visible knowledge entries, or read one by its qualified ID."""
         if p.entry_id is not None and p.query is not None:
             raise OpError("bad_params", "supply either entry_id or query")
-        if p.expected_revision is not None and p.entry_id is None:
-            raise OpError("bad_params", "expected_revision requires an entry_id")
         owner = principal(caller)
         configured = []
         cwd = worktree = None
@@ -1762,8 +1740,6 @@ def register_knowledge_ops(app: App) -> None:
             cwd = session.cwd
             worktree = str(top) if top is not None else None
             configured = await catalog_sources(who, session, top)
-            if within is not None:
-                configured = [source for source in configured if source in within]
 
         snapshots = await asyncio.gather(
             *(kn.source_snapshot(source) for source in configured)
@@ -1847,17 +1823,7 @@ def register_knowledge_ops(app: App) -> None:
             else:
                 raise OpError("not_found", "no matching knowledge entry")
             neighbors = await kn.catalog_neighbors(list(items.values()), p.entry_id)
-            revision = it.revision
-            if p.expected_revision is not None and personal is None and it.path:
-                revision = await asyncio.to_thread(current_revision, it.path)
             check_access("read")
-            if p.expected_revision is not None and (
-                p.expected_revision != revision or p.expected_revision != it.revision
-            ):
-                raise OpError(
-                    "revision_changed",
-                    f"the page changed; current revision: {revision or 'unavailable'}",
-                )
             rank = kn.read_rank(caller.log_id or "", it.id)
             kn.usage.add(
                 owner,
@@ -1918,11 +1884,6 @@ def register_knowledge_ops(app: App) -> None:
             )
         return {
             **search_fields,
-            **(
-                {"synthesis": True}
-                if ref and synthesis.QUEUE in app.queues.queues
-                else {}
-            ),
             "items": all_rows,
             "sources": [
                 {
@@ -1943,139 +1904,6 @@ def register_knowledge_ops(app: App) -> None:
                 else {}
             ),
         }
-
-    @r.op(
-        "knowledge.synthesize",
-        Synthesize,
-        names=(("log_id", "session"),),
-        agent=True,
-        local=True,
-        work=True,
-    )
-    async def knowledge_synthesize(p: Synthesize, caller):
-        """Start a read-only Knowledge worker for a task. The queue result
-        has steps, citations, contradictions, gaps and limits. Open a citation
-        with knowledge_catalog and its entry_id and expected_revision. Use
-        task_cancel to stop the worker."""
-        ref = caller.log_id if caller.is_agent else p.log_id
-        if not ref or (caller.is_agent and p.log_id not in (None, ref)):
-            raise OpError("bad_params", "choose your own session context")
-        if caller.is_agent and ref in app.sessions.sessions:
-            check_scope_name(
-                app.sessions.sessions[ref].spec.scope, "queues", synthesis.QUEUE
-            )
-        _, session, _ = await source_context(ref, caller)
-        owner = principal(caller)
-        if session.owner != owner:
-            raise OpError("forbidden", "choose a session you own")
-        queue = app.queues.queues.get(synthesis.QUEUE)
-        if queue is None or "error" in queue:
-            raise OpError(
-                "synthesis_off",
-                "configure the knowledge-synthesis queue with a Claude Code agent",
-            )
-        task = p.task.strip()
-        if not task:
-            raise OpError("bad_params", "supply a task")
-        warning = app.queues.admit(
-            synthesis.QUEUE, session.log_id, str(session.cwd), owner
-        )
-        queued = await app.queues.enqueue(
-            synthesis.QUEUE,
-            json.dumps({"task": task, "context": p.context}),
-            caller.is_agent,
-            session.log_id,
-            str(session.cwd),
-            owner=owner,
-            synthesis=True,
-        )
-        out = {
-            "task_id": queued.id,
-            "status": queued.status,
-            "position": app.queues.position(queued),
-        }
-        return out | (
-            {"warning": warning} if warning and queued.status == "pending" else {}
-        )
-
-    async def synthesize(task: Task, spec: SpawnSpec) -> str:
-        if spec.harness != "claude-code":
-            raise OpError(
-                "synthesis_off",
-                "the knowledge-synthesis queue requires a Claude Code agent",
-            )
-        owner = task.owner or app.user
-        caller = Caller(
-            "agent",
-            task.enqueuer,
-            principal=Principal(owner, await app.who_of_key(owner)),
-        )
-        ref = task.enqueuer
-        assert ref is not None
-        who, session, top = await source_context(ref, caller)
-        sources = set(await catalog_sources(who, session, top))
-        payload = json.loads(task.payload)
-        instructions = payload["task"]
-        context = payload["context"]
-
-        async def check_sources() -> None:
-            current_who, current, current_top = await source_context(ref, caller)
-            current_sources = await catalog_sources(current_who, current, current_top)
-            if not sources.issubset(current_sources):
-                raise OpError(
-                    "forbidden", "knowledge access changed; start a new synthesis"
-                )
-
-        async def fetch(**params):
-            return await catalog(CatalogItems(**params), caller, within=sources)
-
-        try:
-            async with asyncio.timeout(synthesis.SECONDS):
-                pages, limits, gaps = await synthesis.collect(instructions, fetch)
-                if pages:
-                    await check_sources()
-                    guide, cost = await synthesis.generate(
-                        app._bin(spec.harness),
-                        spec.model,
-                        instructions,
-                        context,
-                        pages,
-                    )
-                    if s := app.sessions.sessions.get(ref):
-                        s.add_btw_cost(cost)
-                    guide["gaps"] += gaps
-                else:
-                    guide = {
-                        "steps": [],
-                        "contradictions": [],
-                        "gaps": gaps + ["No matching visible Knowledge pages."],
-                    }
-        except TimeoutError:
-            return json.dumps(
-                {
-                    "steps": [],
-                    "contradictions": [],
-                    "citations": [],
-                    "gaps": ["Synthesis did not finish within its time budget."],
-                    "limits": ["time"],
-                }
-            )
-        except oneshot.OneshotError as e:
-            raise OpError("synthesis_failed", str(e)) from e
-
-        await check_sources()
-        citations = [
-            {
-                "number": number,
-                **{key: value for key, value in page.items() if key != "body"},
-            }
-            for number, page in enumerate(pages, 1)
-        ]
-        return json.dumps(
-            {**guide, "citations": citations, "limits": limits}, ensure_ascii=False
-        )
-
-    app.queues.synthesize = synthesize
 
     @r.op(
         "knowledge.worktree.read",

@@ -489,10 +489,6 @@ def test_knowledge_wiki_navigation_at_desktop_and_phone(server, page):
     from aegis.knowledge import history
 
     server.stop()
-    config = server.root / ".aegis.yaml"
-    config.write_text(
-        config.read_text() + "queues: {knowledge-synthesis: {agent: opus}}\n"
-    )
     history.ensure_repo(server.root)
     how = server.root / "know-how"
     how.mkdir()
@@ -599,11 +595,7 @@ def test_knowledge_wiki_navigation_at_desktop_and_phone(server, page):
     page.locator(".kconnections section").filter(
         has=page.get_by_role("heading", name="Outgoing links")
     ).get_by_role("button", name="verify-ledger", exact=True).press("Enter")
-    edit(
-        page,
-        skill.read_text()
-        + "Reconcile the molybdenum entries. [[Restore the ledger]]\n",
-    )
+    edit(page, skill.read_text() + "Reconcile the molybdenum entries.\n")
     page.click(".ksave")
     page.get_by_text("Saved and approved.").wait_for()
     assert "molybdenum" in skill.read_text()
@@ -664,27 +656,6 @@ def test_knowledge_wiki_navigation_at_desktop_and_phone(server, page):
         if evidence:
             page.screenshot(path=str(Path(evidence) / f"contextual-write-{width}.png"))
 
-    page.get_by_role("button", name="Back to all items").click()
-    for width, height in ((1280, 920), (390, 844)):
-        page.set_viewport_size({"width": width, "height": height})
-        page.get_by_role("button", name="Synthesize a task").click()
-        page.get_by_role("textbox", name="Task").fill("vanadium")
-        page.get_by_role("button", name="Synthesize", exact=True).click()
-        guide = page.get_by_role("dialog", name="", exact=True)
-        page.get_by_text("Combine the restoration checks.").wait_for()
-        if evidence:
-            page.screenshot(path=str(Path(evidence) / f"synthesis-{width}.png"))
-        for title, needle in (
-            ("Restore the ledger", "Test the vanadium restoration."),
-            ("verify-ledger", "Reconcile the molybdenum entries."),
-        ):
-            guide.get_by_role("button", name=title, exact=False).click()
-            guide.get_by_text(needle, exact=False).wait_for()
-            guide.get_by_text("Revision", exact=False).wait_for()
-            if evidence and title == "Restore the ledger":
-                page.screenshot(path=str(Path(evidence) / f"citation-{width}.png"))
-            guide.get_by_role("button", name="Back to guide").click()
-        guide.get_by_role("button", name="Close", exact=True).click()
     assert page.errors == []
     if evidence:
         (Path(evidence) / "journey.txt").write_text(

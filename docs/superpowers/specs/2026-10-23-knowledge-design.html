@@ -497,13 +497,6 @@ their editor and history.
 Validate the search, link, edit, and search again in a test workspace before
 enabling the wiki by default.</p>
 
-<h3>Task synthesis</h3>
-<p>Delivery 7 adds a session-scoped synthesis request. It uses BM25 and resolved
-links to collect a bounded set of visible pages. A tool-free queue worker
-returns cited steps, contradictions, gaps and any limits reached. Citation
-reads verify the required revision. Enabling the synthesis queue is explicit.
-A guide can be saved through the existing source write operation.</p>
-
 <p>Every hint writes one <code>hinted</code> row per item shown. A <code>read</code> of an item that was hinted in the same turn also records the hint's rank in <code>detail</code>. That pair is how the engine is judged on real use: the share of reads that came from the hint, and at which rank. <code>knowledge_stats</code> and the Knowledge view are queries over this table. Rows older than a year are dropped.</p>
 
 <h2 id="view"><span class="n">10</span>The Knowledge view</h2>

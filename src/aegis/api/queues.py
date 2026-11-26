@@ -36,16 +36,6 @@ class Queues:
         )
         return Task(self._srv, r["task_id"])
 
-    async def synthesize(
-        self, session: Session, task: str, *, context: str = ""
-    ) -> Task:
-        """Build a cited Knowledge guide for a session. Read it with Task.wait()."""
-        r = await self._srv._call(
-            "knowledge.synthesize",
-            {"log_id": session.log_id, "task": task, "context": context},
-        )
-        return Task(self._srv, r["task_id"])
-
     async def get(self, task_id: str) -> Task:
         if task_id not in self._srv.app.queues.tasks:
             raise TaskNotFound(f"no task {task_id!r}")
