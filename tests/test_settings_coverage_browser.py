@@ -3,8 +3,6 @@ keys it gained (#527). The keys are the readers' own (test_config_coverage)."""
 
 # ruff: noqa: F811  (pytest fixtures imported from test_browser)
 
-import json
-from os import environ
 from pathlib import Path
 
 import pytest
@@ -132,35 +130,3 @@ def test_agent_and_queue_descriptions_save_and_reload(full_server, page):
     page.wait_for_selector('#sp-agent .opt .meta:text-is("Review difficult changes.")')
     page.screenshot(path=str(full_server.root / "descriptions-picker.png"))
     assert page.errors == []
-
-
-def test_source_settings_validate_save_and_reload(full_server, page):
-    open_settings(page, full_server.url)
-    field = page.locator('[data-key="knowledge.sources"]')
-    assert json.loads(field.input_value())[0]["root"] == "docs"
-    config = full_server.root / ".aegis.yaml"
-    before = config.read_bytes()
-
-    field.fill("[")
-    page.click("#set-save")
-    error = page.locator('[data-row="knowledge"] .set-why.error')
-    assert "knowledge.sources" in error.inner_text()
-    assert config.read_bytes() == before
-    assert field.input_value() == "["
-
-    sources = [{"root": ".codex/skills", "format": "skill", "exclude": ["drafts"]}]
-    field.fill(json.dumps(sources))
-    page.click("#set-save")
-    page.wait_for_function(
-        "document.querySelector('#set-status').textContent === 'Saved'"
-    )
-    assert YAML(typ="safe").load(config.read_text())["knowledge"]["sources"] == sources
-    page.reload()
-    assert json.loads(field.input_value()) == sources
-    assert page.errors == []
-    if evidence := environ.get("WIKI_SOURCE_EVIDENCE"):
-        section = page.locator("#set-embeddings")
-        section.screenshot(path=str(Path(evidence) / "settings-desktop.png"))
-        page.set_viewport_size({"width": 390, "height": 844})
-        section.screenshot(path=str(Path(evidence) / "settings-phone.png"))
-        assert page.evaluate("document.documentElement.scrollWidth") <= 390

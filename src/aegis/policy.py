@@ -209,10 +209,6 @@ class HostPolicy:
         None, may run a session-less operation. The default allows."""
         return True
 
-    def knowledge_source(self, who: Any, session: SessionView, root: Path) -> bool:
-        """Whether this caller may read the registered knowledge root in this session."""
-        return True
-
     def catalog(self, who: Any) -> Catalog:
         return Catalog()
 
