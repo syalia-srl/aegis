@@ -102,8 +102,8 @@ class Task:
 
     # Synthesis uses a tool-free process instead of a resumable session.
     synthesis: bool = False
-    # Record the inbox attempt before delivering so retries cannot queue it twice.
-    callback_started: bool = False
+    # A synthesis result stays retryable until the inbox accepts it.
+    callback_delivered: bool = False
 
     def public(self) -> dict:
         d = asdict(self)
@@ -220,6 +220,9 @@ class Queues:
         self.on_mention: Callable[[Task, str, str], Awaitable[None]] | None = None
         self.synthesize: Callable[[Task, SpawnSpec], Awaitable[str]] | None = None
         self._syntheses: dict[str, asyncio.Task] = {}
+        self._delivering: set[str] = set()
+        self._callback_retries: dict[str, asyncio.TimerHandle] = {}
+        self._stopping = False
         self._registry = registry
         self._monitors = monitors
         self._path = path
@@ -232,6 +235,10 @@ class Queues:
 
     def shutdown(self) -> None:
         """The server is stopping: a SIGTERM grace check must not outlive it."""
+        self._stopping = True
+        for retry in self._callback_retries.values():
+            retry.cancel()
+        self._callback_retries.clear()
         for task in self._syntheses.values():
             task.cancel()
         for h in self._sigterm_timers:
@@ -285,6 +292,7 @@ class Queues:
                     continue
                 rec.pop("event", None)
                 rec.pop("at", None)
+                rec.pop("callback_started", None)
                 try:
                     t = Task(**rec)
                 except TypeError:
@@ -668,6 +676,16 @@ class Queues:
                 )
             except Exception as e:
                 self._fail(t, f"its worker could not resume after a restart: {e}")
+        for t in list(self.tasks.values()):
+            if t.synthesis and t.callback and not t.callback_delivered:
+                if t.status == "completed":
+                    await self._callback(t, "ok", t.result or "")
+                elif t.status == "failed":
+                    await self._callback(t, "error", f"The task failed: {t.error}")
+                elif t.status == "cancelled":
+                    await self._callback(
+                        t, "error", "Knowledge synthesis was cancelled."
+                    )
         await self.dispatch()
 
     # -- completion ----------------------------------------------------------------
@@ -763,15 +781,15 @@ class Queues:
             except Exception:
                 log.exception("aegis: could not send the callback of %s back", t.id)
             return
-        if not t.callback or not t.enqueuer or (t.synthesis and t.callback_started):
+        if not t.callback or not t.enqueuer:
             return
         s = self._registry.sessions.get(t.enqueuer)
         if s is None:
             return
+        if t.synthesis:
+            await self._synthesis_callback(t, s, outcome, body)
+            return
         try:
-            if t.synthesis:
-                t.callback_started = True
-                self._log(t, "callback_started")
             # The enqueuer's own task: it reaches a workflow node too.
             await s.deliver(
                 f"> from queue:{t.queue} · task#{t.id} · {outcome} · {iso_now()}",
@@ -780,3 +798,40 @@ class Queues:
             )
         except Exception:
             log.exception("aegis: could not deliver the callback of %s", t.id)
+
+    async def _synthesis_callback(
+        self, t: Task, s: Session, outcome: str, body: str
+    ) -> None:
+        if t.callback_delivered or t.id in self._delivering or self._stopping:
+            return
+        if retry := self._callback_retries.pop(t.id, None):
+            retry.cancel()
+        self._delivering.add(t.id)
+        try:
+            # The header must be identical after a restart. The inbox uses it
+            # to recognize this callback even without the queue checkpoint.
+            stamp = time.strftime(
+                "%Y-%m-%dT%H:%M:%SZ", time.gmtime(t.finished_at or t.created_at)
+            )
+            await s.deliver(
+                f"> from queue:{t.queue} · task#{t.id} · {outcome} · {stamp}",
+                body,
+                through_lock=True,
+                durable=True,
+            )
+            t.callback_delivered = True
+            self._log(t, "callback_delivered")
+        except Exception:
+            t.callback_delivered = False
+            log.exception("aegis: could not deliver the callback of %s", t.id)
+            if not self._stopping:
+
+                def retry_callback() -> None:
+                    self._callback_retries.pop(t.id, None)
+                    asyncio.create_task(self._callback(t, outcome, body))
+
+                self._callback_retries[t.id] = asyncio.get_running_loop().call_later(
+                    1, retry_callback
+                )
+        finally:
+            self._delivering.discard(t.id)

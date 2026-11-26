@@ -823,8 +823,10 @@ The queue counts the tool-free Claude Code subprocess as a worker. It hands
 the generator only the requester-visible text collected by BM25 and bounded
 link traversal. The structured result maps numbered claims to catalog IDs and
 revisions. A revision-qualified catalog read verifies the current source bytes.
-The task log records the result and callback attempt. Saving a guide is an
-explicit Knowledge write.
+The task log keeps the result until the recipient inbox accepts it. Synthesis
+callbacks carry a stable queue task identity, so recovery can retry an
+unconfirmed delivery without creating a second inbox response. Saving a guide
+is an explicit Knowledge write.
 
 A catalog query scores one BM25 corpus containing only entries visible to the
 requester, with title and description weighted above the full body. The index
