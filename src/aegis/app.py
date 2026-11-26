@@ -90,7 +90,14 @@ from .cascade import Cooling, Fall, classify, pick
 from .cgroups import SessionCgroups
 from .channels import Channels, Throttle
 from .claude.process import PERMISSION_MODE, ControlError
-from .config import CONTEXT_DEFAULTS, Config, Snapshot, accept_version, write_host
+from .config import (
+    CONTEXT_DEFAULTS,
+    DEFAULT_KNOWLEDGE_SOURCES,
+    Config,
+    Snapshot,
+    accept_version,
+    write_host,
+)
 from .harness import harness_for
 from .model_catalog import ModelCatalog
 from .config_ops import register_config_ops
@@ -115,9 +122,11 @@ from .park import Parker, Watchers
 from .push import register_push_ops
 from .queues import Queues
 from .journal.ops import register_journal_ops
+from .journal.paths import place
 from .journal.service import Journal
 from .knowledge.know_how import KnowHow
-from .knowledge.service import Knowledge
+from .knowledge.service import SCAN_EVERY_S, Knowledge
+from .knowledge.sources import Source
 from .knowledge.items import NAME_RE, Item
 from .skill_mcp import SkillServers
 from .knowledge_ops import (
@@ -578,6 +587,7 @@ class App:
         self._config_task: asyncio.Task | None = None
         self._versions_task: asyncio.Task | None = None
         self._knowledge_task: asyncio.Task | None = None
+        self._knowledge_sources_task: asyncio.Task | None = None
         # Checks a save started in the background, held so none is collected.
         self._knowledge_soon: set[asyncio.Task] = set()
         self._background: set[asyncio.Task] = set()
@@ -2022,6 +2032,7 @@ class App:
         self._versions_task = asyncio.create_task(self._startup_versions())
         # The knowledge flags, at boot and then daily, off the loop.
         self._knowledge_task = asyncio.create_task(self._knowledge_checks())
+        self._knowledge_sources_task = asyncio.create_task(self._knowledge_sources())
         # The shared model catalogue, at boot and every 15 minutes (ranking.py).
         self._ranking_task = asyncio.create_task(self._ranking_downloads())
         # In the background too, for the new tab's doctor row (doctor_watch.py).
@@ -2070,6 +2081,10 @@ class App:
             self._versions_task.cancel()
         if self._knowledge_task is not None:
             self._knowledge_task.cancel()
+        if self._knowledge_sources_task is not None:
+            self._knowledge_sources_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._knowledge_sources_task
         for task in list(self._knowledge_soon):
             task.cancel()
         await self.doctor_watch.stop()
@@ -2167,6 +2182,59 @@ class App:
         task = asyncio.create_task(self.bounded_check(principal, items))
         self._knowledge_soon.add(task)
         task.add_done_callback(self._knowledge_soon.discard)
+
+    async def knowledge_source_settings(self) -> tuple[Path, list[Source]]:
+        private = await asyncio.to_thread(self.roots.state_root.resolve)
+        configured = [
+            Source(
+                Path("/", *(self.roots.config_root / setting.root).parts[1:]),
+                setting.format,
+                setting.include,
+                setting.exclude,
+                private=private,
+                optional=setting in DEFAULT_KNOWLEDGE_SOURCES,
+            )
+            for setting in self.config.current().knowledge["sources"]
+        ]
+        configured = [
+            source for source in configured if not source.root.is_relative_to(private)
+        ]
+        self.knowledge.sources.configure(configured)
+        return private, configured
+
+    async def _refresh_knowledge_sources(self) -> int:
+        directories = {str(self.roots.config_root)}
+        directories.update(str(s.spec.cwd) for s in self.sessions.sessions.values())
+
+        def worktrees() -> set[Path]:
+            return {
+                Path(top) for directory in directories if (top := place(directory)[2])
+            }
+
+        tops = await asyncio.to_thread(worktrees)
+        private, configured = await self.knowledge_source_settings()
+        sources = set(configured) | self.knowledge.sources.worktrees()
+        sources.update(
+            Source(top / "know-how", "know-how", worktree=top, private=private)
+            for top in tops
+            if not (top / "know-how").is_relative_to(private)
+        )
+        await asyncio.gather(
+            *(self.knowledge.refresh_source(source) for source in sources)
+        )
+        return len(sources)
+
+    async def _knowledge_sources(self) -> None:
+        first = True
+        while True:
+            try:
+                count = await self._refresh_knowledge_sources()
+                if first:
+                    log.info("knowledge source startup scan finished (%d roots)", count)
+                    first = False
+            except Exception:
+                log.exception("could not refresh knowledge sources")
+            await asyncio.sleep(SCAN_EVERY_S)
 
     async def _knowledge_checks(self) -> None:
         """The daily pass: every principal's memories flagged once at boot,
