@@ -526,7 +526,7 @@ class _knowledge:
         """knowledge.card.undo"""
     async def card_unimport(self, *, log_id: str, id: str, name: str) -> Any:
         """Undo one item of an import card: its import commit is reverted, so it leaves aegis. Its original is wherever it then was."""
-    async def get(self, *, name: str | None = ..., id: str | None = ...) -> Any:
+    async def get(self, *, name: str | None = ..., entry_id: str | None = ...) -> Any:
         """Read a personal knowledge item by ID or name, with its edit stamp."""
     async def history(self, *, name: str) -> Any:
         """The commits that changed an item, newest first, a deleted one's included."""

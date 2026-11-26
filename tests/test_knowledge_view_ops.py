@@ -123,7 +123,7 @@ async def test_qualified_reads_keep_names_and_history_in_each_personal_store(mem
         (ADMIN, admin_row, "Admin procedure"),
         (member, member_row, "Member freeze"),
     ):
-        got = await call(members, "knowledge.get", caller, id=row["id"])
+        got = await call(members, "knowledge.get", caller, entry_id=row["id"])
         assert got == await call(members, "knowledge.get", caller, name="release")
         assert got["description"] == description
         assert got["stamp"] == got["revision"] == row["revision"]
@@ -132,22 +132,24 @@ async def test_qualified_reads_keep_names_and_history_in_each_personal_store(mem
     assert member_row["expires"] == "2020-01-01"
     assert (await call(members, "knowledge.history", member, name="release"))["history"]
     assert (
-        await refused(members, "knowledge.get", ADMIN, id=member_row["id"])
+        await refused(members, "knowledge.get", ADMIN, entry_id=member_row["id"])
     ).code == "not_found"
     assert (
-        await refused(members, "knowledge.get", member, id=admin_row["id"])
+        await refused(members, "knowledge.get", member, entry_id=admin_row["id"])
     ).code == "not_found"
 
     path = store.dir("wiki-member") / member_row["relative_path"]
     path.write_text(path.read_text() + "New detail\n")
-    got = await call(members, "knowledge.get", member, id=member_row["id"])
+    got = await call(members, "knowledge.get", member, entry_id=member_row["id"])
     assert (
         got["body"].endswith("New detail\n")
         and got["revision"] != member_row["revision"]
     )
     assert (await refused(members, "knowledge.get", member)).code == "bad_params"
     assert (
-        await refused(members, "knowledge.get", member, name="release", id=got["id"])
+        await refused(
+            members, "knowledge.get", member, name="release", entry_id=got["id"]
+        )
     ).code == "bad_params"
 
 

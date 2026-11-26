@@ -91,7 +91,7 @@ button to the list.
 ## Entry IDs and revisions
 
 `knowledge.list` returns an `id` for each personal entry. It combines the
-source ID and the path relative to that source. Pass that ID as `id` to
+source ID and the path relative to that source. Pass that entry ID to
 `knowledge.get` to read the entry, or pass its historical `name`. An ID
 only resolves within the caller's own store. The read returns the body and
 the full file text with the revision of those bytes. Edits keep the entry

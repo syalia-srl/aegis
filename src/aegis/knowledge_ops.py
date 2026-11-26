@@ -455,7 +455,7 @@ class ItemRef(_Strict):
 
 class ReadItem(_Strict):
     name: str | None = None
-    id: str | None = None
+    entry_id: str | None = None
 
 
 class PutItem(_Strict):
@@ -1519,11 +1519,11 @@ def register_knowledge_ops(app: App) -> None:
     async def knowledge_get(p: ReadItem, caller):
         """Read a personal knowledge item by ID or name, with its edit stamp."""
         owner = principal(caller)
-        if (p.name is None) == (p.id is None):
-            raise OpError("bad_params", "supply exactly one of name or id")
-        result = await kn.read(owner, name=p.name, entry_id=p.id)
+        if (p.name is None) == (p.entry_id is None):
+            raise OpError("bad_params", "supply exactly one of name or entry_id")
+        result = await kn.read(owner, name=p.name, entry_id=p.entry_id)
         if result is None:
-            ref = p.id if p.id is not None else p.name
+            ref = p.entry_id if p.entry_id is not None else p.name
             raise OpError("not_found", f"no item matching {ref!r}")
         it, text = result
         files = (
