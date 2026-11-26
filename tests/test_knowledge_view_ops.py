@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 from aegis.knowledge import history
-from aegis.ops import Caller, OpError
+from aegis.ops import Caller, OpError, Principal
 
 from .knowledge_samples import mem, skill
 from .one_person import BEN, recorded  # noqa: F401
@@ -92,6 +92,65 @@ async def test_get_returns_the_whole_file_its_stamp_and_a_skills_files(world):
     assert got["files"] == ["SKILL.md", "go.py"] and len(got["stamp"]) == 64
     assert (await refused(world, "knowledge.get", name="nope")).code == "not_found"
     assert (await refused(world, "knowledge.get", name="../x")).code == "bad_name"
+
+
+async def test_qualified_reads_keep_names_and_history_in_each_personal_store(members):
+    store = members.app.knowledge.store
+    owner = members.app.who(ADMIN).name
+    member = Caller("user", principal=Principal("wiki-member"))
+    await seed(members, mem("release", "Admin procedure"), owner=owner)
+    await seed(
+        members,
+        mem(
+            "release",
+            "Member freeze",
+            status="proposed",
+            lifetime="temporary",
+            expires="2020-01-01",
+        ),
+        owner="wiki-member",
+    )
+    (admin_row,) = (await call(members, "knowledge.list", ADMIN))["items"]
+    (member_row,) = (await call(members, "knowledge.list", member))["items"]
+    assert admin_row["id"] != member_row["id"]
+    assert (
+        admin_row["relative_path"]
+        == member_row["relative_path"]
+        == "memories/release.md"
+    )
+    assert admin_row["source_id"] != member_row["source_id"]
+    for caller, row, description in (
+        (ADMIN, admin_row, "Admin procedure"),
+        (member, member_row, "Member freeze"),
+    ):
+        got = await call(members, "knowledge.get", caller, entry_id=row["id"])
+        assert got == await call(members, "knowledge.get", caller, name="release")
+        assert got["description"] == description
+        assert got["stamp"] == got["revision"] == row["revision"]
+        assert got["title"] == "release" and got["scope"] == "personal"
+    assert member_row["status"] == "proposed" and member_row["flags"] == ["expired"]
+    assert member_row["expires"] == "2020-01-01"
+    assert (await call(members, "knowledge.history", member, name="release"))["history"]
+    assert (
+        await refused(members, "knowledge.get", ADMIN, entry_id=member_row["id"])
+    ).code == "not_found"
+    assert (
+        await refused(members, "knowledge.get", member, entry_id=admin_row["id"])
+    ).code == "not_found"
+
+    path = store.dir("wiki-member") / member_row["relative_path"]
+    path.write_text(path.read_text() + "New detail\n")
+    got = await call(members, "knowledge.get", member, entry_id=member_row["id"])
+    assert (
+        got["body"].endswith("New detail\n")
+        and got["revision"] != member_row["revision"]
+    )
+    assert (await refused(members, "knowledge.get", member)).code == "bad_params"
+    assert (
+        await refused(
+            members, "knowledge.get", member, name="release", entry_id=got["id"]
+        )
+    ).code == "bad_params"
 
 
 async def test_put_saves_the_edit_approved_as_one_commit(world):
