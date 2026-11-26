@@ -10197,6 +10197,126 @@ def test_realtime_delivery_retry_keeps_unsent_text_accessible(
     assert sends_of(dict_server, other) == [] and pg.errors == []
 
 
+def test_realtime_recovers_speech_refused_while_the_mic_is_live(
+    dict_server, page, tmp_path
+):
+    from .test_workflows_e2e import RESULT, flow
+
+    pg = page
+    pg.set_viewport_size({"width": 390, "height": 844})
+    # Use a continuous Web Audio track instead of hardware. The real composer
+    # still opens the stream and feeds its worklet, segmenter and workers.
+    pg.add_init_script("""
+        window.testFinalCount = 0;
+        const BrowserWorker = window.Worker;
+        window.Worker = class extends BrowserWorker {
+          constructor(url, ...args) {
+            super(url, ...args);
+            if (String(url).endsWith('/dictation.worker.js')) {
+              this.addEventListener('message', ({ data }) => {
+                if (data.type === 'text') window.testFinalCount++;
+              });
+            }
+          }
+        };
+        navigator.mediaDevices.getUserMedia = async () => {
+          const context = new AudioContext();
+          const oscillator = context.createOscillator();
+          const gain = context.createGain();
+          const output = context.createMediaStreamDestination();
+          oscillator.connect(gain).connect(output);
+          gain.gain.value = 0;
+          oscillator.start();
+          await context.resume();
+          const track = output.stream.getAudioTracks()[0];
+          const phrase = (frequency, seconds, delay = 0) => {
+            const start = context.currentTime + delay;
+            oscillator.frequency.setValueAtTime(frequency, start);
+            gain.gain.setValueAtTime(0.3, start);
+            gain.gain.setValueAtTime(0, start + seconds);
+            return start + seconds;
+          };
+          window.testMicTrack = track;
+          phrase(380, 1.5, 0.55);
+          window.testSecondPhrase = () => { window.testPhraseEnd = phrase(590, 2.6); };
+          window.testSecondPhraseDone = () => context.currentTime >= window.testPhraseEnd;
+          return output.stream;
+        };
+    """)
+    attempts = []
+
+    def sent(frame):
+        message = json.loads(frame)
+        params = message.get("params", {})
+        if message.get("op") == "session.send" and params.get("realtime"):
+            attempts.append(params)
+
+    pg.on("websocket", lambda socket: socket.on("framesent", sent))
+    pg.goto(dict_server.url)
+    pg.wait_for_selector("#a2[data-view=fleet]")
+    owner = spawn(
+        pg,
+        "/mcp workflow_arm " + json.dumps({"definition": flow("/busy 90", RESULT)}),
+    )
+    card = pg.locator("#entries .wfcard")
+    card.get_by_role("button", name="Approve and run").click()
+    node_link = card.locator(
+        '.wfrow[data-node="one"][data-state="running"] a[href^="#s="]'
+    )
+    node_link.wait_for()
+    origin = node_link.get_attribute("href").removeprefix("#s=")
+    node_link.click()
+    pg.wait_for_function("(id) => location.hash === '#s=' + id", arg=origin)
+
+    press_mic(pg)
+    move_to_target(pg, "realtime")
+    pg.mouse.up()
+    retry = pg.get_by_role("button", name="Retry delivery")
+    retry.wait_for(timeout=22000)
+    assert pg.evaluate("window.testMicTrack.readyState") == "live"
+    pg.get_by_text(re.compile(r"in_workflow:.*workflow")).wait_for()
+    (first,) = attempts
+    assert first["log_id"] == origin and first["realtime"]["state"] == "open"
+    assert 1.0 <= float(re.match(r"\[(\d+\.\d)s", first["text"])[1]) <= 1.6
+    assert not any(r.get("inbox") for r in sends_of(dict_server, origin))
+    pg.screenshot(path=tmp_path / "phone-realtime-live-lock.png")
+
+    pg.evaluate("window.testSecondPhrase()")
+    pg.wait_for_function("window.testSecondPhraseDone()")
+    pg.click("#realtime-stop")
+    pg.wait_for_function("window.testMicTrack.readyState === 'ended'", timeout=3000)
+    pg.wait_for_function("window.testFinalCount === 2", timeout=5000)
+    assert retry.is_visible() and attempts == [first]
+    pg.get_by_role("button", name="View unsent speech").click()
+    pending = pg.get_by_role("textbox", name="Unsent speech")
+    pg.wait_for_function(
+        "() => document.querySelector('.realtime-unsent').value.includes('\\n\\n')",
+        timeout=5000,
+    )
+    retained = pending.input_value().split("\n\n")
+    assert retained[0] == first["text"]
+    assert len(retained) == 2 and retained[1] != retained[0]
+    assert 2.4 <= float(re.match(r"\[(\d+\.\d)s", retained[1])[1]) <= 2.7
+    pg.get_by_role("dialog").get_by_role("button", name="Close").click()
+
+    pg.click(f"#tablist .tab[data-id='{owner}']")
+    card.get_by_role("button", name="Stop", exact=True).click()
+    pg.wait_for_selector("#entries .wfcard[data-status=stopped]")
+    retry.click()
+    pg.wait_for_selector("#realtime-status", state="hidden")
+    assert len(attempts) == 4 and attempts[0] == attempts[1]
+    assert [a.get("text") for a in attempts[1:]] == retained + [None]
+    assert len({a["nonce"] for a in attempts[1:]}) == 3
+    delivered = [
+        r["inbox"][0]["realtime"]
+        for r in sends_of(dict_server, origin)
+        if r.get("inbox") and r["inbox"][0].get("realtime")
+    ]
+    assert [m["text"] for m in delivered] == retained + [""]
+    assert [m["state"] for m in delivered] == ["open", "closing", "ended"]
+    assert pg.errors == []
+
+
 def test_the_working_row_types_its_verb_and_counts_the_turns_tokens(server, page):
     """#938: while a turn runs the verb types out letter by letter and the
     counters show the turn's new input and output tokens; they start at zero
