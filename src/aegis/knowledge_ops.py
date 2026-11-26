@@ -52,6 +52,8 @@ from . import launch
 from .skill_mcp import SkillToolError, stop_group
 from .knowledge import checks, history, importer
 from .knowledge.items import Item, check_name, dump, parse_memory, parse_skill
+from .knowledge.sources import Source
+from .journal.paths import place
 from .monitors import iso_now
 from .ops import Caller, OpError
 
@@ -462,6 +464,16 @@ class ReadWorktreeItem(_Strict):
     log_id: str = Field(min_length=1)
     entry_id: str | None = None
     relative_path: str | None = None
+
+
+class CatalogItems(_Strict):
+    log_id: str | None = Field(
+        None,
+        description="Session whose worktree supplies sources. Agents default to their own.",
+    )
+    entry_id: str | None = Field(
+        None, description="Read one entry by ID; omit to list entries."
+    )
 
 
 class PutItem(_Strict):
@@ -1551,6 +1563,113 @@ def register_knowledge_ops(app: App) -> None:
             "files": files,
         }
 
+    async def source_context(ref: str, caller):
+        log_id = app.session_of("session", ref)
+        session = app.view_of(log_id) if log_id else None
+        who = app.who(caller).who
+        if session is None or not app.policy.can(who, "read", session):
+            raise OpError("no_session", f"no session {ref!r}")
+        _, _, top = await asyncio.to_thread(place, session.cwd)
+        return who, session, Path(top) if top else None
+
+    @r.op(
+        "knowledge.catalog",
+        CatalogItems,
+        names=(("log_id", "session"),),
+        access="read",
+        agent=True,
+        local=True,
+    )
+    async def knowledge_catalog(p: CatalogItems, caller):
+        """List visible knowledge sources and entries, or read a qualified entry."""
+        owner = principal(caller)
+        configured = []
+        ref = p.log_id or caller.log_id
+        if ref:
+            who, session, top = await source_context(ref, caller)
+            config_root = app.roots.config_root
+            private = await asyncio.to_thread(app.roots.state_root.resolve)
+            configured = [
+                Source(
+                    Path("/", *(config_root / setting.root).parts[1:]),
+                    setting.format,
+                    setting.include,
+                    setting.exclude,
+                    private=private,
+                )
+                for setting in app.config.current().knowledge["sources"]
+            ]
+            kn.sources.configure(configured)
+            if top is not None:
+                configured.insert(
+                    0,
+                    Source(top / "know-how", "know-how", worktree=top, private=private),
+                )
+            configured = list(
+                dict.fromkeys(
+                    source
+                    for source in configured
+                    if not source.root.is_relative_to(private)
+                    and app.policy.knowledge_source(who, session, source.root)
+                )
+            )
+
+        if p.entry_id is not None:
+            personal = await kn.read(owner, entry_id=p.entry_id)
+            if personal is not None:
+                it, raw = personal
+                files = (
+                    await asyncio.to_thread(kn.store.entry_files, it)
+                    if it.kind == "skill"
+                    else []
+                )
+                return {
+                    **entry_fields(it),
+                    "kind": it.kind,
+                    "body": it.body,
+                    "text": raw,
+                    "files": files,
+                }
+
+        snapshots = await asyncio.gather(
+            *(kn.source_snapshot(source) for source in configured)
+        )
+        rows = {}
+        errors = []
+        for source, snapshot in zip(configured, snapshots):
+            for key, error in sorted(snapshot.errors.items()):
+                errors.append({"path": str(source.root / key), "error": error})
+            for _, entry in sorted(snapshot.entries.items()):
+                it = entry.item
+                row = {
+                    **entry_fields(it),
+                    "kind": "skill" if source.format == "skill" else "doc",
+                    "files": list(entry.files),
+                    "root": str(source.worktree or source.root),
+                }
+                if p.entry_id == it.id:
+                    return {**row, "body": it.body, "text": entry.text}
+                rows.setdefault(it.id, row)
+        if p.entry_id is not None:
+            raise OpError("not_found", "no matching knowledge entry")
+        personal_rows = [
+            {**entry_fields(it), "kind": it.kind} for it in await kn.items(owner)
+        ]
+        return {
+            "items": personal_rows + list(rows.values()),
+            "sources": [
+                {
+                    "root": str(source.root),
+                    "format": source.format,
+                    "scope": "workspace",
+                    "include": list(source.include),
+                    "exclude": list(source.exclude),
+                }
+                for source in configured
+            ],
+            "errors": errors,
+        }
+
     @r.op(
         "knowledge.worktree.read",
         ReadWorktreeItem,
@@ -1560,10 +1679,11 @@ def register_knowledge_ops(app: App) -> None:
     )
     async def knowledge_worktree_get(p: ReadWorktreeItem, caller):
         """Read a know-how document in a session's Git worktree, by ID or path."""
-        log_id = app.session_of("session", p.log_id)
-        session = app.view_of(log_id) if log_id else None
-        if session is None or not app.policy.can(app.who(caller).who, "read", session):
-            raise OpError("no_session", f"no session {p.log_id!r}")
+        who, session, top = await source_context(p.log_id, caller)
+        if top is None or not app.policy.knowledge_source(
+            who, session, top / "know-how"
+        ):
+            raise OpError("not_found", "no matching know-how entry in this worktree")
         if (p.entry_id is None) == (p.relative_path is None):
             raise OpError(
                 "bad_params", "supply exactly one of entry_id or relative_path"
