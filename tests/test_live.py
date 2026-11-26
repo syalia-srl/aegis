@@ -2818,9 +2818,8 @@ async def test_a_real_agent_chooses_contextual_knowledge_destinations(tmp_path: 
         writer = await world.spawn()
         expires = date.today() + timedelta(days=5)
         for request in (
-            f"Please remember that I'm responsible for the restoration until {expires}. "
-            "Keep the reminder private to me and save it now.",
             "Add 'Verify restoration of the amber ledger.' to the team's existing release procedure.",
+            f"Please save a reminder just for me that I'm responsible for the restoration until {expires}.",
             "Update the workspace skill we use to audit restore evidence so it says "
             "'Compare the cobalt recovery logs.' Keep its resources.",
         ):

@@ -623,7 +623,6 @@ class _memory:
     async def save(
         self,
         *,
-        asked: bool = ...,
         expected_revision: str | None = ...,
         name: str,
         description: str,
@@ -632,6 +631,7 @@ class _memory:
         lifetime: Literal["permanent", "temporary"] = ...,
         expires: str | None = ...,
         paths: builtins.list[str] = ...,
+        asked: bool = ...,
     ) -> Any:
         """Save a personal fact or reminder. For a direct request such as "remind me through Friday", set asked: true, lifetime: temporary and expires to Friday's date. Use expected_revision: null for a new memory or the current catalog revision when updating one. Report the returned path."""
     async def search(self, *, query: str, limit: int = ...) -> Any:
