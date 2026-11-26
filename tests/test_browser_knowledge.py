@@ -321,4 +321,7 @@ def test_agent_reads_live_knowledge_source(server, page):
         result = page.locator(".row.prose .md").last
         result.screenshot(path=str(Path(evidence) / "desktop.png"))
         page.set_viewport_size({"width": 390, "height": 844})
+        if page.locator("#a2").get_attribute("data-side") == "open":
+            page.click("#nav-side")
+        page.wait_for_function("document.querySelector('#a2').dataset.side !== 'open'")
         result.screenshot(path=str(Path(evidence) / "phone.png"))
