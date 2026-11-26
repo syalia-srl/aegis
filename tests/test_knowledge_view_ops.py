@@ -180,7 +180,7 @@ async def test_one_caller_reads_homonymous_worktree_entries_by_id(tmp_path):
         ("20261126-000000-aaaaaa", "alice", main, "Build.\n"),
         ("20261126-000000-bbbbbb", "bob", branch, "Test.\n"),
     )
-    op = "knowledge.worktree_get"
+    op = "knowledge.worktree.read"
     entries = []
     for log_id, owner, root, body in contexts:
         app.sessions.archived[log_id] = {

@@ -1552,7 +1552,7 @@ def register_knowledge_ops(app: App) -> None:
         }
 
     @r.op(
-        "knowledge.worktree_get",
+        "knowledge.worktree.read",
         ReadWorktreeItem,
         names=(("log_id", "session"),),
         access="read",
