@@ -2763,6 +2763,7 @@ async def test_real_opencode_discovers_agent_and_queue_descriptions(
 async def test_a_real_agent_chooses_contextual_knowledge_destinations(tmp_path: Path):
     """Run with live provider credentials and make test-live for this case."""
     import asyncio
+    import os
     from datetime import date, timedelta
     from hashlib import sha256
 
@@ -2772,11 +2773,20 @@ async def test_a_real_agent_chooses_contextual_knowledge_destinations(tmp_path: 
 
     claude = shutil.which("claude")
     assert claude, "claude is not on PATH"
+    model = os.environ.get("AEGIS_LIVE_KNOWLEDGE_MODEL", HAIKU)
     ensure_repo(tmp_path)
     (tmp_path / ".aegis.yaml").write_text(
         "default_agent: opus\n"
         "agents:\n"
-        f"  opus: {{harness: claude-code, model: {HAIKU}, effort: low, permission: full}}\n"
+        "  opus:\n"
+        "    harness: claude-code\n"
+        f"    model: {json.dumps(model)}\n"
+        "    effort: low\n"
+        "    permission: full\n"
+        "    harness_tools: false\n"
+        "    primer: false\n"
+        "    notices: false\n"
+        "    tools: {allow: [knowledge_catalog, knowledge_write, memory_save]}\n"
         "knowledge:\n"
         "  sources:\n"
         "    - {root: .codex/skills, format: skill, writable: true}\n"
@@ -2807,15 +2817,17 @@ async def test_a_real_agent_chooses_contextual_knowledge_destinations(tmp_path: 
     try:
         writer = await world.spawn()
         expires = date.today() + timedelta(days=5)
-        await ask(
-            writer,
-            "Use Aegis Knowledge tools for all discovery and writing. "
-            "Add 'Verify restoration of the amber ledger.' to the team's existing "
-            "release procedure. Remind only me that I own the restoration through "
-            f"{expires}. Update the workspace skill we use to audit restore evidence "
-            "so it says 'Compare the cobalt recovery logs.' Keep its resources. "
-            "Choose the existing destinations and report the actual saved paths.",
-        )
+        for request in (
+            "Add 'Verify restoration of the amber ledger.' to the team's existing release procedure.",
+            f"Remind only me that I own the restoration through {expires}.",
+            "Update the workspace skill we use to audit restore evidence so it says "
+            "'Compare the cobalt recovery logs.' Keep its resources.",
+        ):
+            await ask(
+                writer,
+                "Use Aegis Knowledge tools for discovery and writing. "
+                f"{request} Choose the destination and report the actual saved path.",
+            )
         assert "Verify restoration of the amber ledger." in procedure.read_text()
         assert "Compare the cobalt recovery logs." in skill.read_text()
         assert attachment.read_text() == "original attachment\n"
