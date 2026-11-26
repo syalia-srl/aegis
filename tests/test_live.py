@@ -2819,9 +2819,7 @@ async def test_a_real_agent_chooses_contextual_knowledge_destinations(tmp_path: 
         expires = date.today() + timedelta(days=5)
         for request in (
             "Add 'Verify restoration of the amber ledger.' to the team's existing release procedure.",
-            f"Remind only me that I own the restoration through {expires}. "
-            "I am explicitly asking you to save this. Mark it asked=true and use "
-            f"expected_revision=null if creating it. Set lifetime=temporary and expires={expires}.",
+            f"Please save a reminder just for me that I'm responsible for the restoration until {expires}.",
             "Update the workspace skill we use to audit restore evidence so it says "
             "'Compare the cobalt recovery logs.' Keep its resources.",
         ):
@@ -2839,6 +2837,10 @@ async def test_a_real_agent_chooses_contextual_knowledge_destinations(tmp_path: 
             if item.kind == "memory"
         ]
         assert memory.expires == expires and memory.status == "approved"
+        (save,) = [
+            entry for entry in writer.entries() if entry.get("title") == "memory_save"
+        ]
+        assert "expected_revision: null" in save["detail"]["args"]
         assert memory.path is not None
         assert "restor" in memory.path.read_text().lower()
         for path in (procedure, skill, memory.path):

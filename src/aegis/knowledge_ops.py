@@ -666,15 +666,16 @@ def register_knowledge_ops(app: App) -> None:
 
     @r.op("memory.save", SaveMemory, agent=True)
     async def memory_save(p: SaveMemory, caller):
-        """Save a memory: one fact that later sessions should know, such as
-        who the person is, how they want you to work, or where something
-        runs. Saving an existing name replaces that memory. Set asked: true
-        when the person's message that began this turn asked you to remember
-        it; it is then saved at once, with a card that lets them undo it.
-        Otherwise a new memory is
-        proposed: a card in your transcript asks the person to approve it,
-        and it is not hinted until then; a change to an approved one applies
-        at once, and its card lets the person undo it."""
+        """Save a personal fact or reminder. For a direct request such as
+        "remind me through Friday", set asked: true, lifetime: temporary and
+        expires to Friday's date. Use expected_revision: null for a new
+        memory or the current catalog revision when updating one. Report the
+        returned path.
+
+        An explicit request in a person's turn saves with Undo. A new memory
+        saved on the agent's initiative is proposed for approval. An update
+        to an approved memory takes effect with Undo.
+        """
         owner = principal(caller)
         check_name(p.name)
         if p.lifetime == "temporary" and p.expires is None:
