@@ -480,3 +480,140 @@ def test_browser_catalog_search_reads_the_late_match(server, page):
     assert result["hit"]["relative_path"] == "know-how/restoring.md"
     assert result["read"]["revision"] == result["hit"]["revision"]
     assert result["read"]["body"].endswith("Zirconium ledger.\n")
+
+
+def test_knowledge_wiki_navigation_at_desktop_and_phone(server, page):
+    from os import environ
+    from pathlib import Path
+
+    from aegis.knowledge import history
+
+    server.stop()
+    history.ensure_repo(server.root)
+    how = server.root / "know-how"
+    how.mkdir()
+    (how / "restore.md").write_text(
+        "---\ntitle: Restore the ledger\n---\n"
+        "Check the zirconium ledger. [[verify-ledger]] [[Missing]] [[Shared]]\n"
+    )
+    seed_skill(server.root, "verify-ledger", "Verify the restored entries")
+    seed_memory(server.root, "shared", "Personal shared entry")
+    external = server.root / ".codex" / "skills" / "shared"
+    external.mkdir(parents=True)
+    (external / "SKILL.md").write_text("---\ntitle: Shared\n---\nOther steps.\n")
+    marker = server.root / "mcp-started"
+    skill = store_dir(server.root) / "skills" / "verify-ledger" / "SKILL.md"
+    script = skill.with_name("server.py")
+    echo = Path(__file__).parent / "fixtures" / "skill_mcp_echo.py"
+    script.write_bytes(
+        f"open({str(marker)!r}, 'w').close()\n".encode() + echo.read_bytes()
+    )
+    skill.write_text(
+        skill.read_text().replace(
+            "\n---\n", "\naegis:\n  mcp: {command: [python3, server.py]}\n---\n", 1
+        )
+    )
+    server.start()
+    page.goto(server.url)
+    session = spawn(page)
+    page.click("#knowledge-btn")
+    context = page.get_by_role("combobox", name="Session context")
+    source = page.get_by_role("combobox", name="Knowledge source")
+    query = page.get_by_role("searchbox", name="Search knowledge")
+    query.fill("zirconium")
+    page.locator(".klist .empty").wait_for()
+    context.select_option(session)
+    hit = page.get_by_role("button", name="Restore the ledger", exact=False)
+    hit.wait_for()
+    source.select_option(label="Personal knowledge")
+    page.locator(".klist .empty").wait_for()
+    source.select_option(label=str(how))
+    hit.wait_for()
+
+    evidence = environ.get("KNOWLEDGE_VIEW_EVIDENCE")
+    for width, height in ((1280, 920), (390, 844)):
+        page.set_viewport_size({"width": width, "height": height})
+        hit.press("Enter")
+        page.get_by_role("heading", name="Restore the ledger").wait_for()
+        outgoing = page.locator(".kconnections section").filter(
+            has=page.get_by_role("heading", name="Outgoing links")
+        )
+        assert "Missing · Unresolved" in outgoing.inner_text()
+        assert "Shared · Ambiguous" in outgoing.inner_text()
+        assert outgoing.get_by_role(
+            "button", name="Personal · memories/shared.md"
+        ).is_visible()
+        assert outgoing.get_by_role(
+            "button", name=str(external / "SKILL.md")
+        ).is_visible()
+        assert (
+            page.locator(".kdetail .md")
+            .get_by_text("Check the zirconium ledger.", exact=False)
+            .is_visible()
+        )
+        assert page.evaluate("document.documentElement.scrollWidth") <= width
+        if evidence:
+            page.screenshot(path=str(Path(evidence) / f"knowledge-{width}.png"))
+        outgoing.get_by_role("button", name="verify-ledger", exact=True).press("Enter")
+        editor = page.locator(".ked .cm-content")
+        editor.wait_for()
+        assert "Verify the restored entries" in editor.inner_text()
+        assert not marker.exists()
+        incoming = page.locator(".kconnections section").filter(
+            has=page.get_by_role("heading", name="Incoming references")
+        )
+        if evidence:
+            page.screenshot(path=str(Path(evidence) / f"backlink-{width}.png"))
+        incoming.get_by_role("button", name="Restore the ledger").press("Enter")
+        graph = page.locator(".kgraph")
+        graph.get_by_role("button", name="verify-ledger").press("Enter")
+        editor.wait_for()
+        page.get_by_role("button", name="Back to all items").press("Enter")
+        hit.wait_for()
+        assert query.input_value() == "zirconium"
+        assert context.input_value() == session
+        assert source.locator("option:checked").inner_text() == str(how)
+        assert not marker.exists()
+
+    hit.press("Enter")
+    page.get_by_role("heading", name="Restore the ledger").wait_for()
+    page.locator(".kconnections section").filter(
+        has=page.get_by_role("heading", name="Outgoing links")
+    ).get_by_role("button", name="verify-ledger", exact=True).press("Enter")
+    edit(page, skill.read_text() + "Reconcile the molybdenum entries.\n")
+    page.click(".ksave")
+    page.get_by_text("Saved and approved.").wait_for()
+    assert "molybdenum" in skill.read_text()
+    page.get_by_role("button", name="Back to all items").press("Enter")
+    source.select_option(label="All sources")
+    query.fill("molybdenum")
+    page.locator(".krow[data-name=verify-ledger]").wait_for()
+    page.set_viewport_size({"width": 1280, "height": 920})
+    second = spawn(page)
+    page.click("#knowledge-btn")
+    context.select_option(second)
+    query.fill("molybdenum")
+    page.locator(".krow[data-name=verify-ledger]").press("Enter")
+    page.wait_for_function(
+        "document.querySelector('.ked .cm-content')?.textContent.includes('molybdenum')"
+    )
+    assert not marker.exists()
+
+    # Positive control. Explicitly invoking the same skill starts its MCP process.
+    page.goto(f"{server.url}#s={second}")
+    page.fill("#input", '/mcp skill_read {"name":"verify-ledger"}')
+    page.press("#input", "Enter")
+    turns_done(page, 1)
+    assert marker.exists()
+    assert page.errors == []
+    if evidence:
+        (Path(evidence) / "journey.txt").write_text(
+            "Fresh aegis serve with a Git worktree and a personal MCP skill.\n"
+            "Search ‘zirconium’ → select session → select know-how source → "
+            "open page → follow outgoing link → follow backlink → open graph neighbor → return to search.\n"
+            "Passed using Enter at 1280 px and 390 px. Query and filters persisted.\n"
+            "Ambiguous targets showed both paths and the missing target was marked unresolved.\n"
+            "The MCP startup marker remained absent throughout browsing. "
+            "An explicit skill_read created it in the second session.\n"
+            "A personal edit became searchable immediately and opened with the new text in a second session context.\n"
+        )

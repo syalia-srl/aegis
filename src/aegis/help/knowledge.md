@@ -5,7 +5,7 @@ when: remembering a fact for later sessions, keeping a procedure as a skill, fin
 hints:
   - Type /remember and a fact; every later session can find it. #remember-something
   - The knowledge block under your message names what may help the agent. #the-hint
-  - The Knowledge view lists your memories and skills to search, edit and restore. #the-knowledge-view
+  - The Knowledge view searches sources, follows wiki links and edits personal items. #the-knowledge-view
 ---
 
 aegis keeps your memories and skills on the server: one Markdown file per
@@ -64,15 +64,25 @@ person's store, and the agent is told the outcome.
 
 ## The Knowledge view
 
-The Knowledge button in the top bar, or Alt+I, opens the Knowledge view:
-your own memories and skills, never anyone else's, an admin's
-included. A search box and the chips all, skills, memories and flagged
-narrow the list; flagged lists proposals and expired or stale memories.
-Proposals come first. Each row shows the name, the description, when an
-agent last read it and how often, and its flag: proposed, expired, stale
-(hover it for the missing path) or ok.
+Open Knowledge from the top bar or press Alt+I. **Session context** adds
+that session's worktree and the configured sources it can read, and boosts
+results that match its checkout or path. **Knowledge source** limits the
+results to one source. The search box matches titles, descriptions and full
+page text. The All, Skills, Memories and Flagged filters narrow the results.
+Flagged lists personal proposals and expired or stale entries.
 
-Open a row to read and edit the item's whole file, its frontmatter
+Each result shows its path and source, plus any expiry or search match.
+Personal rows also show usage and status. Open a result with Enter or click
+it. Follow **Outgoing links**, **Incoming references**, or a node in the
+**Local graph** to move between pages. Ambiguous links show the candidate
+paths. **Copy reference** copies the qualified link for pasting into the
+source. An unresolved link has no visible destination. **Back to all items**
+keeps the search and filters. Browsing a skill reads its text without loading
+the skill or starting its MCP server.
+
+Workspace pages are read-only in Knowledge. Edit a workspace page in its source.
+
+Open a personal row to read and edit the item's whole file, its frontmatter
 included, in the editor. Save, or Ctrl+S, commits the edit
 and approves the item, so editing a proposal approves the text you
 saved; Approve on its card then does nothing and says it changed. If
@@ -118,9 +128,8 @@ caller's personal store.
 
 Pass `query` to search the visible catalog. For example, run
 `aegis call knowledge_catalog log_id=SESSION query="restore a backup" limit=10`.
-The browser can send the same arguments to `knowledge.catalog`. The
-Knowledge view's personal search and the existing memory and skill tools
-keep their current behavior.
+The Knowledge view uses the same `knowledge.catalog` operation. Pass
+a source ID or kind to filter the visible corpus before ranking and limits.
 
 Catalog search uses BM25 over each entry's title, description and full body
 and works with embeddings off. A page in the selected checkout or a matching
@@ -161,9 +170,7 @@ Personal entries retain their own store boundary.
 At startup the server scans configured sources, then refreshes them and
 the worktrees in use every five seconds. A catalog call for a newly
 encountered checkout can scan it immediately. Removing a configured root
-withdraws it on the next catalog call and leaves its files in place. The Knowledge
-view, personal search and skill commands continue to use their existing
-readers.
+withdraws it on the next catalog call and leaves its files in place.
 
 ## Wiki links and backlinks
 

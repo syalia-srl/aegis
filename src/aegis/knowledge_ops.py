@@ -51,7 +51,14 @@ from pathlib import Path
 from . import launch
 from .skill_mcp import SkillToolError, stop_group
 from .knowledge import checks, history, importer
-from .knowledge.items import Item, check_name, dump, parse_memory, parse_skill
+from .knowledge.items import (
+    Item,
+    check_name,
+    dump,
+    parse_memory,
+    parse_skill,
+    source_id,
+)
 from .knowledge.sources import Entry, Source
 from .journal.paths import place
 from .monitors import iso_now
@@ -477,6 +484,10 @@ class CatalogItems(_Strict):
 
     query: str | None = Field(None, description="Search visible entries with BM25.")
     limit: int = Field(20, ge=1, le=100, description="Maximum number of search hits.")
+    source_id: str | None = Field(None, description="Filter results by source ID.")
+    kind: Literal["all", "skill", "memory", "flagged"] = Field(
+        "all", description="Filter results by kind or personal flags."
+    )
 
 
 class PutItem(_Strict):
@@ -1619,6 +1630,11 @@ def register_knowledge_ops(app: App) -> None:
             if p.entry_id is not None
             else None
         )
+        used = (
+            await asyncio.to_thread(kn.usage.summary, owner)
+            if personal is not None or p.entry_id is None
+            else {}
+        )
         personal_files = []
         if personal is not None and personal[0].kind == "skill":
             personal_files = await asyncio.to_thread(kn.store.entry_files, personal[0])
@@ -1668,10 +1684,20 @@ def register_knowledge_ops(app: App) -> None:
                 it = entry.item
                 entries.setdefault(it.id, (source, entry))
                 items.setdefault(it.id, it)
+        source_roots = {
+            source_id(source.worktree or source.root): str(
+                source.worktree or source.root
+            )
+            for source, _ in visible
+        }
         if p.entry_id is not None:
             if personal is not None:
                 it, raw = personal
-                page = {**entry_fields(it), "kind": it.kind, "files": personal_files}
+                page = {
+                    **row(owner, it, used),
+                    "stamp": it.revision,
+                    "files": personal_files,
+                }
             elif p.entry_id in entries:
                 source, entry = entries[p.entry_id]
                 it, raw = entry.item, entry.text
@@ -1680,17 +1706,33 @@ def register_knowledge_ops(app: App) -> None:
                 raise OpError("not_found", "no matching knowledge entry")
             neighbors = await kn.catalog_neighbors(list(items.values()), p.entry_id)
             check_access("read")
-            return {**page, "body": it.body, "text": raw, **neighbors}
+            return {
+                **page,
+                "body": it.body,
+                "text": raw,
+                "source_roots": source_roots,
+                **neighbors,
+            }
 
         def result_row(it: Item) -> dict:
             if it.id in entries:
                 return source_row(*entries[it.id])
-            return {**entry_fields(it), "kind": it.kind}
+            return row(owner, it, used)
 
+        def includes(it: Item) -> bool:
+            if p.source_id is not None and it.source_id != p.source_id:
+                return False
+            if p.kind == "flagged":
+                return it.id not in entries and bool(
+                    it.status == "proposed" or kn.flags_of(owner, it.name, it.expired())
+                )
+            return p.kind == "all" or p.kind == it.kind
+
+        filtered = [it for it in items.values() if includes(it)]
         search_fields = {}
         if p.query is not None:
             hits, total = await kn.search_catalog(
-                list(items.values()), p.query, p.limit, cwd=cwd, worktree=worktree
+                filtered, p.query, p.limit, cwd=cwd, worktree=worktree
             )
             check_access("search")
             all_rows = [
@@ -1705,13 +1747,21 @@ def register_knowledge_ops(app: App) -> None:
             ]
             search_fields["total"] = total
         else:
-            all_rows = [result_row(item) for item in items.values()]
+            all_rows = [result_row(item) for item in filtered]
+            all_rows.sort(
+                key=lambda x: (
+                    x["status"] != "proposed",
+                    x["kind"] != "skill",
+                    x["name"],
+                )
+            )
         return {
             **search_fields,
             "items": all_rows,
             "sources": [
                 {
                     "root": str(source.root),
+                    "source_id": source_id(source.worktree or source.root),
                     "format": source.format,
                     "scope": "workspace",
                     "include": list(source.include),
@@ -1720,6 +1770,11 @@ def register_knowledge_ops(app: App) -> None:
                 for source, _ in visible
             ],
             "errors": errors,
+            **(
+                {"personal_source_id": personal_items[0].source_id}
+                if personal_items
+                else {}
+            ),
         }
 
     @r.op(
