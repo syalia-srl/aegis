@@ -774,7 +774,7 @@ a committed save) and in a daily pass the App runs from boot, each bounded
 at 30 s per principal, through the
 thread, so the paths a memory quotes are looked for off the event loop; they live in memory in `Knowledge`
 and in the usage db's `flags` table, so a restart logs no flag twice.
-The Knowledge view's ops (`knowledge.list`, `.get`, `.put`, `.history`,
+The personal knowledge ops (`knowledge.list`, `.get`, `.put`, `.history`,
 `.restore`, `.remove`) are a person's, never an agent's, and act on the
 caller's own store, an admin's included. File-backed items carry a source ID
 derived from their canonical root and a path relative to that root. Each Git
@@ -820,6 +820,14 @@ changed snapshots rebuild the graph, including references that previously had
 no match. Resolution checks the referring page's source before looking in the
 rest of the visible catalog. Full entry IDs select a specific destination.
 Policy is checked again after graph construction, before returning a page.
+
+The browser's Knowledge view uses the catalog for search and qualified page
+reads. Its source and kind filters apply before ranking and limits. Link
+resolution and the local graph use the whole visible corpus, so filtering
+search results leaves navigation intact. The view keeps the query and
+filters when opening pages and carries the session context between them.
+Personal pages still use the store's edit, history, restore and removal
+operations. Links by personal name continue to work.
 
 `/setup`'s import (`knowledge.import`, `knowledge/importer.py`) reads each
 ticked source in a thread, never on the event loop, and saves it with `fresh`,

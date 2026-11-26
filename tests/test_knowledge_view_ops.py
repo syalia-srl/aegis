@@ -480,6 +480,19 @@ async def test_catalog_reconciles_sources_and_checks_policy_on_every_read(tmp_pa
     assert unrestricted["total"] == 1
     same_query = await catalog(query="release", limit=1)
     assert same_query["total"] == 52 and len(same_query["items"]) == 1
+    skill_source = next(
+        source for source in same_query["sources"] if source["format"] == "skill"
+    )
+    filtered = await catalog(
+        query="release", limit=1, source_id=skill_source["source_id"], kind="skill"
+    )
+    assert filtered["total"] == 1
+    assert filtered["items"][0]["relative_path"] == "release/SKILL.md"
+    assert (
+        await catalog(
+            query="release", source_id=skill_source["source_id"], kind="memory"
+        )
+    )["total"] == 0
     policy.denied = {guides, how}
     permitted = await catalog(query="release", limit=1)
     assert permitted["total"] == 1

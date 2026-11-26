@@ -591,7 +591,10 @@ function route(hash = hashNow()) {
   if (h === "settings") return { view: "settings" };
   if (h === "journal") return { view: "journal" };
   if (h === "usage") return { view: "usage" };
-  if (h === "knowledge" || h.startsWith("knowledge=")) return { view: "knowledge", id: unhash(h.slice(10)) };
+  if (h === "knowledge" || h.startsWith("knowledge=")) {
+    const [id, context] = h.slice(10).split("&context=");
+    return { view: "knowledge", id: unhash(id), context: context === undefined ? undefined : unhash(context) };
+  }
   if (h === "files" || h.startsWith("files=")) return { view: "files", id: unhash(h.slice(6)) };
   if (h === "schedules") return { view: "schedules" };
   if (h === "help" || h.startsWith("help=")) return { view: "help", id: unhash(h.slice(5)) };
@@ -826,7 +829,10 @@ const journal = new Journal(app.conn, views.journal, {
 // The Knowledge view routes its rows and Back through the URL, so the
 // browser's Back closes an open item.
 const knowledgeView = new Knowledge(app.conn, views.knowledge, {
-  onOpen: (name) => go(`#knowledge=${encodeURIComponent(name)}`),
+  onOpen: (id, context) => {
+    const suffix = context ? `&context=${encodeURIComponent(context)}` : "";
+    go(`#knowledge=${encodeURIComponent(id)}${suffix}`);
+  },
   onBack: () => go("#knowledge"),
 });
 // Alt+O's picker opens a file in the Files view; Shift+Enter in a new browser tab.
@@ -1459,7 +1465,7 @@ function render() {
   root.dataset.mode = r.view === "read" ? "read" : "live";
   // Quota rows redraw on a quota patch, the timer, or a change of view; never
   // on a sessions patch, which would take the hover tooltip with them.
-  const viewKey = `${r.view}:${r.id || ""}`;
+  const viewKey = `${r.view}:${r.context || ""}:${r.id || ""}`;
   const newView = viewKey !== quotaDrawnFor;
   quotaDrawnFor = viewKey;
   if (r.view === "fleet") {
@@ -1511,8 +1517,9 @@ function render() {
     watchHost(null);
     follow(null);
     show("knowledge");
-    if (newView) knowledgeView.show(r.id);
-    setTitle(`${r.id || "Knowledge"} · aegis`);
+    knowledgeView.contexts(local().filter((s) => !s.stale && !isTool(s)));
+    if (newView) knowledgeView.show(r.id, r.context);
+    setTitle("Knowledge · aegis");
   } else if (r.view === "files") {
     watchHost(null);
     follow(null);

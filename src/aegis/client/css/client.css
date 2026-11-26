@@ -1938,6 +1938,29 @@
    usage column and the open item takes the list's place. */
 .aegis[data-view=knowledge] .v-knowledge{display:flex;flex-direction:column;overflow:auto}
 .aegis .knowledge{max-width:1180px;width:100%;margin:0 auto;padding:22px 28px 32px;font-size:13px}
+.aegis .knowledge .kfilters{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
+.aegis .knowledge .kfilter{min-width:0;max-width:100%;padding:6px 8px;border:1px solid var(--rule);border-radius:var(--r);background:var(--bg);color:var(--ink);font:inherit}
+.aegis .knowledge .kfilter .menu{width:max-content;max-width:min(55ch, calc(100vw - 32px))}
+.aegis .knowledge .kfilter .opt{white-space:normal;overflow-wrap:anywhere}
+.aegis .knowledge .kerrors{overflow-wrap:anywhere}
+.aegis .knowledge .kconnections{display:grid;gap:8px}
+.aegis .knowledge .kconnections h3{margin:4px 0;font-size:13px}
+.aegis .knowledge .kconnections ul{padding-left:20px;margin:0}
+.aegis .knowledge .kconnections li+li{margin-top:4px}
+.aegis .knowledge .kconnections li .kmeta{display:block}
+.aegis .knowledge .knode{max-width:100%;white-space:normal;overflow-wrap:anywhere;text-align:left}
+.aegis .knowledge .kchoice{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:4px 0}
+.aegis .knowledge .kgraph{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:8px;align-items:center;padding:8px;border:1px solid var(--rule);border-radius:var(--r)}
+.aegis .knowledge :is(.kbranch,.kcenter){overflow-wrap:anywhere}
+.aegis .knowledge .kbranch{display:grid;gap:4px;min-width:0}
+.aegis .knowledge .kbranch:not(:has(button)){display:none}
+.aegis .knowledge .kbranch .knode{justify-content:center;border-color:var(--rule)}
+.aegis .knowledge .kcenter{position:relative;padding:6px;text-align:center;border:1px solid var(--accent);border-radius:var(--r);background:var(--accent-soft)}
+.aegis .knowledge .kgraph:has(.incoming button) .kcenter::before,.aegis .knowledge .kgraph:has(.outgoing button) .kcenter::after{content:"";position:absolute;top:50%;width:8px;border-top:1px solid var(--accent)}
+.aegis .knowledge .kcenter::before{right:100%}
+.aegis .knowledge .kcenter::after{left:100%}
+.aegis .knowledge .kdetail .md{overflow-wrap:anywhere}
+.aegis .knowledge .kdetail .md pre{overflow:auto}
 .aegis .knowledge .kpanes{display:flex;gap:18px;align-items:flex-start;margin-top:14px}
 .aegis .knowledge .klist{flex:1 1 0;min-width:0;border:1px solid var(--rule);border-radius:var(--r-lg);overflow:hidden;background:var(--bg)}
 .aegis .knowledge .klist .empty{padding:24px 14px;color:var(--muted);text-align:center}
@@ -1957,10 +1980,10 @@
 .aegis .knowledge .fl.exp{color:var(--err)}
 .aegis .knowledge .kdetail{flex:1.4 1 0;min-width:0;display:flex;flex-direction:column;gap:8px;border:1px solid var(--rule);border-radius:var(--r-lg);background:var(--surface);padding:12px 14px}
 .aegis .knowledge .khead{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.aegis .knowledge .kback{display:none}
+.aegis .knowledge .kback{display:inline-flex;align-items:center}
 .aegis .knowledge .kback .ic{width:14px;height:14px;margin-right:4px}
 .aegis .knowledge .ktitle{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;min-width:0}
-.aegis .knowledge .kname{font-family:var(--font-mono);font-size:14px;color:var(--strong);overflow-wrap:anywhere}
+.aegis .knowledge .kname{margin:0;font-weight:500;font-family:var(--font-mono);font-size:14px;color:var(--strong);overflow-wrap:anywhere}
 .aegis .knowledge .kkind{font-family:var(--font-mono);font-size:11px;color:var(--faint)}
 .aegis .knowledge .kdesc{color:var(--ink)}
 .aegis .knowledge .kmeta{font-family:var(--font-mono);font-size:11px;color:var(--muted);overflow-wrap:anywhere}
@@ -1978,11 +2001,11 @@
 .aegis .knowledge .kvnow{font-family:var(--font-mono);font-size:10.5px;color:var(--ok)}
 @media (max-width:640px){
   .aegis .knowledge{padding:12px 12px 24px}
+  .aegis .knowledge .kfilters{flex-direction:column;align-items:flex-start}
   .aegis .krow{grid-template-columns:18px minmax(0,1fr) auto}
   .aegis .krow .use{display:none}
   .aegis .knowledge[data-open="1"] .ktop,.aegis .knowledge[data-open="1"] .klist{display:none}
   .aegis .knowledge[data-open="1"] .kpanes{margin-top:0}
-  .aegis .knowledge .kback{display:inline-flex;align-items:center}
   .aegis .knowledge .kdetail{padding:10px}
   .aegis .knowledge .ked{height:52vh}
 }
