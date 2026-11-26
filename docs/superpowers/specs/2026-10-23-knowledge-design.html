@@ -221,6 +221,16 @@ svg text{font-family:var(--font-mono)}
 <p class="lede">Today each harness keeps its own skills and its own memory, loads all of it into every session, and nobody can tell which parts are used or still true. This spec moves both into aegis, per user, as Markdown files. aegis finds the few that matter for each message with a search index, records every use, and gives the person and an agent the means to prune what went stale.</p>
 
 <h2 id="delivers"><span class="n">01</span>What this delivers</h2>
+<p>Wiki delivery 1 adds source-qualified identities to the personal store.
+An entry's ID combines the canonical source root's identifier with the
+file's relative path. Separate worktrees have separate root identifiers.
+The read operation accepts the ID or the historical name and returns the
+SHA-256 revision of the same bytes it read. The entry model carries title,
+description, body, format, scope, lifetime, expiry and proposal status.
+Existing files and their Git history need no migration. An on-demand read
+can also resolve a know-how document's ID or relative path in a Git worktree
+selected by an authorized session. Registering, indexing and refreshing
+additional roots is a later delivery.</p>
 <div class="trio">
   <div class="card">
     <h4>One store, every harness</h4>
