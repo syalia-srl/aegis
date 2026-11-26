@@ -2821,7 +2821,7 @@ async def test_a_real_agent_chooses_contextual_knowledge_destinations(tmp_path: 
             "Add 'Verify restoration of the amber ledger.' to the team's existing release procedure.",
             f"Remind only me that I own the restoration through {expires}. "
             "I am explicitly asking you to save this. Mark it asked=true and use "
-            "expected_revision=null if creating it.",
+            f"expected_revision=null if creating it. Set lifetime=temporary and expires={expires}.",
             "Update the workspace skill we use to audit restore evidence so it says "
             "'Compare the cobalt recovery logs.' Keep its resources.",
         ):
@@ -2871,6 +2871,13 @@ async def test_a_real_agent_chooses_contextual_knowledge_destinations(tmp_path: 
             )
         )
 
+        original_revision = sha256(procedure.read_bytes()).hexdigest()
+        previous_calls = {
+            entry["id"]
+            for session in readers
+            for entry in session.entries()
+            if entry.get("title") == "knowledge_write"
+        }
         lines = ("Record the indigo result.", "Record the silver result.")
         await asyncio.gather(
             *(
@@ -2883,6 +2890,14 @@ async def test_a_real_agent_chooses_contextual_knowledge_destinations(tmp_path: 
                 for session, line in zip(readers, lines, strict=True)
             )
         )
+        for session in readers:
+            (attempt,) = [
+                entry
+                for entry in session.entries()
+                if entry.get("title") == "knowledge_write"
+                and entry["id"] not in previous_calls
+            ]
+            assert original_revision in json.dumps(attempt["detail"]["args"])
         current = procedure.read_text()
         assert sum(line in current for line in lines) == 1
         revision = sha256(procedure.read_bytes()).hexdigest()
