@@ -515,6 +515,7 @@ class Session:
         # Inbox messages waiting for this session's turn to end.
         self.held: list[dict] = list(held or [])
         self._flushing = False
+        self._flushing_durable: list[dict] = []
         # Whether a person's message began the current turn (a typed send, or
         # a / line such as /remember), not an agent's, a queue's or aegis's
         # delivery: memory_save honours asked only then (knowledge_ops.py).
@@ -666,7 +667,7 @@ class Session:
             "context_tokens": self.context_tokens,
             "context_window": self.context_window,
             "activity": self.activity,
-            "held": self.held,
+            "held": self._flushing_durable + self.held,
             "worker": self.worker,
             "schedule": self.schedule,
             "workflow": self.workflow,
@@ -1123,6 +1124,7 @@ class Session:
         urgent: bool = False,
         by_person: bool = False,
         realtime: dict | None = None,
+        durable: bool = False,
     ) -> Literal["sent", "held", "steered"]:
         """An inbox message. Idle or stopped: sent now (a stopped session is
         resumed to receive it). Mid-turn: held, and sent with any others when
@@ -1137,6 +1139,25 @@ class Session:
         if not through_lock:
             self.check_lock()
             self.check_handed_off()
+        if durable:
+            # This producer uses a stable header as its delivery key. A crash
+            # between inbox delivery and the producer checkpoint can replay it.
+            if self._inbox_received(header):
+                return "sent"
+            if any(m["header"] == header for m in self._flushing_durable):
+                return "held"
+            if not any(m["header"] == header for m in self.held):
+                self._hold(
+                    {"header": header, "body": body, "ts": time.time(), "durable": True}
+                )
+            if (
+                self.in_turn
+                or self._host.quota_hold(self) is not None
+                or self._host.refuse_hold(self) is not None
+            ):
+                return "held"
+            await self._flush_held()
+            return "sent"
         raw: dict = {"header": header, "body": body, "ts": time.time()}
         if realtime is not None:
             raw["realtime"] = realtime
@@ -1176,10 +1197,26 @@ class Session:
             # turn still has to end before the session can hear it.
             self._metas.write(self.meta())
             self._record({"kind": "realtime_held", "realtime": voice, "ts": msg["ts"]})
+        elif msg.get("durable"):
+            try:
+                self._metas.write(self.meta())
+            except OSError:
+                self.held.pop()
+                raise
         else:
             self._metas.write_soon(self.log_id, self.meta)
         self._publish_now()
         self._host.status_changed(self)
+
+    def _inbox_received(self, header: str) -> bool:
+        # Older queue attempts used the time of each attempt in the header.
+        key = header.removeprefix("> from ").rsplit(" · ", 1)[0]
+        return any(
+            row["kind"] == "inbox"
+            and row["status"] == "ok"
+            and row["title"].rsplit(" · ", 1)[0] == key
+            for row in self.entries()
+        )
 
     def _quiet(self, msg: dict) -> dict | None:
         """``msg`` as a session with notices off gets it (#983): aegis's own
@@ -1195,7 +1232,12 @@ class Session:
         """Send what is held in one turn; ``keep``, the messages that stay
         held (a refusing guard's wakes, when a person's message goes)."""
         self._flushing = True
-        batch = [m for m in map(self._quiet, self.held) if m]
+        batch = [
+            m
+            for m in map(self._quiet, self.held)
+            if m and not (m.get("durable") and self._inbox_received(m["header"]))
+        ]
+        self._flushing_durable = [m for m in batch if m.get("durable")]
         self.held = list(keep or [])
         try:
             if batch:
@@ -1204,8 +1246,15 @@ class Session:
                 await self._send_inbox(
                     batch, by_person=any(m.get("by_person") for m in batch)
                 )
+        except BaseException:
+            self.held[:0] = self._flushing_durable
+            raise
         finally:
+            durable = bool(self._flushing_durable)
+            self._flushing_durable = []
             self._flushing = False
+            if durable:
+                self._metas.write(self.meta())
             if batch and not self.busy:
                 # The turn the send started ended before it returned, and its
                 # end found the session busy flushing (#536).
@@ -1214,7 +1263,7 @@ class Session:
     async def _send_inbox(
         self, batch: list[dict], *, steered: bool = False, by_person: bool = False
     ) -> None:
-        has_realtime = any("realtime" in message for message in batch)
+        structured = any("realtime" in m or m.get("durable") for m in batch)
         await self._send(
             _inbox_text(batch),
             typed=next(
@@ -1222,7 +1271,7 @@ class Session:
             ),
             steered=steered,
             by_person=by_person,
-            inbox=batch if has_realtime else None,
+            inbox=batch if structured else None,
         )
 
     @property

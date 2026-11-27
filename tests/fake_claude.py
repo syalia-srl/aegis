@@ -1078,6 +1078,18 @@ def oneshot() -> None:
         else:
             out_text = f"The run has {len(steps)} steps and {done} finished."
         out = {"text": out_text}
+    elif "steps" in schema.get("properties", {}):
+        pages = json.loads(prompt)["pages"]
+        refs = list(range(1, len(pages) + 1))
+        out = {
+            "steps": [{"text": "Combine the restoration checks.", "sources": refs}],
+            "contradictions": [
+                {"text": "The retention policies disagree.", "sources": refs}
+            ]
+            if all(word in prompt for word in ("seven days", "thirty days"))
+            else [],
+            "gaps": [],
+        }
     elif "title" in schema.get("properties", {}):
         # A group's name (group_names.py): one word per member, and a title
         # that lists the handles, so a test reads which members it saw.
