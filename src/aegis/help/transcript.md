@@ -13,6 +13,25 @@ your messages, the agent's replies and thinking, a row for each tool call with
 its result, the messages other sessions and monitors sent it, and the files
 and pages it sent you. Select a row with j and k, or with ↑ and ↓.
 
+## The latest request
+
+When your last message scrolls above the top of the transcript, its text stays
+over the top while you read the reply below. Tool rows, the agent's replies and
+notifications never take its place, and a newer message from you replaces it at
+once.
+
+A short message shows in one line. A longer one shows two lines with Show more
+under it: press it, or Tab to it and press Enter or Space, to open the whole
+message in place, up to half the transcript's height; a longer paste scrolls
+inside it. Show less closes it again and leaves your reading position where it
+was. An attachment sent with no text is named by its file.
+
+The header leaves as soon as any part of your original message is back in view,
+and it stays away while you read above that message. It is a reading aid: open
+the original row to use its attachments, its copy button or its links, or to
+quote it. Reopening a transcript at its tail shows the header even when the
+original row is still above the mounted part of the transcript.
+
 ## While the agent works
 
 While a turn runs, the last row of the transcript shows that the agent is
