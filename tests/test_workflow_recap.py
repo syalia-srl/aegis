@@ -462,3 +462,97 @@ async def test_a_recap_saved_with_the_json_wrapper_loads_as_text(world, tmp_path
     assert world.app.workflow_recaps._saved["run-1"]["text"] == (
         "La revisión está pendiente."
     )
+
+
+def test_recent_activity_keeps_visible_lines_and_excludes_raw_output():
+    from aegis.workflow_recap import activity
+
+    entries = [
+        {
+            "kind": "tool",
+            "title": "bash",
+            "summary": "ran the tests",
+            "detail": {"result": "RAW OUTPUT"},
+        },
+        {"kind": "prose", "md": "The suite is green; opening the PR."},
+        {"kind": "inbox", "title": "aegis: CI is green"},
+        {"kind": "system", "summary": "done in 2.1s"},
+    ]
+    assert activity(entries) == [
+        "did: bash ran the tests",
+        "said: The suite is green; opening the PR.",
+        "heard: aegis: CI is green",
+    ]
+    assert "RAW OUTPUT" not in " ".join(activity(entries))
+
+
+def test_summary_attributes_activity_to_the_task_and_attempt():
+    from aegis.workflow_recap import summary
+
+    wire = {
+        "title": "Run",
+        "say": "Steps.",
+        "status": "running",
+        "tree": [
+            {
+                "id": "w",
+                "depth": 0,
+                "say": "Implement it.",
+                "state": "running",
+                "attempts": 2,
+            }
+        ],
+        "open": [],
+    }
+    data = summary(wire, {"w": ["did: edit src/aegis/x.py"]})
+    assert data["steps"][0]["attempt"] == 3
+    assert data["steps"][0]["recent"] == ["did: edit src/aegis/x.py"]
+
+
+async def test_a_paused_worker_sends_its_recent_visible_activity(world, monkeypatch):
+    from .test_workflows_parallel import leaf, script
+
+    asks = script(["workflow_ask", {"question": "Which port?"}])
+    model = Model(texts=["paused recap"])
+    monkeypatch.setattr(oneshot, "run", model.run)
+    run_id = await armed(
+        world,
+        f"id: ask\ntitle: Ask\nsay: One.\nroot:\n  seq:\n    - {leaf('w', 'Work.', asks)}\n  say: One.\n",
+    )
+    await approve(world, run_id)
+    await until(
+        lambda: (world.app.workflows.runs[run_id].open.get("q1") or {}).get("told"),
+        timeout=20,
+        what="the worker's question",
+    )
+    view = await opened(world, run_id)
+    await until(lambda: len(model.calls) == 1, timeout=5)
+    prompt = model.calls[0]["prompt"]
+    assert "attempt 1, recent activity:" in prompt
+    assert "workflow_ask" in prompt
+    assert "did: " in prompt or "said: " in prompt
+    model.release(0)
+    await until(lambda: recap(world, run_id).get("text"), timeout=5)
+    await closed(world, run_id, view["view"])
+
+
+async def test_reload_regenerates_a_current_recap_and_keeps_the_text(
+    world, monkeypatch
+):
+    model = Model(texts=["first", "second"])
+    monkeypatch.setattr(oneshot, "run", model.run)
+    run_id = await armed(world)
+    view = await opened(world, run_id)
+    await until(lambda: len(model.calls) == 1, timeout=5)
+    model.release(0)
+    await until(lambda: recap(world, run_id).get("text") == "first", timeout=5)
+    assert (await refreshed(world, run_id, view["view"]))["status"] == "current"
+
+    out = await world.app.registry.call("workflow.recap.reload", {"run": run_id})
+    assert out["status"] == "loading"
+    got = recap(world, run_id)
+    assert got["text"] == "first" and got.get("updating") is True
+    await until(lambda: len(model.calls) == 2, timeout=5)
+    model.release(1)
+    await until(lambda: recap(world, run_id).get("text") == "second", timeout=5)
+    await closed(world, run_id, view["view"])

@@ -216,3 +216,34 @@ def test_a_saved_recap_with_the_json_wrapper_shows_as_a_paragraph(server, page):
     assert text.startswith("La revisión está pendiente."), text
     assert '{"text"' not in text, text
     assert not page.errors
+
+
+def test_the_icon_only_reload_button_regenerates_the_recap(server, page):  # noqa: F811
+    page.set_viewport_size({"width": 1300, "height": 900})
+    page.goto(server.url)
+    page.wait_for_selector("#a2[data-view=fleet]")
+    spawn(
+        page,
+        "/mcp workflow_arm "
+        + json.dumps({"definition": flow(RESULT, RESULT), "args": {}}),
+    )
+    settled(page, "armed")
+    page.wait_for_selector(".wfcard .wfrecap")
+    button = page.locator(".wfcard .wfrecap .reload")
+    assert button.count() == 1
+    assert button.get_attribute("aria-label")
+    assert button.get_attribute("title")
+    before = page.locator(".wfcard .wfrecap").inner_text()
+    paid = calls(server)
+    button.click()
+    # A current state still costs one generation: the button forces it.
+    for _ in range(100):
+        if calls(server) > paid:
+            break
+        page.wait_for_timeout(100)
+    assert calls(server) > paid
+    page.wait_for_selector(".wfcard .wfrecap")
+    text = page.locator(".wfcard .wfrecap").inner_text()
+    assert '{"text"' not in text
+    assert text.startswith(before.split("updating")[0].split("stale")[0])
+    assert not page.errors

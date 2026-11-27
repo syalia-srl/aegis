@@ -926,6 +926,7 @@ export default {
   "entries.workflow.notFound": "workflow not found",
   "entries.workflow.recapStale": "stale",
   "entries.workflow.recapUpdating": "updating…",
+  "entries.workflow.recapReload": "Regenerate this recap",
   "entries.workflow.replacedBy": "replaced by v{version}",
   "entries.workflow.open": "Open",
   "entries.workflow.openIt": "Open it",

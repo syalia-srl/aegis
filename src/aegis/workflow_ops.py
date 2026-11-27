@@ -484,6 +484,20 @@ def register_workflow_ops(app: App) -> None:
         return await app.workflow_recaps.refresh(p.run, p.view)
 
     @r.op(
+        "workflow.recap.reload",
+        RunName,
+        read=True,
+        access="read",
+        names=(("run", "run"),),
+    )
+    async def workflow_recap_reload(p: RunName, caller):
+        """A person asked the card to regenerate its recap now: a fresh call
+        even when the saved text answers the same state, and the old text
+        stays visible until the new one lands."""
+        readable(p.run, caller)
+        return await app.workflow_recaps.reload(p.run)
+
+    @r.op(
         "workflow.recap.close",
         RecapView,
         read=True,

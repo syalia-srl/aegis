@@ -1082,8 +1082,12 @@
 .a2 .wfcard .wfarg>.md .fence pre{max-height:24em;overflow:auto}
 .a2 .wfcard[data-status=armed]{border-color:var(--warn)}
 .a2 .wfcard .wflede{padding:8px 12px;font-family:var(--font-prose);font-size:14.5px;border-bottom:1px solid var(--rule)}
-.a2 .wfcard .wfrecap{margin:0;padding:9px 12px;font-family:var(--font-prose);font-size:14.5px;line-height:1.55;border-left:2px solid var(--accent);border-bottom:1px solid var(--rule);background:var(--accent-soft)}
+.a2 .wfcard .wfrecap{position:relative;margin:0;padding:9px 38px 9px 12px;font-family:var(--font-prose);font-size:14.5px;line-height:1.55;border-left:2px solid var(--accent);border-bottom:1px solid var(--rule);background:var(--accent-soft)}
 .a2 .wfcard .wfrecap .mark{margin-left:8px;font-family:var(--font-mono);font-size:10.5px;color:var(--muted);white-space:nowrap}
+.a2 .wfcard .wfrecap .reload{position:absolute;right:6px;bottom:6px;display:grid;place-items:center;width:28px;height:28px;padding:0;border:1px solid transparent;border-radius:var(--r);background:none;color:var(--muted);cursor:pointer}
+.a2 .wfcard .wfrecap .reload:hover{color:var(--accent);border-color:var(--rule);background:var(--surface)}
+.a2 .wfcard .wfrecap .reload:disabled{opacity:.5;cursor:progress}
+@media(pointer:coarse){.a2 .wfcard .wfrecap .reload{width:44px;height:44px}}
 .a2 .wfcard .story{padding:8px 12px;border-bottom:1px solid var(--rule);font-size:13px}
 .a2 .wfcard .story .line{display:flex;gap:8px;padding:2px 0}
 .a2 .wfcard .story .tm{font-family:var(--font-mono);font-size:11px;color:var(--faint);flex:none;width:38px}
