@@ -994,16 +994,22 @@ value filled in after approval chooses it. **A workflow card recaps its run
 above the steps (#1190).** The agent `recap:` names writes it (`workflow_recap.py`),
 from the run's logical tree only: every row with its description, state,
 outcome, error and wait, folded map items and earlier loop rounds included;
-never a prompt, command, arg, session, tool output or another run, and the
-text is drawn as plain text. A browser reports an expanded card that
+never a prompt, command, arg, raw tool output or another run. For a worker
+that is running, paused or failed it also reads that session's last few
+visible rows (what the worker said, a tool's title and summary, a message it
+heard) and falls back to the recorded state when none are readable. The text
+is drawn as plain text. A browser reports an expanded card that
 intersects a visible tab as open, through `workflow.recap.open`,
-`workflow.recap.refresh` and `workflow.recap.close`, operations no agent
-reaches and which check that the caller may see the run's owner. The input
-is hashed, so a re-render, a fold or a second tab on the same state costs no
-call. One call per run is shared by every open view; a newer state that
-arrives during it is requested once after, an older answer never replaces a
-newer one, and the last successful text is kept per run in
-`<state>/workflow-recaps.json` across restarts. The last view closing drops
+`workflow.recap.refresh`, `workflow.recap.reload` and `workflow.recap.close`,
+operations no agent reaches and which check that the caller may see the run's
+owner. The input is hashed, so a re-render, a fold or a second tab on the same
+state costs no call. One call per run is shared by every open view; a newer
+state that arrives during it is requested once after, an older answer never
+replaces a newer one, and the last successful text is kept per run in
+`<state>/workflow-recaps.json` across restarts. The reload operation forces
+one fresh call for the state already on screen, keeping the old text marked
+updating until it lands; a second click while it runs queues one more. The
+last view closing drops
 a queued refresh, a dispatched call may finish and be cached, and a failure
 is retried only after the view closes and reopens. A step with `session: <id>`
 is prompted again in an earlier step's session, through the lock and with no

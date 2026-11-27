@@ -1208,6 +1208,8 @@ class _workflow:
         """An expanded workflow card is visible: its recap, or the one already saved, marked updating while a call runs."""
     async def recap_refresh(self, *, run: str, view: str) -> Any:
         """A visible card's run changed: share the call in flight, or answer the newest state once."""
+    async def recap_reload(self, *, run: str) -> Any:
+        """A person asked the card to regenerate its recap now: a fresh call even when the saved text answers the same state, and the old text stays visible until the new one lands."""
     async def reject(self, *, run: str) -> Any:
         """workflow.reject"""
     async def result(self, *, value: Any, summary: str, node: str | None = ...) -> Any:
