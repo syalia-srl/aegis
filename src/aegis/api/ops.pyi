@@ -1202,6 +1202,12 @@ class _workflow:
         """Give an early output while your node keeps working, as a workflow node: a step waiting on it starts now. Each name once. Your first message names the outputs other steps wait on."""
     async def read(self, *, id: str) -> Any:
         """A saved workflow for Settings → Workflows: its file's text, to export, and its steps as the card draws them. A person's: an agent reads the file itself."""
+    async def recap_close(self, *, run: str, view: str) -> Any:
+        """A card left the viewport or its tab: the last one drops what was queued for the run."""
+    async def recap_open(self, *, run: str) -> Any:
+        """An expanded workflow card is visible: its recap, or the one already saved, marked updating while a call runs."""
+    async def recap_refresh(self, *, run: str, view: str) -> Any:
+        """A visible card's run changed: share the call in flight, or answer the newest state once."""
     async def reject(self, *, run: str) -> Any:
         """workflow.reject"""
     async def result(self, *, value: Any, summary: str, node: str | None = ...) -> Any:
