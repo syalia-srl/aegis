@@ -588,7 +588,15 @@ class Workflows:
         if detail:
             out["tree"] = self._rows(st, wf) if wf else []
             out["story"] = st.story
+            recaps = getattr(self._app, "workflow_recaps", None)
+            if recaps is not None:
+                out["recap"] = recaps.state(run, out)
         return out
+
+    def republish(self, run: str) -> None:
+        """Send one run's wire again at the next flush: its recap changed."""
+        if run in self.runs:
+            self._publish(run)
 
     def taken(self, run: str, to: str | None) -> dict:
         """The short reply to an answer or a stop: the run's status, the

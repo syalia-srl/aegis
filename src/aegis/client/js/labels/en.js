@@ -924,6 +924,8 @@ export default {
   "entries.decision.runAgain.other": "Run again: {kept} done steps kept, {toRun} to run",
 
   "entries.workflow.notFound": "workflow not found",
+  "entries.workflow.recapStale": "stale",
+  "entries.workflow.recapUpdating": "updating…",
   "entries.workflow.replacedBy": "replaced by v{version}",
   "entries.workflow.open": "Open",
   "entries.workflow.openIt": "Open it",

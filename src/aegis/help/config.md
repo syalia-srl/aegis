@@ -547,6 +547,11 @@ with the model and its cost in its tooltip. It says what the session needs from
 you only while the session waits on you. The sparkle in the transcript's
 navigation pill asks for a fresh one.
 
+The same agent writes the recap above an expanded workflow card. That one is
+paid for only while a card intersects a visible tab, once per run at a time,
+and its last successful text is kept per run across restarts. Without `recap:`
+neither a session's recap nor a run's is written.
+
 ## Side notes
 
 `btw:` with `agent:` names an agent that answers `/btw` side questions. It reads
