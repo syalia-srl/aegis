@@ -16,6 +16,7 @@ import { serverNow } from "./clock.js";
 import { SETTLE } from "./toolverb.js";
 import { labelsFor } from "./labels.js";
 import { pdfViewerSrc } from "./pdfview.js";
+import { watchRecap } from "./wfrecap.js";
 
 // The table a row reads when its caller passes none: the standalone page, until
 // b1/b9 give it a mount of its own. A mount passes its own through render().
@@ -1248,6 +1249,19 @@ function storyLines(w, fs, t = en) {
   return out;
 }
 
+// The run's recap (#1190): a plain paragraph above its steps. The server's
+// text is drawn as text, never markup; a stale or updating label says what
+// the paragraph is, and the live status line above it stays current.
+function recapLine(w, t = en) {
+  const r = w.recap;
+  if (!r?.text) return null;
+  const line = el("p", "wfrecap", r.text);
+  if (r.updating) line.append(el("span", "mark", t("entries.workflow.recapUpdating")));
+  else if (r.stale) line.append(el("span", "mark", t("entries.workflow.recapStale")));
+  if (r.failed) line.title = r.failed;
+  return line;
+}
+
 function storyLine(t, mark, mk, text) {
   const line = el("div", "line");
   line.dataset.mark = mark;
@@ -1350,17 +1364,20 @@ export function fillWorkflow(card, t = card._t || en) {
   const id = `wf-${card.dataset.run}`;
   const host = hostOf(card, id);
   if (!w) {
+    card.dataset.expanded = "false";
     card.replaceChildren(el("div", "fbar", t("entries.workflow.notFound")));
     return;
   }
   card.dataset.status = w.status;
   card.dataset.held = docked(id);
+  card.dataset.recap = w.recap?.text ? (w.recap.updating ? "updating" : w.recap.stale ? "stale" : "current") : "";
   const title = [entryIcon("pip"), el("span", "fn", w.title), el("span", "fs", workflowStatus(w, t))];
   if (w.status === "replaced" && !host) {
     // Armed again before approval: the newer card under a later call is the one.
     const v = workflows.summary(w.replaced_by)?.version || w.version + 1;
     const head = el("div", "fbar");
     head.append(...title);
+    card.dataset.expanded = "false";
     card.replaceChildren(head, el("div", "wflede", t("entries.workflow.replacedBy", { version: v })));
     return;
   }
@@ -1379,6 +1396,9 @@ export function fillWorkflow(card, t = card._t || en) {
     head.append(...title, view, dockButton(id));
     const at = docker.docked(id);
     if (at) {
+      // Docked: the transcript row is one line, not an expanded card. The
+      // pane's copy is the one that reads and refreshes the recap.
+      card.dataset.expanded = "false";
       card.replaceChildren(head, heldLine(id, at === true ? DOCKED : inWindow(at), t));
       return;
     }
@@ -1398,6 +1418,8 @@ export function fillWorkflow(card, t = card._t || en) {
     kids.push(box);
   }
   kids.push(headLine(w, t), el("div", "wflede", w.say));
+  const recap = recapLine(w, t);
+  if (recap) kids.push(recap);
   const waits = w.status === "running" ? openLine(w, t) : null;
   if (waits) kids.push(waits);
   const now = nowSection(w, t);
@@ -1496,6 +1518,10 @@ export function fillWorkflow(card, t = card._t || en) {
   const refocus = keepDraft(card);
   card.replaceChildren(...kids);
   refocus();
+  // This is a full card: report it to the server while it intersects a
+  // visible tab, and on every draw ask once whether its run's state moved.
+  card.dataset.expanded = "true";
+  watchRecap(card, (op, params) => workflows.call(op, params));
 }
 
 // What a person typed at a gate, by run and node: a card is redrawn on every

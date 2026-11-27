@@ -91,6 +91,11 @@ class NodeRef(_Strict):
     node: str
 
 
+class RecapView(_Strict):
+    run: str
+    view: str
+
+
 class Stop(RunName):
     node: str | None = Field(
         default=None,
@@ -196,6 +201,15 @@ def register_workflow_ops(app: App) -> None:
             raise OpError(
                 "not_yours", "only the session that armed a workflow can stop it"
             )
+
+    def readable(run: str, caller: Caller) -> None:
+        """A recap is the run's text: only a caller that may see its owner
+        gets one, as the run list and the card's channel already require."""
+        st = wf.runs.get(run)
+        if st is None:
+            raise OpError("no_run", f"no workflow run {run!r}")
+        if not app.sees(app.acting(caller), st.owner):
+            raise OpError("not_yours", f"you may not read workflow run {run!r}")
 
     @r.op("workflow.lint", Definition, agent=True, read=True, access="read")
     async def workflow_lint(p: Definition, caller):
@@ -439,6 +453,48 @@ def register_workflow_ops(app: App) -> None:
         if p.run not in wf.runs:
             raise OpError("no_run", f"no workflow run {p.run!r}")
         return wf.wire(p.run)
+
+    # The card's reading aid: a person's browser says when an expanded card
+    # is visible, changes and closes. No agent reaches these, and the text
+    # never moves the run.
+    @r.op(
+        "workflow.recap.open",
+        RunName,
+        read=True,
+        access="read",
+        names=(("run", "run"),),
+    )
+    async def workflow_recap_open(p: RunName, caller):
+        """An expanded workflow card is visible: its recap, or the one
+        already saved, marked updating while a call runs."""
+        readable(p.run, caller)
+        return await app.workflow_recaps.open(p.run)
+
+    @r.op(
+        "workflow.recap.refresh",
+        RecapView,
+        read=True,
+        access="read",
+        names=(("run", "run"),),
+    )
+    async def workflow_recap_refresh(p: RecapView, caller):
+        """A visible card's run changed: share the call in flight, or answer
+        the newest state once."""
+        readable(p.run, caller)
+        return await app.workflow_recaps.refresh(p.run, p.view)
+
+    @r.op(
+        "workflow.recap.close",
+        RecapView,
+        read=True,
+        access="read",
+        names=(("run", "run"),),
+    )
+    async def workflow_recap_close(p: RecapView, caller):
+        """A card left the viewport or its tab: the last one drops what was
+        queued for the run."""
+        readable(p.run, caller)
+        return app.workflow_recaps.close(p.run, p.view)
 
     # Open to read permission, like turn_end: a node reports what it did
     # whatever it may change, or a review node could never finish.

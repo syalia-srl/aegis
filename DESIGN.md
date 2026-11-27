@@ -990,7 +990,22 @@ step is done, the refusal names the later steps that may still continue in it),
 and the card and the Fleet open it read-only. A step's `see` is a fixed path,
 resolved on the server from the run and the step by `workflow.see`, an
 operation not marked for agents, so the browser never names a path and no
-value filled in after approval chooses it. A step with `session: <id>`
+value filled in after approval chooses it. **A workflow card recaps its run
+above the steps (#1190).** The agent `recap:` names writes it (`workflow_recap.py`),
+from the run's logical tree only: every row with its description, state,
+outcome, error and wait, folded map items and earlier loop rounds included;
+never a prompt, command, arg, session, tool output or another run, and the
+text is drawn as plain text. A browser reports an expanded card that
+intersects a visible tab as open, through `workflow.recap.open`,
+`workflow.recap.refresh` and `workflow.recap.close`, operations no agent
+reaches and which check that the caller may see the run's owner. The input
+is hashed, so a re-render, a fold or a second tab on the same state costs no
+call. One call per run is shared by every open view; a newer state that
+arrives during it is requested once after, an older answer never replaces a
+newer one, and the last successful text is kept per run in
+`<state>/workflow-recaps.json` across restarts. The last view closing drops
+a queued refresh, a dispatched call may finish and be cached, and a failure
+is retried only after the view closes and reopens. A step with `session: <id>`
 is prompted again in an earlier step's session, through the lock and with no
 new slot, and is tagged with that session while it runs. The session stays
 open while a user may still run in it (a loop its owner is not in counts

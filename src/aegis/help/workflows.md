@@ -326,6 +326,18 @@ gate for the person stays shown. A loop past six rounds shows only its
 current one. The story's lines for those items fold into one line with the
 same toggle; a failure, a question and a note stay shown.
 
+When the card is expanded, a short recap of the run sits above its steps: what
+finished and what it produced, what is running, what remains and, when the run
+is blocked, what it waits on and who can act. It is written by the agent
+`recap:` names, the one session recaps use. It refreshes while the card is on
+screen and costs a call only when the run's state really changed: folding a
+map or a loop, a clock tick or a second tab on the same state costs nothing. A
+card that is collapsed, scrolled out of view or in a background tab is not
+open and gets no refresh. On return the saved text shows at once, marked
+`updating…` while a new one is written and `stale` when it answers an older
+state. With no `recap:` agent, the card shows its ordinary status and no
+recap.
+
 The card opens full screen, docks and moves to another browser window as a
 page does. A step's session has no tab while the run lives: its handle on
 the card and on the Fleet's card opens the transcript read-only, and the
