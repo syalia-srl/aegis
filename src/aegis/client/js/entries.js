@@ -1259,6 +1259,20 @@ function recapLine(w, t = en) {
   if (r.updating) line.append(el("span", "mark", t("entries.workflow.recapUpdating")));
   else if (r.stale) line.append(el("span", "mark", t("entries.workflow.recapStale")));
   if (r.failed) line.title = r.failed;
+  // A person may ask for a fresh reading with the current worker activity. The
+  // old paragraph stays on screen while the server writes the new one.
+  const again = iconButton(
+    el("button", "btn reload"),
+    "again",
+    t("entries.workflow.recapReload"),
+  );
+  again.addEventListener("click", () => {
+    again.disabled = true;
+    workflows.call("workflow.recap.reload", { run: w.run }).catch(() => {}).finally(() => {
+      again.disabled = false;
+    });
+  });
+  line.append(again);
   return line;
 }
 

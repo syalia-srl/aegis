@@ -329,14 +329,21 @@ same toggle; a failure, a question and a note stay shown.
 When the card is expanded, a short recap of the run sits above its steps: what
 finished and what it produced, what is running, what remains and, when the run
 is blocked, what it waits on and who can act. It is written by the agent
-`recap:` names, the one session recaps use. It refreshes while the card is on
+`recap:` names, the one session recaps use. For every worker that is running,
+paused or failed it also reads that session's latest visible activity — what
+the worker said, the last tools it ran and the messages it heard, never raw
+tool output — so the paragraph can say where it actually got to, not only the
+state recorded for it. A worker with no readable activity falls back to its
+recorded state, outcome and error. It refreshes while the card is on
 screen and costs a call only when the run's state really changed: folding a
 map or a loop, a clock tick or a second tab on the same state costs nothing. A
 card that is collapsed, scrolled out of view or in a background tab is not
 open and gets no refresh. On return the saved text shows at once, marked
 `updating…` while a new one is written and `stale` when it answers an older
-state. With no `recap:` agent, the card shows its ordinary status and no
-recap.
+state. An icon-only reload button in the recap's lower-right corner
+regenerates it on demand from the current state and worker activity; the old
+paragraph stays readable marked `updating…` until the new one arrives. With no
+`recap:` agent, the card shows its ordinary status and no recap.
 
 The card opens full screen, docks and moves to another browser window as a
 page does. A step's session has no tab while the run lives: its handle on
