@@ -49,6 +49,8 @@ export default {
   "dialog.ok": "OK",
   "dialog.cancel": "Cancel",
 
+  "transcript.pin.show": "Show more",
+  "transcript.pin.hide": "Show less",
   "transcript.offline": "Not saved on this device. It opens when the connection is back.",
   "transcript.needsConnection": "Needs the connection.",
   "transcript.queued.send": "Send anyway",

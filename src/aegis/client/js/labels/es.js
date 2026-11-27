@@ -50,6 +50,8 @@ export default {
   "dialog.ok": "Aceptar",
   "dialog.cancel": "Cancelar",
 
+  "transcript.pin.show": "Mostrar más",
+  "transcript.pin.hide": "Mostrar menos",
   "transcript.offline": "No se guardó en este dispositivo. Se abrirá cuando vuelva la conexión.",
   "transcript.needsConnection": "Necesita la conexión.",
   "transcript.queued.send": "Enviar de todos modos",

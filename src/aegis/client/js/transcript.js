@@ -94,6 +94,37 @@ export class Transcript {
     this.selected = null; // an entry id: apply() replaces nodes, ids stay
     this.sinceId = null; // the entry the "new since you left" divider sits above
     this.sinceText = "";
+    // The latest user entry, shown at the pane's top while its row is above
+    // the reading area (the sticky request, #1196). It is data, not a mounted
+    // row: on reopening a long transcript the row may be above the window.
+    this.pinId = null;
+    this.pinText = "";
+    this.pinKey = "";
+    this.pinCanExpand = false;
+    this.pinExpanded = false;
+    this.pinFrame = 0;
+    this.pin = document.createElement("div");
+    this.pin.className = "reqpin";
+    this.pin.hidden = true;
+    this.pinTextNode = document.createElement("div");
+    this.pinTextNode.className = "reqpin-text";
+    this.pinTextNode.tabIndex = -1;
+    this.pinMsg = document.createElement("span");
+    this.pinMsg.className = "reqpin-msg";
+    this.pinMore = document.createElement("span");
+    this.pinMore.className = "reqpin-more";
+    this.pinMore.hidden = true;
+    this.pinTextNode.append(this.pinMsg, this.pinMore);
+    this.pin.append(this.pinTextNode);
+    this.scroller.parentElement?.insertBefore(this.pin, this.scroller);
+    this.pinTextNode.addEventListener("click", () => this.togglePin());
+    this.pinTextNode.addEventListener("keydown", (ev) => {
+      if (!this.pinCanExpand) return;
+      if (ev.key === "Enter" || ev.key === " " || ev.key === "Spacebar") {
+        ev.preventDefault();
+        this.togglePin();
+      }
+    });
     this.onSelect = onSelect; // after every selection change: each path ends in mark()
     this.onReply = onReply; // an agent reply that arrived whole, or stopped streaming (speak.js)
     this.loadDetail = loadDetail; // ids -> Promise of whole entries
@@ -125,6 +156,7 @@ export class Transcript {
       if (kept && !this.atBottom()) this.toBottom();
       if (this.following) this.jump.classList.remove("new");
       this.fillTop();
+      this.schedulePin();
     });
     jump.addEventListener("click", () => this.toBottom());
     // A row the reader opened or closed keeps that state across updates and
@@ -147,6 +179,7 @@ export class Transcript {
     new ResizeObserver(() => {
       if (this.following) this.toBottom();
       else if (this.held?.node.isConnected) this.hold();
+      this.schedulePin();
     }).observe(list);
     // Reading: an unread agent message counts as read once its row has been
     // seen for a second while the page is visible and focused. Seen means half
@@ -238,6 +271,142 @@ export class Transcript {
     this.bottomAt = this.scroller.scrollTop;
     this.following = true;
     this.jump.classList.remove("new");
+    this.schedulePin();
+  }
+
+  // -- the latest request ------------------------------------------------
+
+  // The newest user-authored entry is the candidate, whatever the reader is
+  // looking at: a newer message replaces it at once (#1196). Tool rows, agent
+  // replies and notifications are not eligible.
+  refreshPin() {
+    let id = null;
+    for (const [k, e] of this.entries) if (e.kind === "user") id = k;
+    if (id !== this.pinId) {
+      // A newer request starts collapsed, whatever the reader was doing.
+      this.pinExpanded = false;
+      this.pinKey = "";
+      this.pinMsg.scrollTop = 0;
+      this.pinId = id;
+    }
+  }
+
+  // What the pinned row says: its text, or the names of what it attached when
+  // it has no text. Attachments are never replayed, only named.
+  pinTextFor(e) {
+    const md = String(e.md ?? "");
+    if (md.trim()) return md;
+    const names = (e.detail?.files || []).map((f) => f.name).filter(Boolean);
+    return names.join(", ");
+  }
+
+  // A frame of quiet collects a scroll, a patch and a resize into one update.
+  schedulePin() {
+    if (this.pinFrame) return;
+    this.pinFrame = requestAnimationFrame(() => {
+      this.pinFrame = 0;
+      this.updatePin();
+    });
+  }
+
+  // Show the candidate while its whole row sits above the reading area. An
+  // unmounted candidate is above the mounted suffix by construction, so a
+  // reopened transcript pins it before its row is mounted. Any of the row in
+  // view, or a reader above it, leaves the header hidden.
+  updatePin() {
+    const entry = this.pinId ? this.entries.get(this.pinId) : null;
+    const text = entry ? this.pinTextFor(entry) : "";
+    if (!text) {
+      this.pin.hidden = true;
+      this.pinText = "";
+      this.pinMsg.textContent = "";
+      this.pinKey = "";
+      this.pinCanExpand = false;
+      this.pinExpanded = false;
+      this.applyPinState();
+      return;
+    }
+    const scrollerTop = this.scroller.getBoundingClientRect().top;
+    const row = this.nodes.get(entry.id);
+    const above = row
+      ? row.getBoundingClientRect().bottom <= scrollerTop + 0.5
+      : this.nodes.size > 0;
+    const width = this.scroller.clientWidth;
+    if (!above) {
+      this.pin.hidden = true;
+      if (this.pinText !== text) {
+        // The old request leaves at once, even while this one is below the
+        // reading area and there is nothing to pin yet.
+        this.pinText = text;
+        this.pinMsg.textContent = text;
+        this.pinKey = "";
+        this.pinCanExpand = false;
+        this.pinExpanded = false;
+        this.applyPinState();
+      } else if (this.pinExpanded) {
+        this.pinExpanded = false;
+        this.applyPinState();
+      }
+      return;
+    }
+    this.pin.hidden = false;
+    const key = `${entry.id}\u0000${text}\u0000${width}`;
+    if (key !== this.pinKey) {
+      const changed = this.pinId !== entry.id || this.pinText !== text;
+      this.pinText = text;
+      this.pinId = entry.id;
+      this.pinKey = key;
+      this.pinMsg.textContent = text;
+      if (changed) {
+        this.pinExpanded = false;
+        this.pinMsg.scrollTop = 0;
+      }
+      this.measurePin();
+    }
+    this.applyPinState();
+  }
+
+  // Whether the text needs a disclosure: more than the two wrapped lines the
+  // collapsed header shows. Measured unclamped, before the next paint.
+  measurePin() {
+    const msg = this.pinMsg;
+    msg.classList.remove("clamp");
+    const style = getComputedStyle(msg);
+    const line = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.5 || 21;
+    const full = msg.scrollHeight;
+    this.pinCanExpand = full > line * 2 + 1;
+    if (!this.pinCanExpand) this.pinExpanded = false;
+  }
+
+  applyPinState() {
+    const t = this.pinTextNode;
+    if (this.pinCanExpand) {
+      t.setAttribute("role", "button");
+      t.tabIndex = 0;
+      t.setAttribute("aria-expanded", String(this.pinExpanded));
+      this.pinMore.hidden = false;
+      const more = this.t(this.pinExpanded ? "transcript.pin.hide" : "transcript.pin.show");
+      if (this.pinMore.textContent !== more) this.pinMore.textContent = more;
+      this.pinMsg.classList.toggle("clamp", !this.pinExpanded);
+      t.classList.toggle("expanded", this.pinExpanded);
+      const max = this.pinExpanded ? `${Math.round(this.scroller.clientHeight / 2)}px` : "";
+      if (t.style.maxHeight !== max) t.style.maxHeight = max;
+    } else {
+      t.removeAttribute("role");
+      t.removeAttribute("aria-expanded");
+      t.tabIndex = -1;
+      t.classList.remove("expanded");
+      t.style.maxHeight = "";
+      this.pinMsg.classList.remove("clamp");
+      this.pinMore.hidden = true;
+    }
+  }
+
+  togglePin() {
+    if (!this.pinCanExpand) return;
+    this.pinExpanded = !this.pinExpanded;
+    this.pinMsg.scrollTop = 0;
+    this.applyPinState();
   }
 
   // The entry to draw: the fetched whole one while it is still current.
@@ -347,6 +516,7 @@ export class Transcript {
     this.sinceText = sinceText;
     this.rev = data.rev;
     for (const e of data.entries) this.entries.set(e.id, e);
+    this.refreshPin();
     const frag = document.createDocumentFragment();
     for (const e of data.entries.slice(-WINDOW)) frag.append(this.mount(e));
     this.list.replaceChildren(frag);
@@ -355,6 +525,7 @@ export class Transcript {
     this.mark();
     this.toBottom();
     this.fillTop();
+    this.schedulePin();
   }
 
   // A delta: what changed since the revision this tab held, removals first.
@@ -387,6 +558,7 @@ export class Transcript {
     this.clear();
     const { entries, full, opened, touched, openRuns, rev } = s;
     Object.assign(this, { entries, full, opened, touched, openRuns, rev });
+    this.refreshPin();
     const frag = document.createDocumentFragment();
     for (const e of [...this.entries.values()].slice(-WINDOW)) frag.append(this.mount(e));
     this.list.replaceChildren(frag);
@@ -395,6 +567,7 @@ export class Transcript {
     this.mark();
     this.toBottom();
     this.fillTop();
+    this.schedulePin();
   }
 
   // The PAGE entries before the first mounted row, mounted above it, with the
@@ -420,6 +593,7 @@ export class Transcript {
     // anchor across the layout that read forces; so the row stays held until
     // the reader scrolls.
     if (now) this.held = { node: now, top: now.getBoundingClientRect().top, at: this.scroller.scrollTop };
+    this.schedulePin();
     return true;
   }
 
@@ -506,11 +680,13 @@ export class Transcript {
         first.remove();
       }
     }
+    this.refreshPin();
     this.keepMenu();
     this.fold();
     this.mark();
     if (this.following) this.toBottom();
     else if (added) this.jump.classList.add("new");
+    this.schedulePin();
     for (const id of replies) this.onReply(id);
   }
 
@@ -528,6 +704,14 @@ export class Transcript {
 
   clear() {
     this.entries.clear();
+    this.pinId = null;
+    this.pinText = "";
+    this.pinKey = "";
+    this.pinCanExpand = false;
+    this.pinExpanded = false;
+    this.pinMsg.scrollTop = 0;
+    this.pin.hidden = true;
+    this.applyPinState();
     this.nodes.clear();
     this.opened.clear();
     this.touched.clear();
@@ -541,6 +725,7 @@ export class Transcript {
     this.headOf.clear();
     this.marked = false;
     this.mountedVoice = false;
+    this.pinMsg.textContent = "";
     this.watch.disconnect();
     unwatch(this.list);
     this.refWatch.disconnect();
@@ -811,6 +996,7 @@ export class Transcript {
     }
     this.marked = marked.size > 0;
     if (this.headOf.has(this.selected)) this.selected = this.headOf.get(this.selected);
+    this.schedulePin();
   }
 }
 
