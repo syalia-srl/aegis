@@ -1042,6 +1042,42 @@ def oneshot() -> None:
         ]
         q = asked[-1] if asked else ""
         out = {"answer": f"btw of: {q}", "needs_more": "[[more]]" in q}
+    elif "text" in schema.get("properties", {}):
+        # A workflow's recap (#1190): a paragraph shaped by the run's own
+        # states and waits, so a test can tell which state a call answered.
+        steps = [ln for ln in prompt.splitlines() if re.match(r"^\s*- \[", ln)]
+        done = sum(1 for ln in steps if "[done]" in ln)
+        failed = [ln for ln in steps if "[failed]" in ln]
+        running = [ln for ln in steps if "[running]" in ln]
+        status = next(
+            (
+                ln.split(": ", 1)[1]
+                for ln in prompt.splitlines()
+                if ln.startswith("status: ")
+            ),
+            "",
+        )
+        waits = [
+            ln[2:] for ln in prompt.splitlines() if ln.startswith("- ") and ": " in ln
+        ]
+        if status in ("done", "failed", "stopped", "rejected"):
+            what = f"The run ended {status}"
+            if failed:
+                what += f" with a failed step: {failed[0].split('] ', 1)[-1]}"
+            out_text = f"{what}. {done} of {len(steps)} steps finished."
+        elif waits:
+            out_text = (
+                f"The run is waiting: {waits[0]}. "
+                f"{done} of {len(steps)} steps finished."
+            )
+        elif running:
+            out_text = (
+                f"The run is working on {running[0].split('] ', 1)[-1]}. "
+                f"{done} of {len(steps)} steps finished."
+            )
+        else:
+            out_text = f"The run has {len(steps)} steps and {done} finished."
+        out = {"text": out_text}
     elif "steps" in schema.get("properties", {}):
         pages = json.loads(prompt)["pages"]
         refs = list(range(1, len(pages) + 1))

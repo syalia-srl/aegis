@@ -1050,6 +1050,8 @@
 .aegis .wfcard .wfarg>.md .fence pre{max-height:24em;overflow:auto}
 .aegis .wfcard[data-status=armed]{border-color:var(--warn)}
 .aegis .wfcard .wflede{padding:8px 12px;font-family:var(--font-prose);font-size:14.5px;border-bottom:1px solid var(--rule)}
+.aegis .wfcard .wfrecap{margin:0;padding:9px 12px;font-family:var(--font-prose);font-size:14.5px;line-height:1.55;border-left:2px solid var(--accent);border-bottom:1px solid var(--rule);background:var(--accent-soft)}
+.aegis .wfcard .wfrecap .mark{margin-left:8px;font-family:var(--font-mono);font-size:10.5px;color:var(--muted);white-space:nowrap}
 .aegis .wfcard .story{padding:8px 12px;border-bottom:1px solid var(--rule);font-size:13px}
 .aegis .wfcard .story .line{display:flex;gap:8px;padding:2px 0}
 .aegis .wfcard .story .tm{font-family:var(--font-mono);font-size:11px;color:var(--faint);flex:none;width:38px}
