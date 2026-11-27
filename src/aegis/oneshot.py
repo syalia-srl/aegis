@@ -188,6 +188,24 @@ def _number(value, kind: type[float] | type[int]) -> float | int:
         return kind(0)
 
 
+def _answer(c: dict, out: type[T]) -> dict:
+    """The answer a transport field carries as a serialized object.
+
+    A harness's own ``text`` field can hold the model's JSON answer as a
+    string. When that inner object validates, it is the answer, not the
+    envelope around it (#1194)."""
+    for key, value in c.items():
+        if key not in out.model_fields or not isinstance(value, str):
+            continue
+        for nested in _objects(value):
+            try:
+                out.model_validate(nested)
+            except ValidationError:
+                continue
+            return nested
+    return c
+
+
 def parse(stdout: str, out: type[T]) -> tuple[T | None, float, int]:
     """The structured answer, cost and time from any supported harness."""
     values = _json_values(stdout)
@@ -209,7 +227,7 @@ def parse(stdout: str, out: type[T]) -> tuple[T | None, float, int]:
             candidates.extend(_objects(text))
     for c in candidates:
         try:
-            return out.model_validate(c), cost, ms
+            return out.model_validate(_answer(c, out)), cost, ms
         except ValidationError:
             continue
     return None, cost, ms

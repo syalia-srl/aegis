@@ -110,3 +110,36 @@ def test_parse_accepts_newline_delimited_harness_events():
     )
     value, cost, ms = oneshot.parse(stdout, Out)
     assert value == Out(answer="yes") and cost == 0.02 and ms == 700
+
+
+class TextOut(BaseModel):
+    text: str
+
+
+def test_parse_prefers_the_answer_a_transport_text_field_serializes():
+    # Codex's item and OpenCode's part both carry the model's answer in a
+    # ``text`` field. When that answer is itself the schema's object, the
+    # outer field is transport, not the paragraph (#1194).
+    inner = json.dumps({"text": "La revisión está pendiente."}, ensure_ascii=False)
+    streams = [
+        json.dumps(
+            {
+                "type": "item/completed",
+                "threadId": "t",
+                "turnId": "u",
+                "item": {"type": "agentMessage", "id": "m", "text": inner},
+            }
+        ),
+        json.dumps({"type": "text", "part": {"type": "text", "text": inner}}),
+    ]
+    for stdout in streams:
+        value, _, _ = oneshot.parse(stdout, TextOut)
+        assert value == TextOut(text="La revisión está pendiente.")
+
+
+def test_parse_keeps_a_plain_text_transport_field_as_text():
+    stdout = json.dumps(
+        {"type": "text", "part": {"type": "text", "text": "La revisión sigue."}}
+    )
+    value, _, _ = oneshot.parse(stdout, TextOut)
+    assert value == TextOut(text="La revisión sigue.")

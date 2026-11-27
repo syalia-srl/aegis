@@ -412,3 +412,53 @@ async def test_the_saved_recap_survives_a_restart(world, monkeypatch):
     assert again["status"] == "current"
     await asyncio.sleep(0.05)
     assert len(model.calls) == 1
+
+
+async def test_a_transport_text_field_around_the_answer_reads_as_a_paragraph(
+    world, monkeypatch
+):
+    # Codex's agentMessage item carries the model's answer in ``text``. When
+    # the answer is the JSON object the call asks for, that outer field is
+    # transport and must not become the paragraph (#1194).
+    async def run(argv, cwd, timeout, prompt, harness="claude-code"):
+        return json.dumps(
+            {
+                "type": "item/completed",
+                "threadId": "t",
+                "turnId": "u",
+                "item": {
+                    "type": "agentMessage",
+                    "id": "m",
+                    "text": json.dumps(
+                        {"text": "La revisión está pendiente."}, ensure_ascii=False
+                    ),
+                },
+            }
+        )
+
+    monkeypatch.setattr(oneshot, "run", run)
+    run_id = await armed(world)
+    await opened(world, run_id)
+    await until(lambda: recap(world, run_id).get("text"), timeout=5, what="the recap")
+    assert recap(world, run_id)["text"] == "La revisión está pendiente."
+
+
+async def test_a_recap_saved_with_the_json_wrapper_loads_as_text(world, tmp_path):
+    path = tmp_path / ".aegis" / "state" / "workflow-recaps.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "run-1": {
+                    "input": "fingerprint",
+                    "text": json.dumps(
+                        {"text": "La revisión está pendiente."}, ensure_ascii=False
+                    ),
+                }
+            }
+        )
+    )
+    await world.restart()
+    assert world.app.workflow_recaps._saved["run-1"]["text"] == (
+        "La revisión está pendiente."
+    )

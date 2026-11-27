@@ -65,6 +65,26 @@ SYSTEM = (
 )
 
 
+def plain(text: str) -> str:
+    """The paragraph inside a serialized text object, or ``text`` itself.
+
+    A one-shot harness's own ``text`` field can carry the model's JSON answer
+    as a string; an earlier parse saved that envelope as the paragraph
+    (#1194). Unwrap up to two layers so saved recaps read as text again."""
+    value = text.strip()
+    for _ in range(2):
+        if not value.startswith("{"):
+            break
+        try:
+            inner = json.loads(value)
+        except ValueError:
+            break
+        if not (isinstance(inner, dict) and isinstance(inner.get("text"), str)):
+            break
+        value = inner["text"].strip()
+    return value
+
+
 def summary(w: dict) -> dict:
     """The run information a recap may read, and nothing else: no prompts,
     commands, args, tool output, sessions or other runs. Every row is kept,
@@ -324,7 +344,7 @@ class WorkflowRecaps:
             self._failed[run] = (cur, str(e))
             return
         value, cost, ms = oneshot.parse(out, WorkflowRecapOut)
-        text = value.text.strip() if value is not None else ""
+        text = plain(value.text) if value is not None else ""
         if not text:
             self._failed[run] = (cur, "the model returned nothing usable")
             return
@@ -386,7 +406,7 @@ class WorkflowRecaps:
         if not isinstance(raw, dict):
             return {}
         return {
-            k: v
+            k: {**v, "text": plain(v["text"])}
             for k, v in raw.items()
             if isinstance(v, dict) and isinstance(v.get("text"), str) and v.get("input")
         }
