@@ -170,3 +170,49 @@ def test_a_hidden_tab_pays_nothing_and_catches_up_on_return(server, page):  # no
     )
     assert calls(server) > paid
     assert not page.errors
+
+
+def test_a_saved_recap_with_the_json_wrapper_shows_as_a_paragraph(server, page):  # noqa: F811
+    page.set_viewport_size({"width": 1300, "height": 900})
+    page.goto(server.url)
+    page.wait_for_selector("#a2[data-view=fleet]")
+    lid = spawn(
+        page,
+        "/mcp workflow_arm "
+        + json.dumps({"definition": flow(RESULT, RESULT), "args": {}}),
+    )
+    settled(page, "armed")
+    run = page.locator(".wfcard").first.get_attribute("data-run")
+
+    # What an earlier build saved (#1194): the recap's own JSON envelope.
+    server.stop()
+    state = server.root / ".aegis" / "state"
+    state.mkdir(parents=True, exist_ok=True)
+    (state / "workflow-recaps.json").write_text(
+        json.dumps(
+            {
+                run: {
+                    "input": "an older state",
+                    "text": json.dumps(
+                        {"text": "La revisión está pendiente."}, ensure_ascii=False
+                    ),
+                    "at": 0,
+                    "model": "opus",
+                }
+            },
+            ensure_ascii=False,
+        )
+    )
+    # The catch-up call must not replace the text before the test reads it.
+    server.env.update(
+        {"FAKE_CLAUDE_ONESHOT": "slow", "FAKE_CLAUDE_ONESHOT_SLEEP": "120"}
+    )
+    server.start()
+    page.goto(server.url)
+    page.wait_for_selector("#a2[data-view=fleet]")
+    page.click(f"#tablist .tab[data-id='{lid}']")
+    page.wait_for_selector(".wfcard .wfrecap")
+    text = page.locator(".wfcard .wfrecap").inner_text()
+    assert text.startswith("La revisión está pendiente."), text
+    assert '{"text"' not in text, text
+    assert not page.errors
