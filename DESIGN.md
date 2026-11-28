@@ -1295,12 +1295,16 @@ that changed. Mounting a long transcript whole and rebuilding every tab per patc
 made typing cost grow with the transcript's length and the number of sessions
 (#157, #158).
 
-**The latest request stays over the reading area.** The newest user entry is
-the transcript's candidate whether or not its row is mounted
-(`js/transcript.js`). While its whole row is above the reading area, its text
-is drawn over the top of the pane; the original row in view, or a reader above
-it, leaves the header hidden. It is data rather than a row, so reopening a
-long transcript pins a request whose row is above the mounted window (#1196).
+**The request nearest above the reading area stays over it.** The candidate is
+the user entry whose whole original row is nearest above the reading area's
+top, whether or not that row is mounted (`js/transcript.js`). Its text is drawn
+over the top of the pane; a row any part of which is in view is not a
+candidate, so reading under B shows A until B has wholly passed the top
+(#1198). The candidates are kept in transcript order and the last one above is
+found by binary search, never by walking the mounted rows on a scroll. An
+unmounted entry is above when it precedes the first mounted one: mounted rows
+are a suffix, so reopening a long transcript pins the newest request before its
+row mounts (#1196).
 
 **A sampler runs only while someone watches.** The host meters (`host.py`)
 and the network readings (`net/service.py`) read nothing while no browser
