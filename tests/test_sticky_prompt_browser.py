@@ -163,7 +163,10 @@ def test_the_request_pins_at_the_last_pixel_and_expands_in_place(server, page): 
     assert page.errors == []
 
 
-def test_a_new_request_replaces_the_pin_and_sessions_keep_their_own(server, page):  # noqa: F811
+def test_a_new_request_takes_over_once_it_passes_the_top_and_sessions_keep_their_own(
+    server,  # noqa: F811
+    page,  # noqa: F811
+):
     page.set_viewport_size({"width": 1280, "height": 800})
     page.goto(server.url)
     page.wait_for_selector("#a2[data-view=fleet]")
@@ -175,8 +178,9 @@ def test_a_new_request_replaces_the_pin_and_sessions_keep_their_own(server, page
     page.locator(".reqpin-text").click()
     assert pin(page)["expanded"] == "true"
 
-    # The new message takes over at once: the old text leaves even while the
-    # new row is still below the reading area, and it starts collapsed.
+    # A new message below the reading area does not take over. The request
+    # above it keeps the header, open state and all, until its own row
+    # passes above the top (#1198).
     page.fill("#input", "/many 120")
     page.press("#input", "Enter")
     page.wait_for_function(
@@ -184,7 +188,9 @@ def test_a_new_request_replaces_the_pin_and_sessions_keep_their_own(server, page
     )
     page.wait_for_timeout(200)
     state = pin(page)
-    assert not state["on"] and state["text"] != first
+    assert (
+        state["on"] and state["text"] == first.rstrip() and state["expanded"] == "true"
+    ), state
 
     turns_done(page, 3)
     wait_pin(page)
@@ -280,9 +286,8 @@ def test_a_reopened_transcript_pins_an_unmounted_request_until_its_row_returns(
     assert state["text"] == "/many 230" and state["rows"] == 0, state
     assert state["count"] > 350
 
-    # Mount every earlier row. At the top the latest request is below the
-    # reader, so no header. It stays hidden while the row is in view, and
-    # comes back only once the whole row passes above the reading area.
+    # Mount every earlier row. At the top of the transcript nothing has
+    # passed above the reader, so no header.
     while page.locator("#entries > .row.user").count() < 2:
         page.evaluate("document.getElementById('tr').scrollTop = 0")
         page.wait_for_timeout(120)
@@ -290,12 +295,20 @@ def test_a_reopened_transcript_pins_an_unmounted_request_until_its_row_returns(
     page.wait_for_timeout(200)
     wait_pin(page, on=False)
 
+    # With the latest request's row in view, the request before it is the
+    # nearest one above: the header shows that one, not nothing and not the
+    # latest (which is still below).
     latest = page.locator("#entries > .row.user").last
     latest.scroll_into_view_if_needed()
     page.wait_for_timeout(200)
-    wait_pin(page, on=False)
+    state = pin(page)
+    assert state["on"] and state["text"] == "/many 120", state
+
+    # While the latest row is only partly past the top the earlier request
+    # still pins; once the whole row is above, the latest takes over.
     edge(page, 1)
-    wait_pin(page, on=False)
+    state = pin(page)
+    assert state["on"] and state["text"] == "/many 120", state
     edge(page, -1)
     wait_pin(page)
     assert pin(page)["text"] == "/many 230"
@@ -334,4 +347,118 @@ def test_a_reopened_transcript_pins_an_unmounted_request_until_its_row_returns(
         anchor["id"],
     )
     assert abs(now - anchor["top"]) < 60, (anchor, now)
+    assert page.errors == []
+
+
+PLACE = """([i, at, d]) => {
+  const t = document.getElementById('tr');
+  const rows = [...document.querySelectorAll('#entries > .row.user')];
+  const r = rows[i].getBoundingClientRect();
+  const edge = at === 'bottom' ? r.bottom : r.top;
+  t.scrollTop += edge - t.getBoundingClientRect().top + d;
+  const now = rows[i].getBoundingClientRect();
+  const top = t.getBoundingClientRect().top;
+  return {scrollTop: t.scrollTop, top: now.top - top, bottom: now.bottom - top};
+}"""
+
+
+def brief(state):
+    """A pin state fit for a failure message: no pasted prose in it."""
+    if state is None:
+        return None
+    return {
+        "on": state["on"],
+        "head": state["text"][:24],
+        "len": len(state["text"]),
+        "role": state["role"],
+        "expanded": state["expanded"],
+        "more": state["more"],
+    }
+
+
+def place(pg, index, at, d=0):
+    """Scroll so the reading area's top sits `d` px past a user row's edge."""
+    state = None
+    for _ in range(3):
+        state = pg.evaluate(PLACE, [index, at, d])
+        pg.wait_for_timeout(200)
+    return state
+
+
+def test_the_pin_is_the_nearest_request_above_the_reading_area(server, browser, page):  # noqa: F811
+    page.set_viewport_size({"width": 1280, "height": 800})
+    page.goto(server.url)
+    page.wait_for_selector("#a2[data-view=fleet]")
+    sid = spawn(page)
+    a = "/md A-request " + "one. " * 259 + "one."
+    b = "/md B-request " + "two. " * 259 + "two."
+    c = "/md C-request " + "three. " * 259 + "three."
+    for text in (a, b, c):
+        send(page, text)
+    assert page.locator("#entries > .row.user").count() == 3
+
+    # At the top of the transcript nothing has passed above: no header.
+    page.evaluate("document.getElementById('tr').scrollTop = 0")
+    page.wait_for_timeout(200)
+    assert not pin(page)["on"], brief(pin(page))
+
+    # Between A and B, with C already in the transcript: A is the nearest
+    # request wholly above the reading area.
+    state = place(page, 0, "bottom", 60)
+    assert pin(page)["on"] and pin(page)["text"] == a, (state, brief(pin(page)))
+
+    # B partly visible: still A.
+    state = place(page, 1, "top", 8)
+    assert pin(page)["text"] == a, (state, brief(pin(page)))
+
+    # B wholly past the top: B.
+    state = place(page, 1, "bottom", 8)
+    assert pin(page)["text"] == b, (state, brief(pin(page)))
+
+    # Back up: A again, symmetrically.
+    state = place(page, 1, "top", 8)
+    assert pin(page)["text"] == a, (state, brief(pin(page)))
+
+    # An opened header collapses when the candidate itself changes.
+    page.locator(".reqpin-text").click()
+    assert pin(page)["expanded"] == "true"
+    state = place(page, 1, "bottom", 8)
+    now = pin(page)
+    assert now["text"] == b and now["expanded"] == "false", (state, brief(now))
+
+    # A message that arrives below this reader never replaces the candidate,
+    # and the reader's place does not move.
+    state = place(page, 0, "bottom", 60)
+    anchor = page.evaluate(
+        """() => {
+          const t = document.getElementById('tr');
+          const row = [...t.querySelectorAll('#entries > .row')]
+            .find((r) => r.getBoundingClientRect().top >= t.getBoundingClientRect().top);
+          return {id: row.dataset.id, top: row.getBoundingClientRect().top};
+        }"""
+    )
+    other = new_page(browser, [])
+    other.goto(f"{server.url.split('#')[0]}#s={sid}")
+    other.wait_for_selector("#a2[data-view=session]")
+    send(other, "a later request")
+    page.wait_for_timeout(300)
+    now = pin(page)
+    assert now["on"] and now["text"] == a, (state, brief(now))
+    moved = page.evaluate(
+        """id => document.querySelector(`#entries > .row[data-id="${id}"]`)
+                 .getBoundingClientRect().top""",
+        anchor["id"],
+    )
+    assert abs(moved - anchor["top"]) < 60, (anchor, moved)
+
+    # Phone width: the same rule on taller rows.
+    page.set_viewport_size({"width": 390, "height": 760})
+    page.wait_for_timeout(300)
+    state = place(page, 0, "bottom", 40)
+    now = pin(page)
+    assert now["on"] and now["text"] == a, (state, brief(now))
+    state = place(page, 1, "top", 8)
+    assert pin(page)["text"] == a, (state, brief(pin(page)))
+    state = place(page, 1, "bottom", 8)
+    assert pin(page)["text"] == b, (state, brief(pin(page)))
     assert page.errors == []

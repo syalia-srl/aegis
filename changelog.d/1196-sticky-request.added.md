@@ -4,4 +4,4 @@
   when the original row comes back into view. Reading a long reply no longer
   costs your place to check what you asked, and a reopened long transcript pins
   the request even before its row is mounted.
-help: transcript#the-latest-request
+help: transcript#the-request-above-the-transcript
