@@ -1,0 +1,7 @@
+Counted with Element.prototype.getBoundingClientRect wrapped, after a 1200 px
+scroll into history, real aegis serve + Chromium 1280x800 (#1198):
+
+40 user messages: 122 mounted rows  ->  6 rect reads
+80 user messages: 242 mounted rows  ->  7 rect reads
+
+The count follows log2(user messages), not the number of rows.

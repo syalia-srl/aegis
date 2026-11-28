@@ -1,0 +1,36 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+__________ test_the_pin_is_the_nearest_request_above_the_reading_area __________
+
+server = <tests.test_browser.Server object at 0x2b7a8b1b410>
+browser = <Browser type=<BrowserType name=chromium executable_path=/home/apiad/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome> version=153.0.8010.12>
+page = <Page url='http://127.0.0.1:38023/#s=20261127-224531-767f28'>
+
+    def test_the_pin_is_the_nearest_request_above_the_reading_area(server, browser, page):  # noqa: F811
+        page.set_viewport_size({"width": 1280, "height": 800})
+        page.goto(server.url)
+        page.wait_for_selector("#a2[data-view=fleet]")
+        sid = spawn(page)
+        a = "/md A-request " + "one. " * 259 + "one."
+        b = "/md B-request " + "two. " * 259 + "two."
+        c = "/md C-request " + "three. " * 259 + "three."
+        for text in (a, b, c):
+            send(page, text)
+        assert page.locator("#entries > .row.user").count() == 3
+    
+        # At the top of the transcript nothing has passed above: no header.
+        page.evaluate("document.getElementById('tr').scrollTop = 0")
+        page.wait_for_timeout(200)
+        assert not pin(page)["on"], brief(pin(page))
+    
+        # Between A and B, with C already in the transcript: A is the nearest
+        # request wholly above the reading area.
+        state = place(page, 0, "bottom", 60)
+>       assert pin(page)["on"] and pin(page)["text"] == a, (state, brief(pin(page)))
+E       AssertionError: ({'bottom': -60.40625, 'scrollTop': 326, 'top': -248.40625}, {'expanded': None, 'head': '/md C-request three. thr', 'len': 1833, 'more': False, ...})
+E       assert (False)
+
+tests/test_sticky_prompt_browser.py:408: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_sticky_prompt_browser.py::test_the_pin_is_the_nearest_request_above_the_reading_area
+1 failed, 4 deselected in 7.67s
