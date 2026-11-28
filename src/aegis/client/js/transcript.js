@@ -103,6 +103,10 @@ export class Transcript {
     this.pinCanExpand = false;
     this.pinExpanded = false;
     this.pinFrame = 0;
+    this.userIds = []; // user entry ids, transcript order: the candidates
+    this.userAt = new Map(); // id -> its index in userIds
+    this.ord = new Map(); // entry id -> transcript position, for unmounted ones
+    this.nextOrd = 0;
     this.pin = document.createElement("div");
     this.pin.className = "reqpin";
     this.pin.hidden = true;
@@ -274,21 +278,44 @@ export class Transcript {
     this.schedulePin();
   }
 
-  // -- the latest request ------------------------------------------------
+  // -- the nearest request -----------------------------------------------
 
-  // The newest user-authored entry is the candidate, whatever the reader is
-  // looking at: a newer message replaces it at once (#1196). Tool rows, agent
-  // replies and notifications are not eligible.
-  refreshPin() {
-    let id = null;
-    for (const [k, e] of this.entries) if (e.kind === "user") id = k;
-    if (id !== this.pinId) {
-      // A newer request starts collapsed, whatever the reader was doing.
-      this.pinExpanded = false;
-      this.pinKey = "";
-      this.pinMsg.scrollTop = 0;
-      this.pinId = id;
+  // The user entries in transcript order, with each one's position, so the
+  // candidate below is a binary search rather than a walk of the mounted rows
+  // on every scroll (#1198). Rebuilt on a snapshot, a restore or a clear;
+  // deltas add and drop one at a time.
+  indexPin() {
+    this.userIds = [];
+    this.userAt = new Map();
+    this.ord = new Map();
+    let at = 0;
+    for (const [id, e] of this.entries) {
+      this.ord.set(id, at++);
+      if (e.kind === "user") {
+        this.userAt.set(id, this.userIds.length);
+        this.userIds.push(id);
+      }
     }
+    this.nextOrd = at;
+  }
+
+  // An entry arrived: it is the newest, so it sorts after every other, and
+  // joins the candidate list when it is the reader's own message.
+  indexAdd(e) {
+    this.ord.set(e.id, this.nextOrd++);
+    if (e.kind !== "user") return;
+    this.userAt.set(e.id, this.userIds.length);
+    this.userIds.push(e.id);
+  }
+
+  // An entry went away; the candidate index closes over the gap.
+  indexDrop(id) {
+    this.ord.delete(id);
+    const at = this.userAt.get(id);
+    if (at === undefined) return;
+    this.userAt.delete(id);
+    this.userIds.splice(at, 1);
+    for (let i = at; i < this.userIds.length; i++) this.userAt.set(this.userIds[i], i);
   }
 
   // What the pinned row says: its text, or the names of what it attached when
@@ -309,58 +336,71 @@ export class Transcript {
     });
   }
 
-  // Show the candidate while its whole row sits above the reading area. An
-  // unmounted candidate is above the mounted suffix by construction, so a
-  // reopened transcript pins it before its row is mounted. Any of the row in
-  // view, or a reader above it, leaves the header hidden.
+  // Whether this entry's whole original row is above the reading area's top.
+  // An unmounted entry is above when it sits before the first mounted one:
+  // mounted rows are a suffix, so everything unmounted precedes them. A row
+  // with no box (a hidden pane) is not above, and a row any part of which is
+  // visible is not either.
+  pinAbove(id, top) {
+    const row = this.nodes.get(id);
+    if (row) {
+      const r = row.getBoundingClientRect();
+      return r.height > 0 && r.bottom <= top + 0.5;
+    }
+    const first = this.list.firstElementChild;
+    const at = first ? this.ord.get(first.dataset.id) : undefined;
+    return at !== undefined && this.ord.get(id) < at;
+  }
+
+  // The user entry whose whole row is nearest above the reading area's top:
+  // above A and B, A; while B is partly visible, still A; once B is wholly
+  // past it, B. None at the top, or above every message. The candidates are
+  // in transcript order and the predicate flips once, so a binary search
+  // finds the last one above without reading every row.
+  pinCandidate() {
+    const ids = this.userIds;
+    if (!ids.length) return null;
+    const top = this.scroller.getBoundingClientRect().top;
+    let lo = 0;
+    let hi = ids.length - 1;
+    let found = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (this.pinAbove(ids[mid], top)) {
+        found = mid;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    return found < 0 ? null : ids[found];
+  }
+
+  // Show the candidate's text over the reading area. A different candidate
+  // starts collapsed; the same one keeps what the reader opened.
   updatePin() {
-    const entry = this.pinId ? this.entries.get(this.pinId) : null;
+    const id = this.pinCandidate();
+    const entry = id ? this.entries.get(id) : null;
     const text = entry ? this.pinTextFor(entry) : "";
-    if (!text) {
-      this.pin.hidden = true;
-      this.pinText = "";
-      this.pinMsg.textContent = "";
+    if (id !== this.pinId || text !== this.pinText) {
+      this.pinId = id;
+      this.pinText = text;
       this.pinKey = "";
-      this.pinCanExpand = false;
       this.pinExpanded = false;
+      this.pinMsg.textContent = text;
+      this.pinMsg.scrollTop = 0;
+    }
+    if (!id || !text) {
+      this.pin.hidden = true;
+      this.pinCanExpand = false;
       this.applyPinState();
       return;
     }
-    const scrollerTop = this.scroller.getBoundingClientRect().top;
-    const row = this.nodes.get(entry.id);
-    const above = row
-      ? row.getBoundingClientRect().bottom <= scrollerTop + 0.5
-      : this.nodes.size > 0;
-    const width = this.scroller.clientWidth;
-    if (!above) {
-      this.pin.hidden = true;
-      if (this.pinText !== text) {
-        // The old request leaves at once, even while this one is below the
-        // reading area and there is nothing to pin yet.
-        this.pinText = text;
-        this.pinMsg.textContent = text;
-        this.pinKey = "";
-        this.pinCanExpand = false;
-        this.pinExpanded = false;
-        this.applyPinState();
-      } else if (this.pinExpanded) {
-        this.pinExpanded = false;
-        this.applyPinState();
-      }
-      return;
-    }
     this.pin.hidden = false;
-    const key = `${entry.id}\u0000${text}\u0000${width}`;
+    const width = this.scroller.clientWidth;
+    const key = `${id}\u0000${text}\u0000${width}`;
     if (key !== this.pinKey) {
-      const changed = this.pinId !== entry.id || this.pinText !== text;
-      this.pinText = text;
-      this.pinId = entry.id;
       this.pinKey = key;
-      this.pinMsg.textContent = text;
-      if (changed) {
-        this.pinExpanded = false;
-        this.pinMsg.scrollTop = 0;
-      }
       this.measurePin();
     }
     this.applyPinState();
@@ -516,7 +556,7 @@ export class Transcript {
     this.sinceText = sinceText;
     this.rev = data.rev;
     for (const e of data.entries) this.entries.set(e.id, e);
-    this.refreshPin();
+    this.indexPin();
     const frag = document.createDocumentFragment();
     for (const e of data.entries.slice(-WINDOW)) frag.append(this.mount(e));
     this.list.replaceChildren(frag);
@@ -558,7 +598,7 @@ export class Transcript {
     this.clear();
     const { entries, full, opened, touched, openRuns, rev } = s;
     Object.assign(this, { entries, full, opened, touched, openRuns, rev });
-    this.refreshPin();
+    this.indexPin();
     const frag = document.createDocumentFragment();
     for (const e of [...this.entries.values()].slice(-WINDOW)) frag.append(this.mount(e));
     this.list.replaceChildren(frag);
@@ -623,6 +663,7 @@ export class Transcript {
         const prev = this.entries.get(e.id);
         const known = prev !== undefined;
         this.entries.set(e.id, e);
+        if (!known) this.indexAdd(e);
         if (!e.unread) {
           this.sent.delete(e.id);
           this.since.delete(e.id);
@@ -657,6 +698,7 @@ export class Transcript {
       } else if (op.remove !== undefined) {
         const wasLive = this.entries.get(op.remove)?.live;
         this.entries.delete(op.remove);
+        this.indexDrop(op.remove);
         const old = this.nodes.get(op.remove);
         if (old) {
           if (wasLive && old.matches(".prose")) freedReply = old;
@@ -680,7 +722,6 @@ export class Transcript {
         first.remove();
       }
     }
-    this.refreshPin();
     this.keepMenu();
     this.fold();
     this.mark();
@@ -704,6 +745,10 @@ export class Transcript {
 
   clear() {
     this.entries.clear();
+    this.userIds = [];
+    this.userAt.clear();
+    this.ord.clear();
+    this.nextOrd = 0;
     this.pinId = null;
     this.pinText = "";
     this.pinKey = "";
